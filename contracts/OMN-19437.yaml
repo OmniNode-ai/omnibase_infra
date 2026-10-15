@@ -1,0 +1,49 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19437
+title: onex delegate mints a trace id and a span id and stamps them, with the tenant, on the request it publishes
+summary: The delegation terminal carried no trace or span id. The CLI is the publisher, so onex delegate mints a fresh uuid4 trace_id and span_id per invocation and writes them beside the UUID tenant it already stamps, when the delegate contract's request model declares both fields; the omnimarket handler copies them onto the terminal (a separate omnimarket change under this ticket). A contract that does not declare the fields yet gets the request it always got.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19437-cli-trace-span
+    statement: The request onex delegate publishes carries a non-null trace id, a non-null span id and a UUID tenant wherever the contract's request model declares the ids, and is unchanged where it does not.
+    acceptance:
+      - id: AC2
+        statement: "AC2 (CLI half): the publish path of onex delegate writes a non-null trace_id and span_id (both UUIDs, different on each invocation) and a UUID tenant_id into the request, and writes neither id where the contract's request model does not declare them -- falsifier: uv run pytest tests/unit/cli/test_delegate_trace_span_omn19437.py -q"
+evidence_requirements:
+  - kind: tests
+    description: The publish-path tests for the trace and span ids pass.
+    command: uv run pytest tests/unit/cli/test_delegate_trace_span_omn19437.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19437-ac2-cli-publish-path
+    description: The publish-path tests assert a non-null UUID trace_id and span_id, a UUID tenant_id, different ids per invocation, and no ids where the request model does not declare them; the three tests that assert the ids fail at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_trace_span_omn19437.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19437-deploy-cli-mints-trace-context
+    description: The CLI is compute-only and has no live deploy surface of its own; the source at the merged head carries the minting function the publish path calls.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def mint_delegate_trace_context'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19437-ac2-cli-runtime-integration
+    description: The real CLI and in-memory runtime deliver trace and span UUIDs to a typed handler and persist its echoed context, mint fresh ids per invocation, and omit both fields for a contract that does not declare them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_trace_span_cli_omn19437.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

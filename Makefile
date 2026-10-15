@@ -28,6 +28,7 @@
 #
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
+#     make check-sasl-local    # prove the local broker refuses anonymous clients and accepts onex-local (OMN-20820)
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
 #     make tenant-local        # give your runtime a tenant (delegation refuses without one), then make up-local
 #     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
@@ -49,12 +50,14 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local status-local delegate-local tenant-local secret-local down-local down-local-volumes
+        local-env up-local status-local check-sasl-local delegate-local tenant-local secret-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
 LOCAL_OVERLAY_FILE ?= $(HOME)/.omnibase/local.bifrost.yaml
 LOCAL_PROJECT := omnibase-infra-local
+# OMN-20820: the one SCRAM superuser redpanda-local-sasl creates on the laptop broker.
+LOCAL_SASL_USER := onex-local
 ONEX_CLI := uv run python -m omnibase_infra.docker.catalog.cli
 
 help: ## Show this help
@@ -126,8 +129,10 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	@command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }
 	@if [ -e "$(LOCAL_ENV_FILE)" ]; then \
 	  echo "==> Keeping existing env file $(LOCAL_ENV_FILE)"; \
-	  for var in OMNINODE_RUNTIME_PASSWORD TENANT_PROJECTION_WRITER_PASSWORD; do \
+	  for var in OMNINODE_RUNTIME_PASSWORD TENANT_PROJECTION_WRITER_PASSWORD REDPANDA_SUPERUSER_PASSWORD; do \
 	    grep -q "^$$var=" "$(LOCAL_ENV_FILE)" || { \
+	      chmod 600 "$(LOCAL_ENV_FILE)" || exit 1; \
+	      [ -z "$$(tail -c 1 "$(LOCAL_ENV_FILE)")" ] || echo >> "$(LOCAL_ENV_FILE)"; \
 	      printf '%s=%s\n' "$$var" "$$(openssl rand -hex 32)" >> "$(LOCAL_ENV_FILE)"; \
 	      echo "==> Added $$var to $(LOCAL_ENV_FILE) (generated)"; \
 	    }; \
@@ -138,6 +143,7 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	      -e "s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^OMNINODE_RUNTIME_PASSWORD=.*|OMNINODE_RUNTIME_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^TENANT_PROJECTION_WRITER_PASSWORD=.*|TENANT_PROJECTION_WRITER_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^REDPANDA_SUPERUSER_PASSWORD=.*|REDPANDA_SUPERUSER_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^ONEX_LOCAL_BIFROST_OVERLAY=.*|ONEX_LOCAL_BIFROST_OVERLAY=$(LOCAL_OVERLAY_FILE)|" \
 	      docker/local.env.example > "$(LOCAL_ENV_FILE)"; \
 	  echo "==> Wrote env file $(LOCAL_ENV_FILE) (passwords generated)"; \
@@ -154,8 +160,27 @@ status-local: _check-docker ## Laptop profile: migration gate, runtime /health b
 	@echo "runtime main /health:";    curl -sS --max-time 10 http://localhost:8085/health; echo
 	@echo "runtime effects /health:"; curl -sS --max-time 10 http://localhost:8086/health; echo
 	@echo "delegate-skill command topic consumer groups:"
-	@docker exec $(LOCAL_PROJECT)-redpanda rpk group list \
-	  | awk 'NR==1 || /node_delegate_skill_orchestrator/' || true
+	@test -f "$(LOCAL_ENV_FILE)" || { echo "ERROR: $(LOCAL_ENV_FILE) is missing; run make local-env." >&2; exit 2; }
+	@pass=$$(sed -n 's/^REDPANDA_SUPERUSER_PASSWORD=//p' "$(LOCAL_ENV_FILE)"); \
+	  test -n "$$pass" || { echo 'ERROR: REDPANDA_SUPERUSER_PASSWORD is absent from $(LOCAL_ENV_FILE); run make local-env.' >&2; exit 2; }; \
+	  groups=$$(RPK_PASS="$$pass" docker exec -e RPK_USER=$(LOCAL_SASL_USER) -e RPK_PASS -e RPK_SASL_MECHANISM=SCRAM-SHA-256 \
+	    $(LOCAL_PROJECT)-redpanda rpk group list) || exit 1; \
+	  printf '%s\n' "$$groups" | awk 'NR==1 || /node_delegate_skill_orchestrator/'
+
+check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anonymous clients and accepts the local superuser (OMN-20820)
+	@test -f "$(LOCAL_ENV_FILE)" || { echo "ERROR: $(LOCAL_ENV_FILE) is missing; run make local-env." >&2; exit 2; }
+	@pass=$$(sed -n 's/^REDPANDA_SUPERUSER_PASSWORD=//p' "$(LOCAL_ENV_FILE)"); \
+	  test -n "$$pass" || { echo 'ERROR: REDPANDA_SUPERUSER_PASSWORD is absent from $(LOCAL_ENV_FILE); run make local-env.' >&2; exit 2; }; \
+	  broker=$(LOCAL_PROJECT)-redpanda; \
+	  if anon=$$(docker exec $$broker rpk cluster info -X brokers=localhost:19092 2>&1); then \
+	    echo "FAIL: an anonymous client was accepted by the local broker (SASL is not enforced)" >&2; exit 1; \
+	  fi; \
+	  printf '%s\n' "$$anon" | grep -q 'SASL is required but not provided' || { \
+	    echo "FAIL: the anonymous client was refused, but not for want of SASL:" >&2; printf '%s\n' "$$anon" >&2; exit 1; }; \
+	  RPK_PASS="$$pass" docker exec -e RPK_USER=$(LOCAL_SASL_USER) -e RPK_PASS -e RPK_SASL_MECHANISM=SCRAM-SHA-256 \
+	    $$broker rpk cluster info -X brokers=localhost:19092 > /dev/null || { \
+	    echo "FAIL: the local superuser $(LOCAL_SASL_USER) was refused" >&2; exit 1; }; \
+	  echo "==> OK: the local broker refuses anonymous clients and accepts $(LOCAL_SASL_USER)"
 
 delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
 	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }

@@ -1,0 +1,94 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20820
+title: The laptop bundle's broker requires SASL, and every client of the bundle authenticates
+summary: >-
+  The local catalog bundle gains redpanda-local-sasl, a one-shot that creates one SCRAM superuser (onex-local), grants it, turns SASL on and reads the anonymous refusal back. Every runtime-layer client of the bundle carries KAFKA_SECURITY_PROTOCOL, KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD and waits for the one-shot to complete. make local-env adds one generated password (REDPANDA_SUPERUSER_PASSWORD) to an existing env file after setting it to 0600, status-local authenticates its consumer-group listing, make check-sasl-local proves the refusal, and the catalog-local CI job gates on both. No other bundle changes.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: req-local-broker-sasl
+    statement: The laptop broker refuses anonymous clients and every client of the bundle authenticates as one local superuser, without changing any other bundle.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the `local` render has the `redpanda-local-sasl` one-shot and all seven clients carry the four `KAFKA_*` variables and the completion dependency -- falsifier: `uv run pytest tests/unit/infra/test_catalog_local_profile.py -k sasl -q` fails on the PR''s revision, or passes on the pre-change bundle'
+      - id: AC2
+        statement: 'AC2: every bundle other than `local` renders byte-identically to its pre-change digest -- falsifier: the digest test over all other bundles fails after the change'
+      - id: AC3
+        statement: 'AC3: `make local-env` adds exactly one new assignment (the superuser password) to an existing 0644 env file, sets it to 0600 first, and changes no other line -- falsifier: the temporary-HOME test shows zero or two added assignments, a mode other than 0600, or a changed or removed line'
+      - id: AC4
+        statement: 'AC4: on the lab host after the second boot, `docker ps -a` for the project lists every expected service; each long-lived one is healthy or running with RestartCount 0; `redpanda-partition-cap`, `local-tenant-registry-seed` and `redpanda-local-sasl` have exited 0; an anonymous `rpk cluster info -X brokers=localhost:19092` exits non-zero with "SASL is required but not provided" and the same call as the superuser exits 0 -- falsifier: a missing service, an unhealthy or restarting one, a one-shot exiting non-zero, the anonymous call exiting 0, or the superuser call exiting non-zero'
+      - id: AC5
+        statement: 'AC5: `make delegate-local` after each boot returns a receipt with status `success`, and the `delegation_events` count for its correlation id is exactly 1 (the query of the local-dev guide, section 6, as OMN-20113 AC3 uses it) -- falsifier: the count is 0 or above 1, or the status is not `success`'
+      - id: AC6
+        statement: 'AC6: the first boot (pre-change revision) keeps its volumes and the second boot (this revision) reaches AC4 and AC5 on them, with the first boot''s `delegation_events` row still present -- falsifier: a client container crash-loops after the switch, the earlier row is gone, or the only way to a healthy stack is `make down-local-volumes`'
+      - id: AC7
+        statement: 'AC7: the CI job `Runtime Boot Laptop Profile (catalog local)` fails when `redpanda-local-sasl` is removed from the bundle and when an authenticated probe is made anonymous -- falsifier: the job''s run on a branch that deletes the service from `bundles.yaml`, or one that strips the credentials from a probe, is green'
+      - id: AC8
+        statement: 'AC8: `make status-local` lists the delegate consumer group with exit 0 and `make check-sasl-local` exits 0 on the secured stack and non-zero on a stack booted from the pre-change revision -- falsifier: either exit code is the other way round'
+evidence_requirements:
+  - kind: tests
+    description: The laptop profile tests (SASL render, digest of every other bundle, env file, Makefile targets) and the catalog-local CI step tests.
+    command: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/integration/infra/test_laptop_profile_env_file_render_omn19496.py tests/ci/test_runtime_boot_catalog_local_sasl_omn20820.py tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-ac1-local-render-sasl
+    description: The local render carries the one-shot, and every runtime-layer client carries the four KAFKA_* variables and the completion dependency; the one-shot's script runs against a stub broker in the order superuser, enable_sasl, anonymous refusal, authenticated positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k sasl -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-ac2-other-bundles-unchanged
+    description: Every bundle other than local renders to the digest taken on dev before the change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k "pre_sasl_digest or in_no_other_bundle" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-ac3-local-env-one-assignment
+    description: In a temporary HOME, make local-env adds exactly one assignment to an existing 0644 env file, at mode 0600, and no other line changes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k "local_env and sasl" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-ac4-ac6-lab-second-boot
+    description: The lab second-boot readback (host, sha and observations) is recorded in the PR body's Lab line; the hosted check pins what that readback exercises, the one-shot exit codes and the anonymous refusal with its authenticated positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_catalog_local_sasl_omn20820.py tests/unit/infra/test_catalog_local_profile.py -k "one_shot or check_sasl_local" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+      - AC5
+      - AC6
+  - id: dod-ac7-ci-job-gates-on-sasl
+    description: The catalog-local job runs make check-sasl-local and the one-shot exit step, and its consumer-group probe authenticates; the same steps fail against a broker that accepts anonymous clients and against stripped credentials.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_catalog_local_sasl_omn20820.py tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-ac8-status-and-check-targets
+    description: make status-local lists the delegate group through an authenticated rpk call, and make check-sasl-local exits 0 on a secured stub broker and non-zero on an open one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k "check_sasl_local or status_local" -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8

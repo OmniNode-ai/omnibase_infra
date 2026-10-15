@@ -734,6 +734,12 @@ io_operations:
       - apply
       - max_companions
       - dispatch_cwd
+      # OMN-21146. Where --offer reads an offered ticket's companion from, in
+      # place of GitHub search: the canonical clones, the PR watcher's state,
+      # and the bus lane the gateway node is read on.
+      - clone_root
+      - pr_watcher_state_path
+      - gateway_bus_lane
       - dod_verify_timeout_seconds
       - gh_timeout_seconds
       - close_if_done_label

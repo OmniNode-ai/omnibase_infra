@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: neither form, an empty contract, or a receipt that fails or names another PR, head or ticket exits 1 -- falsifier: uv run pytest tests/ci -k release_evidence_refuses -q'
+  - id: req-omn20959-cascade-branch-check
+    statement: The cascade branch regression check uses release commit evidence for its valid-input cases.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: branch rendering, ticket suffixes and deduplication remain covered with a release commit SHA sample, and the evidence positive control covers short, full and uppercase commit SHAs instead of a retired OCC citation.'
 evidence_requirements:
   - kind: tests
     description: The shipped resolver, run under bash with a stub gh, resolves both evidence forms and refuses every unbound or absent one.
@@ -43,3 +48,16 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-20959-ac4-cascade-branch-check
+    description: The branch check uses a full release commit SHA as its default valid evidence input and runs its branch, deduplication and input-validation assertions.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -Eq 'evidence_source: str = "[0-9a-f]{40}"' tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

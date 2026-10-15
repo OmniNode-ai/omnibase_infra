@@ -1,0 +1,77 @@
+# OMN-20820 (bus-mint plan T1): the laptop broker requires authentication.
+# Until `enable_sasl` is true, the local broker accepts a client built with no
+# credentials at all, so nothing on a laptop exercises the authenticated path
+# every staging and production client takes. This one-shot creates the SCRAM
+# superuser the bundle's clients authenticate as, grants it, turns SASL on, and
+# reads the refusal back. Listed ONLY in the `local` bundle.
+#
+# Order inside the script is load-bearing, as on the dev lane (OMN-18012): the
+# superuser grant lands BEFORE `enable_sasl`. With `kafka_enable_authorization`
+# unset, ACLs follow SASL, so a principal that is not a superuser authenticates
+# and then can do nothing. Both properties are dynamic (no broker restart), and
+# the Admin API stays open (`admin_api_require_auth` is untouched), which the
+# `redpanda` healthcheck and redpanda-partition-cap depend on.
+#
+# The readback is the point: the user is a superuser, SASL reads true, an
+# UNAUTHENTICATED client is refused, and an authenticated one is accepted (the
+# positive control: a dead broker refuses the anonymous client too). `set -eu`
+# and no `|| true`: a swallowed exit code here is the failure this service
+# exists to catch. Idempotent on every later boot of the same volume.
+#
+# The `$$` forms are compose's escape: the container's shell expands them from
+# its environment, so the password is never rendered into the command line.
+# The password is the operator's own, in the env file `make local-env` writes
+# (mode 0600); nothing here creates, rotates or reads any other credential.
+name: redpanda-local-sasl
+description: One-shot that creates the laptop broker's SCRAM superuser, enables SASL and proves anonymous clients are refused
+image: redpandadata/redpanda:v24.2.7
+layer: infrastructure
+container_name: omnibase-infra-redpanda-local-sasl
+required_env:
+  - REDPANDA_SUPERUSER_PASSWORD
+hardcoded_env:
+  KAFKA_SASL_USERNAME: onex-local
+  KAFKA_SASL_PASSWORD: '${REDPANDA_SUPERUSER_PASSWORD:?REDPANDA_SUPERUSER_PASSWORD required}'
+operational_defaults: {}
+ports: null
+healthcheck: null
+volumes: []
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+  - service: redpanda-partition-cap
+    condition: service_completed_successfully
+restart: 'no'
+resources: null
+entrypoint:
+  - /bin/sh
+  - -c
+command:
+  - |
+    set -eu
+    ADMIN="-X admin.hosts=redpanda:9644"
+    BROKER="-X brokers=redpanda:9092"
+    if /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$KAFKA_SASL_USERNAME"; then
+      echo "OMN-20820: SCRAM superuser already present"
+    else
+      /usr/bin/rpk security user create "$$KAFKA_SASL_USERNAME" -p "$$KAFKA_SASL_PASSWORD" --mechanism SCRAM-SHA-256 $$ADMIN
+      echo "OMN-20820: SCRAM superuser created"
+    fi
+    /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$KAFKA_SASL_USERNAME"
+    /usr/bin/rpk cluster config set superusers "['$$KAFKA_SASL_USERNAME']" $$ADMIN
+    /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
+    /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$KAFKA_SASL_USERNAME"
+    echo "OMN-20820: superuser grant confirmed"
+    /usr/bin/rpk cluster config get enable_sasl $$ADMIN | grep -qx true
+    echo "OMN-20820: enable_sasl confirmed true"
+    if /usr/bin/rpk topic list $$BROKER >/dev/null 2>&1; then
+      echo "OMN-20820 FAIL: an UNAUTHENTICATED client reached the Kafka listener" >&2
+      exit 1
+    fi
+    echo "OMN-20820: unauthenticated client refused"
+    RPK_USER="$$KAFKA_SASL_USERNAME" RPK_PASS="$$KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list $$BROKER >/dev/null
+    echo "OMN-20820: authenticated client accepted - positive control"
+labels:
+  com.omninode.service: redpanda-local-sasl
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-20820

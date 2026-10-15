@@ -1,0 +1,99 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21146
+title: The evidence closer resolves an offered ticket's change-control companion without GitHub search
+summary: evidence_autoclose_sweep --offer found the merged OCC companion with gh api search/issues, which the GitHub-search guard refuses on every host, so an offered ticket ended in error_github_api before the verifier ran (OMN-20113 verified 3 of 3 and still could not close). The companion is now read from the PR watcher's state and the canonical clone's default branch (git log --grep, with the commit's own changed files), else through node_github_repo_gateway_effect (onex scm pr-heads and pr-view), and when no change-control copy exists the product repository's merged contracts/<ticket>.yaml is accepted. A ticket with neither still refuses with a typed reason.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21146-local-companion
+    statement: An offered ticket's merged change-control companion is read from local state and the gateway node, never from GitHub search.
+    acceptance:
+      - id: AC1
+        statement: "AC1: --offer resolves the ticket's merged companion from the PR watcher's state and the canonical clone's default branch, with its changed files from the commit, and makes no GitHub read -- falsifier: the clone tests fail against the merge-base handler, which calls search/issues"
+      - id: AC2
+        statement: "AC2: when the local sources hold no companion that binds the ticket, the companion is read through node_github_repo_gateway_effect, and a gateway that cannot answer is ERROR_GITHUB_API, never an absence -- falsifier: the gateway tests fail against the merge-base handler"
+      - id: AC3
+        statement: "AC3: when the change-control copy is absent, the product repository's merged contracts/<ticket>.yaml is accepted as the evidence source, and a contract on two product repositories is refused rather than chosen between -- falsifier: the product-contract tests fail against the merge-base handler"
+      - id: AC4
+        statement: "AC4: a ticket with no merged companion and no product contract still refuses with SKIPPED_NO_OFFER_COMPANION, and a commit that only names the ticket in passing is not its companion -- falsifier: the negative-control tests fail when the title binding filter is removed"
+  - id: req-omn21146-dispatch-core-floor
+    statement: The frozen dispatch environment must satisfy the core floor required by the current omnimarket provider, including its session and tier context factors.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the frozen runtime installs omnibase-core 0.47.44 and dependency-injector 4.49.1 and accepts conversation_tail, lane_rules and tail_summary context factors -- falsifier: the same runtime probe fails against the merge base lock, which installs core 0.47.39"
+evidence_requirements:
+  - kind: tests
+    description: The offer-path unit tests run real git repositories for the clone, the watcher state file and a gateway double shaped like onex scm's answers.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_offer_selection.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21146-ac1-local-companion
+    description: The offer tests pass at this head; the clone and watcher tests fail against the merge-base handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "clone or watcher"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21146-ac2-gateway
+    description: The gateway rung resolves a ticket-named companion the clone lacks and a gateway error is a refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k gateway
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21146-ac3-product-contract
+    description: A product repository's merged contract stands in for the absent change-control copy; two holders are refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "product"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21146-ac4-negative-control
+    description: Nothing to find still refuses with the typed no-companion reason, and a passing mention is discarded.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "no_companion_and_no_product_contract or only_mentions or no_pr_number"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21146-deploy-local-companion-shipped
+    description: The handler at the merged head resolves the offered companion through offer_companion_sources and no longer names the GitHub search endpoint on the offer path; the deployed surface is the source at the merged head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'offer_companion_sources.read_gateway_candidates'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21146-offer-receipt-integration
+    description: Real local Git refs and watcher state reach the serialized closer receipt with the merged companion or product-contract provenance; a conflicting changed-file binding refuses before verification or Linear writes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_offer_local_companion_receipt_omn21146.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC3
+      - AC4
+  - id: dod-omn21146-deploy-dispatch-core-floor
+    description: A hosted runner installs the frozen runtime and reads back the installed core and injector versions, then constructs the session and tier factors consumed by omnimarket. The merge-base runtime lacks these factors and carries the older versions.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --frozen python -c 'from importlib.metadata import version; from omnibase_core.enums.enum_context_factor import EnumContextFactor; factors = ("conversation_tail", "lane_rules", "tail_summary"); assert tuple(EnumContextFactor(value).value for value in factors) == factors; assert version("omnibase-core") == "0.47.44", version("omnibase-core"); assert version("dependency-injector") == "4.49.1", version("dependency-injector"); print("dispatch runtime readback:", version("omnibase-core"), version("dependency-injector"), factors)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5

@@ -575,6 +575,12 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
 WORKFLOW_READ_BATCH_SIZE = 20
 # A batch returns up to twenty repositories' workflow texts in one response.
 WORKFLOW_READ_BATCH_TIMEOUT_SECONDS = 60
+# OMN-19998: GitHub answers a GraphQL query whose response it cannot build in time
+# with a gateway error (CI run 38758500873: ``gh: HTTP 504`` for seventeen private
+# repositories at once, read clean by the next scheduled run). Such a batch is read
+# again in halves; one repository still refused after this many retries raises.
+GATEWAY_ERROR_RE = re.compile(r"\bHTTP 50[234]\b")
+WORKFLOW_READ_GATEWAY_RETRIES = 1
 WORKFLOW_TREE_SELECTION = """
     object(expression: "HEAD:.github/workflows") {
       ... on Tree {
@@ -618,38 +624,58 @@ def _default_branch_workflow_texts_batch(
     texts: dict[str, dict[str, str]] = {}
     for offset in range(0, len(repo_names), WORKFLOW_READ_BATCH_SIZE):
         chunk = repo_names[offset : offset + WORKFLOW_READ_BATCH_SIZE]
-        declarations = ["$owner: String!"]
-        selections: list[str] = []
-        variables = ["-f", f"owner={org}"]
-        for index, repo_name in enumerate(chunk):
-            declarations.append(f"$n{index}: String!")
-            selections.append(
-                f"r{index}: repository(owner: $owner, name: $n{index}) {{"
-                f"{WORKFLOW_TREE_SELECTION}"
-                "}"
-            )
-            variables.extend(["-f", f"n{index}={repo_name}"])
-        query = "query(" + ", ".join(declarations) + ") {" + "\n".join(selections) + "}"
-        result = _run_gh(
-            ["api", "graphql", "-f", f"query={query}", *variables],
-            timeout=WORKFLOW_READ_BATCH_TIMEOUT_SECONDS,
+        texts.update(_workflow_texts_chunk(chunk, org))
+    return texts
+
+
+def _workflow_texts_chunk(
+    chunk: list[str], org: str, retries: int = WORKFLOW_READ_GATEWAY_RETRIES
+) -> dict[str, dict[str, str]]:
+    """Read one batch; OMN-19998: a gateway error reads it again in halves."""
+    declarations = ["$owner: String!"]
+    selections: list[str] = []
+    variables = ["-f", f"owner={org}"]
+    for index, repo_name in enumerate(chunk):
+        declarations.append(f"$n{index}: String!")
+        selections.append(
+            f"r{index}: repository(owner: $owner, name: $n{index}) {{"
+            f"{WORKFLOW_TREE_SELECTION}"
+            "}"
         )
-        if result.returncode != 0:
-            raise _read_failed(
-                f"gh api graphql workflow read for {', '.join(chunk)}", result
-            )
-        payload = json.loads(result.stdout or "{}")
-        data = payload.get("data")
-        for index, repo_name in enumerate(chunk):
-            repository = data.get(f"r{index}") if isinstance(data, dict) else None
-            # OMN-20413: errors without a usable tree must not read as clean.
-            if payload.get("errors") and isinstance(repository, dict):
-                if repository.get("object") is None:
-                    raise RuntimeError(
-                        f"gh api graphql workflow read for {repo_name} "
-                        "returned no usable workflow data"
-                    )
-            texts[repo_name] = _parse_workflow_tree(repo_name, repository)
+        variables.extend(["-f", f"n{index}={repo_name}"])
+    query = "query(" + ", ".join(declarations) + ") {" + "\n".join(selections) + "}"
+    result = _run_gh(
+        ["api", "graphql", "-f", f"query={query}", *variables],
+        timeout=WORKFLOW_READ_BATCH_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        gateway = not RATE_LIMIT_RE.search(result.stderr) and GATEWAY_ERROR_RE.search(
+            result.stderr
+        )
+        if gateway and len(chunk) > 1:
+            half = len(chunk) // 2
+            return {
+                **_workflow_texts_chunk(chunk[:half], org),
+                **_workflow_texts_chunk(chunk[half:], org),
+            }
+        if gateway and retries > 0:
+            return _workflow_texts_chunk(chunk, org, retries - 1)
+        raise _read_failed(
+            f"gh api graphql workflow read for {', '.join(chunk)}", result
+        )
+    payload = json.loads(result.stdout or "{}")
+    data = payload.get("data")
+    texts: dict[str, dict[str, str]] = {}
+    for index, repo_name in enumerate(chunk):
+        repository = data.get(f"r{index}") if isinstance(data, dict) else None
+        # OMN-20413: errors without a usable tree must not read as clean.
+        if payload.get("errors") and isinstance(repository, dict):
+            if repository.get("object") is None:
+                raise RuntimeError(
+                    f"gh api graphql workflow read for {repo_name} "
+                    "returned no usable workflow data"
+                )
+        texts[repo_name] = _parse_workflow_tree(repo_name, repository)
     return texts
 
 

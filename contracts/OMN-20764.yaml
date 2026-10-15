@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-20764
+title: onex delegate names the absent consumer in a typed terminal when its command topic has no live consumer
+summary: 'The transport refusal an onex delegate call writes when no consumer group is bound to its command topic now types the topic (command_topic) and the absent consumer (absent_consumer) and records DelegateNoConsumerRefusedError as its transport_error_type, instead of leaving the topic empty and the consumer in prose. The wait stays bounded by the rebind window. The hourly-tick half (AC2) lives in a sibling repository.'
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy. Only AC1 is transcribed; AC2 is evidenced by a change in a sibling repository under the same ticket.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: an onex delegate call whose request topic has no live consumer ends within its budget with a typed terminal naming the topic and the absent consumer, not a bare timeout -- falsifier: uv run pytest tests -k delegate_no_consumer_typed_terminal'
+  - id: req-first-hop-refusal-check
+    statement: The first-hop regression rejects a downstream-chain refusal while accepting a more specific locus refusal.
+    acceptance:
+      - id: AC3
+        statement: 'A missing first-hop consumer raises a locus refusal naming the topic and does not probe downstream or classify the failure as downstream -- falsifier: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The typed-terminal suite passes.
+    command: uv run pytest tests/unit/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
+  - kind: tests
+    description: Focused downstream-chain regression tests.
+    command: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20764-ac1-no-consumer-typed-terminal
+    description: 'AC1, red-first. tests/unit/cli/test_delegate_no_consumer_typed_terminal_omn20764.py drives resolve_delegate_locus and the real delegate command with no consumer group bound and asserts the raised error and the written receipt.json transport_refusal carry command_topic and absent_consumer, within the rebind bound, with positive controls for a bound consumer and for an unanswerable broker. At the merge base the module fails at collection because DelegateNoConsumerRefusedError does not exist.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
+    binds_ac:
+      - "AC1"
+  - id: dod-omn-20764-ac1-existing-locus-suites
+    description: 'AC1 regression half. The existing locus, rebind-wait and transport-terminal suites still pass with the typed error, so the fail-closed behaviour is unchanged.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_locus.py tests/unit/cli/test_delegate_locus_rebind_wait_omn18843.py tests/unit/cli/test_delegate_transport_terminal_omn18925.py -q
+  - id: dod-omn-20764-ac1-integration-cli-receipt
+    description: 'AC1 through the real onex delegate command. tests/integration/cli/test_delegate_no_consumer_typed_terminal_omn20764.py invokes delegate_command with no consumer group bound, loads the written receipt.json transport_refusal through ModelDelegateTransportRefusal and asserts command_topic, absent_consumer and transport_error_type, with an unanswerable-broker control that leaves absent_consumer empty. At the merge base both tests fail because the model has no absent_consumer field.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
+    binds_ac:
+      - "AC1"
+  - id: dod-deploy
+    description: The delegate locus source at the evaluated checkout revision defines DelegateNoConsumerRefusedError; the merge base lacks it.
+    source: manual
+    checks:
+      - check_type: command
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_locus.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class DelegateNoConsumerRefusedError' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn20764-first-hop-check-repair
+    description: The first-hop test keeps the locus exception, topic, message and no-downstream-probe assertions and explicitly rejects downstream misclassification.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
+    binds_ac:
+      - AC3

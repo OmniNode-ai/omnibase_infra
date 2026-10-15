@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19944
+title: The declared-state diff, apply and reconcile orchestrator nodes plan, apply and repair a surface within policy and under a per-surface lease
+summary: node_declared_state_diff_compute plans create, update and delete operations from one round's observations; node_declared_state_apply_effect applies them only for kinds the policy allows, only from a fresh generation and under one lease per surface; node_declared_state_reconcile_orchestrator runs observe, diff and apply as one round. The observe effect (OMN-19940) is a port here, and the lab four-round run waits on it.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: req-omn19944
+    statement: A round converges a wrong surface, lists zero operations once converged, repairs a later hand edit, refuses a plan whose surface moved, serializes concurrent rounds on the lease and refuses a disallowed kind by name.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a first apply of a wrong state changes it; a second round lists zero operations; a hand edit after that is repaired by the next round; an item whose surface moved since it was observed is refused -- falsifier: the four-round test (wrong, fixed, hand-edited, fixed again), each round''s operation count asserted, and the same four rounds run on the lab'
+      - id: AC2
+        statement: 'AC2: two concurrent rounds on one surface serialize on the lease -- falsifier: the concurrency test'
+      - id: AC3
+        statement: 'AC3: a surface kind not allowed by policy is refused by name -- falsifier: the policy test'
+evidence_requirements:
+  - kind: tests
+    description: The four-round test, the stale-plan refusal, the concurrency test and the policy tests pass.
+    command: uv run pytest tests/unit/nodes/node_declared_state_diff_compute tests/unit/nodes/node_declared_state_apply_effect tests/unit/nodes/node_declared_state_reconcile_orchestrator tests/unit/models/test_declared_state_models.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19944-ac1
+    description: The in-process four-round test and the stale-plan refusal pass; the same four rounds on the lab are not run here because the observe effect (OMN-19940) has not landed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_reconcile_orchestrator/test_declared_state_reconcile.py -q -k "four_rounds or moved_after_observation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19944-ac2
+    description: Two concurrent rounds on one surface never run an operation at the same time and the second is refused as stale.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect/test_declared_state_apply.py -q -k "serialize or different_surfaces or lease"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19944-ac3
+    description: A kind the policy does not allow is refused with its name in the refusal and the surface is untouched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect/test_declared_state_apply.py tests/unit/nodes/node_declared_state_reconcile_orchestrator/test_declared_state_reconcile.py -q -k "policy"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-deploy
+    description: Deploy-scope readback, bound to no criterion; the reconcile handler is present in the repository at the evaluated checkout revision, and the merge base lacks it.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_declared_state_reconcile.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerDeclaredStateReconcile' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

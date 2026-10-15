@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_declared_state_apply_effect
+contract_name: node_declared_state_apply_effect
+node_name: node_declared_state_apply_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+description: >
+  Apply a planned declared-state diff to one surface. It refuses a surface kind the apply policy does not allow, an unobservable surface, and an operation whose surface moved since it was observed, and holds one lease per surface so two rounds never interleave applies.
+
+input_model:
+  name: ModelDeclaredStateApplyRequest
+  module: omnibase_infra.models.declared_state.model_declared_state_apply_request
+  description: The diff, the apply policy and the round id that holds the lease.
+output_model:
+  name: ModelDeclaredStateApplyResult
+  module: omnibase_infra.models.declared_state.model_declared_state_apply_result
+  description: Applied, or the named refusal and how many operations were applied before it.
+capabilities:
+  - name: declared_state.apply
+    description: Apply a planned diff under policy, freshness and the surface lease.
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - event_model:
+        name: ModelDeclaredStateApplyRequest
+        module: omnibase_infra.models.declared_state.model_declared_state_apply_request
+      handler:
+        name: HandlerDeclaredStateApply
+        module: omnibase_infra.handlers.handler_declared_state_apply
+      output_events:
+        - ModelDeclaredStateApplyResult
+dependencies:
+  - name: protocol_declared_state_surface
+    type: protocol
+    class_name: ProtocolDeclaredStateSurface
+    module: omnibase_infra.protocols.protocol_declared_state_surface
+    description: One adapter per surface kind, bound per lane by overlay.
+  - name: protocol_declared_state_lease
+    type: protocol
+    class_name: ProtocolDeclaredStateLease
+    module: omnibase_infra.protocols.protocol_declared_state_lease
+    description: Per-surface lease; HandlerDeclaredStateLeaseLocal serializes inside one process.
+metadata:
+  description: Apply a planned declared-state diff under policy, freshness and a per-surface lease.
+  author: OmniNode Team
+  license: MIT
+  tags: [effect, declared-state, reconcile]
+  related_tickets: [OMN-19944, OMN-17427]
