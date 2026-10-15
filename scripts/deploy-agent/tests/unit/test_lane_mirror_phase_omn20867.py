@@ -432,6 +432,7 @@ def test_the_receipt_rides_the_terminal_facts() -> None:
         deps_convergence: list[object] = []
         compose_invocations: list[object] = []
         verify_recreate: list[object] = []
+        oneshot_reruns: list[object] = []
         sibling_source_refs: dict[str, str] = {}
 
     agent.executor = cast("Any", _Executor())
@@ -492,6 +493,7 @@ class _FakeExecutor:
         self.sibling_source_refs: dict[str, str] = {}
         self.recreate_supervision: list[object] = []
         self.verify_recreate: list[object] = []
+        self.oneshot_reruns: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
         self.health_checks: list[object] = []

@@ -118,6 +118,11 @@ def compose_stub(monkeypatch: pytest.MonkeyPatch) -> _ComposeStub:
         "_ensure_runtime_migrations_ready",
         lambda self, **kwargs: None,
     )
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor,
+        "rerun_changed_oneshots",
+        lambda self, **kwargs: [],
+    )
 
     def _states(
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,

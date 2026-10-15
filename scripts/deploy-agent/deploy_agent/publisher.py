@@ -20,6 +20,7 @@ from deploy_agent.events import (
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
     ModelLaneMirrorReceipt,
+    ModelOneShotRerun,
     ModelOnexApiDelivery,
     ModelRebuildCompleted,
     ModelRecreateSupervision,
@@ -90,6 +91,7 @@ def build_completion_payload(
     deps_convergence: list[ModelDepsConvergenceFinding] | None = None,
     compose_invocations: list[ModelComposeInvocation] | None = None,
     verify_recreate: list[ModelVerifyRecreate] | None = None,
+    oneshot_reruns: list[ModelOneShotRerun] | None = None,
     onex_api_delivery: ModelOnexApiDelivery | None = None,
     lane_mirror: ModelLaneMirrorReceipt | None = None,
 ) -> dict[str, Any]:
@@ -147,6 +149,9 @@ def build_completion_payload(
     positive fact -- verification found nothing to repair -- which is what
     makes the field's absence from an older event distinguishable from a
     deploy that repaired nothing.
+
+    OMN-19911 adds ``oneshot_reruns``: the control-plane one-shots a runtime
+    rebuild re-ran because their config hash moved, each with its exit code.
     """
     started_at = job.accepted_at
     completed_at = job.completed_at or datetime.now(UTC)
@@ -188,6 +193,7 @@ def build_completion_payload(
         deps_convergence=list(deps_convergence or []),
         compose_invocations=list(compose_invocations or []),
         verify_recreate=list(verify_recreate or []),
+        oneshot_reruns=list(oneshot_reruns or []),
         onex_api_delivery=onex_api_delivery,
         lane_mirror=lane_mirror,
     )

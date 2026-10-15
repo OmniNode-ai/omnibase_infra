@@ -111,10 +111,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--event",
         required=True,
+        action="append",
         type=Path,
         help=(
             "the fact document to publish: `lab_pass_receipt.py emit "
-            "--event-out`, or `lane-census-check.sh --observed-out`"
+            "--event-out`, or `lane-census-check.sh --observed-out`. Repeat it "
+            "to publish several documents from one step; each is published, "
+            "and reported, on its own (OMN-20772)."
         ),
     )
     parser.add_argument(
@@ -140,15 +143,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for event_path in args.event:
+        _publish_one(event_path, args)
+    return EXIT_OK
 
-    if not args.event.is_file():
-        _warn(f"no lab fact document at {args.event} — nothing to publish")
+
+def _publish_one(event_path: Path, args: argparse.Namespace) -> int:
+    """Publish one fact document; every failure is a warning and ``EXIT_OK``."""
+    if not event_path.is_file():
+        _warn(f"no lab fact document at {event_path} — nothing to publish")
         return EXIT_OK
 
     try:
-        payload: dict[str, Any] = json.loads(args.event.read_text(encoding="utf-8"))
+        payload: dict[str, Any] = json.loads(event_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        _warn(f"lab fact document at {args.event} is unreadable: {exc}")
+        _warn(f"lab fact document at {event_path} is unreadable: {exc}")
         return EXIT_OK
 
     topic = payload.get("topic")

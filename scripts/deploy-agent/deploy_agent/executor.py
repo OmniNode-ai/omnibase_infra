@@ -46,6 +46,7 @@ from deploy_agent.events import (
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
     EnumLaneMirrorOutcome,
+    EnumOneShotRerunReason,
     EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -55,6 +56,7 @@ from deploy_agent.events import (
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
     ModelLaneMirrorReceipt,
+    ModelOneShotRerun,
     ModelRebuildRequested,
     ModelRecreateSupervision,
     ModelVerifyRecreate,
@@ -438,6 +440,14 @@ RUNTIME_MIGRATION_SERVICES: tuple[str, ...] = (
     "forward-migration",
     "migration-gate",
 )
+# OMN-19911: one-shots that configure the lane's control plane and that the
+# runtime services rely on having run. A runtime rebuild starts its services
+# with ``up -d --no-deps``, so compose never revisits a completed one-shot it
+# was not asked to start; ``DeployExecutor.rerun_changed_oneshots`` re-runs
+# the ones whose declaration moved. ``redpanda-partition-cap`` is here because
+# OMN-19543 moved creation of the ``onex.tenant.events`` control-plane topic
+# into it, and that lane's copy kept the hash it had on 2026-09-25.
+CONTROL_PLANE_ONESHOT_SERVICES: tuple[str, ...] = ("redpanda-partition-cap",)
 MIGRATION_TREE_PATHS: tuple[str, ...] = (
     "docker/migrations",
     "scripts/run-forward-migrations.sh",
@@ -2529,6 +2539,10 @@ class DeployExecutor:
         # whether that repaired them. Read by the agent when it builds the
         # terminal event, for the same reason residue and supervision are.
         self.verify_recreate: list[ModelVerifyRecreate] = []
+        # OMN-19911: the control-plane one-shots a runtime rebuild re-ran
+        # because their config hash moved, with each exit code. Read by the
+        # agent when it writes the job's terminal record and event.
+        self.oneshot_reruns: list[ModelOneShotRerun] = []
         # OMN-20864: per runtime health port, what its LAST probe answered when
         # that was a running runtime whose monitor reads degraded, else None.
         # Read by the declared-start wait (has the monitor settled?) and by the
@@ -2574,6 +2588,7 @@ class DeployExecutor:
         self.deploy_build_date = None
         self.recreate_supervision = []
         self.verify_recreate = []
+        self.oneshot_reruns = []
         self.deps_convergence = []
         self.compose_invocations = []
         self.health_checks = []
@@ -5284,6 +5299,11 @@ class DeployExecutor:
                 self._ensure_runtime_migrations_ready(
                     lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=False
                 )
+            # OMN-19911: then the control-plane one-shots whose declaration
+            # moved, BEFORE the services that rely on what they configure.
+            self.rerun_changed_oneshots(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
+            )
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
@@ -5453,6 +5473,152 @@ class DeployExecutor:
             )
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
+
+    def _running_config_hash(self, lane: EnumRuntimeLane, service: str) -> str:
+        """The config hash on ``service``'s container, or ``""`` when it has none.
+
+        Read by compose's own project and service labels rather than by a
+        container name, so a lane overlay that renames the container cannot
+        make a one-shot that ran look as if it never did.
+        """
+        result = _run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"label=com.docker.compose.project={lane_config_for(lane).compose_project}",
+                "--filter",
+                f"label=com.docker.compose.service={service}",
+                "--format",
+                '{{.Label "com.docker.compose.config-hash"}}',
+            ],
+            timeout=CONFIG_HASH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"`docker ps` for {service} exited {result.returncode}: "
+                f"{result.stderr.strip()[:300]}"
+            )
+        return result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+
+    def plan_oneshot_reruns(self, lane: EnumRuntimeLane) -> list[ModelOneShotRerun]:
+        """Name the control-plane one-shots a runtime rebuild must re-run (OMN-19911).
+
+        A one-shot is planned when no container for it exists, or when the hash
+        on its container differs from the one compose renders now -- the same
+        comparison compose itself makes on a plain ``up``, which a ``--no-deps``
+        runtime rebuild never reaches for a one-shot it was not asked to start.
+        An unreadable render or an unreadable container raises: skipping the
+        check on a read failure is how the lane's writers ended up on a broker
+        without their topic.
+        """
+        services = _without_disabled_services(
+            list(CONTROL_PLANE_ONESHOT_SERVICES), lane
+        )
+        if not services:
+            return []
+        rendered = self._rendered_config_hashes(lane, services)
+        project = lane_config_for(lane).compose_project
+        plan: list[ModelOneShotRerun] = []
+        for service in services:
+            rendered_hash = rendered.get(service, "")
+            if not rendered_hash:
+                raise RuntimeError(
+                    f"`compose config --hash` rendered no hash for {service}"
+                )
+            running_hash = self._running_config_hash(lane, service)
+            if running_hash == rendered_hash:
+                continue
+            plan.append(
+                ModelOneShotRerun(
+                    service=service,
+                    lane=lane,
+                    compose_project=project,
+                    reason=(
+                        EnumOneShotRerunReason.CONFIG_CHANGED
+                        if running_hash
+                        else EnumOneShotRerunReason.NEVER_RAN
+                    ),
+                    running_config_hash=running_hash,
+                    rendered_config_hash=rendered_hash,
+                )
+            )
+        return plan
+
+    def rerun_changed_oneshots(
+        self, *, lane: EnumRuntimeLane, timeout: int, build: bool = True
+    ) -> list[ModelOneShotRerun]:
+        """Re-run each planned control-plane one-shot and record how it ended.
+
+        OMN-19911. Each record, with its exit code, is appended to
+        ``oneshot_reruns`` BEFORE a failure is raised, so a one-shot that did
+        not exit 0 still leaves its record on the job.
+        """
+        config = lane_config_for(lane)
+        reruns: list[ModelOneShotRerun] = []
+        for planned in self.plan_oneshot_reruns(lane):
+            logger.warning(
+                "control-plane one-shot: re-running %s on %s (%s)",
+                planned.service,
+                planned.compose_project,
+                planned.reason.value,
+            )
+            cmd = [
+                "docker",
+                "compose",
+                *_compose_file_args(lane),
+                "-p",
+                config.compose_project,
+                "--profile",
+                "runtime",
+                "up",
+                "-d",
+                "--no-deps",
+                "--force-recreate",
+            ]
+            if not build:
+                cmd.extend(["--no-build", "--pull", "never"])
+            cmd.append(planned.service)
+            self._record_compose_invocation(Phase.RUNTIME, cmd)
+            result = run_compose_recreate(
+                cmd,
+                timeout=timeout,
+                lane=lane,
+                services=[planned.service],
+                env=_compose_env(),
+            )
+            ok, _pending = (
+                verify_oneshots_completed(
+                    [planned.service], timeout_s=timeout, lane=lane
+                )
+                if result.returncode == 0
+                else (False, [planned.service])
+            )
+            try:
+                exit_code = _compose_service_states(lane).get(
+                    planned.service, ("missing", None)
+                )[1]
+            except RuntimeError:
+                exit_code = None
+            record = planned.model_copy(
+                update={"exit_code": exit_code, "completed": ok and exit_code == 0}
+            )
+            self.oneshot_reruns.append(record)
+            reruns.append(record)
+            logger.info("control-plane one-shot: %s", record.describe())
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Control-plane one-shot {planned.service} could not be "
+                    f"re-run: {result.stderr.strip() or result.stdout.strip()}"
+                )
+            if not record.completed:
+                raise RuntimeError(
+                    f"Control-plane one-shot {planned.service} did not exit 0 "
+                    f"after its re-run (exit code {exit_code}). A one-shot that "
+                    "has not exited 0 has not proven it did its job."
+                )
+        return reruns
 
     def converge_forward_migration(self, *, lane: EnumRuntimeLane) -> str:
         """Apply migration one-shots under the lane lock without restarting runtime."""
