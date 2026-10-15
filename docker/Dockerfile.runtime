@@ -294,8 +294,9 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 # image, in either mode. Nothing in the runtime imports it — omnibase_infra has
 # zero live `onex_change_control` imports in src/, tests/, scripts/ or docker/,
 # static or dynamic — and OMN-16191 cut the last product-repo runtime dependency
-# on it. infra no longer declares any onex-change-control dependency; it was
-# removed under OMN-20074.
+# on it. infra still declares onex-change-control in [dependency-groups], but
+# that is a dev/governance-tooling group for CI and pre-commit validators, not
+# [project] dependencies, so it has no bearing on image contents.
 #
 # Prod-grant resolution is unaffected: the prod-promotion gate fetches
 # onex_change_control@main over the NETWORK at check time and never imports the

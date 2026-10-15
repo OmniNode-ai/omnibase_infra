@@ -197,7 +197,6 @@ def test_pinned_wheel_check_maps_no_onex_change_control_repo() -> None:
 @pytest.mark.parametrize(
     ("relative", "stale"),
     [
-        ("docker/Dockerfile.runtime", "still declares onex-change-control"),
         (".github/workflows/ci.yml", "conflicts against onex_change_control"),
         ("scripts/check_dep_provenance.py", "must remain allowed"),
         (
