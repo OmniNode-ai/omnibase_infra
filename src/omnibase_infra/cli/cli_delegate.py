@@ -280,6 +280,7 @@ __all__ = [
     "TENANT_OVERLAY_ENV",
     "DelegateTenantRefusedError",
     "read_install_identity",
+    "mint_delegate_trace_context",
     "resolve_delegate_tenant",
     "BUS_CHOICES",
     "DEFAULT_BUS",
@@ -2402,6 +2403,26 @@ def resolve_delegate_tenant(
     )
 
 
+def mint_delegate_trace_context() -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Mint this invocation's ``(trace_id, span_id)``, or ``(None, None)``.
+
+    OMN-19437. The CLI is the publisher, so it owns the trace this command
+    starts: a fresh trace id and a fresh span id per invocation, which the
+    delegate handler copies onto the terminal so a ``delegation_events`` row
+    joins to the command that issued it.
+
+    The delegate contract's request model owns what a request may carry, and
+    the model is ``extra="forbid"``. A contract whose release does not declare
+    the two fields yet would refuse the key and dead-letter the command, so
+    nothing is minted there and the request is sent as before. Where the
+    contract declares them, both are always minted.
+    """
+    fields = _delegate_request_model().model_fields
+    if "trace_id" not in fields or "span_id" not in fields:
+        return None, None
+    return uuid.uuid4(), uuid.uuid4()
+
+
 def _request_payload(
     *,
     prompt: str,
@@ -2419,6 +2440,8 @@ def _request_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    trace_id: uuid.UUID | None = None,
+    span_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
@@ -2483,6 +2506,12 @@ def _request_payload(
     # like every other optional field here.
     if tenant_id is not None:
         payload["tenant_id"] = tenant_id
+    # OMN-19437: the trace context the handler copies onto the terminal. Omitted
+    # entirely when the contract's request model does not declare it yet.
+    if trace_id is not None:
+        payload["trace_id"] = str(trace_id)
+    if span_id is not None:
+        payload["span_id"] = str(span_id)
     return payload
 
 
@@ -2505,6 +2534,8 @@ def _write_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    trace_id: uuid.UUID | None = None,
+    span_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
     named_tests: Mapping[str, str] | None = None,
 ) -> Path:
@@ -2563,6 +2594,8 @@ def _write_payload(
         ticket_id=ticket_id,
         caller=caller,
         tenant_id=tenant_id,
+        trace_id=trace_id,
+        span_id=span_id,
         lineage=lineage,
         named_tests=named_tests,
     )
@@ -4303,6 +4336,7 @@ def run_delegate(
             )
         except DelegateTenantRefusedError as exc:
             raise click.ClickException(str(exc)) from exc
+        trace_id, span_id = mint_delegate_trace_context()
         payload_path = _write_payload(
             prompt=prompt,
             task_type=resolved_task_type,
@@ -4323,6 +4357,8 @@ def run_delegate(
             ticket_id=ticket_id,
             caller=caller,
             tenant_id=tenant_id,
+            trace_id=trace_id,
+            span_id=span_id,
             lineage=lineage,
             named_tests=named_tests,
         )
