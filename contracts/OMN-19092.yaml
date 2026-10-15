@@ -74,3 +74,17 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-deploy-shared-declaration
+    description: Deploy probe. The shared module at the checked-out commit defines the classifier this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the runtime importing omnibase_infra.handlers.kafka_permanent_failure.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/kafka_permanent_failure.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def classify_permanent_kafka_failure'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-deploy-forwarder-reads-declaration
+    description: Deploy probe. The gateway forwarder at the checked-out commit reads its authorization kinds from the shared module; the probe reads it from GitHub at that commit and exits nonzero on a tree whose forwarder still keeps its own tuple of aiokafka classes, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/gateway_forwarder.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'EnumKafkaPermanentFailure.CLUSTER_AUTHORIZATION_REFUSED'
+        cwd: ${OMNI_HOME}/omnibase_infra
