@@ -30,11 +30,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn19437-deploy-cli-mints-trace-context
-    description: The CLI source at the merged head carries the minting function the publish path calls.
+    description: The CLI is compute-only and has no live deploy surface of its own; the source at the merged head carries the minting function the publish path calls.
     source: manual
     checks:
       - check_type: command
-        check_value: grep -cF 'def mint_delegate_trace_context' src/omnibase_infra/cli/cli_delegate.py
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def mint_delegate_trace_context'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
