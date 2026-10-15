@@ -200,10 +200,18 @@ x-lane-overlay-mount: &lane-overlay-mount
   bind:
     create_host_path: false
 services:
+  # OMN-19925: the infra services below carry "runtime" and "full" beside
+  # "judge". onex-runtime-deploy renders this lane with the single profile
+  # `runtime`; with only "judge" here postgres, redpanda, valkey and the
+  # migration one-shots dropped out of that project while omninode-runtime,
+  # runtime-effects and projection-api (profiles runtime/full from the base
+  # file) still depended on them: `service "projection-api" depends on
+  # undefined service "redpanda"`. "judge" stays so the standalone
+  # `--profile judge` render above is unchanged.
   postgres:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-postgres
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
@@ -249,7 +257,7 @@ services:
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-judge-redpanda
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     ulimits:
       nofile:
         soft: 65535
@@ -299,7 +307,7 @@ services:
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-judge-redpanda-partition-cap
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -315,7 +323,7 @@ services:
   valkey:
     image: valkey/valkey:8.0-alpine
     container_name: omnibase-infra-judge-valkey
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     command: >-
       sh -c 'valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$$VALKEY_PASSWORD"'
     environment:
@@ -334,7 +342,7 @@ services:
   forward-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-forward-migration
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -429,7 +437,7 @@ services:
   migration-gate:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-migration-gate
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -459,7 +467,7 @@ services:
   intelligence-migration:
     image: postgres:16-alpine
     container_name: omnibase-infra-judge-intelligence-migration
-    profiles: ["judge"]
+    profiles: ["judge", "runtime", "full"]
     depends_on:
       postgres:
         condition: service_healthy
