@@ -1,57 +1,86 @@
 schema_version: 1.0.0
 ticket_id: OMN-21147
-title: Catalog checks accept endpoint retirement and live adapter tests fail closed
-summary: Check-only prerequisite for omnibase_infra PR 5001; catalog checks cover current models and explicitly selected live tests require a configured endpoint.
+title: 'omnibase_infra: no retired lab value in the repository'
+summary: Every retired lab value that omnibase_core's hardcoded-model-config guard reports as family R is removed from omnibase_infra, never replaced by another model name, host or port.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn21147-catalog-checks
-    statement: Checks cover the current registry without requiring a retired endpoint or silently skipping live calls.
-    acceptance:
-      - id: AC-CHECK1
-        statement: Every current local inference model has a health path, and the primary model remains required.
-      - id: AC-CHECK2
-        statement: Measured-metric scoring selects a model that exists in the loaded registry.
-      - id: AC-CHECK3
-        statement: Live adapter tests use marker selection and require an explicit reachable endpoint when selected.
+- id: req-omn21147-infra-retired
+  statement: The repository carries no retired lab value (family R), which can never be baselined.
+  acceptance:
+  - id: AC1
+    statement: 'AC1: the whole-tree guard reports zero family R findings in omnibase_infra -- falsifier: uv run --with omnibase-core python -m omnibase_core.validation.hardcoded_model_config.runtime_hardcoded_model_config --all prints a line with "[R in".'
+  - id: AC2
+    statement: 'AC2: the tests that read the changed contracts, compose files, fixtures and the edge delegation worker pass without the retired values -- falsifier: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/unit/runtime/models/test_model_bifrost_lane_overlay.py tests/unit/infra/test_judge_compose_profile.py tests/scripts/test_check_llm_endpoint_env_contract.py tests/unit/scripts/edge_delegation_worker -q -n 0 fails.'
+- id: req-omn21147-catalog-checks
+  statement: Checks cover the current registry without requiring a retired endpoint or silently skipping live calls.
+  acceptance:
+  - id: AC-CHECK1
+    statement: Every current local inference model has a health path, and the primary model remains required.
+  - id: AC-CHECK2
+    statement: Measured-metric scoring selects a model that exists in the loaded registry.
+  - id: AC-CHECK3
+    statement: Live adapter tests use marker selection and require an explicit reachable endpoint when selected.
 evidence_requirements:
-  - kind: tests
-    description: Focused catalog and environment-gated-skip checks.
-    command: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py tests/unit/docker/test_model_registry_health_paths.py tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
+- kind: tests
+  description: Contract, bifrost render, compose profile and edge worker tests.
+  command: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/unit/runtime/models/test_model_bifrost_lane_overlay.py tests/unit/infra/test_judge_compose_profile.py tests/scripts/test_check_llm_endpoint_env_contract.py tests/unit/scripts/edge_delegation_worker -q -n 0
+- kind: tests
+  description: Focused catalog and environment-gated-skip checks.
+  command: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py tests/unit/docker/test_model_registry_health_paths.py tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn21147-current-inference-health
-    description: Every current inference row must declare the health path, with a nonempty candidate assertion.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/docker/test_model_registry_health_paths.py -q --no-cov -k local_inference_models_have_health_paths
-    binds_ac: [AC-CHECK1]
-  - id: dod-omn21147-registry-scoring-check
-    description: Scoring reads a local candidate from the loaded registry and retains its measured-metric assertions.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: grep -q 'measured_model = local_coders\[0\]' tests/integration/test_model_router_registry_scoring_integration.py
-      - check_type: test_passes
-        check_value: uv run pytest tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
-    binds_ac: [AC-CHECK2]
-  - id: dod-omn21147-live-adapter-fail-closed
-    description: The live suite requires a configured endpoint and carries no environment-gated skip.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: "python3 -c \"from pathlib import Path; s=Path('tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py').read_text(); assert 'assert _ENDPOINT_HOST' in s; assert 'pytest.mark.skipif' not in s; assert 'pytest.mark.slow' in s\""
-      - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py -q --no-cov
-    binds_ac: [AC-CHECK3]
-  - id: dod-omn21147-hosted-routing-readback
-    description: Hosted-runner readback loads the real catalog through the installed routing loader and requires a local code-generation candidate. No private lane is needed.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: "uv run python -c \"from omnibase_infra.services.routing_api import routes; entries=routes._load_registry(); assert any(e.tier == 'local' and 'code_generation' in e.capabilities for e in entries); print('routing catalog readback passed')\""
+- id: dod-omn21147-infra-tests
+  description: The tests that read the changed files pass.
+  source: manual
+  checks:
+  - check_type: test_passes
+    check_value: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py tests/unit/runtime/test_render_bifrost_delegation_contract.py tests/unit/runtime/models/test_model_bifrost_lane_overlay.py tests/unit/infra/test_judge_compose_profile.py tests/scripts/test_check_llm_endpoint_env_contract.py tests/unit/scripts/edge_delegation_worker -q -n 0
+  binds_ac:
+  - AC1
+  - AC2
+- id: dod-omn21147-infra-deploy
+  description: The deployed runtime image's packaged pricing manifest no longer carries the retired model rows. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion.
+  source: manual
+  execution_scope: local_done_gate
+  checks:
+  - check_type: command
+    check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import importlib.resources as r; t=r.files('omnibase_infra.configs').joinpath('pricing_manifest.yaml').read_text(); raise SystemExit('deepseek-v4' in t)"
+- id: dod-omn21147-current-inference-health
+  description: Every current inference row must declare the health path, with a nonempty candidate assertion.
+  source: manual
+  checks:
+  - check_type: test_passes
+    check_value: uv run pytest tests/unit/docker/test_model_registry_health_paths.py -q --no-cov -k local_inference_models_have_health_paths
+  binds_ac:
+  - AC-CHECK1
+- id: dod-omn21147-registry-scoring-check
+  description: Scoring reads a local candidate from the loaded registry and retains its measured-metric assertions.
+  source: manual
+  checks:
+  - check_type: command
+    check_value: grep -q 'measured_model = local_coders\[0\]' tests/integration/test_model_router_registry_scoring_integration.py
+  - check_type: test_passes
+    check_value: uv run pytest tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
+  binds_ac:
+  - AC-CHECK2
+- id: dod-omn21147-live-adapter-fail-closed
+  description: The live suite requires a configured endpoint and carries no environment-gated skip.
+  source: manual
+  checks:
+  - check_type: command
+    check_value: python3 -c "from pathlib import Path; s=Path('tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py').read_text(); assert 'assert _ENDPOINT_HOST' in s; assert 'pytest.mark.skipif' not in s; assert 'pytest.mark.slow' in s"
+  - check_type: test_passes
+    check_value: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py -q --no-cov
+  binds_ac:
+  - AC-CHECK3
+- id: dod-omn21147-hosted-routing-readback
+  description: Hosted-runner readback loads the real catalog through the installed routing loader and requires a local code-generation candidate. No private lane is needed.
+  source: manual
+  checks:
+  - check_type: command
+    check_value: uv run python -c "from omnibase_infra.services.routing_api import routes; entries=routes._load_registry(); assert any(e.tier == 'local' and 'code_generation' in e.capabilities for e in entries); print('routing catalog readback passed')"
