@@ -309,6 +309,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC18
   - id: dod-omn-17427-ac18-deploy
@@ -318,4 +321,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18-deploy-dispatch
+    description: Hosted-runner runtime dispatch smoke -- job facts reach the published terminal event through five contract-routed hops and serialized envelopes; overdue queues and jobs alert, below-bound jobs do not. Only external gh/ssh probes are replaced; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra

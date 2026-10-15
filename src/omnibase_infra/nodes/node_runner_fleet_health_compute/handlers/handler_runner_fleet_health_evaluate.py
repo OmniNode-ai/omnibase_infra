@@ -110,12 +110,6 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_r
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
     ModelRunnerFleetRunnerFact,
 )
-from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import (
-    ModelRunnerFleetSnapshot,
-)
-from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_job_fact import (
-    ModelRunnerJobFact,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -621,9 +615,10 @@ def _recommend_for_assessment(
 
 
 def _evaluate_alerts(
-    snapshot: ModelRunnerFleetSnapshot,
+    request: ModelRunnerFleetHealthEvaluateCommand,
 ) -> tuple[ModelRunnerFleetAlert, ...]:
     """Evaluate offline runners, stuck jobs, and queue ages without I/O."""
+    snapshot = request.snapshot
     alerts: list[ModelRunnerFleetAlert] = []
     if snapshot.github_source_ok:
         for runner in snapshot.runners:
@@ -636,7 +631,7 @@ def _evaluate_alerts(
                     )
                 )
 
-    queued: dict[tuple[str, tuple[str, ...]], list[ModelRunnerJobFact]] = {}
+    queued: dict[tuple[str, tuple[str, ...]], tuple[float, int]] = {}
     for job in snapshot.jobs:
         if (
             job.status == "in_progress"
@@ -658,10 +653,10 @@ def _evaluate_alerts(
             )
         elif job.status == "queued":
             key = (job.repo, tuple(sorted(job.labels)))
-            queued.setdefault(key, []).append(job)
+            oldest_age, count = queued.get(key, (0.0, 0))
+            queued[key] = (max(oldest_age, job.age_seconds), count + 1)
 
-    for (repo, labels), jobs in sorted(queued.items()):
-        oldest_age = max(job.age_seconds for job in jobs)
+    for (repo, labels), (oldest_age, count) in sorted(queued.items()):
         if oldest_age > _QUEUE_AGE_ALERT_SECONDS:
             alerts.append(
                 ModelRunnerFleetAlert(
@@ -671,7 +666,7 @@ def _evaluate_alerts(
                     labels=labels,
                     observed_seconds=oldest_age,
                     threshold_seconds=_QUEUE_AGE_ALERT_SECONDS,
-                    queued_count=len(jobs),
+                    queued_count=count,
                 )
             )
     return tuple(alerts)
@@ -849,7 +844,7 @@ class HandlerRunnerFleetHealthEvaluate:
             correlation_id=correlation_id,
             evaluated_at=datetime.now(tz=UTC),
             assessments=tuple(assessments),
-            alerts=_evaluate_alerts(snapshot),
+            alerts=_evaluate_alerts(request),
             ready_count=ready_count,
             not_ready_count=not_ready_count,
             readiness_unknown_count=readiness_unknown_count,
