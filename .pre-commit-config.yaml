@@ -107,6 +107,13 @@ repos:
         files: ^(scripts/lane_census_plan\.py|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: census-desired-state-drift
+        name: Census desired-state drift kinds (OMN-19414)
+        entry: bash -c 'uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "lab_sync or unreadable" -q && uv run --frozen pytest tests/unit/scripts/test_lane_census_dry_run.py tests/ci/test_lane_census_desired_state_omn19414.py -q'
+        language: system
+        files: ^(scripts/(lane_census_plan\.py|lane-census-check\.sh|lab_sync/desired_state\.py)|deploy/lab-sync/desired-state\.schema\.json|tests/fixtures/lab_sync/.*|tests/unit/scripts/(test_lane_census_plan|test_lane_census_dry_run)\.py|tests/ci/(test_lane_census_desired_state_omn19414\.py|fixtures/lane_census_desired_state_omn19414\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: census-health-collector
         name: Census health inspect transport (OMN-19416)
         entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q

@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "scripts/lane-census-check.sh --json --dry-run run read-only on the lab host that carries the dev lane, at omnibase_infra dev 502812d9ff03 plus the OMN-19414 change; the second run names a desired-state path that does not exist",
+    "captured_utc": "2026-10-15T05:45:55Z"
+  },
+  "runs": {
+    "desired_state_unset": {
+      "exit_code": 0,
+      "lab_sync_evaluated": false,
+      "has_drift": false,
+      "finding_kinds": []
+    },
+    "desired_state_removed": {
+      "exit_code": 30,
+      "lab_sync_evaluated": true,
+      "has_drift": true,
+      "finding_kinds": ["desired_state_unreadable"],
+      "severity": "critical"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19414
+title: The census planner reports revision, config-hash, package, undeclared-container, runner and broker drift against the desired state
+summary: The lane census planner compares the inventory with the generated lab-desired-state.v1 document and reports revision_mismatch, config_hash_mismatch, package_version_mismatch, undeclared_container, broker_config_mismatch, runner_count_mismatch, runner_workdir_mismatch and runner_offline, and reports desired_state_unreadable (never zero findings) when the state cannot be read.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19414
+    statement: Each desired-state drift kind is produced by its known-bad fixture and not by the clean fixture, and a missing or unparseable desired state fails closed.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: each known-bad fixture produces its finding and the clean fixture produces none -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py -k lab_sync -q'
+      - id: AC2
+        statement: 'AC2: a run with the desired-state file removed exits non-zero with desired_state_unreadable, never zero findings -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py -k unreadable -q'
+evidence_requirements:
+  - kind: tests
+    description: Every lab-sync fixture produces exactly its findings, the clean fixture none, and mutated clean inputs produce the named finding.
+    command: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k lab_sync
+  - kind: tests
+    description: A planner run and a census driver run with the desired-state file removed exit non-zero with desired_state_unreadable.
+    command: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_dry_run.py -q -k "unreadable or desired_state"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19414-ac1
+    description: Every lab-sync fixture produces exactly its findings and the clean fixture produces none.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k lab_sync
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19414-ac2
+    description: A run with the desired-state file removed exits non-zero with desired_state_unreadable.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k unreadable
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

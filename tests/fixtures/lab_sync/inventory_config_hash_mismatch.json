@@ -380,6 +380,32 @@
         "Status": "Up 2 hours (healthy)"
       }
     ],
+    "github_runners": [
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-deploy-runner",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-runner-1",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-verify-runner-1",
+        "status": "online"
+      }
+    ],
     "host": "omninode-pc",
     "lane": "dev",
     "networks": [
@@ -401,5 +427,6 @@
   "provenance": "Runner rows are live. Row E2: until 14:25-14:52Z no .201 non-pool runner carried the low-disk mount omnibase_infra#4025 added, so each ran a config hash other than the fleet render. The real pre-recreate hash was not recorded; the observed value is a stand-in string, and the desired value is the live post-recreate label.",
   "source": "knowledge-base-internal beta/plans/2026-09-24-lab-release-sync-plan.md section 1",
   "source_row": "E2",
+  "synthetic_fields": "github_runners (OMN-19414): every runner container registered online, so the runner_offline rule has the collector field it grades.",
   "ticket": "OMN-19411"
 }

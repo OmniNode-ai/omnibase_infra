@@ -46,9 +46,30 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
 
 Every kind, with its one severity, is declared in ``CENSUS_FINDING_KINDS``; the
 eleven lab-sync kinds that compare the inventory with the generated desired
-state are declared in ``LAB_SYNC_FINDING_KINDS`` (OMN-19411). OMN-19416 wires
-unhealthy and declared restart-loop evaluation. The remaining desired-state
-comparisons are not yet evaluated here.
+state (``lab-desired-state.v1``) are declared in ``LAB_SYNC_FINDING_KINDS``
+(OMN-19411). OMN-19416 evaluates unhealthy and declared restart-loop; OMN-19414
+evaluates the other nine against the desired state the envelope carries as
+``desired_state`` (one document or a list, one per surface):
+
+  revision_mismatch, config_hash_mismatch, package_version_mismatch,
+  broker_config_mismatch      — a declared container or broker against its row
+  undeclared_container        — a container nothing declares, from a host
+                                surface's ``allowed_undeclared``
+  runner_count_mismatch, runner_workdir_mismatch, runner_offline
+                              — a runner_fleet surface against the fleet rows
+                                and the GitHub registration
+  desired_state_unreadable    — ``desired_state`` is null, malformed or absent
+                                from a run that was asked to read one. It FAILS
+                                CLOSED: the census never reads clean without a
+                                desired state to compare against
+
+The planner stays pure. ``main`` reads ``$LANE_CENSUS_DESIRED_STATE`` (one
+document, or a directory of ``*.json`` documents) through the stdlib validator
+``lab_sync/desired_state.py`` and puts the result in the envelope; with the
+variable unset and no ``desired_state`` in the envelope the desired-state
+comparisons are not run and the plan says so (``lab_sync_evaluated: false``). A
+declared facet the collector did not supply (``Packages`` on a row,
+``broker_config``, ``github_runners``) raises, never reads clean.
 
 Host scoping (OMN-19088): every lane declares the host(s) it runs on
 (`hosts:`, naming entries of the top-level `hosts:` registry). The census
@@ -73,7 +94,9 @@ Input envelope (stdin JSON):
       ...
     ],
     "networks": ["omnibase-infra-prod-network", ...],  # `docker network ls`
-    "runtime_tag": "0.37.0" | null  # resolved runtime tag (optional)
+    "runtime_tag": "0.37.0" | null, # resolved runtime tag (optional)
+    "desired_state": {...} | [{...}] | null,  # lab-desired-state.v1 (optional)
+    "desired_state_error": "why it could not be read"  # optional, with null
   }
 
 Output (stdout JSON):
@@ -83,6 +106,7 @@ Output (stdout JSON):
     "lanes_checked": ["prod", ...],    # lanes declared for this host
     "lanes_not_applicable": ["dogfood", ...],  # lanes declared elsewhere
     "lanes_skipped_optional_down": ["prepr-1", ...],  # optional + entirely down
+    "lab_sync_evaluated": true|false,  # the desired-state kinds were graded
     "findings": [ {lane, kind, container, detail, severity}, ... ],
     "has_drift": true|false
   }
@@ -99,6 +123,7 @@ produced no findings. It exists so a consumer can tell that silence apart from
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import os
@@ -112,6 +137,21 @@ import yaml
 
 SCHEMA_VERSION = "1.1.0"
 DEFAULT_UNHEALTHY_AFTER_SECONDS = 1800
+
+#: OMN-19414: a container an ``allowed_undeclared`` entry admits has no manifest
+#: service to declare a ``restart_bound``, and E7 was a restart loop (6051
+#: restarts) in exactly such a project. The bound the lab alarm used for it.
+DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND = 5
+
+ENV_DESIRED_STATE = "LANE_CENSUS_DESIRED_STATE"
+IMAGE_REVISION_LABEL = "org.opencontainers.image.revision"
+COMPOSE_CONFIG_HASH_LABEL = "com.docker.compose.config-hash"
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
+COMPOSE_WORKDIR_LABEL = "com.docker.compose.project.working_dir"
+#: Shortest image revision label read as a prefix of the desired commit. Images
+#: are labelled with a 12-character prefix of the commit they were built from.
+MIN_REVISION_PREFIX = 12
 
 # Names that identify no single host and so may never be a host alias. Every
 # Docker Desktop host reports the daemon name `docker-desktop` (measured on the
@@ -129,6 +169,11 @@ EXIT_HOST_UNDECLARED = 5
 #: The driver's "missing dependency" code: the manifest is private config the
 #: host must supply, and without it there is no desired state to compare.
 EXIT_NOT_CONFIGURED = 3
+
+#: Exit status of ``main`` when the plan carries ``desired_state_unreadable``
+#: (OMN-19414). The plan is still printed: the driver treats it as drift, so a
+#: census without a readable desired state exits non-zero and publishes.
+EXIT_DESIRED_STATE_UNREADABLE = 9
 
 
 class HostDeclarationError(ValueError):
@@ -580,6 +625,433 @@ def _finding(lane: str, kind: str, container: str, detail: str) -> dict[str, str
     }
 
 
+# ---------------------------------------------------------------------------
+# OMN-19414 — the desired-state comparisons (lab release sync plan, T1.2)
+# ---------------------------------------------------------------------------
+
+_LabRow = tuple[str, dict[str, Any], dict[str, str]]
+
+
+def _read_desired_state(path: Path) -> tuple[list[dict[str, Any]] | None, str]:
+    """Read ``lab-desired-state.v1`` documents; ``(None, reason)`` when unreadable.
+
+    ``path`` is one document or a directory of ``*.json`` documents. Every
+    document goes through the stdlib validator, so a refused, truncated or
+    hash-mismatched document is unreadable here and never partly compared.
+    """
+    module_path = Path(__file__).resolve().parent / "lab_sync" / "desired_state.py"
+    spec = importlib.util.spec_from_file_location("lab_sync_desired_state", module_path)
+    if spec is None or spec.loader is None:
+        return None, f"the desired-state validator {module_path} cannot be loaded"
+    module = importlib.util.module_from_spec(spec)
+    # A dataclass resolves its module through sys.modules while it is defined.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except OSError as exc:
+        return None, f"the desired-state validator {module_path} cannot be read: {exc}"
+    if path.is_dir():
+        paths = sorted(path.glob("*.json"))
+        if not paths:
+            return None, f"{path} holds no desired-state document"
+    else:
+        paths = [path]
+    documents: list[dict[str, Any]] = []
+    for candidate in paths:
+        try:
+            documents.append(module.load_desired_state(candidate).document)
+        except module.DesiredStateRefusalError as exc:
+            return None, f"{candidate}: {exc}"
+    return documents, ""
+
+
+def _desired_documents(envelope: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    """The envelope's desired-state documents, or why there are none."""
+    desired = envelope.get("desired_state")
+    if isinstance(desired, dict):
+        return [desired], ""
+    if (
+        isinstance(desired, list)
+        and desired
+        and all(isinstance(doc, dict) for doc in desired)
+    ):
+        return list(desired), ""
+    reason = str(envelope.get("desired_state_error") or "").strip()
+    if reason:
+        return [], reason
+    if desired is None:
+        return [], "no desired state was supplied"
+    return [], f"the desired state is a {type(desired).__name__}, not a document"
+
+
+def _ungradable(subject: str, field: str, kind: str) -> ValueError:
+    return ValueError(
+        f"{subject}: the desired state declares {kind} but the envelope carries no "
+        f"{field}; the collector must supply it, and a census that cannot grade it "
+        "does not read it as clean"
+    )
+
+
+def _scalar_text(value: Any) -> str:
+    """A value as ``rpk cluster config get`` prints it, so int 1048576 == '1048576'."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _distribution(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", str(name)).lower()
+
+
+def _revision_matches(actual: str, expected: str) -> bool:
+    if not actual:
+        return False
+    if actual == expected:
+        return True
+    return len(actual) >= MIN_REVISION_PREFIX and expected.startswith(actual)
+
+
+def _container_sync_findings(
+    lane: str, document: dict[str, Any], rows: dict[str, _LabRow]
+) -> list[dict[str, str]]:
+    """revision, config hash and package drift of each declared container."""
+    findings: list[dict[str, str]] = []
+    for want in document.get("containers") or []:
+        name = want.get("name", "")
+        if name not in rows:
+            continue  # a declared container that is gone is container_absent's
+        _, row, labels = rows[name]
+        revision = want.get("revision")
+        if revision is not None:
+            actual = labels.get(IMAGE_REVISION_LABEL, "")
+            if not _revision_matches(actual, revision):
+                findings.append(
+                    _finding(
+                        lane,
+                        "revision_mismatch",
+                        name,
+                        f"container {name!r} runs an image built from "
+                        f"{actual or '(no revision label)'}, the desired state "
+                        f"declares {revision}",
+                    )
+                )
+        config_hash = want.get("config_hash")
+        if config_hash is not None:
+            actual = labels.get(COMPOSE_CONFIG_HASH_LABEL, "")
+            if actual != config_hash:
+                findings.append(
+                    _finding(
+                        lane,
+                        "config_hash_mismatch",
+                        name,
+                        f"container {name!r} carries compose config-hash "
+                        f"{actual or '(none)'}, the desired state declares "
+                        f"{config_hash}: its image, env or mounts drifted",
+                    )
+                )
+        packages = want.get("packages") or {}
+        if packages:
+            installed = row.get("Packages")
+            if not isinstance(installed, dict):
+                raise _ungradable(name, "Packages on its container row", "packages")
+            have = {_distribution(k): str(v) for k, v in installed.items()}
+            diffs = [
+                f"{dist} {have.get(_distribution(dist), '(not installed)')} "
+                f"!= {version}"
+                for dist, version in sorted(packages.items())
+                if have.get(_distribution(dist)) != version
+            ]
+            if diffs:
+                findings.append(
+                    _finding(
+                        lane,
+                        "package_version_mismatch",
+                        name,
+                        f"container {name!r} has installed distributions off the "
+                        f"desired lock: {'; '.join(diffs)}",
+                    )
+                )
+    return findings
+
+
+def _broker_sync_findings(
+    lane: str,
+    document: dict[str, Any],
+    rows: list[_LabRow],
+    broker_config: Any,
+) -> list[dict[str, str]]:
+    """Each declared ``rpk cluster config`` key against what the broker reports."""
+    broker = document.get("broker")
+    if not isinstance(broker, dict):
+        return []
+    service = broker.get("service")
+    project = (document.get("surface") or {}).get("compose_project")
+    findings: list[dict[str, str]] = []
+    for name, _, labels in rows:
+        if labels.get(COMPOSE_SERVICE_LABEL) != service:
+            continue
+        if project and labels.get(COMPOSE_PROJECT_LABEL) != project:
+            continue
+        if not isinstance(broker_config, dict) or name not in broker_config:
+            raise _ungradable(name, "broker_config for the broker", "broker keys")
+        read = broker_config[name]
+        diffs = [
+            f"{key} reads {_scalar_text(read.get(key))}, declared {want}"
+            for key, want in sorted((broker.get("cluster_config") or {}).items())
+            if _scalar_text(read.get(key)) != _scalar_text(want)
+        ]
+        if diffs:
+            findings.append(
+                _finding(
+                    lane,
+                    "broker_config_mismatch",
+                    name,
+                    f"broker {name!r} departs from the lane's broker profile: "
+                    f"{'; '.join(diffs)}",
+                )
+            )
+    return findings
+
+
+def _runner_sync_findings(
+    document: dict[str, Any],
+    rows: dict[str, _LabRow],
+    github_runners: Any,
+) -> list[dict[str, str]]:
+    """A runner fleet against its container rows and its GitHub registration."""
+    runners = document.get("runners")
+    if not isinstance(runners, dict):
+        return []
+    surface = document.get("surface") or {}
+    project = surface.get("compose_project")
+    host = str(surface.get("host") or "")
+    fleet = {
+        name: entry
+        for name, entry in rows.items()
+        if project and entry[2].get(COMPOSE_PROJECT_LABEL) == project
+    }
+    pools = {pool["name"]: pool for pool in runners.get("pools") or []}
+    declared = {c["name"]: c for c in runners.get("containers") or []}
+    sole_pool = next(iter(pools.values())) if len(pools) == 1 else None
+    findings: list[dict[str, str]] = []
+    for name, want in sorted(declared.items()):
+        expected = want.get("config_hash")
+        if name in rows and expected is not None:
+            actual = rows[name][2].get(COMPOSE_CONFIG_HASH_LABEL, "")
+            if actual != expected:
+                findings.append(
+                    _finding(
+                        "",
+                        "config_hash_mismatch",
+                        name,
+                        f"runner {name!r} carries compose config-hash "
+                        f"{actual or '(none)'}, the fleet render declares {expected}",
+                    )
+                )
+    for name, (_, _, labels) in sorted(fleet.items()):
+        pool = pools.get(declared.get(name, {}).get("pool", "")) or sole_pool
+        workdir = (pool or {}).get("workdir")
+        actual = labels.get(COMPOSE_WORKDIR_LABEL, "")
+        if workdir and actual != workdir:
+            findings.append(
+                _finding(
+                    "",
+                    "runner_workdir_mismatch",
+                    name,
+                    f"runner {name!r} runs from {actual or '(no working_dir label)'}, "
+                    f"the fleet path is {workdir}",
+                )
+            )
+    counts = [pool.get("expected_count") for pool in pools.values()]
+    if pools and all(type(count) is int for count in counts):
+        expected_total = sum(counts)
+        running = sorted(
+            name
+            for name, (_, row, _) in fleet.items()
+            if _running(row.get("State", ""), row.get("Status", ""))
+        )
+        if len(running) != expected_total:
+            findings.append(
+                _finding(
+                    "",
+                    "runner_count_mismatch",
+                    host,
+                    f"host {host!r} runs {len(running)} runner container(s) in "
+                    f"project {project!r} ({', '.join(running) or 'none'}), the "
+                    f"fleet declares {expected_total}",
+                )
+            )
+    present = sorted(name for name in declared if name in fleet)
+    if present:
+        if not isinstance(github_runners, list):
+            raise _ungradable(host, "github_runners", "runners")
+        online = {
+            str(entry.get("name"))
+            for entry in github_runners
+            if isinstance(entry, dict) and entry.get("status") == "online"
+        }
+        for name in present:
+            if name not in online:
+                findings.append(
+                    _finding(
+                        "",
+                        "runner_offline",
+                        name,
+                        f"runner {name!r} has a container but is not registered "
+                        "online with GitHub",
+                    )
+                )
+    return findings
+
+
+def _allowed_by(entry: dict[str, Any], row: _LabRow) -> bool:
+    """Whether one ``allowed_undeclared`` entry admits a container (all selectors)."""
+    name, data, labels = row
+    match = entry.get("match") or {}
+    if not match:
+        return False
+    pattern = match.get("name_pattern")
+    if pattern is not None:
+        try:
+            if not re.fullmatch(pattern, name):
+                return False
+        except re.error as exc:
+            raise ValueError(
+                f"allowed_undeclared {entry.get('name')!r}: name_pattern is not a "
+                f"regular expression: {exc}"
+            ) from exc
+    project = match.get("compose_project")
+    if project is not None and labels.get(COMPOSE_PROJECT_LABEL) != project:
+        return False
+    label = match.get("label")
+    if label is not None:
+        key, _, value = label.partition("=")
+        if labels.get(key) != value:
+            return False
+    max_age = match.get("max_age_seconds")
+    if max_age is not None:
+        age = data.get("AgeSeconds")
+        # An age the collector did not read cannot be shown to be young enough.
+        if isinstance(age, bool) or not isinstance(age, (int, float)) or age > max_age:
+            return False
+    return True
+
+
+def _undeclared_sync_findings(
+    documents: list[dict[str, Any]], manifest: dict[str, Any], rows: list[_LabRow]
+) -> list[dict[str, str]]:
+    """Containers nothing declares and no ``allowed_undeclared`` entry admits.
+
+    Graded only when a host surface is among the documents: that surface owns
+    ``allowed_undeclared``. A container is declared by a manifest service, a
+    desired-state container or runner, or the runner fleet's compose project,
+    and a lane-labelled container is the lane census's (``unexpected_container``).
+    An admitted container still answers to ``DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND``.
+    """
+    host_documents = [
+        doc for doc in documents if (doc.get("surface") or {}).get("kind") == "host"
+    ]
+    if not host_documents:
+        return []
+    allowed = [
+        entry for doc in host_documents for entry in doc.get("allowed_undeclared") or []
+    ]
+    declared = {
+        svc["name"]
+        for lane in manifest["lanes"].values()
+        for svc in lane.get("services", [])
+    }
+    fleet_projects = set()
+    for doc in documents:
+        declared.update(c["name"] for c in doc.get("containers") or [])
+        runners = doc.get("runners")
+        if isinstance(runners, dict):
+            declared.update(c["name"] for c in runners.get("containers") or [])
+            project = (doc.get("surface") or {}).get("compose_project")
+            if project:
+                fleet_projects.add(project)
+    findings: list[dict[str, str]] = []
+    for row in rows:
+        name, data, labels = row
+        if (
+            name in declared
+            or labels.get("com.omninode.lane")
+            or labels.get(COMPOSE_PROJECT_LABEL) in fleet_projects
+        ):
+            continue
+        admitted = next((entry for entry in allowed if _allowed_by(entry, row)), None)
+        if admitted is None:
+            findings.append(
+                _finding(
+                    "",
+                    "undeclared_container",
+                    name,
+                    f"container {name!r} (compose project "
+                    f"{labels.get(COMPOSE_PROJECT_LABEL) or '(none)'}) is declared by "
+                    "no lane or surface and no allowed_undeclared entry admits it",
+                )
+            )
+            continue
+        count = data.get("RestartCount")
+        if type(count) is not int or count < 0:
+            raise ValueError(f"{name}: RestartCount is missing or invalid")
+        if count > DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND:
+            findings.append(
+                _finding(
+                    "",
+                    "container_restart_loop",
+                    name,
+                    f"container {name!r} (admitted by allowed_undeclared "
+                    f"{admitted.get('name')!r}, owner {admitted.get('owner')}) has "
+                    f"restarted {count} times, past the "
+                    f"{DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND} an admitted "
+                    "container may",
+                )
+            )
+    return findings
+
+
+def lab_sync_findings(
+    envelope: dict[str, Any], manifest: dict[str, Any], rows: list[_LabRow]
+) -> list[dict[str, str]]:
+    """Compare the inventory with the generated desired state (OMN-19414).
+
+    Pure. An unreadable desired state is ``desired_state_unreadable`` and nothing
+    else is compared: there is nothing to compare, and the census must not read
+    clean without it.
+    """
+    lane = str(envelope.get("lane") or "")
+    documents, reason = _desired_documents(envelope)
+    if not documents:
+        return [
+            _finding(
+                lane,
+                "desired_state_unreadable",
+                "desired_state",
+                f"the desired state cannot be read ({reason}); no desired-state "
+                "comparison ran, so this census proves nothing about drift",
+            )
+        ]
+    by_name = {row[0]: row for row in rows}
+    findings: list[dict[str, str]] = []
+    for document in documents:
+        surface = document.get("surface") or {}
+        is_lane = surface.get("kind") == "compose_lane"
+        findings.extend(
+            _container_sync_findings(lane if is_lane else "", document, by_name)
+        )
+        findings.extend(
+            _broker_sync_findings(lane, document, rows, envelope.get("broker_config"))
+        )
+        findings.extend(
+            _runner_sync_findings(document, by_name, envelope.get("github_runners"))
+        )
+    findings.extend(_undeclared_sync_findings(documents, manifest, rows))
+    return findings
+
+
 def _is_optional_and_entirely_down(
     lane_spec: dict[str, Any], actual_by_name: dict[str, dict[str, Any]]
 ) -> bool:
@@ -851,12 +1323,19 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
             )
         )
 
+    # OMN-19414: the desired-state comparisons run when the envelope carries a
+    # `desired_state` key, null included: null is the unreadable case.
+    lab_sync_evaluated = "desired_state" in envelope
+    if lab_sync_evaluated:
+        findings.extend(lab_sync_findings(envelope, manifest, labelled_rows))
+
     return {
         "schema_version": SCHEMA_VERSION,
         "host": host_id,
         "lanes_checked": checked,
         "lanes_not_applicable": not_applicable,
         "lanes_skipped_optional_down": skipped_optional_down,
+        "lab_sync_evaluated": lab_sync_evaluated,
         "findings": findings,
         "has_drift": len(findings) > 0,
     }
@@ -875,6 +1354,14 @@ def main() -> int:
     envelope.setdefault(
         "host", os.environ.get("LANE_CENSUS_HOST") or socket.gethostname()
     )
+    # OMN-19414: the generated desired state, from the path the driver names. An
+    # envelope that already carries one (a replayed fixture) keeps its own.
+    desired_path = os.environ.get(ENV_DESIRED_STATE, "").strip()
+    if desired_path and "desired_state" not in envelope:
+        documents, reason = _read_desired_state(Path(desired_path))
+        envelope["desired_state"] = documents
+        if documents is None:
+            envelope["desired_state_error"] = reason
     try:
         plan = build_plan(envelope, manifest)
     except HostDeclarationError as exc:
@@ -882,10 +1369,14 @@ def main() -> int:
         return EXIT_HOST_UNDECLARED
     json.dump(plan, sys.stdout)
     sys.stdout.write("\n")
+    if any(f["kind"] == "desired_state_unreadable" for f in plan["findings"]):
+        return EXIT_DESIRED_STATE_UNREADABLE
     # Exit 0 on any plan — the planner reports; the shell driver decides exit
     # policy so the JSON plan is always emittable for dry-run/inspection. The
     # non-zero exits are an unattributable host (EXIT_HOST_UNDECLARED) and an
-    # absent manifest (EXIT_NOT_CONFIGURED), for which no plan exists to emit.
+    # absent manifest (EXIT_NOT_CONFIGURED), for which no plan exists to emit,
+    # and an unreadable desired state (EXIT_DESIRED_STATE_UNREADABLE), whose plan
+    # is emitted above.
     return 0
 
 
