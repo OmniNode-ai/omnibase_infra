@@ -38,6 +38,7 @@ The four groups below are the four the plan requires, in order.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,21 @@ _UNLISTED_PR = 8501
 _DOD_VERIFY_STATE_MODEL = (
     "omnimarket.nodes.node_dod_verify.models.model_dod_verify_state.ModelDodVerifyState"
 )
+
+
+# Where this module's clones and watcher state live; set by the fixture below.
+_SANDBOX: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _isolated_local_sources(tmp_path: Path) -> None:
+    """OMN-21146: the offer path reads the PR watcher's state and the canonical
+    clones, never GitHub search. Point both at an empty sandbox; ``_handler``
+    writes the companions a test declares into the watcher state."""
+    clones = tmp_path / "clones"
+    clones.mkdir()
+    _SANDBOX["clone_root"] = str(clones)
+    _SANDBOX["watcher"] = str(tmp_path / "watcher.json")
 
 
 def _iso(delta: timedelta) -> str:
@@ -276,12 +292,7 @@ class _GhRecorder:
         path = args[2]
         self.paths.append(path)
         if path.startswith("search/issues"):
-            if self._search_error:
-                return None, self._search_error
-            for ticket, items in self._search_items.items():
-                if ticket in path:
-                    return {"total_count": len(items), "items": items}, ""
-            return {"total_count": 0, "items": []}, ""
+            raise AssertionError("GitHub search was called: the guard refuses it")
         if "/files" in path:
             number = int(path.split("/pulls/", 1)[1].split("/", 1)[0])
             ticket = _AGED if number == _AGED_PR else _UNLISTED
@@ -314,10 +325,37 @@ def _handler(
         table = verdicts or {}
         return table.get(ticket_id, _all_green(ticket_id)), 0, ""
 
+    # The companions the test declares are merged PRs in the watcher's state;
+    # the gateway answers "nothing" unless the test gave it an error to raise.
+    records = {
+        f"onex_change_control#{item['number']}": {
+            "facts": {
+                "number": item["number"],
+                "state": "MERGED",
+                "title": item["title"],
+                "merged_at": item["pull_request"]["merged_at"],
+            }
+        }
+        for items in getattr(gh, "_search_items", {}).values()
+        for item in items
+    }
+    Path(_SANDBOX["watcher"]).write_text(json.dumps({"schema": 1, "prs": records}))
+    gateway_error = getattr(gh, "_search_error", "")
+
+    async def fake_gateway(args: list[str], timeout: float) -> tuple[Any, str]:
+        if gateway_error:
+            return None, gateway_error
+        return {
+            "outcome": "completed",
+            "operation": "pr_heads",
+            "result": {"operation": "pr_heads", "prs": []},
+        }, ""
+
     handler = HandlerEvidenceAutocloseSweep(
         linear_client=linear,  # type: ignore[arg-type]
         run_gh_command=gh,
         run_dod_verify_command=fake_dod_verify,
+        run_gateway_command=fake_gateway,
     )
     return handler, verified
 
@@ -332,6 +370,8 @@ def _request(**overrides: Any) -> ModelEvidenceAutocloseSweepRequest:
         "backfill_lookback_hours": 168,
         "backfill_max_candidates": 5,
         "apply": True,
+        "clone_root": _SANDBOX["clone_root"],
+        "pr_watcher_state_path": _SANDBOX["watcher"],
     }
     defaults.update(overrides)
     return ModelEvidenceAutocloseSweepRequest(**defaults)
@@ -376,8 +416,9 @@ async def test_an_aged_nominated_ticket_is_resolved_outside_every_window() -> No
     # One verifier call per tick, and exactly one write across the two.
     assert verified == [_AGED, _AGED]
     assert linear.state_updates == [(f"issue-{_AGED}", "state-done-id")]
-    # Resolution went through the SEARCH endpoint, not a window enumeration.
-    assert any(path.startswith("search/issues") for path in gh.paths)
+    # Resolution read local state: no GitHub search and no window enumeration.
+    assert not any(path.startswith("search/issues") for path in gh.paths)
+    assert not any("/pulls?" in path for path in gh.paths)
 
 
 async def test_the_newest_merged_companion_wins_when_a_ticket_has_several() -> None:
@@ -535,7 +576,9 @@ async def test_a_companion_whose_files_bind_a_different_ticket_is_refused() -> N
 async def test_a_failed_offer_resolution_is_a_github_error_not_an_absence() -> None:
     """ "I could not look" must never resolve to "there is nothing there"."""
     linear = _RecordingLinear()
-    gh = _GhRecorder(search_error="gh api: 502 Bad Gateway")
+    # No local companion, and the gateway cannot answer (OMN-21146: the search
+    # error this test used to inject is now the gateway node's).
+    gh = _GhRecorder(search_items={}, search_error="gateway: 502 Bad Gateway")
     handler, _verified = _handler(linear, gh)
 
     result = await handler.handle(_request(offer_tickets=(_AGED,)))

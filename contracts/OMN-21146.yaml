@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21146
+title: The evidence closer resolves an offered ticket's change-control companion without GitHub search
+summary: evidence_autoclose_sweep --offer found the merged OCC companion with gh api search/issues, which the GitHub-search guard refuses on every host, so an offered ticket ended in error_github_api before the verifier ran (OMN-20113 verified 3 of 3 and still could not close). The companion is now read from the PR watcher's state and the canonical clone's default branch (git log --grep, with the commit's own changed files), else through node_github_repo_gateway_effect (onex scm pr-heads and pr-view), and when no change-control copy exists the product repository's merged contracts/<ticket>.yaml is accepted. A ticket with neither still refuses with a typed reason.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21146-local-companion
+    statement: An offered ticket's merged change-control companion is read from local state and the gateway node, never from GitHub search.
+    acceptance:
+      - id: AC1
+        statement: "AC1: --offer resolves the ticket's merged companion from the PR watcher's state and the canonical clone's default branch, with its changed files from the commit, and makes no GitHub read -- falsifier: the clone tests fail against the merge-base handler, which calls search/issues"
+      - id: AC2
+        statement: "AC2: when the local sources hold no companion that binds the ticket, the companion is read through node_github_repo_gateway_effect, and a gateway that cannot answer is ERROR_GITHUB_API, never an absence -- falsifier: the gateway tests fail against the merge-base handler"
+      - id: AC3
+        statement: "AC3: when the change-control copy is absent, the product repository's merged contracts/<ticket>.yaml is accepted as the evidence source, and a contract on two product repositories is refused rather than chosen between -- falsifier: the product-contract tests fail against the merge-base handler"
+      - id: AC4
+        statement: "AC4: a ticket with no merged companion and no product contract still refuses with SKIPPED_NO_OFFER_COMPANION, and a commit that only names the ticket in passing is not its companion -- falsifier: the negative-control tests fail when the title binding filter is removed"
+evidence_requirements:
+  - kind: tests
+    description: The offer-path unit tests run real git repositories for the clone, the watcher state file and a gateway double shaped like onex scm's answers.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_offer_selection.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21146-ac1-local-companion
+    description: The offer tests pass at this head; the clone and watcher tests fail against the merge-base handler.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "clone or watcher"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21146-ac2-gateway
+    description: The gateway rung resolves a ticket-named companion the clone lacks and a gateway error is a refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k gateway
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21146-ac3-product-contract
+    description: A product repository's merged contract stands in for the absent change-control copy; two holders are refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "product"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21146-ac4-negative-control
+    description: Nothing to find still refuses with the typed no-companion reason, and a passing mention is discarded.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21146_offer_local_companion.py -q --no-cov -k "no_companion_and_no_product_contract or only_mentions or no_pr_number"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

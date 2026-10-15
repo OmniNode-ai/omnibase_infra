@@ -211,6 +211,10 @@ skills:
       - {name: apply, payload_field: apply, arg_type: boolean, default: false}
       - {name: max-companions, payload_field: max_companions, arg_type: integer}
       - {name: dispatch-cwd, payload_field: dispatch_cwd, arg_type: string}
+      # OMN-21146. --offer reads the companion from these, never from GitHub search.
+      - {name: clone-root, payload_field: clone_root, arg_type: string}
+      - {name: pr-watcher-state, payload_field: pr_watcher_state_path, arg_type: string}
+      - {name: gateway-bus-lane, payload_field: gateway_bus_lane, arg_type: string}
       - {name: dod-verify-timeout-seconds, payload_field: dod_verify_timeout_seconds, arg_type: integer}
       - {name: gh-timeout-seconds, payload_field: gh_timeout_seconds, arg_type: integer}
       - {name: close-if-done-label, payload_field: close_if_done_label, arg_type: string}
