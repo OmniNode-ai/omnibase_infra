@@ -29,3 +29,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-r1-probe-timeout-outlasts-cli-wait-ac2
+    description: The probe's kill timeout outlasts the CLI's declared terminal wait plus its hard-timeout grace, and the workflow job timeout leaves setup headroom above it, so a queued lane is graded by the CLI and not killed as probe-timeout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k outlasts
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
