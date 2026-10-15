@@ -62,7 +62,9 @@ dod_evidence:
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'onex.evt.omnibase-infra.llm-inference-response.v1'
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"onex.evt.omnibase-infra.inference-response.v1"' | grep -qx 0
+        # grep -c exits 1 on a zero count, which pipefail reports as a failure;
+        # awk reads the whole file and fails on an empty read or any match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk -v t='"onex.evt.omnibase-infra.inference-response.v1"' 'index($0, t) {n++} END {exit (NR == 0 || n > 0)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
