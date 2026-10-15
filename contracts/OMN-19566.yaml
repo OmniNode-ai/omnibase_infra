@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: a green pin advance is ACCEPTED, the same run without its paths is MISSING both checks, a live derived node term is ACCEPTED and a dead one FAILs naming the node, a forwarder change stays MISSING forwarder_refused_topic, and the host prints the paths the workflow reads -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q'
+  - id: req-omn19566-one-check-run-per-head
+    statement: A head carries exactly one lab-proof-receipt check run; a rerun or re-dispatch for the same head updates the App's existing run in place instead of posting a second.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: a head with no lab-proof-receipt run gets one created, a second post for the same head updates that run (one run on the head afterwards, a PATCH that carries no head_sha), an existing duplicate updates the newest and names the rest, a run of another App or another name is never updated, a refused update is raised and never retried as a second post, and the workflow hands the posting App slug to the poster -- falsifier: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py tests/ci/test_lab_proof_check_run_upsert_replay_omn19566.py -q'
 evidence_requirements:
   - kind: tests
     description: The conditional-check, workflow-path and pool-driver tests.
@@ -60,3 +65,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn19566-one-check-run-per-head
+    description: The poster updates the head's existing lab-proof-receipt run in place, so a head carries exactly one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py tests/ci/test_lab_proof_check_run_upsert_replay_omn19566.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q -- '--app-slug' .github/workflows/lab-proof-receipt.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

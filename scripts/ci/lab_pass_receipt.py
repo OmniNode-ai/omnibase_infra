@@ -171,6 +171,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
@@ -178,7 +179,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Final, Protocol
+from typing import Any, Final, Literal, Protocol
 
 #: Bump when a field is added or a meaning changes. A receipt carrying an
 #: unknown version is REFUSED by the gate rather than best-effort parsed: a
@@ -4359,39 +4360,41 @@ def render_pr_head_check_run(
 
 
 class CheckRunPostError(RuntimeError):
-    """The check-run POST did not succeed. Carries the HTTP status when known."""
+    """A check-run request did not succeed. Carries the HTTP status when known."""
 
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
 
 
-def post_check_run(
-    body: Mapping[str, Any],
-    *,
-    repo: str,
-    token: str,
-    api_base: str = "https://api.github.com",  # url-authority-ok: canonical public GitHub REST base, the one origin a check run is created at; post_check_run pins the repo to OmniNode-ai before any request
-    urlopen: Callable[..., Any] = urllib.request.urlopen,
-    timeout: float = 30.0,
-) -> dict[str, Any]:
-    """POST one check run and return GitHub's answer.
+@dataclass(frozen=True)
+class PostedCheckRun:
+    """What :func:`upsert_check_run` did, and the check run it answered with.
 
-    Check runs can be created only by a GitHub App, so ``token`` must be an App
-    installation token with ``checks: write`` on ``repo`` (the workflow mints
-    one); a personal token is refused by GitHub with 403, and that refusal is
-    raised here rather than swallowed. The token never reaches argv or a log.
+    ``superseded_ids`` are older runs of the same name on the same head that
+    were left in place: a check run cannot be deleted through the API, so a head
+    that already carried a duplicate keeps it, and the newest one is updated.
     """
-    if not token:
-        msg = "a GitHub App installation token is required to post a check run"
-        raise CheckRunPostError(msg)
-    if not re.fullmatch(r"OmniNode-ai/[A-Za-z0-9._-]+", repo):
-        msg = f"repo={repo!r} must name an OmniNode-ai repository"
-        raise CheckRunPostError(msg)
+
+    action: Literal["created", "updated"]
+    check_run: dict[str, Any]
+    superseded_ids: tuple[int, ...] = ()
+
+
+def _check_run_call(
+    method: str,
+    url: str,
+    *,
+    token: str,
+    body: Mapping[str, Any] | None,
+    urlopen: Callable[..., Any],
+    timeout: float,
+) -> dict[str, Any]:
+    """One REST call with the App token; the answer must be a JSON object."""
     request = urllib.request.Request(  # noqa: S310 - fixed https API base
-        f"{api_base.rstrip('/')}/repos/{repo}/check-runs",
-        data=json.dumps(dict(body)).encode("utf-8"),
-        method="POST",
+        url,
+        data=json.dumps(dict(body)).encode("utf-8") if body is not None else None,
+        method=method,
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
@@ -4404,15 +4407,93 @@ def post_check_run(
             payload = json.loads(response.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
-        msg = f"check-run POST to {repo} refused with HTTP {exc.code}: {detail}"
+        msg = f"check-run {method} {url} refused with HTTP {exc.code}: {detail}"
         raise CheckRunPostError(msg, status=exc.code) from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        msg = f"check-run POST to {repo} failed: {exc}"
+        msg = f"check-run {method} {url} failed: {exc}"
         raise CheckRunPostError(msg) from exc
     if not isinstance(payload, dict):
-        msg = f"check-run POST to {repo} returned a non-object body"
+        msg = f"check-run {method} {url} returned a non-object body"
         raise CheckRunPostError(msg)
     return payload
+
+
+def upsert_check_run(
+    body: Mapping[str, Any],
+    *,
+    repo: str,
+    token: str,
+    app_slug: str = "",
+    api_base: str = "https://api.github.com",  # url-authority-ok: canonical public GitHub REST base, the one origin a check run is created at; upsert_check_run pins the repo to OmniNode-ai before any request
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+    timeout: float = 30.0,
+) -> PostedCheckRun:
+    """Post the check run for a head, or update the one already there.
+
+    A head carries exactly one run of this name (OMN-19566 AC3): the head's
+    existing runs of ``body["name"]`` are listed first and the newest by id is
+    PATCHed in place; only a head with none gets a POST. A rerun of the
+    workflow, or a retry after a post that landed but whose job failed later,
+    therefore replaces the verdict instead of stacking a second run beside it.
+    ``app_slug`` narrows the match to runs the posting App created, since
+    another App's run cannot be patched.
+
+    Check runs can be created only by a GitHub App, so ``token`` must be an App
+    installation token with ``checks: write`` on ``repo`` (the workflow mints
+    one); a personal token is refused by GitHub with 403, and that refusal is
+    raised here rather than swallowed. The token never reaches argv or a log.
+    """
+    if not token:
+        msg = "a GitHub App installation token is required to post a check run"
+        raise CheckRunPostError(msg)
+    if not re.fullmatch(r"OmniNode-ai/[A-Za-z0-9._-]+", repo):
+        msg = f"repo={repo!r} must name an OmniNode-ai repository"
+        raise CheckRunPostError(msg)
+    name = str(body["name"])
+    root = f"{api_base.rstrip('/')}/repos/{repo}"
+    query = urllib.parse.urlencode({"check_name": name, "per_page": 100})
+    listing = _check_run_call(
+        "GET",
+        f"{root}/commits/{body['head_sha']}/check-runs?{query}",
+        token=token,
+        body=None,
+        urlopen=urlopen,
+        timeout=timeout,
+    )
+    existing = sorted(
+        (
+            run["id"]
+            for run in listing.get("check_runs", [])
+            if isinstance(run, dict)
+            and run.get("name") == name
+            and isinstance(run.get("id"), int)
+            and (not app_slug or (run.get("app") or {}).get("slug") == app_slug)
+        ),
+        reverse=True,
+    )
+    if not existing:
+        created = _check_run_call(
+            "POST",
+            f"{root}/check-runs",
+            token=token,
+            body=body,
+            urlopen=urlopen,
+            timeout=timeout,
+        )
+        return PostedCheckRun(action="created", check_run=created)
+    # head_sha addresses the run; it is not a field a PATCH takes
+    patch = {key: value for key, value in body.items() if key != "head_sha"}
+    updated = _check_run_call(
+        "PATCH",
+        f"{root}/check-runs/{existing[0]}",
+        token=token,
+        body=patch,
+        urlopen=urlopen,
+        timeout=timeout,
+    )
+    return PostedCheckRun(
+        action="updated", check_run=updated, superseded_ids=tuple(existing[1:])
+    )
 
 
 #: How each outcome is badged in a rendered receipt. INDETERMINATE is spelled
@@ -6489,6 +6570,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     pr_check.add_argument(
+        "--app-slug",
+        default="",
+        help=(
+            "the GitHub App that posts the check run: only its existing "
+            "lab-proof-receipt run on the head is updated in place (default: "
+            "any App's run of that name)"
+        ),
+    )
+    pr_check.add_argument(
         "--dry-run",
         action="store_true",
         help="print the check-run body and post nothing",
@@ -6609,8 +6699,11 @@ def _run_pr_head_publication(args: argparse.Namespace) -> int:
         print(json.dumps(body, indent=2, sort_keys=True))
         return 0
     try:
-        posted = post_check_run(
-            body, repo=subject.repo, token=os.environ.get(args.token_env, "")
+        posted = upsert_check_run(
+            body,
+            repo=subject.repo,
+            token=os.environ.get(args.token_env, ""),
+            app_slug=args.app_slug,
         )
     except CheckRunPostError as exc:
         print(
@@ -6627,8 +6720,10 @@ def _run_pr_head_publication(args: argparse.Namespace) -> int:
                 "posted": True,
                 "conclusion": body["conclusion"],
                 "head_sha": body["head_sha"],
-                "check_run_id": posted.get("id"),
-                "html_url": posted.get("html_url"),
+                "action": posted.action,
+                "check_run_id": posted.check_run.get("id"),
+                "html_url": posted.check_run.get("html_url"),
+                "superseded_check_run_ids": list(posted.superseded_ids),
             },
             sort_keys=True,
         )
