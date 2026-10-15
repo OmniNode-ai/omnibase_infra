@@ -14,12 +14,21 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The manifest validator, the migration class check and the RLS policy gate over the vendored files.
-    command: uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete
+    command: uv run --frozen pytest tests/unit/migrations/test_omn20717_unpriced_cost_vendored.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn20717-vendored-unpriced-cost-test
+    description: The vendored files match the omnimarket sources' checksums, each has its ledger row and forward-only class, and 0061 backfills under a helper policy it drops, never toggling forced RLS or restating tenant_isolation. At the merge base the files are absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn20717_unpriced_cost_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn20717-infra-manifest
     description: The application migration manifest binds the three vendored files to the checksums of the omnimarket sources.
     source: manual
