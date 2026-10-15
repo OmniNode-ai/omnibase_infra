@@ -45,6 +45,26 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: the hook rejects a token with or without a receipt-id comment in a file and rejects a commit message with a receipt-id comment, while a comment alone remains inert -- falsifier: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q fails at the merge base'
+  - id: req-occ-readers-s6-infra
+    statement: omnibase_infra's contract-topic-graph, omni-standards-compliance, pr-ci-zombie-detector and release workflows must read no onex_change_control, and the unused onex-change-control dev dependency and sibling pin must be gone.
+    acceptance:
+      - id: AC10
+        statement: 'AC10: contract-topic-graph.yml, omni-standards-compliance.yml, pr-ci-zombie-detector.yml and release.yml name no onex_change_control outside comments, the handler-contract check runs omnibase_core''s handler at a PyPI release that ships it, the zombie detector scans only omnimarket, release evidence is the in-repo contract alone, and neither pyproject.toml, uv.lock nor .github/sibling-pins.yaml carries onex_change_control -- falsifier: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py -q fails at the merge base'
+  - id: req-dispatch-parity-declared-closure
+    statement: Dispatch parity must pin both the declared OCC development corpus and the retired OCC corpus without changing any executable selection oracle.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 149-contract retired inventory, both sharing all 1090 probes, 126 dispatchers and 110 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
+  - id: req-occ-residual-s6-infra
+    statement: omnibase_infra's branch-protection audit workflow and deploy-scope pre-push hook must read no onex_change_control, and the two scripts that ran out of a change-control clone with no caller must be gone.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: branch-protection-audit.yml fetches and runs no change-control auditor and keeps its orphan and parity checks, check_deploy_scope_dod.py reads this repository''s contracts/ and fails a cited ticket with no contract there, and run_contract_sweep.py and verify_error_triage_e2e.py are deleted -- falsifier: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q fails at the merge base'
+  - id: req-occ-residual-s6-infra-migration-connect
+    statement: scripts/run-migrations.py must retry its first postgres connection while a freshly started server resets it, so Runtime Boot Smoke (compose) does not fail on the startup race.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: connect_with_retry retries ConnectionError and CannotConnectNowError up to its attempt limit, re-raises the last error, and does not retry an authentication failure -- falsifier: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -67,6 +87,12 @@ evidence_requirements:
   - kind: tests
     description: The contract-validation step passes this repository's branch contract and refuses both planted binds_ac shapes and a malformed contract.
     command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
+  - kind: tests
+    description: The four workflows read no onex_change_control, the release resolves evidence from the in-repo contract alone, and the dev dependency and sibling pin are gone.
+    command: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
+  - kind: tests
+    description: The branch-protection audit and the deploy-scope hook read no onex_change_control, and the two caller-less scripts are deleted.
+    command: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -153,3 +179,100 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-occ-readers-s6-infra-ac10
+    description: The repository tests prove the four workflows read no onex_change_control, the release refuses a receipt-only release, and the pyproject dependency, uv.lock entry and sibling pin are gone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10
+  - id: dod-dispatch-parity-declared-closure-ac11
+    description: The focused parity guard tests refuse missing required packages and planted inventory, route and selection drift. The tracked-blob probe exercises the checked-out commit's dependency selection and both oracle inventories, independently of the verifier's test overlay at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py tests/ci/test_dispatch_parity_live_contact_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |
+          uv run python - <<'PY'
+          import ast
+          import json
+          import subprocess
+          import tempfile
+          import tomllib
+          from pathlib import Path
+          from typing import Any
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+
+          def tracked(name):
+              return subprocess.check_output(
+                  ['git', 'show', 'HEAD:tests/fixtures/dispatch_parity/' + name], text=True
+              )
+
+          source = ast.parse(tracked('harness.py'))
+          names = {'required_onex_nodes_packages', 'load_selection_oracle'}
+          functions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name in names]
+          assert {node.name for node in functions} == names, 'Tracked harness lacks declared-closure selection'
+          required = ('omnibase-core', 'omnibase-infra')
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              for name in ('selection-oracle-v2.json', 'selection-oracle-no-occ-v2.header.json'):
+                  (root / name).write_text(tracked(name))
+              namespace = dict(globals(), __file__=str(root / 'harness.py'), REQUIRED_ONEX_NODES_PACKAGES=required)
+              exec(compile(ast.Module(body=functions, type_ignores=[]), '<tracked-harness>', 'exec'), namespace)
+              select = namespace['required_onex_nodes_packages']
+              manifest = root / 'pyproject.toml'
+              manifest.write_text('[project]\ndependencies = []\n[dependency-groups]\ndev = []\n')
+              assert select(manifest) == required
+              for declaration in ('onex-change-control==0.5.1', 'onex_change_control>=0.5.1'):
+                  for group in ('project', 'dev'):
+                      project = [declaration] if group == 'project' else []
+                      dev = [declaration] if group == 'dev' else []
+                      manifest.write_text('[project]\ndependencies = ' + json.dumps(project) + '\n[dependency-groups]\ndev = ' + json.dumps(dev) + '\n')
+                      assert select(manifest) == required + ('onex-change-control',)
+              manifest.write_text('[project]\ndependencies = []\n[dependency-groups]\ndev = [{include-group = "corpus"}]\ncorpus = ["onex-change-control==0.5.1"]\n')
+              try:
+                  select(manifest)
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError('Indirect dependency group silently accepted')
+              legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
+              retired = namespace['load_selection_oracle'](required)
+              assert legacy['header']['corpus']['contracts_discovered'] == 153
+              assert retired['header']['corpus']['contracts_discovered'] == 149
+              assert retired['header']['required_onex_nodes_packages'] == list(required)
+              assert retired['header']['required_missing_packages'] == []
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 128}
+              for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
+                  assert legacy[section] == retired[section], section
+              assert len(retired['dispatchers']) == 126
+              assert len(retired['routes']) == 110
+              assert len(retired['probes']) == 1090
+          print('Tracked dispatch parity closure and inventories passed')
+          PY
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11
+  - id: dod-occ-residual-s6-infra-ac12
+    description: The repository tests prove the audit workflow and the deploy-scope hook read no onex_change_control and the two scripts are gone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
+  - id: dod-occ-residual-s6-infra-ac13
+    description: The migration runner retries a connection reset during postgres startup and fails on an authentication error at once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC13

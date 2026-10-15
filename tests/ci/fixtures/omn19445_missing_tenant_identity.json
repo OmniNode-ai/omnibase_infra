@@ -1,0 +1,8 @@
+{
+  "_provenance": {
+    "source": "onex delegate 'Reply with exactly the word: ok' --bus kafka --lane dev, run by scripts/ci/r1_front_door_probe.py on lab host h101 with a clean HOME and omnimarket 28219cf929b3 co-installed; the same refusal ended the scheduled run 38516783126 of r1-front-door-probe.yml (job 115697266864) on 2026-10-14",
+    "captured_utc": "2026-10-14T23:44:00Z"
+  },
+  "stderr": "drift_guard: mode=ancestor-lag installed=28219cf929b3 clone_head=624fa16c80c0 behind=8 verdict=proceed reason=installed_commit_is_a_known_ancestor_of_clone_head\ntask class: document (fallback \u2014 no declared selection predicate claimed this 6-word request; using the contract's declared selection_fallback 'document'. Pass --criteria to state your own acceptance criteria instead)\ntransport: bus=kafka lane=dev (explicit --bus kafka)\ndelegate artifacts (REFUSED -- refused_before_dispatch, nothing dispatched): /private/tmp/rem19445/home2/.onex_state/runs/bf6d71c3-6132-4f9d-82de-df19fa85cd57/result.txt /private/tmp/rem19445/home2/.onex_state/runs/bf6d71c3-6132-4f9d-82de-df19fa85cd57/receipt.json /private/tmp/rem19445/home2/.onex_state/runs/bf6d71c3-6132-4f9d-82de-df19fa85cd57/run.json\nError: this install has never minted a tenant identity, so there is no tenant to stamp on the request and a deployed lane could not attribute its verdict. Run `onex local init` once on this machine. No identity is invented, and no request is sent without one. (A declared tenant overlay sets ONEX_TENANT_ID.)\n",
+  "exit_code": 1
+}

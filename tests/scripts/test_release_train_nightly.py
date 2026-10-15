@@ -2073,3 +2073,144 @@ class TestPathsDownstreamReposCloneByTagAreReleaseRelevant:
     ) -> None:
         policy = rt.load_policy(self._write(tmp_path, ""))["omnibase_core"]
         assert policy.consumed_paths == ()
+
+
+# --------------------------------------------------------------------------- #
+# The version bump moves the lockfile with the manifest.                        #
+# --------------------------------------------------------------------------- #
+_LOCK_BEFORE = """\
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "aiokafka"
+version = "0.4.313"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "omnimarket"
+version = "0.4.313"
+source = { editable = "." }
+dependencies = [
+    { name = "aiokafka" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "aiokafka", specifier = ">=0.4.313" }]
+"""
+
+_PYPROJECT_BEFORE = """\
+[project]
+name = "omnimarket"
+version = "0.4.313"
+
+[tool.example]
+version = "0.4.313"
+"""
+
+
+class TestTheVersionBumpMovesTheLockfileWithTheManifest:
+    """omnimarket#3888, 0.4.314: the release PR was red on every ``--locked`` check.
+
+    The recovery case (dev not ahead of the latest tag) moved only
+    ``[project].version`` in ``pyproject.toml``. The repo's own ``uv.lock`` records
+    its root package's version, so ``uv sync --locked`` refused the checkout
+    ("The lockfile at `uv.lock` needs to be updated, but `--locked` was provided")
+    and Aislop Sweep, Compliance Sweep, Contract Compliance Check, Contract Sweep
+    Gate and the CI Summary that waits on them all failed at that step, before any
+    check of the release's content ran. ``release-cut.yml`` has always run
+    ``uv lock`` after its dev bump; the train's bump did not.
+    """
+
+    WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
+
+    @staticmethod
+    def _clone(tmp_path: Path, *, lock: str | None = _LOCK_BEFORE) -> Path:
+        root = tmp_path / "clone"
+        root.mkdir()
+        (root / "pyproject.toml").write_text(_PYPROJECT_BEFORE, encoding="utf-8")
+        if lock is not None:
+            (root / "uv.lock").write_text(lock, encoding="utf-8")
+        return root
+
+    def test_the_bump_writes_the_manifest_and_the_lockfile_together(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._clone(tmp_path)
+        written = rt.bump_declared_version(root, "0.4.314")
+        assert written == ["pyproject.toml", "uv.lock"]
+        assert 'name = "omnimarket"\nversion = "0.4.314"' in (
+            root / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        assert 'name = "omnimarket"\nversion = "0.4.314"\nsource' in (
+            root / "uv.lock"
+        ).read_text(encoding="utf-8")
+
+    def test_the_bump_touches_only_the_roots_own_entry(self, tmp_path: Path) -> None:
+        """Discrimination: a dependency at the same version string stays put."""
+        root = self._clone(tmp_path)
+        rt.bump_declared_version(root, "0.4.314")
+        lock = (root / "uv.lock").read_text(encoding="utf-8")
+        assert 'name = "aiokafka"\nversion = "0.4.313"' in lock
+        assert 'specifier = ">=0.4.313"' in lock
+        assert lock.count("0.4.314") == 1
+        assert '[tool.example]\nversion = "0.4.313"' in (
+            root / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+
+    def test_a_repo_without_a_lockfile_bumps_the_manifest_alone(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._clone(tmp_path, lock=None)
+        assert rt.bump_declared_version(root, "0.4.314") == ["pyproject.toml"]
+        assert not (root / "uv.lock").exists()
+
+    def test_a_lockfile_with_no_entry_for_the_root_refuses_rather_than_going_stale(
+        self, tmp_path: Path
+    ) -> None:
+        stale = _LOCK_BEFORE.replace('name = "omnimarket"', 'name = "someone-else"')
+        root = self._clone(tmp_path, lock=stale)
+        with pytest.raises(rt.ReleaseTrainConfigError, match=r"uv\.lock"):
+            rt.bump_declared_version(root, "0.4.314")
+        assert 'version = "0.4.313"' in (root / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ), "a refused bump must not leave the manifest half-moved"
+
+    def test_the_project_name_is_matched_the_way_uv_normalises_it(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._clone(tmp_path)
+        (root / "pyproject.toml").write_text(
+            _PYPROJECT_BEFORE.replace("omnimarket", "Omni_Market"), encoding="utf-8"
+        )
+        (root / "uv.lock").write_text(
+            _LOCK_BEFORE.replace("omnimarket", "omni-market"), encoding="utf-8"
+        )
+        assert rt.bump_declared_version(root, "0.4.314") == [
+            "pyproject.toml",
+            "uv.lock",
+        ]
+
+    def test_the_subcommand_prints_what_it_wrote_one_path_per_line(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = self._clone(tmp_path)
+        code = rt.main(["bump-version", "--clone", str(root), "--version", "0.4.314"])
+        assert code == 0
+        assert capsys.readouterr().out.split() == ["pyproject.toml", "uv.lock"]
+
+    def test_the_workflow_bumps_through_the_subcommand_and_commits_what_it_wrote(
+        self,
+    ) -> None:
+        """The inline regex moved only the manifest; the workflow must not carry one."""
+        body = self.WORKFLOW.read_text(encoding="utf-8")
+        assert "release_train.py" in body
+        assert "bump-version" in body
+        assert "re.subn" not in body, (
+            "an inline manifest rewrite in the workflow is the second loader "
+            "again, and it is the one that skipped uv.lock"
+        )
+        assert "git add CHANGELOG.md pyproject.toml\n" not in body, (
+            "the release commit stages the manifest without its lockfile"
+        )

@@ -138,15 +138,12 @@ jobs:
       # OMN-20959: after the S6 cut-over (omnibase_infra#4792) this repository
       # runs no change-control autobind, so no bot writes a citation line into
       # the release PR's body any more and the body is not an evidence source.
-      # Evidence is read from where it now lives, in this order:
-      #   1. repo-contract: contracts/<ticket>.yaml at the release commit, with
-      #      a non-empty dod_evidence list. evidence_source = the release commit.
-      #   2. change-control receipt: a PASS receipt on onex_change_control's
-      #      default branch (where its evidence PRs merge) under drift/dod_receipts/<ticket>/dod-<owner>-<repo>-pr-<n>/ whose
-      #      pr_number is the release PR and whose commit_sha is its head.
-      #      evidence_source = the onex_change_control default-branch commit
-      #      that last wrote that receipt directory.
-      # Neither found: exit 1 before the build (the OMN-16286 refusal).
+      # Evidence is read from where it now lives: contracts/<ticket>.yaml at the
+      # release commit, with a non-empty dod_evidence list. evidence_source =
+      # the release commit. OMN-20074 (OCC retirement): a change-control
+      # receipt is no longer evidence and this step reads that repository no
+      # more. Absent the contract: exit 1 before the build (the OMN-16286
+      # refusal).
       # The ticket comes from the merged PR's title, else its head branch.
       - name: Resolve release ticket + evidence (OMN-16286)
         id: release_evidence
@@ -170,11 +167,10 @@ jobs:
           import json, re, sys
           pulls = json.load(open(sys.argv[1], encoding="utf-8"))
           merged = [p for p in pulls if p.get("state") == "closed" and p.get("merged_at")]
-          out = {"pr_number": "", "pr_head_sha": "", "ticket": ""}
+          out = {"pr_number": "", "ticket": ""}
           if merged:
               pr = merged[0]
               out["pr_number"] = str(pr.get("number") or "")
-              out["pr_head_sha"] = str((pr.get("head") or {}).get("sha") or "")
               for text in (pr.get("title") or "", (pr.get("head") or {}).get("ref") or ""):
                   m = re.search(r"OMN-[0-9]+", text, re.IGNORECASE)
                   if m:
@@ -187,7 +183,6 @@ jobs:
                   fh.write(f"{k}={v}\n")
           PY
           pr_number="$(sed -n 's/^pr_number=//p' "${scratch}/pr.env")"
-          pr_head_sha="$(sed -n 's/^pr_head_sha=//p' "${scratch}/pr.env")"
           ticket="$(sed -n 's/^ticket=//p' "${scratch}/pr.env")"
 
           if [ -z "$pr_number" ]; then
@@ -202,7 +197,7 @@ jobs:
           evidence_source=""
           evidence_kind=""
 
-          # 1. repo-contract: the in-repo contract at the release commit.
+          # The in-repo contract at the release commit.
           contract="contracts/${ticket}.yaml"
           if [ -f "$contract" ] && python3 - "$contract" <<'PY'
           import re, sys
@@ -220,47 +215,8 @@ jobs:
             evidence_kind="repo-contract:${contract}"
           fi
 
-          # 2. change-control receipt bound to the release PR's head.
-          if [ -z "$evidence_source" ] && [ -n "$pr_head_sha" ]; then
-            receipt_dir="drift/dod_receipts/${ticket}/dod-${REPOSITORY%%/*}-${REPOSITORY##*/}-pr-${pr_number}"
-            occ="repos/${REPOSITORY%%/*}/onex_change_control"
-            if gh api "${occ}/contents/${receipt_dir}" > "${scratch}/dir.json"; then
-              for path in $(python3 -c 'import json,sys; [print(e["path"]) for e in json.load(open(sys.argv[1])) if isinstance(e, dict) and e.get("type") == "file" and e.get("name", "").endswith(".yaml")]' "${scratch}/dir.json"); do
-                gh api "${occ}/contents/${path}" > "${scratch}/receipt.json" || continue
-                if python3 - "${scratch}/receipt.json" "$pr_number" "$pr_head_sha" "$ticket" <<'PY'
-          import base64, json, re, sys
-          doc = json.load(open(sys.argv[1], encoding="utf-8"))
-          text = base64.b64decode(doc.get("content", "")).decode("utf-8")
-          def field(name):
-              m = re.search(rf"^{name}:[ \t]*['\"]?([^'\"\n]*?)['\"]?[ \t]*$", text, re.MULTILINE)
-              return m.group(1) if m else ""
-          ok = (
-              field("status") == "PASS"
-              and field("pr_number") == sys.argv[2]
-              and field("commit_sha") == sys.argv[3]
-              and field("ticket_id") == sys.argv[4]
-          )
-          raise SystemExit(0 if ok else 1)
-          PY
-                then
-                  occ_sha=""
-                  if gh api "${occ}/commits?path=${receipt_dir}&per_page=1" > "${scratch}/occ_commits.json"; then
-                    occ_sha="$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); print(c[0]["sha"] if c else "")' "${scratch}/occ_commits.json")"
-                  fi
-                  if [[ "$occ_sha" =~ ^[0-9a-f]{40}$ ]]; then
-                    evidence_source="${occ_sha}"
-                    evidence_kind="change-control-receipt:${path}"
-                  fi
-                  break
-                fi
-              done
-            else
-              echo "No change-control receipt directory ${receipt_dir} on onex_change_control."
-            fi
-          fi
-
           if [ -z "$evidence_source" ]; then
-            echo "::error::OMN-16286: release PR #${pr_number} (commit ${head_sha}, ticket ${ticket}) has no evidence: no contracts/${ticket}.yaml with dod_evidence at the release commit, and no PASS change-control receipt bound to PR #${pr_number} at head ${pr_head_sha:-<unknown>}. Add the ticket's in-repo contract, or release from an evidenced commit."
+            echo "::error::OMN-16286: release PR #${pr_number} (commit ${head_sha}, ticket ${ticket}) has no evidence: no contracts/${ticket}.yaml with dod_evidence at the release commit. Add the ticket's in-repo contract, or release from an evidenced commit."
             exit 1
           fi
 

@@ -73,7 +73,7 @@ output_model:
   name: "ModelRunnerFleetHealthVerdict"
   module: "omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict"
   description: >-
-    Per-runner + fleet-level health verdict with recommended actions, carrying source-determinacy flags (github_source_ok / docker_source_ok / buildx_determinate) so a probe-source outage is distinguishable from a confirmed-healthy fleet (OMN-14228 Slice A), plus the OMN-15255 composite readiness surface: per-runner readiness + evaluated signals, ready/not_ready/unknown counts, fleet_ready, quarantined_runners, bounce_eligible_runners, and per-signal fleet rollups.
+    Per-runner + fleet-level health verdict with recommended actions, carrying source-determinacy flags (github_source_ok / docker_source_ok / buildx_determinate) so a probe-source outage is distinguishable from a confirmed-healthy fleet (OMN-14228 Slice A), plus the OMN-15255 composite readiness surface: per-runner readiness + evaluated signals, ready/not_ready/unknown counts, fleet_ready, quarantined_runners, bounce_eligible_runners, and per-signal fleet rollups. Includes offline-runner, stuck-job, and repo/labels queue-age alerts (OMN-17427).
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -112,8 +112,8 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-07-04"
-  updated: "2026-07-26"
-  ticket: "OMN-15195"
+  updated: "2026-10-14"
+  ticket: "OMN-17427"
   tags:
     - compute
     - def-b

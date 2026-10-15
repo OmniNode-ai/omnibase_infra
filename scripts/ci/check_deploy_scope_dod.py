@@ -9,7 +9,7 @@ Shift the hosted **Deploy Gate** left. The hosted required check
 `validate_pr_deploy_required.py` reusable, CLAUDE.md PR CI Requirements Sec.4)
 was the ONLY surface that caught omnibase_infra#2319: a PR that touched
 ``handler_wiring.py`` (a deploy-scoped runtime surface) with **no** deploy-scope
-DoD item in its OCC contract. The drift was invisible locally until the PR hit
+DoD item in its ticket contract. The drift was invisible locally until the PR hit
 CI. This hook runs the deterministic, locally-decidable half of that gate at
 ``git push`` time so the same gap is caught before the push leaves the machine.
 
@@ -22,26 +22,20 @@ resolved from the ``OMNI_HOME`` sibling clone, and calls its
 functions directly. There is exactly one rule set; the local hook and the
 hosted gate cannot drift on the deploy-scope patterns or the evidence rule.
 
-Tri-state decision (fail-loud on the locally-decidable gaps, NEVER false-red):
+Tri-state decision (fail-loud on the locally-decidable gaps, NEVER false-red).
+The cited tickets' contracts are this repository's own ``contracts/<ticket>.yaml``
+-- the directory the hosted gate reads at the pull request head
+(``contract-source: caller``, OMN-20074) -- so every gap below is decidable here:
 
   * ``SKIP_NO_RUNTIME``  -- no deploy-scoped file changed. Exit 0 (parity with the
     hosted gate's ``skipped`` branch).
   * ``FAIL_NO_TICKET``   -- deploy-scoped surface touched but the push cites no
     ``OMN-XXXX`` ticket at all. Deterministic CI failure; exit 1.
-  * ``FAIL_NO_EVIDENCE`` -- deploy-scoped surface touched, a ticket IS cited, its
-    OCC contract IS present locally, but it declares NO deploy-scope DoD evidence.
-    This is exactly the omnibase_infra#2319 gap, now caught locally; exit 1.
-  * ``PASS_EVIDENCE``    -- deploy-scoped surface touched, cited ticket's local OCC
-    contract declares deploy-scope DoD evidence. Exit 0 (parity pass).
-  * ``NOTICE_COMPANION_UNMERGED`` -- deploy-scoped surface touched, a ticket IS
-    cited, but its OCC contract is NOT resolvable in the local
-    ``onex_change_control`` clone (the OCC companion is authored/merged
-    separately, so absence-locally is NOT proof-of-absence-in-PR). Emits a loud,
-    actionable NOTICE and exits 0. This is the deliberate boundary: the FULL
-    PR-body + Evidence-Source OCC-ref resolution (``gh pr view`` /
-    ``checkout-occ-contracts.sh``) stays a CI-only concern (OMN-14655 split
-    principle: deploy-gate's PR-body/OCC-checkout half is CI-only). Failing red
-    here would false-fail every legitimate push whose companion has not merged.
+  * ``FAIL_NO_EVIDENCE`` -- deploy-scoped surface touched and either no cited
+    ticket has a ``contracts/<ticket>.yaml``, or a contract is present but declares
+    NO deploy-scope DoD evidence (the omnibase_infra#2319 gap); exit 1.
+  * ``PASS_EVIDENCE``    -- deploy-scoped surface touched, a cited ticket's contract
+    declares deploy-scope DoD evidence. Exit 0 (parity pass).
 
 FAIL-LOUD (root CLAUDE.md Rule #8, OMN-14655 principle #4): a gate that cannot
 run must be indistinguishable from a failing one. If the diff base cannot be
@@ -83,7 +77,7 @@ override args are supplied, which is how the unit test drives the pure core):
     uv run python scripts/ci/check_deploy_scope_dod.py \
         --changed-files "src/omnibase_infra/runtime/service_kernel.py" \
         --pr-body "Closes OMN-1234" \
-        --contracts-dir /path/to/onex_change_control/contracts
+        --contracts-dir /path/to/contracts
 """
 
 from __future__ import annotations
@@ -108,9 +102,10 @@ import yaml
 _CANONICAL_VALIDATOR_RELPATH = Path(
     "omniclaude/.github/actions/deploy-gate/validate_pr_deploy_required.py"
 )
-# Local OCC contracts tree, relative to OMNI_HOME. The hosted gate reads contracts
-# from onex_change_control (OMN-11423); locally we read the sibling clone.
-_OCC_CONTRACTS_RELPATH = Path("onex_change_control/contracts")
+# This repository's own ticket contracts. The hosted deploy gate reads
+# ``contracts/<ticket>.yaml`` at the pull request head (``contract-source:
+# caller``, OMN-20074); locally we read the same directory of the working tree.
+_CONTRACTS_RELPATH = Path("contracts")
 
 _DEFAULT_BASE_REF = "origin/dev"
 
@@ -119,7 +114,6 @@ SKIP_NO_RUNTIME = "SKIP_NO_RUNTIME"
 FAIL_NO_TICKET = "FAIL_NO_TICKET"
 FAIL_NO_EVIDENCE = "FAIL_NO_EVIDENCE"
 PASS_EVIDENCE = "PASS_EVIDENCE"
-NOTICE_COMPANION_UNMERGED = "NOTICE_COMPANION_UNMERGED"
 
 
 class DeployScopeHookError(RuntimeError):
@@ -345,6 +339,11 @@ def _try_gh_pr_body(repo_root: Path, branch: str) -> str | None:
     return body or None
 
 
+def contracts_dir_for(repo_root: Path) -> Path:
+    """The directory the hosted deploy gate reads the cited tickets' contracts from."""
+    return repo_root / _CONTRACTS_RELPATH
+
+
 def classify_deploy_scope(
     validator: ModuleType,
     changed_files: list[str],
@@ -388,17 +387,17 @@ def classify_deploy_scope(
 
     present = [t for t in tickets if (contracts_dir / f"{t}.yaml").is_file()]
     if not present:
+        missing = ", ".join(f"contracts/{t}.yaml" for t in tickets)
         return DeployScopeDecision(
-            outcome=NOTICE_COMPANION_UNMERGED,
-            exit_code=0,
+            outcome=FAIL_NO_EVIDENCE,
+            exit_code=1,
             runtime_hits=tuple(runtime_hits),
             tickets=tuple(tickets),
             detail=(
                 "Deploy-scoped surface touched; cited ticket(s) "
-                f"{tickets} have no OCC contract in the local "
-                f"{contracts_dir} clone (companion likely not merged yet). "
-                "Cannot prove the gap locally -- the hosted deploy-gate resolves "
-                "the OCC companion via Evidence-Source and makes the final call."
+                f"{tickets} have no contract in this repository ({missing}). "
+                "The hosted deploy-gate reads the contract at the pull request "
+                "head and fails on the same gap."
             ),
         )
 
@@ -410,7 +409,7 @@ def classify_deploy_scope(
             tickets=tuple(present),
             detail=(
                 f"Deploy-scoped surface touched; ticket(s) {present} declare "
-                "deploy-scope DoD evidence in their OCC contract."
+                "deploy-scope DoD evidence in their contract."
             ),
         )
 
@@ -420,8 +419,8 @@ def classify_deploy_scope(
         runtime_hits=tuple(runtime_hits),
         tickets=tuple(present),
         detail=(
-            f"Deploy-scoped surface touched; cited ticket(s) {present} have an "
-            "OCC contract but declare NO deploy-scope DoD evidence "
+            f"Deploy-scoped surface touched; cited ticket(s) {present} have a "
+            "contract but declare NO deploy-scope DoD evidence "
             "(the omnibase_infra#2319 gap)."
         ),
     )
@@ -443,7 +442,7 @@ def render(decision: DeployScopeDecision, validator: ModuleType) -> None:
         _log(
             "This is the LOCAL mirror of the required hosted `deploy-gate` check. "
             "Fix it before pushing: add a deploy-scope DoD item to the cited "
-            "ticket's OCC contract (onex_change_control/contracts/OMN-XXXX.yaml)."
+            "ticket's contract (contracts/OMN-XXXX.yaml)."
         )
 
 
@@ -738,7 +737,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--contracts-dir",
         default=None,
-        help="OCC contracts dir override (bypasses OMNI_HOME resolution).",
+        help="Ticket contracts dir override (default: <repo root>/contracts).",
     )
     parser.add_argument(
         "--omni-home",
@@ -784,7 +783,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.contracts_dir is not None:
             contracts_dir = Path(args.contracts_dir)
         else:
-            contracts_dir = omni_home / _OCC_CONTRACTS_RELPATH
+            contracts_dir = contracts_dir_for(repo_root)
 
         if args.pr_body is not None:
             pr_body = args.pr_body

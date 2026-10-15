@@ -1,13 +1,14 @@
 {
   "_provenance": {
-    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below; cli_review --help of each listed revision; and the substitute-vote classifier of the pinned and previous revisions over the lost-voter error texts below",
-    "captured_utc": "2026-10-11T07:29:16Z",
+    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below; cli_review --help of each listed revision; and the substitute-vote classifier of the pinned and previous revisions over the lost-voter error texts below; and the review voter adapter's _DEFAULT_MAX_TOKENS and _RETRY_MAX_TOKENS (retry_budget) at the pinned revision and the one before it",
+    "captured_utc": "2026-10-14T12:36:00Z",
     "control_captured_utc": "2026-10-11T04:46:31Z",
     "ticket": "OMN-20947",
-    "pinned_revision": "64b950973a5686d33e0b439fb80749d66362d06d",
+    "pinned_revision": "3fcbf795087a79081c0ceeb676216bf64c5d49ae",
     "control_revision": "8782c0507035e2cec20ccacbc404d32f894161b5",
     "previous_pinned_revision": "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070",
-    "note": "voter hosts and reviewer logins are synthetic; each overlay is written with schema_version review_voters_overlay.v1 before loading"
+    "note": "voter hosts and reviewer logins are synthetic; each overlay is written with schema_version review_voters_overlay.v1 before loading",
+    "retry_budget_previous_revision": "64b950973a5686d33e0b439fb80749d66362d06d"
   },
   "overlays": {
     "voters_only": {
@@ -122,7 +123,7 @@
     }
   },
   "revisions": {
-    "64b950973a5686d33e0b439fb80749d66362d06d": {
+    "3fcbf795087a79081c0ceeb676216bf64c5d49ae": {
       "schema": {
         "overlay_properties": [
           "backend_overlay",
@@ -265,7 +266,7 @@
     }
   },
   "cli_review": {
-    "64b950973a5686d33e0b439fb80749d66362d06d": {
+    "3fcbf795087a79081c0ceeb676216bf64c5d49ae": {
       "accepts_head_sha": true
     },
     "8782c0507035e2cec20ccacbc404d32f894161b5": {
@@ -273,7 +274,7 @@
     }
   },
   "substitution": {
-    "64b950973a5686d33e0b439fb80749d66362d06d": {
+    "3fcbf795087a79081c0ceeb676216bf64c5d49ae": {
       "call_timed_out": {
         "error": "[ONEX_CORE_092_TIMEOUT_ERROR] Request to voter-b timed out after 300.0s (2 attempts)",
         "substitutable_as": "timed out"
@@ -316,6 +317,16 @@
         "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (500) from voter-b",
         "substitutable_as": null
       }
+    }
+  },
+  "retry_budget": {
+    "3fcbf795087a79081c0ceeb676216bf64c5d49ae": {
+      "default_max_tokens": 4096,
+      "retry_max_tokens": 8192
+    },
+    "64b950973a5686d33e0b439fb80749d66362d06d": {
+      "default_max_tokens": 4096,
+      "retry_max_tokens": null
     }
   }
 }

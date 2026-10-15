@@ -1136,3 +1136,104 @@ class TestWireRequestResponse:
             await wiring._wire_instance(instance)
 
         assert "already wired" in exc_info.value.message
+
+
+# =============================================================================
+# Failure Terminal Tests
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestFailureTerminalReason:
+    """A failure terminal's own failure_reason is the raised cause."""
+
+    @pytest.mark.parametrize(
+        "shape",
+        ["flat", "envelope"],
+    )
+    async def test_failure_reason_is_the_raised_cause(
+        self, mock_event_bus: MagicMock, shape: str
+    ) -> None:
+        from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
+            RequestResponseWiring,
+        )
+
+        wiring = RequestResponseWiring(
+            event_bus=mock_event_bus,
+            environment="test",
+            app_name="test-app",
+            bootstrap_servers="localhost:9092",
+        )
+        instance = RequestResponseInstanceState(
+            name="test",
+            request_topic="test.topic",
+            completed_topic="test.completed",
+            failed_topic="test.failed",
+            timeout_seconds=5,
+            correlation_config=ModelCorrelationConfig(),
+            consumer_group="test.group",
+        )
+        correlation = str(uuid4())
+        future: asyncio.Future[dict[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        instance.pending[correlation] = future
+        reason = "task class 'agent_delegation' is declared but not routable"
+        body: dict[str, object] = (
+            {"correlation_id": correlation, "failure_reason": reason}
+            if shape == "flat"
+            else {
+                "correlation_id": correlation,
+                "payload": {"correlation_id": correlation, "failure_reason": reason},
+            }
+        )
+        message = MagicMock()
+        message.value = json.dumps(body).encode("utf-8")
+        message.topic = "test.failed"
+
+        await wiring._handle_response_message(instance, message)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await future
+        assert str(exc_info.value) == f"Request failed: {reason}"
+
+    async def test_a_failure_terminal_without_a_reason_says_so(
+        self, mock_event_bus: MagicMock
+    ) -> None:
+        from omnibase_infra.runtime.request_response_wiring import (
+            RequestResponseInstanceState,
+            RequestResponseWiring,
+        )
+
+        wiring = RequestResponseWiring(
+            event_bus=mock_event_bus,
+            environment="test",
+            app_name="test-app",
+            bootstrap_servers="localhost:9092",
+        )
+        instance = RequestResponseInstanceState(
+            name="test",
+            request_topic="test.topic",
+            completed_topic="test.completed",
+            failed_topic="test.failed",
+            timeout_seconds=5,
+            correlation_config=ModelCorrelationConfig(),
+            consumer_group="test.group",
+        )
+        correlation = str(uuid4())
+        future: asyncio.Future[dict[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        instance.pending[correlation] = future
+        message = MagicMock()
+        message.value = json.dumps({"correlation_id": correlation}).encode("utf-8")
+        message.topic = "test.failed"
+
+        await wiring._handle_response_message(instance, message)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await future
+        assert "Request failed: Request failed" not in str(exc_info.value)
+        assert "no failure_reason" in str(exc_info.value)

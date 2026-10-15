@@ -470,6 +470,30 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "over an offer, before any GitHub or Linear I/O about it."
         ),
     )
+    # OMN-18489. The In Progress demotion leg. The window is declared here, in
+    # the contract-bound request, and nowhere as a literal in the handler.
+    demotion_window_hours: int = Field(
+        default=0,
+        ge=0,
+        le=24 * 365,
+        description=(
+            "OMN-18489. Idle window of the In Progress demotion leg, in hours. "
+            "A ticket In Progress with no comment other than a sweep's own, no "
+            "open pull request and no live execution claim for this long, and "
+            "not on the exclusion fence, returns to Backlog. 0 turns the leg "
+            "off and is the value until the window is armed in the workflow."
+        ),
+    )
+    max_demotions_per_run: int = Field(
+        default=5,
+        ge=0,
+        le=100,
+        description=(
+            "OMN-18489. Hard cap on how many tickets one run may demote. The "
+            "rest are recorded skipped_budget_exhausted and offered again next "
+            "run. 0 writes none."
+        ),
+    )
     close_if_done_label: str = Field(
         default="close-if-done",
         description=(

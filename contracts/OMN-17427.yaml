@@ -59,6 +59,35 @@ requirements:
         statement: "AC12: main-target-guard exits non-zero for a base-main PR from a feature head, a dev head with a promotion receipt, a hotfix head with evidence and the release workflows' own heads, and exits zero for those release heads onto dev -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'refused or admitted or replays'"
       - id: AC13
         statement: "AC13: the pre-push hook main-target-guard prints a warning and exits zero for a push to refs/heads/main and prints nothing for dev or a feature branch, and the guard is registered in the CI Summary poller -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'hook or push or poller'"
+  - id: req-omn17427-precommit-commit-path
+    statement: A commit no longer pays for whole-repo scans that CI runs on every pull request, and the staged-only hygiene scan returns the whole-tree verdict.
+    acceptance:
+      - id: AC14
+        statement: "AC14: check-direct-model-call and check-node-boundary-imports run at the pre-push stage with --base taken from the merge base with origin/dev, and the CI jobs that back them run on every pull request -- falsifier: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q"
+      - id: AC15
+        statement: "AC15: the commit-stage public-repo-hygiene hook is handed the staged paths, the merge-commit stage keeps the whole-tree run, and the config still enforces added lines -- falsifier: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision"
+  - id: req-omn17427-hostile-reviewer-retry-budget-pin
+    statement: Every workflow site that clones omniintelligence names the revision whose retry of an unparseable review reply gets 8192 tokens instead of 4096.
+    acceptance:
+      - id: AC16
+        statement: 'AC16: .github/sibling-pins.yaml names omniintelligence at 3fcbf795087a79081c0ceeb676216bf64c5d49ae, the merge commit of omniintelligence#1072, and every workflow clone names it -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q fails over the merge base, which pins 64b950973a5686d33e0b439fb80749d66362d06d'
+  - id: req-omn17427-rr-failure-reason
+    statement: A request-response failure terminal raises its own failure_reason instead of a doubled generic message.
+    acceptance:
+      - id: AC17
+        statement: "AC17: a failure terminal carrying failure_reason, flat or in its envelope payload, rejects the pending request with RuntimeError 'Request failed: <failure_reason>', and one without a reason says so instead of 'Request failed: Request failed' -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason fails at the merge base"
+  - id: req-omn17427-runner-fleet-alerts
+    statement: The runner-fleet snapshot reads each watched run's queued and in-progress jobs, and the health verdict carries typed alerts for a runner offline, a runner busy on one job past the job timeout, and a repo/labels queue whose oldest queued job is past the queue-age bound.
+    acceptance:
+      - id: AC18
+        statement: "AC18: the replayed 2026-10-14 fixture (25 pool runners busy, none wedged, doc checks queued up to 44.9 minutes, two second-host runners offline) yields queue_age_exceeded for the three repos that queued past 30 minutes, runner_offline for the two offline runners, and no runner_stuck; a job running past 360 minutes yields runner_stuck -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q fails at the merge base, where the alert models do not exist"
+  - id: req-omn17427-delegate-named-tests
+    statement: onex delegate names the tests a code delegation is graded by, carries them in the request metadata under the keys omnimarket's delegation port reads, and carries them inline on the deployed lane's bus command.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: --test-file, --named-test and --answer-path write named_tests, named_tests_answer_path and named_tests_files into the request payload the run is handed, and a partial or unsafe naming is a usage error -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"'
+      - id: AC20
+        statement: 'AC20: a run that resolves to the deployed lane is handed its named tests like an in-process run, and the deployed dispatch port publishes them inline on the bus command and refuses, before publication, a spec that points at a caller workspace or carries no test sources -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -99,6 +128,27 @@ evidence_requirements:
   - kind: tests
     description: The pre-push hook warns on a push to main and the guard is registered in the CI Summary poller.
     command: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'hook or push or poller'
+  - kind: tests
+    description: The two whole-repo scans run at push against the merge base and their CI jobs run on every pull request.
+    command: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q
+  - kind: tests
+    description: The commit-stage hygiene hook scans the staged paths and the merge-commit stage keeps the whole tree.
+    command: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision
+  - kind: tests
+    description: The sibling pin names the omniintelligence revision with the larger retry budget, and every workflow clone follows it.
+    command: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q
+  - kind: tests
+    description: A failure terminal's failure_reason is the raised cause.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+  - kind: tests
+    description: The job reader and the stuck, offline and queue-age alerts, including the replayed 2026-10-14 fixture.
+    command: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
+  - kind: tests
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+  - kind: tests
+    description: A named-test run that reaches the deployed lane carries its tests inline on the bus command, and a spec the lane cannot run is refused before publication.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -221,3 +271,109 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC13
+  - id: dod-omn-17427-ac14
+    description: The two whole-repo scans run at push against the merge base, backed by CI jobs that run on every pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14
+  - id: dod-omn-17427-ac15
+    description: The commit-stage hygiene hook scans the staged paths; the merge-commit stage keeps the whole-tree run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC15
+  - id: dod-omn-17427-ac16
+    description: The sibling pin names the merge commit of omniintelligence#1072 and every workflow clone of omniintelligence follows it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
+  - id: dod-omn-17427-ac17
+    description: A failure terminal's failure_reason is the raised cause.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17
+  - id: dod-omn-17427-ac17-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image's request-response wiring returns a failure terminal's own failure_reason from its envelope payload and names a missing one, which an image without the fix cannot do.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18
+    description: The job reader and the runner-fleet alerts; the replayed 2026-10-14 fixture fires the queue-age and offline alerts and no stuck alert.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18
+  - id: dod-omn-17427-ac18-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image's runner-fleet health verdict declares the alerts field and the snapshot declares the jobs field, which an image without the change cannot do.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18-deploy-dispatch
+    description: Hosted-runner runtime dispatch smoke -- job facts reach the published terminal event through five contract-routed hops and serialized envelopes; overdue queues and jobs alert, below-bound jobs do not. Only external gh/ssh probes are replaced; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac19
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19
+  - id: dod-omn-17427-ac20
+    description: A named-test run that reaches the deployed lane carries its tests inline on the bus command, and a spec the lane cannot run is refused before publication.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC20
+  - id: dod-omn-17427-named-tests-deploy-dispatch
+    description: Hosted-runner CLI dispatch smoke -- the real delegate command hands named-test metadata to the in-process runtime and to the deployed lane. The runtime is a stand-in; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k golden_chain
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-named-tests-runtime-deploy-dispatch
+    description: Hosted-runner in-process runtime smoke -- named node ids and whole-file selections reach a typed metadata-echo handler through the real contract loader and in-memory bus, and its response reaches the persisted receipt artifacts. No model endpoint, deployed container or credentials are required; this does not execute the named tests.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

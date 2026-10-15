@@ -51,6 +51,7 @@ def _run(
     ps_rows: str,
     networks: str,
     broker: str | None,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -92,8 +93,10 @@ def _run(
     env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
     env.pop("LANE_MANIFEST", None)
     env.pop("LANE_MEMORY_BROKER_CONTAINER", None)
+    env.pop("LANE_CENSUS_DESIRED_STATE", None)
     if broker:
         env["LANE_MEMORY_BROKER_CONTAINER"] = broker
+    env.update(extra_env or {})
 
     proc = subprocess.run(
         ["bash", str(_SCRIPT), *args],
@@ -160,8 +163,8 @@ def test_live_without_broker_does_not_publish(tmp_path: Path) -> None:
     assert proc.returncode == 8
 
 
-def test_clean_lane_exits_zero(tmp_path: Path) -> None:
-    """A fully-running lane with its network present exits 0 (no drift)."""
+def _clean_lane_inventory() -> tuple[str, str]:
+    """A fully-running lane with its network present: (ps rows, networks)."""
     # Build a healthy inventory for the lane from the manifest.
     import yaml
 
@@ -181,8 +184,12 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
             )
         else:
             rows.append(f"{name}\trunning\tUp 1 hour\tx:1\tcom.omninode.lane={_LANE}")
-    ps = "\n".join(rows) + "\n"
-    networks = f"{NEUTRAL_LANE_NETWORK}\nbridge\n"
+    return "\n".join(rows) + "\n", f"{NEUTRAL_LANE_NETWORK}\nbridge\n"
+
+
+def test_clean_lane_exits_zero(tmp_path: Path) -> None:
+    """A fully-running lane with its network present exits 0 (no drift)."""
+    ps, networks = _clean_lane_inventory()
     proc, calls = _run(
         ["--lane", _LANE],
         tmp_path,
@@ -192,3 +199,23 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert "produce" not in calls, "clean lane must not publish"
+
+
+def test_clean_lane_with_the_desired_state_removed_is_drift(tmp_path: Path) -> None:
+    """OMN-19414 AC2: the lane is clean, the state it is graded against is gone.
+
+    The same inventory exits 0 above; naming a desired-state file that does not
+    exist makes the census exit 30 and carry desired_state_unreadable, never 0.
+    """
+    ps, networks = _clean_lane_inventory()
+    proc, _ = _run(
+        ["--lane", _LANE, "--dry-run", "--json"],
+        tmp_path,
+        ps_rows=ps,
+        networks=networks,
+        broker="redpanda",
+        extra_env={"LANE_CENSUS_DESIRED_STATE": str(tmp_path / "removed.json")},
+    )
+    assert proc.returncode == 30, proc.stderr
+    assert "desired_state_unreadable" in proc.stdout
+    assert "removed.json" in proc.stdout

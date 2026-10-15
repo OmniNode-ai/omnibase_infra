@@ -204,6 +204,66 @@ def _hold_reconcile_host_locks(purpose: str) -> Iterator[None]:
         yield
 
 
+def _restore_build_byproducts(repo_dir: str) -> None:
+    """Put the tracked build placeholders back after the last image build.
+
+    OMN-20637: ``stage_workspace.sh`` and ``compute_workspace_provenance.py``
+    overwrite ``SELF_UPDATE_KNOWN_BYPRODUCT_PATHS`` in the clone this agent
+    builds from, which is the host's canonical omnibase_infra clone. The
+    canonical clone refresh refuses a clone with any tracked change, so every
+    merge event between a build and the next reconcile tick was refused. The
+    images are already built and the next build restages from scratch, so
+    nothing reads these files again. Only these paths are touched, one pathspec
+    each; other tracked work in the clone is never restored, and a failure here
+    never fails the deploy.
+    """
+    for byproduct_path in SELF_UPDATE_KNOWN_BYPRODUCT_PATHS:
+        try:
+            restored = _run(
+                [
+                    "git",
+                    "-C",
+                    repo_dir,
+                    "checkout",
+                    "--quiet",
+                    "--",
+                    f":/{byproduct_path}",
+                ],
+                timeout=PHASE_TIMEOUTS[Phase.GIT],
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning(
+                "could not restore build byproduct %s in %s: %s",
+                byproduct_path,
+                repo_dir,
+                exc,
+            )
+            continue
+        if restored.returncode != 0:
+            logger.warning(
+                "could not restore build byproduct %s in %s (exit=%d): %s",
+                byproduct_path,
+                repo_dir,
+                restored.returncode,
+                restored.stderr[:200],
+            )
+
+
+@contextlib.contextmanager
+def _hold_build_context(purpose: str) -> Iterator[None]:
+    """Hold the reconcile locks across image builds, then restore the clone.
+
+    The restore runs inside the locks and on a failed build too, so no reconcile
+    checkout can interleave and the clone is never left carrying a build's
+    rewrite of its tracked placeholders (OMN-20637).
+    """
+    with _hold_reconcile_host_locks(purpose):
+        try:
+            yield
+        finally:
+            _restore_build_byproducts(REPO_DIR)
+
+
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
     Phase.GIT: 60,
@@ -3798,7 +3858,7 @@ class DeployExecutor:
             # OMN-20154: hold from staging through the LAST build, which reuses
             # staged provenance a reconcile checkout would reset to a placeholder.
             # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
-            with _hold_reconcile_host_locks(f"deploy-agent image build {git_sha[:12]}"):
+            with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
                 self._compose_build(
                     Scope.CORE,
                     git_sha,
@@ -3855,7 +3915,7 @@ class DeployExecutor:
         # OMN-20154: span staging through the LAST build so reconcile-host
         # cannot reset staged provenance before the dev-only build consumes it.
         # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
-        with _hold_reconcile_host_locks(f"deploy-agent image build {git_sha[:12]}"):
+        with _hold_build_context(f"deploy-agent image build {git_sha[:12]}"):
             self._compose_build(
                 scope,
                 git_sha,
@@ -4066,6 +4126,8 @@ class DeployExecutor:
         finally:
             if artifact_stage is not None:
                 shutil.rmtree(artifact_stage, ignore_errors=True)
+            # deploy-gateway.sh stages the workspace into REPO_DIR again (OMN-20637).
+            _restore_build_byproducts(REPO_DIR)
         if result.returncode != 0:
             raise RuntimeError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "

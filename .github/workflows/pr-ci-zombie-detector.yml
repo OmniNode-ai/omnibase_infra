@@ -8,7 +8,7 @@
 # can leave the CURRENT-head run stuck `status=queued` with zero scheduled
 # jobs forever, while an OLDER-head run for the same PR keeps holding the
 # shared concurrency group open: cancel-in-progress leaving 1-2 self-hosted
-# jobs alive past the cancel signal (onex_change_control ci.yml), or a
+# jobs alive past the cancel signal, or a
 # single-flight `cancel-in-progress: false` queue whose stale-head run stalls
 # on a straggler job (omnimarket ci.yml, OMN-14645). This workflow runs
 # `scripts/ci/pr_ci_zombie_detector.py --apply`, which force-cancels the
@@ -25,13 +25,13 @@
 # preinstalled on GitHub-hosted runners -- no `uv sync` / venv needed.
 #
 # Token: a minted `onexbot` App installation token (OMN-19258). The target
-# repos (onex_change_control, omnimarket) are NOT this repo, so the default
-# GITHUB_TOKEN cannot read or force-cancel their runs, and force-cancel needs
+# repo (omnimarket) is NOT this repo, so the default
+# GITHUB_TOKEN cannot read or force-cancel its runs, and force-cancel needs
 # Actions WRITE on the target. The operator granted `onexbot` (app 3342522,
 # installation 123040063) `actions: write` on 2026-09-23 (ruling on
 # OMN-19258); read back live from `gh api /orgs/OmniNode-ai/installations`
-# at 2026-09-23T15:06:01Z. The token is scoped to exactly the two target
-# repos and to `actions: write`, the only permission the script's three calls
+# at 2026-09-23T15:06:01Z. The token is scoped to exactly the target
+# repo and to `actions: write`, the only permission the script's three calls
 # need (list runs, list a run's jobs, force-cancel a run).
 #
 # WHY IT IS NOT CROSS_REPO_PAT ANY MORE. Until OMN-19258 this job ran on
@@ -64,7 +64,7 @@
 # new capability.
 #
 # The two jobs mint SEPARATE tokens from the same `onexbot` App, and that is
-# deliberate. The zombie detector WRITES (force-cancel) Actions on two repos;
+# deliberate. The zombie detector WRITES (force-cancel) Actions on one repo;
 # the alerter only READS, but reads a PRIVATE repo's check-runs and a branch's
 # protection -- see the OMN-18254 comment on its mint step below. One token per
 # job keeps each at the narrowest repository list and permission set it needs.
@@ -108,7 +108,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # OMN-19258: the onexbot App token, scoped to exactly the two repos the
+      # OMN-19258: the onexbot App token, scoped to exactly the repo the
       # detector reads and cancels in, with `actions: write` and nothing
       # else. The script's only calls are `GET actions/runs`,
       # `GET actions/runs/{id}/jobs` and `POST actions/runs/{id}/force-cancel`,
@@ -122,7 +122,6 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
           owner: OmniNode-ai
           repositories: |
-            onex_change_control
             omnimarket
           permission-actions: write
 
@@ -136,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${APP_TOKEN}" ]; then
-            echo "::error::onexbot App token mint produced an empty token. The zombie detector cannot read or force-cancel runs in onex_change_control/omnimarket without it. Failing closed -- a detector that cannot see must never read as a clean sweep (OMN-19258)."
+            echo "::error::onexbot App token mint produced an empty token. The zombie detector cannot read or force-cancel runs in omnimarket without it. Failing closed -- a detector that cannot see must never read as a clean sweep (OMN-19258)."
             exit 1
           fi
           echo "onexbot App token minted."
@@ -150,7 +149,6 @@ jobs:
           set -euo pipefail
           args=(
             --owner OmniNode-ai
-            --repo onex_change_control
             --repo omnimarket
             --stale-after-seconds 900
             --report zombie-detector-report.json

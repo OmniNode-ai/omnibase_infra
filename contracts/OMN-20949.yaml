@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20949
+title: omnibase_infra's Duplication Sweep reads kafka_boundaries.yaml from omnimarket, not onex_change_control
+summary: D2 of scripts/ci/run_duplication_sweep.py reads omnimarket/src/omnimarket/nodes/node_duplication_sweep/contracts/kafka_boundaries.yaml, and the Duplication Sweep workflow checks out omnimarket at the sibling pin in place of onex_change_control. The job, its name and its required context are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20949
+    statement: The required Duplication Sweep must read the Kafka boundary manifest from omnimarket at the pinned sha and name no onex_change_control path.
+    acceptance:
+      - id: AC3
+        statement: "AC3: omnibase_infra's run_duplication_sweep.py D2 reads the omnimarket path and the Duplication Sweep check run on that PR's head is green. -- falsifier: uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py scripts/ci/tests/test_sweep_clis.py -q -p no:randomly"
+evidence_requirements:
+  - kind: tests
+    description: "D2 passes against the omnimarket manifest with no onex_change_control directory, ignores a conflicting manifest left at the retired path, and the workflow checks out omnimarket at the pin."
+    command: "uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py scripts/ci/tests/test_sweep_clis.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20949-ac3
+    description: D2 reads the omnimarket manifest and the Duplication Sweep workflow checks out omnimarket at the pin, not onex_change_control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py scripts/ci/tests/test_sweep_clis.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

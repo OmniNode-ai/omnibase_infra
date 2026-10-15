@@ -31,6 +31,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_readines
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_recommended_action import (
     ModelRecommendedAction,
 )
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_alert import (
+    ModelRunnerFleetAlert,
+)
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_health_assessment import (
     ModelRunnerHealthAssessment,
 )
@@ -45,6 +48,9 @@ class ModelRunnerFleetHealthVerdict(BaseModel):
     evaluated_at: datetime = Field(..., description="When classification ran.")
     assessments: tuple[ModelRunnerHealthAssessment, ...] = Field(
         default_factory=tuple, description="Per-runner classified health state."
+    )
+    alerts: tuple[ModelRunnerFleetAlert, ...] = Field(
+        default=(), description="Runner offline/stuck and queue-age alerts (OMN-17427)."
     )
     expected_count: int = Field(..., ge=0, description="Configured runner count.")
     observed_count: int = Field(..., ge=0, description="Runners actually observed.")

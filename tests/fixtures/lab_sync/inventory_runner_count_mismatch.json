@@ -382,6 +382,32 @@
         "Status": "Up 2 hours (healthy)"
       }
     ],
+    "github_runners": [
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-deploy-runner",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-runner-1",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-verify-runner-1",
+        "status": "online"
+      }
+    ],
     "host": "omninode-pc",
     "lane": "dev",
     "networks": [
@@ -403,5 +429,6 @@
   "provenance": "Runner rows are live (three named runners on .201). The desired excerpt declares four of that set, which no recorded incident did; it exists to pin the count rule.",
   "source": "synthetic",
   "source_row": "synthetic",
+  "synthetic_fields": "github_runners (OMN-19414): every runner container registered online, so the runner_offline rule has the collector field it grades.",
   "ticket": "OMN-19411"
 }

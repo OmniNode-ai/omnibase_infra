@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20489
+title: The delegation local-model doctor check judges every local chat backend in the overlay
+summary: CheckDelegationLocalModel read only the first local-tier chat backend in the bifrost overlay. On two lab hosts the first rung (local-coder, Qwen3.8-27B) was healthy, so the check reported healthy while a later rung, local-studio-planner, still declared gpt-oss-120b, a model its server no longer serves; in-process delegation on one of those hosts refused with model_attribution_mismatch on that rung. The check now probes every local chat backend, each distinct models endpoint once, and reports the first not-serving or id-mismatch fault. The two host overlays were corrected outside this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20489-every-local-backend
+    statement: The delegation local-model doctor check reports a model-id mismatch or a not-serving server on any local-tier chat backend of the overlay, not only the first.
+    acceptance:
+      - id: AC1
+        statement: "AC1: an overlay whose first local chat backend is healthy and whose second declares a model its server does not serve diagnoses local_model_id_mismatch naming the second model, and an all-healthy overlay probes each distinct models endpoint once -- falsifier: the two focused tests fail against the merge-base check"
+evidence_requirements:
+  - kind: tests
+    description: The focused doctor test file covers a mismatch on a later local backend and the one-probe-per-endpoint healthy case beside the existing single-backend cases.
+    command: uv run pytest tests/unit/doctor/test_delegation_check_local_model.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20489-ac1-every-local-backend
+    description: The focused doctor tests pass at this head; the two new tests fail at the merge base, where only the first local chat backend is judged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/doctor/test_delegation_check_local_model.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/doctor/test_delegation_local_model_every_backend_omn20489.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.72"
+version = "0.38.73"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -70,7 +70,7 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.143.0",
+    "fastapi>=0.120.1,<0.144.0",
     "uvicorn>=0.32.0,<0.55.0",
     "pyyaml>=6.0.2,<7.0.0",
     # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
@@ -78,7 +78,7 @@ dependencies = [
     # on malformed responses). 3.9.0 was reachable and the lock resolved 3.14.1.
     "aiohttp>=3.14.3,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
-    "asyncpg>=0.29.0,<0.32.0",
+    "asyncpg>=0.29.0,<0.33.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     # Service integration dependencies (for the actual tools we're migrating)
     "redis>=6.0.0,<9.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
@@ -231,7 +231,7 @@ dev = [
     "pytest-xdist>=3.5.0,<4.0.0",  # Parallel test execution
     "pytest-timeout>=2.3.0,<3.0.0",  # Test timeout support
     "mypy>=1.13.0,<3.0.0",
-    "ruff>=0.14.7,<0.17.0",  # Ruff handles both formatting and linting (replaces black + isort)
+    "ruff>=0.14.7,<0.18.0",  # Ruff handles both formatting and linting (replaces black + isort)
     "types-pyyaml>=6.0.12.20250822,<7.0.0",
     "pre-commit>=4.3.0,<5.0.0",
     "deepdiff>=8.0.0,<10.0.0",  # OMN-12623: direct use in tests/replay topic-migration equivalence harness
@@ -265,8 +265,6 @@ dev = [
     "types-requests>=2.32.0.20250914,<3.0.0",
     "hypothesis>=6.148.7,<7.0.0",
     "pytest-split>=0.10.0,<0.12.0",
-    # Centralized governance hooks (OMN-5135)
-    "onex-change-control>=0.1.0",
 ]
 
 [tool.uv]
@@ -282,11 +280,6 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-13762 R3: pin occ to immutable main HEAD SHA (2dd26ad) so the lock is
-# reproducible from pure PyPI + immutable-rev sources; omnibase-core and
-# omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
-# 0.23.0 are published.
-onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
 # OMN-19749: the temporary git-rev override to omnibase_core#1786's squash
 # (be874b620) is REMOVED. omnibase-core 0.47.24 is published on PyPI (OMN-18595)
 # and contains that squash as an ancestor; the override-dependencies pin above

@@ -57,6 +57,11 @@
 # `--snapshot` writes the file whether or not there is drift, and leaves the
 # drift verdict and exit code below untouched.
 #
+# LANE_CENSUS_DESIRED_STATE (OMN-19414): the generated lab-desired-state.v1 document
+# (or a directory of them) the planner compares the inventory with. Unset, the
+# desired-state kinds are not graded and the plan says so; set and unreadable, the
+# census is drift (desired_state_unreadable) and exits 30.
+#
 # Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps
 #             (an interpreter without PyYAML, or no lane manifest under
 #             ONEX_WORKSPACE_CONFIG_ROOT/config/lab/lane-census and no
@@ -109,6 +114,10 @@ OBSERVED_OUT=""
 EXIT_INVENTORY_UNAVAILABLE=4
 # Host not declared in the manifest's hosts registry — NOT drift (OMN-19088).
 EXIT_HOST_UNDECLARED=5
+# OMN-19414: the planner could not read the desired state named by
+# LANE_CENSUS_DESIRED_STATE. Its plan carries a desired_state_unreadable finding,
+# so this is DRIFT: the census continues and exits 30, never 0.
+EXIT_DESIRED_STATE_UNREADABLE=9
 # OMN-19959: the lane container memory pass (`--memory`). One event per host per
 # pass on its own topic -- a memory observation is not drift, so the drift
 # topic's vocabulary is untouched. See scripts/lane_container_memory_event.py.
@@ -346,7 +355,10 @@ set +e
 PLAN_JSON="$(echo "$ENVELOPE_JSON" | LANE_CENSUS_HOST="$HOST" "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_plan.py" 2>"$SCRATCH/plan.err")"
 PLAN_RC=$?
 set -e
-if [[ $PLAN_RC -ne 0 ]]; then
+if [[ $PLAN_RC -eq $EXIT_DESIRED_STATE_UNREADABLE ]]; then
+  log "DRIFT: the desired state named by LANE_CENSUS_DESIRED_STATE cannot be read; \
+the plan carries desired_state_unreadable and this census does not read clean."
+elif [[ $PLAN_RC -ne 0 ]]; then
   while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/plan.err"
   if [[ $PLAN_RC -eq $EXIT_HOST_UNDECLARED ]]; then
     log "ABORT: host '$HOST' is not declared in the lane manifest's hosts registry. \

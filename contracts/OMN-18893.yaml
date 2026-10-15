@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18893
+title: changed_path_live names what a runtime logs and waives a node that runs in no runtime
+summary: The lab pool's derived changed_path_live term carries the contract name beside the directory name, so a node whose contract name differs from its directory (the name its consumer group and node= field log) can be seen live, and a changed node whose contract declares no topics and no runtime profile is listed as not applicable and passes the check with that evidence, while a runtime node still needs its live line.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18893-live-name
+    statement: The derived live term for a changed node matches the contract name the runtime logs as well as the directory name, and still matches no look-alike name and no discovery line.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the derived term for a node whose contract name differs from its directory matches its consumer group, its node-name logger and its directory logger, and matches neither its discovery line nor a longer look-alike name -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_live_names_omn18893.py -q'
+  - id: req-omn18893-not-applicable
+    statement: A changed node whose contract declares no topics under any event_bus key and no runtime profile gets a not-applicable outcome for changed_path_live, a runtime node in the same PR is still held to its live line, and a contract the host cannot read is never waived.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: a local node alone is ACCEPTED with not-applicable evidence naming it, beside a dead runtime node the run FAILs naming only the runtime node, beside a live runtime node it is ACCEPTED, and an unreadable contract or one with any event_bus topic is never listed as not applicable -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_live_names_omn18893.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The host derivation and pool judge tests, with the OMN-19566 pool tests they extend.
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_live_names_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18893-live-name
+    description: The derived term carries the contract name beside the directory name.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_live_names_omn18893.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn18893-not-applicable
+    description: A node that runs in no runtime passes changed_path_live as not applicable; a runtime node is still held to it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_live_names_omn18893.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'derive_live_not_applicable' scripts/runtime_build/prepr_pool_prove.sh
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

@@ -57,7 +57,12 @@ PRE_PUSH_STAGE = "pre-push"
 
 # The pre-push stage after OMN-18162, by hook id, in file order. The plan's AC1a
 # records the post-change count for this repo as 3.
+# OMN-17427 moved the two whole-repo scans that ci.yml and direct-model-call.yml
+# already run on every PR (node-boundary imports, direct model call) from every
+# commit to every push; neither runs a test runner.
 EXPECTED_PRE_PUSH_HOOK_IDS: tuple[str, ...] = (
+    "check-node-boundary-imports",
+    "check-direct-model-call",
     "mypy-type-check",
     "onex-validate-architecture-layers",
     "prepush-deploy-scope-dod",

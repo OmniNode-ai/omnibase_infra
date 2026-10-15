@@ -17,6 +17,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_trigger import (
     EnumEvidenceAutocloseTrigger,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_in_progress_demotion_decision import (
+    EnumInProgressDemotionDecision,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_linear_identity_path import (
     EnumLinearIdentityPath,
 )
@@ -38,6 +41,15 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evid
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result import (
     ModelEvidenceAutocloseSweepResult,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_outcome import (
+    ModelInProgressDemotionOutcome,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_request import (
+    ModelInProgressDemotionRequest,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_result import (
+    ModelInProgressDemotionResult,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_supersession_verdict import (
     ModelSupersessionVerdict,
 )
@@ -48,6 +60,7 @@ __all__ = [
     "EnumEvidenceAutocloseDecision",
     "EnumEvidenceAutocloseMode",
     "EnumEvidenceAutocloseTrigger",
+    "EnumInProgressDemotionDecision",
     "EnumLinearIdentityPath",
     "ModelAcBindingRow",
     "ModelCascadeProvenance",
@@ -55,5 +68,8 @@ __all__ = [
     "ModelEvidenceAutocloseOutcome",
     "ModelEvidenceAutocloseSweepRequest",
     "ModelEvidenceAutocloseSweepResult",
+    "ModelInProgressDemotionOutcome",
+    "ModelInProgressDemotionRequest",
+    "ModelInProgressDemotionResult",
     "ModelSupersessionVerdict",
 ]

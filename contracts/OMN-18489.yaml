@@ -1,0 +1,82 @@
+schema_version: 1.0.0
+ticket_id: OMN-18489
+title: The evidence sweep demotes In Progress tickets that nothing is working on (AC1 to AC4)
+summary: Adds the In Progress demotion leg to the evidence autoclose sweep node. A ticket In Progress with no comment other than a sweep's own, no open pull request, no live execution claim and no fence entry for the contract-declared window returns to Backlog with a comment naming the window and each resolution. Every unresolvable condition leaves the ticket alone. The leg is off at demotion_window_hours 0, so this change arms nothing; the workflow arming and the AC5 census re-run remain.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Demotion on all five conditions, one negative control per condition, fail-closed error outcomes, and the window read from the request.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-demotion-state-write-and-comment
+    description: A fixture meeting all five conditions is moved to Backlog, read back, and commented with the window and each resolution.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "all_conditions_is_demoted or dry_run"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-demotion-negative-controls
+    description: Each of the five conditions, failing alone, withholds the demotion and writes nothing.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "each_failed_condition_alone"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-demotion-fails-closed
+    description: A failed or partial pull-request resolution, an unreadable comment history, an unreadable start time, a failed enumeration, an unconfirmed readback and an unposted comment each record an error outcome and no demotion.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "failure or unreadable or incomplete or unconfirmed or full_comment_page"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-demotion-window-is-declared
+    description: The window is a required request field with no default, the sweep node contract declares demotion_window_hours as an input, and two windows demote different fixture sets.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "two_windows or window_has_no_default or comment_window_sent"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-demotion-deploy-probe
+    description: Hosted-runner deploy probe reads the demotion leg and declared window from GitHub at the checked-out commit, rather than dev. The accompanying integration probe executes the real sweep handler, Linear client and shared HTTP adapter against a simulated HTTP service and requires Backlog readback and comment, the 168-hour window on the wire, and refusal of partial enumeration and unconfirmed readback. Neither probe needs a private lane; both fail on a checkout without the leg.
+    source: manual
+    binds_ac:
+      - AC4
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          leg="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/in_progress_demotion.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'class InProgressDemotionLeg' <<<"$leg";
+          node_contract="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'demotion_window_hours' <<<"$node_contract"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k sweep_deploy
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-in-progress-demotion
+    statement: The In Progress queue reflects work in flight.
+    acceptance:
+      - id: AC1
+        statement: A ticket meeting all five demotion conditions is moved from In Progress to Backlog with a comment naming the window and each resolution.
+      - id: AC2
+        statement: A ticket failing any one condition is not demoted, and each of the five has its own test.
+      - id: AC3
+        statement: An unresolvable condition leaves the ticket untouched and records an error outcome rather than demoting.
+      - id: AC4
+        statement: The demotion window is contract-declared, not a literal.

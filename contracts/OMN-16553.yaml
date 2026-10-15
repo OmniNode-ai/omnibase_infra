@@ -1,0 +1,108 @@
+schema_version: "1.0.0"
+ticket_id: OMN-16553
+title: FastAPI and asyncpg upper bounds and runner image identity for omnibase_infra PRs 4945, 4946 and 4947
+summary: PR 4945 permits FastAPI below 0.144.0 PR 4946 permits asyncpg below 0.33.0, and PR 4947 widens the Ruff development requirement to >=0.14.7,<0.18.0. Each regenerates the runner image lock after rebasing onto dev. The package version follows dev. The changed dependency manifest and runner lock do not match the canonical deploy-gate runtime paths.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn16553-pr4945-fastapi
+    statement: The dependency declaration permits FastAPI versions from 0.120.1 up to but excluding 0.144.0.
+    acceptance:
+      - id: AC1
+        statement: pyproject.toml and uv.lock declare fastapi>=0.120.1,<0.144.0; the prior upper bound fails the bound command.
+  - id: req-omn16553-pr4945-runner-lock
+    statement: The runner image lock binds the combined dependency manifest after the rebase.
+    acceptance:
+      - id: AC2
+        statement: The recorded shared environment and image identity digests equal the existing identity generator's recomputed values.
+  - id: req-omn16553-pr4946-asyncpg-range
+    statement: The dependency manifest and lockfile metadata permit asyncpg 0.32 releases while retaining the 0.29.0 lower bound.
+    acceptance:
+      - id: AC3
+        statement: The asyncpg requirement is at least 0.29.0 and less than 0.33.0 in both manifests, and uv accepts the lockfile.
+  - id: req-omn16553-pr4946-runner-identity
+    statement: The recorded runner image identity matches the dependency manifests after rebasing onto dev.
+    acceptance:
+      - id: AC4
+        statement: Recomputing the runner identity and shared environment digest agrees with the recorded values.
+  - id: req-ruff-runner-binding
+    statement: The widened Ruff requirement is consistent across the dependency manifests and the runner image identity binds those manifests.
+    acceptance:
+      - id: AC5
+        statement: The development requirement in pyproject.toml and uv.lock is ruff>=0.14.7,<0.18.0.
+      - id: AC6
+        statement: The runner image identity verifies against the manifests carrying the widened Ruff requirement.
+evidence_requirements:
+  - kind: tests
+    description: The FastAPI dependency bound admits the updated upper limit.
+    command: >-
+      python3 -c 'import tomllib; d=tomllib.load(open("pyproject.toml", "rb")); assert "fastapi>=0.120.1,<0.144.0" in d["project"]["dependencies"]; lock=tomllib.load(open("uv.lock", "rb")); package=next(p for p in lock["package"] if p["name"] == "omnibase-infra"); assert any(r["name"] == "fastapi" and r["specifier"] == ">=0.120.1,<0.144.0" for r in package["metadata"]["requires-dist"])'
+  - kind: tests
+    description: The runner image identity matches the rebased manifest.
+    command: python3 scripts/ci/runner_image_identity.py --mode verify
+  - kind: tests
+    description: Focused runner identity and PostgreSQL pool and handler regression tests.
+    command: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/providers/test_provider_postgres_pool.py tests/unit/handlers/test_handler_db.py -q -p no:randomly --no-cov
+  - kind: manual
+    description: Deploy artifact check scoped to the runner image binding; no running container is required.
+    command: "deploy: python3 scripts/ci/runner_image_identity.py --mode verify"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn16553-pr4945-fastapi
+    description: The FastAPI declaration admits versions below 0.144.0 and refuses the old bound.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; d=tomllib.load(open("pyproject.toml", "rb")); assert "fastapi>=0.120.1,<0.144.0" in d["project"]["dependencies"]; lock=tomllib.load(open("uv.lock", "rb")); package=next(p for p in lock["package"] if p["name"] == "omnibase-infra"); assert any(r["name"] == "fastapi" and r["specifier"] == ">=0.120.1,<0.144.0" for r in package["metadata"]["requires-dist"])'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn16553-pr4945-runner-lock
+    description: Recompute both runner lock digests from the dependency manifest.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn16553-pr4946-ac1
+    description: Read the asyncpg constraints from both manifests and ask uv to verify the lockfile.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |-
+          python3 -c 'import pathlib,tomllib; p=tomllib.loads(pathlib.Path("pyproject.toml").read_text()); l=tomllib.loads(pathlib.Path("uv.lock").read_text()); assert "asyncpg>=0.29.0,<0.33.0" in p["project"]["dependencies"]; root=next(x for x in l["package"] if x["name"]=="omnibase-infra"); assert next(x for x in root["metadata"]["requires-dist"] if x["name"]=="asyncpg")["specifier"]==">=0.29.0,<0.33.0"' && uv lock --check
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn16553-pr4946-ac2
+    description: The runner image identity and shared environment digest equal the recomputed binding.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py -k 'recorded_identity_matches_recomputed_identity or identity_uses_shared_env_digest_as_a_binding_component' -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn16553-ac5-ruff-manifests
+    description: Both manifests admit Ruff 0.17 and retain the 0.14.7 floor.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; p=tomllib.load(open("pyproject.toml", "rb")); l=tomllib.load(open("uv.lock", "rb")); assert "ruff>=0.14.7,<0.18.0" in p["dependency-groups"]["dev"]; m=next(x for x in l["package"] if x["name"] == "omnibase-infra"); assert next(x for x in m["metadata"]["requires-dev"]["dev"] if x["name"] == "ruff")["specifier"] == ">=0.14.7,<0.18.0"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn16553-ac6-runner-binding
+    description: The widened requirement and its runner artifact binding are checked together; reverting the ceiling or corrupting either digest fails the probe.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; p=tomllib.load(open("pyproject.toml", "rb")); assert "ruff>=0.14.7,<0.18.0" in p["dependency-groups"]["dev"]' && python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra

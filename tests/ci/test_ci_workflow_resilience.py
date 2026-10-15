@@ -54,8 +54,10 @@ CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 # release-sync main move -- reachable from neither dev nor main after that
 # move landed) to omniclaude dev/main's current tip. Confirmed no checkout
 # step was added between the two commits (diff-reviewed): the invariant this
-# constant pins still holds at the new sha.
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
+# constant pins still holds at the new sha. Re-pinned again to ed4300f8a for
+# the Dependabot bump (#4948); that commit only retires the skip-receipt
+# registry (OMN-20074) and adds no checkout step.
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -834,24 +836,19 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
             step.get("run") == "uv sync --no-cache --all-extras" for step in steps
         )
 
-    # The pinned onex_change_control git+https install must also authenticate.
-    occ_steps = workflow["jobs"]["handler-contract-compliance"]["steps"]
+    # The omnibase_core release install must retry (OMN-20074: it replaced the
+    # onex_change_control git+https install, so it needs no token).
+    core_steps = workflow["jobs"]["handler-contract-compliance"]["steps"]
     install_step = next(
         step
-        for step in occ_steps
-        if step.get("name") == "Install onex_change_control (pinned)"
+        for step in core_steps
+        if step.get("name") == "Install omnibase_core (pinned release)"
     )
-    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
-    # onexbot-occ-writer App installation token.
-    assert (
-        install_step["env"]["GIT_FETCH_TOKEN"]
-        == "${{ steps.app-token.outputs.token || github.token }}"
-    )
-    assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
+    assert "env" not in install_step
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]
     assert "max_attempts=3" in install_step["run"]
-    assert "until uv pip install" in install_step["run"]
-    assert "uv pip install onex_change_control failed after" in install_step["run"]
+    assert "until uv pip install --no-config" in install_step["run"]
+    assert "uv pip install omnibase-core failed after" in install_step["run"]
 
 
 def test_webhook_workflows_use_ci_python_environment() -> None:

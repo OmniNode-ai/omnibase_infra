@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19983"
+title: "A developer overlay's lane mirror derives per-broker grants that read the laptop lane and write only the lab lane"
+summary: "The lane mirror's lanes and topic sets already come from the deployment overlay. What no test pinned was the grant side: that a dev-local to dev overlay selecting the delegation topic set, built through build_gateway_transports and derived through HandlerBrokerGrantDerive, yields READ and DESCRIBE on the dev-local broker only, WRITE and DESCRIBE on the dev broker only, and no grant on any other lane broker or on a hook topic. This change adds that test and no production code. The lab readback of a laptop delegation under the developer's tenant is not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-overlay-grants-per-lane-broker"
+    statement: "The broker grants derived for a developer lane-mirror overlay are exactly the delegation topics, read on the source lane broker and written on the mirror lane broker."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: for an overlay binding source dev-local, mirror dev and topic set delegation, HandlerBrokerGrantDerive over build_gateway_transports yields READ and DESCRIBE (never WRITE) on lane.dev-local.kafka.broker and WRITE and DESCRIBE (never READ) on lane.dev.kafka.broker for each delegation topic, and no grant on another lane broker -- falsifier: the same test with topic set hook_edge in the overlay fails on the missing delegation READ grant"
+evidence_requirements:
+  - kind: "tests"
+    description: "The overlay binding tests, including the per-lane-broker grant derivation."
+    command: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_lane_mirror_overlay_binding_omn19983.py -n 0 -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19983-ac1-overlay-grants"
+    description: "The developer overlay's derived grants read the dev-local broker, write the dev broker and name nothing else."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_lane_mirror_overlay_binding_omn19983.py -n 0 -q -k grants_are_derived"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

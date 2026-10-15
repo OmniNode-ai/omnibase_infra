@@ -16,6 +16,7 @@ import io
 import json
 import urllib.error
 from datetime import UTC, datetime
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,7 @@ def _subject(
 def _receipt(
     *,
     checks: dict[str, bool] | None = None,
+    sha: str = HEAD_SHA,
     subject: receipts.ModelLabProofSubject | None = None,
 ) -> receipts.ModelLabPassReceipt:
     names = checks if checks is not None else dict.fromkeys(MANDATORY, True)
@@ -77,7 +79,7 @@ def _receipt(
         for n, ok in sorted(names.items())
     )
     return receipts.ModelLabPassReceipt(
-        sha=HEAD_SHA,
+        sha=sha,
         lane=receipts.EnumLabLane.PR_HEAD,
         started_at=STARTED,
         finished_at=FINISHED,
@@ -259,26 +261,140 @@ class _Response(io.BytesIO):
         self.close()
 
 
+class _FakeApi:
+    """A check-runs endpoint: lists, creates and patches runs per head."""
+
+    def __init__(self, existing: list[dict[str, Any]] | None = None) -> None:
+        self.runs: list[dict[str, Any]] = list(existing or [])
+        self.calls: list[tuple[str, str, Any]] = []
+        self.auth: set[str | None] = set()
+        self._next_id = 100
+
+    def urlopen(self, request: Any, timeout: float) -> _Response:
+        method = request.get_method()
+        url = request.full_url
+        body = json.loads(request.data) if request.data else None
+        self.calls.append((method, url, body))
+        self.auth.add(request.get_header("Authorization"))
+        if method == "GET":
+            assert "/commits/" in url
+            head = url.split("/commits/")[1].split("/")[0]
+            return _Response(
+                json.dumps(
+                    {"check_runs": [r for r in self.runs if r["head_sha"] == head]}
+                ).encode()
+            )
+        if method == "POST":
+            assert body is not None
+            self._next_id += 1
+            run = {
+                **body,
+                "id": self._next_id,
+                "html_url": f"https://x/runs/{self._next_id}",
+                "app": {"slug": "onexbot"},
+            }
+            self.runs.append(run)
+            return _Response(json.dumps(run).encode())
+        assert method == "PATCH" and body is not None
+        run_id = int(url.rsplit("/", 1)[1])
+        run = next(r for r in self.runs if r["id"] == run_id)
+        run.update(body)
+        return _Response(json.dumps(run).encode())
+
+
 class TestThePost:
-    def test_the_post_goes_to_the_subject_repo_with_the_app_token(self) -> None:
-        seen: dict[str, Any] = {}
-
-        def urlopen(request: Any, timeout: float) -> _Response:
-            seen["url"] = request.full_url
-            seen["method"] = request.get_method()
-            seen["auth"] = request.get_header("Authorization")
-            seen["body"] = json.loads(request.data)
-            return _Response(b'{"id": 7, "html_url": "https://x/runs/7"}')
-
+    def test_a_head_with_no_run_gets_one_posted_to_the_subject_repo(self) -> None:
+        api = _FakeApi()
         body = _check_run(_receipt())
-        answer = receipts.post_check_run(
-            body, repo=REPO, token="ghs_fake", urlopen=urlopen
+        posted = receipts.upsert_check_run(
+            body, repo=REPO, token="ghs_fake", urlopen=api.urlopen
         )
-        assert answer["id"] == 7
-        assert seen["url"] == f"https://api.github.com/repos/{REPO}/check-runs"
-        assert seen["method"] == "POST"
-        assert seen["auth"] == "Bearer ghs_fake"
-        assert seen["body"]["head_sha"] == HEAD_SHA
+        assert posted.action == "created"
+        assert posted.check_run["id"] == 101
+        assert posted.superseded_ids == ()
+        methods = [(m, u) for m, u, _ in api.calls]
+        assert methods[0][0] == "GET"
+        assert (
+            f"/repos/{REPO}/commits/{HEAD_SHA}/check-runs?check_name=lab-proof-receipt"
+            in methods[0][1]
+        )
+        assert methods[1] == ("POST", f"https://api.github.com/repos/{REPO}/check-runs")
+        assert api.auth == {"Bearer ghs_fake"}
+        assert api.calls[1][2]["head_sha"] == HEAD_SHA
+
+    def test_a_rerun_on_the_same_head_updates_the_one_run_never_a_second(
+        self,
+    ) -> None:
+        api = _FakeApi()
+        failing = _receipt(
+            checks={"runtime_main_healthy": True, "changed_path_live": False}
+        )
+        first = receipts.upsert_check_run(
+            _check_run(failing), repo=REPO, token="t", urlopen=api.urlopen
+        )
+        second = receipts.upsert_check_run(
+            _check_run(_receipt()), repo=REPO, token="t", urlopen=api.urlopen
+        )
+        assert (first.action, second.action) == ("created", "updated")
+        assert second.check_run["id"] == first.check_run["id"]
+        on_head = [r for r in api.runs if r["head_sha"] == HEAD_SHA]
+        assert len(on_head) == 1
+        assert on_head[0]["conclusion"] == "success"
+        patch = next(c for c in api.calls if c[0] == "PATCH")
+        assert patch[1].endswith(f"/check-runs/{first.check_run['id']}")
+        assert "head_sha" not in patch[2]
+
+    def test_a_proof_of_another_head_never_touches_this_heads_run(self) -> None:
+        api = _FakeApi()
+        receipts.upsert_check_run(
+            _check_run(_receipt()), repo=REPO, token="t", urlopen=api.urlopen
+        )
+        other = _receipt(sha=MOVED_HEAD_SHA)
+        posted = receipts.upsert_check_run(
+            _check_run(other, live=MOVED_HEAD_SHA),
+            repo=REPO,
+            token="t",
+            urlopen=api.urlopen,
+        )
+        assert posted.action == "created"
+        assert sorted(r["head_sha"] for r in api.runs) == [MOVED_HEAD_SHA, HEAD_SHA]
+
+    def test_an_existing_duplicate_updates_the_newest_and_names_the_rest(
+        self,
+    ) -> None:
+        stale = {"id": 5, "name": "lab-proof-receipt", "head_sha": HEAD_SHA}
+        newer = {"id": 9, "name": "lab-proof-receipt", "head_sha": HEAD_SHA}
+        api = _FakeApi([stale, newer])
+        posted = receipts.upsert_check_run(
+            _check_run(_receipt()), repo=REPO, token="t", urlopen=api.urlopen
+        )
+        assert (posted.action, posted.check_run["id"]) == ("updated", 9)
+        assert posted.superseded_ids == (5,)
+
+    def test_only_the_posting_apps_own_run_is_updated(self) -> None:
+        foreign = {
+            "id": 7,
+            "name": "lab-proof-receipt",
+            "head_sha": HEAD_SHA,
+            "app": {"slug": "someone-else"},
+        }
+        api = _FakeApi([foreign])
+        posted = receipts.upsert_check_run(
+            _check_run(_receipt()),
+            repo=REPO,
+            token="t",
+            app_slug="onexbot",
+            urlopen=api.urlopen,
+        )
+        assert posted.action == "created"
+        assert [c[0] for c in api.calls] == ["GET", "POST"]
+
+    def test_a_run_of_another_name_on_the_head_is_not_a_match(self) -> None:
+        api = _FakeApi([{"id": 3, "name": "ci", "head_sha": HEAD_SHA}])
+        posted = receipts.upsert_check_run(
+            _check_run(_receipt()), repo=REPO, token="t", urlopen=api.urlopen
+        )
+        assert posted.action == "created"
 
     def test_a_refusal_is_raised_with_its_status_never_swallowed(self) -> None:
         def urlopen(request: Any, timeout: float) -> _Response:
@@ -291,11 +407,32 @@ class TestThePost:
             )
 
         with pytest.raises(receipts.CheckRunPostError) as caught:
-            receipts.post_check_run(
-                _check_run(_receipt()), repo=REPO, token="ghp_user", urlopen=urlopen
+            receipts.upsert_check_run(
+                _check_run(_receipt()), repo=REPO, token="ghs_fake", urlopen=urlopen
             )
         assert caught.value.status == 403
         assert "GitHub App" in str(caught.value)
+
+    def test_a_refused_update_is_raised_not_retried_as_a_second_post(self) -> None:
+        api = _FakeApi([{"id": 4, "name": "lab-proof-receipt", "head_sha": HEAD_SHA}])
+
+        def urlopen(request: Any, timeout: float) -> _Response:
+            if request.get_method() == "PATCH":
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    403,
+                    "Forbidden",
+                    Message(),
+                    io.BytesIO(b"{}"),
+                )
+            return api.urlopen(request, timeout)
+
+        with pytest.raises(receipts.CheckRunPostError) as caught:
+            receipts.upsert_check_run(
+                _check_run(_receipt()), repo=REPO, token="t", urlopen=urlopen
+            )
+        assert caught.value.status == 403
+        assert [c[0] for c in api.calls] == ["GET"]
 
     def test_no_token_and_a_foreign_repo_are_refused_before_any_request(
         self,
@@ -305,9 +442,9 @@ class TestThePost:
 
         body = _check_run(_receipt())
         with pytest.raises(receipts.CheckRunPostError, match="token is required"):
-            receipts.post_check_run(body, repo=REPO, token="", urlopen=urlopen)
+            receipts.upsert_check_run(body, repo=REPO, token="", urlopen=urlopen)
         with pytest.raises(receipts.CheckRunPostError, match="OmniNode-ai"):
-            receipts.post_check_run(
+            receipts.upsert_check_run(
                 body, repo="someone/else", token="t", urlopen=urlopen
             )
 
@@ -355,7 +492,7 @@ class TestTheCli:
         def refuse(*args: Any, **kwargs: Any) -> Any:
             raise AssertionError("a dry run must not post")
 
-        monkeypatch.setattr(receipts, "post_check_run", refuse)
+        monkeypatch.setattr(receipts, "upsert_check_run", refuse)
         code = receipts.main(
             [
                 "post-pr-head-check",
@@ -397,6 +534,51 @@ class TestTheCli:
         said = json.loads(capsys.readouterr().out)
         assert said["posted"] is False
         assert "token is required" in said["error"]
+
+    def test_dispatching_the_same_receipt_twice_leaves_one_check_run(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        api = _FakeApi()
+        real = receipts.upsert_check_run
+        monkeypatch.setattr(
+            receipts,
+            "upsert_check_run",
+            lambda body, **kwargs: real(body, **kwargs, urlopen=api.urlopen),
+        )
+        monkeypatch.setenv("LAB_PROOF_CHECK_TOKEN", "ghs_fake")
+        argv = [
+            "post-pr-head-check",
+            "--receipt",
+            str(self._write(tmp_path, _receipt())),
+            "--head-sha",
+            HEAD_SHA,
+            *self._mandatory_args(),
+            "--current-pr-diff-digest",
+            DIFF_DIGEST,
+            "--app-slug",
+            "onexbot",
+        ]
+        said = []
+        for _ in range(2):
+            assert receipts.main(argv) == 0
+            said.append(json.loads(capsys.readouterr().out))
+        assert [s["action"] for s in said] == ["created", "updated"]
+        assert said[0]["check_run_id"] == said[1]["check_run_id"]
+        assert said[1]["superseded_check_run_ids"] == []
+        assert len([r for r in api.runs if r["head_sha"] == HEAD_SHA]) == 1
+
+    def test_the_workflow_hands_the_posting_apps_slug_to_the_poster(self) -> None:
+        text = (
+            Path(__file__).resolve().parents[3]
+            / ".github"
+            / "workflows"
+            / "lab-proof-receipt.yml"
+        ).read_text(encoding="utf-8")
+        assert "steps.app-token.outputs.app-slug" in text
+        assert '--app-slug "${APP_SLUG}"' in text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

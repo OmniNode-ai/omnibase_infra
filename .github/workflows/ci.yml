@@ -1046,6 +1046,12 @@ jobs:
           uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
           uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
 
+      - name: Census desired-state drift kinds (OMN-19414)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "lab_sync or unreadable" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_dry_run.py -q
+          uv run --frozen pytest tests/ci/test_lane_census_desired_state_omn19414.py -q
+
   infra-node-handler-ownership:
     name: Infra Node Handler Ownership
     # OMNI_RUNNER_SELECTOR_V1 — only public-fork PRs use hosted compute.
@@ -1703,7 +1709,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e9055c04ef36cf031e6068a70c3e853b60b86af2 # .github/sibling-pins.yaml
+          ref: 0143496ce7118a743c257b4cdd7009229bc7eb7a # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1831,7 +1837,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1920,7 +1926,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1936,7 +1942,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e9055c04ef36cf031e6068a70c3e853b60b86af2 # .github/sibling-pins.yaml
+          ref: 0143496ce7118a743c257b4cdd7009229bc7eb7a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1952,7 +1958,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e9055c04ef36cf031e6068a70c3e853b60b86af2 # .github/sibling-pins.yaml
+          ref: 0143496ce7118a743c257b4cdd7009229bc7eb7a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4593,7 +4599,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4609,7 +4615,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e9055c04ef36cf031e6068a70c3e853b60b86af2 # .github/sibling-pins.yaml
+          ref: 0143496ce7118a743c257b4cdd7009229bc7eb7a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4625,7 +4631,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e9055c04ef36cf031e6068a70c3e853b60b86af2 # .github/sibling-pins.yaml
+          ref: 0143496ce7118a743c257b4cdd7009229bc7eb7a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

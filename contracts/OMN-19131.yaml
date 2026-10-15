@@ -29,3 +29,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-19131-lab-readback
+    description: "Lab readback, 2026-10-15, lab dev lane (bus kafka, lane dev, deployed-lane), onex delegate at omnibase_infra 0.38.73 and omnimarket 0.4.314 at 7126c3994. The command `onex delegate \"Reply with exactly the word READY\" --bus kafka --lane dev --locus deployed-lane --task-type summarization --timeout 300` exited 1 with `timeout_exceeds_task_class_ceiling: requested_timeout_seconds=300; task_type=summarization; task_class_timeout_ceiling_seconds=240` and the guidance to pass a --timeout of 240 or less or omit it (runs f26c9116-35dd-4c42-af87-6c663beba9f6 and cc44f9fb-cbcb-422c-a6a2-34d62997bda3). The refusal names --timeout and requested_timeout_seconds, does not name the omnimarket version in its failure line (the version is on the identity line above it), and a run directory with run.json, receipt.json and result.txt was written. The same command with --timeout 240 reached a terminal and wrote a receipt with the answer READY (run 387f2980-731b-4c10-bcdb-bcc965a2db59, correlation f58ffb0f-452a-4b1f-ab77-cd91838fb108). An argument-parsing refusal (--timeout 0) also wrote a run directory (run ed03a98c-cde1-48c5-9135-3edad0fb5509). Re-measurement of the capture logs: 10836 node_delegate_skill_orchestrator logs, written 2026-09-30 to 2026-10-15 after the fix merged on 2026-09-23, hold 0 ValidationError tracebacks; the positive control on the same files finds 1497 logs with a Traceback. The check re-runs the ceiling guidance test."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

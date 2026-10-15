@@ -619,3 +619,70 @@ def test_unhealthy_lane_waits_for_convergence_and_retries_once(
     assert clock[0] >= 2 * request.settle_seconds
     assert outcome == "INDETERMINATE"
     assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+@pytest.mark.parametrize("boots_at", [700.0, None])
+def test_booting_lane_gets_a_bounded_boot_grace(
+    tmp_path: Path, boots_at: float | None
+) -> None:
+    """OMN-19812: a runtime still inside its declared start period is booting.
+
+    C28 run 38653017024 went INDETERMINATE on ('running', 'starting') after two
+    300s settle windows; the dev runtime wires several hundred consumers one by
+    one and turned healthy about 12 minutes after compose-up, inside its own
+    declared start period. Docker health "starting" earns a bounded grace on
+    top of each settle window; a lane that never leaves "starting" still ends
+    unreadable (INDETERMINATE) within attempts x (settle + grace).
+    """
+    target = tmp_path / script.WIRING_MODULE
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "\n".join(
+            f'def {f}():\n    flow_counters.register("group")\n'
+            for f in script.BRANCHES.values()
+        )
+    )
+    fake = FakeIO()
+    clock = [0.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect" and (boots_at is None or clock[0] < boots_at):
+            body = json.loads(proc.stdout)
+            body[0]["State"]["Health"]["Status"] = "starting"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run,
+        urlopen=fake.http,
+        sleep=sleep,
+        monotonic=lambda: clock[0],
+        repo_root=tmp_path,
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        samples=2,
+        sample_interval=0,
+        settle_seconds=300,
+        injection_wait=0,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    outcome = grade_consumer_flow(request, observed).outcome
+    if boots_at is not None:
+        assert observed.read_ok, observed.read_error
+        assert outcome == "PASS"
+        return
+    assert not observed.read_ok
+    assert "not running and healthy" in str(observed.read_error)
+    assert "after 2 settle window(s)" in str(observed.read_error)
+    bound = request.attempts * (request.settle_seconds + request.boot_grace_seconds)
+    assert clock[0] >= bound
+    assert clock[0] <= bound + request.attempts * 15.0
+    assert outcome == "INDETERMINATE"

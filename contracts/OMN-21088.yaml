@@ -1,0 +1,83 @@
+schema_version: 1.0.0
+ticket_id: OMN-21088
+title: onex delegate --result-only prints the answer and nothing else, or one Error line
+summary: Add --result-only to onex delegate, mutually exclusive with --json and --human. Success prints result.response exactly on stdout with empty stderr; failures print empty stdout and one stderr error line naming the receipt. Suppressed diagnostics and all run artifacts remain on disk.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+evidence_requirements:
+  - kind: tests
+    description: Success prints the response byte-exact with an empty stderr, each failure class prints exactly one Error line and exits non-zero, and diagnostics.log holds the suppressed lines.
+    command: uv run pytest tests/unit/cli/test_delegate_result_only_omn21088.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-result-only-focused-tests
+    description: The focused tests prove the success output, the one-line failure for terminal failures, argument-parsing refusals, refusals before dispatch, unhandled errors and timeouts, and the diagnostics log.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_result_only_omn21088.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-delegate-suite-unchanged
+    description: The existing delegate CLI tests still pass, so the default and --json forms are unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_output_form_follows_stdout_omn20124.py tests/unit/cli/test_delegate_state_root_omn19232.py -q tests/integration/cli/test_delegate_result_only_omn21088.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-result-only-real-runtime
+    description: The real in-memory runtime dispatches the correlated no-op handler and writes the response, receipt and run metadata; the installed CLI refusal is captured through OS pipes. No receipt-mode or runtime replacement.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/cli/test_delegate_result_only_omn21088.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-result-only-diagnostics
+    description: Suppressed runtime diagnostics and all run artifacts remain on disk while the output is captured.
+    source: manual
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_delegate_result_only_omn21088.py -q -k "suppressed_diagnostics or run_files or streams_are_restored"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-result-only-installed-deploy
+    description: Hosted-runner deploy probe executes this checkout's installed onex CLI with real OS pipes and a temporary state root. It requires exit 2, empty stdout, exactly one argument_parsing error naming the real receipt, and all run artifacts. It fails on an installed CLI predating --result-only and needs no private lane or credentials.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          probe_dir=$(mktemp -d);
+          trap 'rm -rf "$probe_dir"' EXIT;
+          onex_bin=$(uv run --frozen python -c 'import sys; from pathlib import Path; print(Path(sys.executable).parent)');
+          export PATH="$onex_bin:$PATH";
+          status=0;
+          onex delegate probe --result-only --state-root "$probe_dir" --no-such-option-omn21088 >"$probe_dir/stdout" 2>"$probe_dir/stderr" || status=$?;
+          test "$status" -eq 2 &&
+          uv run --frozen python -c 'import json,sys; from pathlib import Path; root=Path(sys.argv[1]); assert (root/"stdout").read_bytes()==b""; runs=list((root/"runs").iterdir()); assert len(runs)==1; run=runs[0]; path=(run/"receipt.json").resolve(); receipt=json.loads(path.read_text()); refusal=receipt["refusal"]; assert refusal["stage"]=="argument_parsing"; expected="Error: argument_parsing: "+refusal["message"]+" (receipt: "+str(path)+")\n"; assert (root/"stderr").read_text()==expected; assert (run/"result.txt").read_bytes()==b""; assert (run/"diagnostics.log").is_file(); metadata=json.loads((run/"run.json").read_text()); assert metadata["run_id"]==run.name; print("OMN-21088 installed CLI deploy probe passed")' "$probe_dir"
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-result-only-output
+    statement: Delegate callers can consume the answer without diagnostics while retaining failure and run evidence.
+    acceptance:
+      - id: AC1
+        statement: Success exits zero, writes result.response byte-exact on stdout, and leaves stderr empty, including multiline Unicode answers.
+      - id: AC2
+        statement: Failures, including parsing and pre-dispatch refusals, exit nonzero with empty stdout and exactly one stderr error line naming the cause and absolute receipt path; --json and --human conflict with --result-only.
+      - id: AC3
+        statement: Suppressed diagnostics go to diagnostics.log and receipt.json, result.txt and run.json are still written.
+      - id: AC4
+        statement: Without --result-only, existing human and JSON output behavior remains unchanged.

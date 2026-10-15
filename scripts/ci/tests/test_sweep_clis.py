@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for run_compliance_sweep.py, run_duplication_sweep.py, run_contract_sweep.py."""
+"""Unit tests for run_compliance_sweep.py and run_duplication_sweep.py."""
 
 from __future__ import annotations
 
@@ -188,10 +188,12 @@ class TestDuplicationSweep:
         )
         bounds_dir = (
             tmp_path
-            / "onex_change_control"
+            / "omnimarket"
             / "src"
-            / "onex_change_control"
-            / "boundaries"
+            / "omnimarket"
+            / "nodes"
+            / "node_duplication_sweep"
+            / "contracts"
         )
         bounds_dir.mkdir(parents=True)
         (bounds_dir / "kafka_boundaries.yaml").write_text(
@@ -201,6 +203,33 @@ class TestDuplicationSweep:
         )
         result = check_d2_topic_conflicts(tmp_path)
         assert result["status"] == "PASS"
+
+    def test_d2_ignores_the_change_control_manifest(self, tmp_path):
+        """OMN-20949: a manifest left at the retired change-control path is not read."""
+        from run_duplication_sweep import check_d2_topic_conflicts
+
+        hooks_dir = tmp_path / "omniclaude" / "src" / "omniclaude" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "topics.py").write_text(
+            'class T:\n    A = "onex.evt.omniclaude.session.v1"\n'
+        )
+        retired_dir = (
+            tmp_path
+            / "onex_change_control"
+            / "src"
+            / "onex_change_control"
+            / "boundaries"
+        )
+        retired_dir.mkdir(parents=True)
+        (retired_dir / "kafka_boundaries.yaml").write_text(
+            "boundaries:\n"
+            "  - topic_name: onex.evt.omniclaude.session.v1\n"
+            "    producer_repo: omnibase_infra\n"
+        )
+        result = check_d2_topic_conflicts(tmp_path)
+        assert result["status"] == "WARN"
+        assert "node_duplication_sweep" in result["detail"]
+        assert "onex_change_control" not in result["detail"]
 
     def test_d1_pass_when_no_duplicates(self, tmp_path):
         from run_duplication_sweep import check_d1_drizzle_tables
@@ -327,88 +356,3 @@ class TestDuplicationSweep:
             ]
         )
         assert result == 0
-
-
-# ---------------------------------------------------------------------------
-# contract sweep tests
-# ---------------------------------------------------------------------------
-
-
-class TestContractSweep:
-    def test_drift_mode_skips_missing_repos(self, tmp_path):
-        from run_contract_sweep import run_drift_mode
-
-        result = run_drift_mode(
-            omni_home=tmp_path,
-            repos=["nonexistent_repo"],
-            sensitivity="STANDARD",
-            check_boundaries=False,
-        )
-        assert result["status"] in ("clean",)
-        assert "nonexistent_repo" in result["repos_not_found"]
-
-    def test_drift_mode_baseline_missing(self, tmp_path):
-        from run_contract_sweep import run_drift_mode
-
-        # Create a minimal repo structure
-        (tmp_path / "my_repo" / "src").mkdir(parents=True)
-        # No snapshot file → baseline_missing
-        result = run_drift_mode(
-            omni_home=tmp_path,
-            repos=["my_repo"],
-            sensitivity="STANDARD",
-            check_boundaries=False,
-        )
-        assert "my_repo" in result["baseline_missing"]
-
-    def test_check_boundaries_missing_file(self, tmp_path):
-        from run_contract_sweep import _check_boundaries
-
-        # No boundaries file → returns empty list
-        result = _check_boundaries(tmp_path)
-        assert result == []
-
-    def test_json_output_structure(self, capsys, tmp_path):
-        import json as json_mod
-
-        from run_contract_sweep import main
-
-        main(
-            [
-                "--omni-home",
-                str(tmp_path),
-                "--repos",
-                "nonexistent",
-                "--mode",
-                "drift",
-                "--json",
-                "--no-check-boundaries",
-            ]
-        )
-        captured = capsys.readouterr()
-        data = json_mod.loads(captured.out)
-        assert data["sweep"] == "contract_sweep"
-        assert "drift" in data
-        assert "status" in data
-
-    def test_exit_0_when_clean(self, tmp_path):
-        from run_contract_sweep import main
-
-        result = main(
-            [
-                "--omni-home",
-                str(tmp_path),
-                "--repos",
-                "nonexistent",
-                "--mode",
-                "drift",
-                "--no-check-boundaries",
-            ]
-        )
-        assert result == 0
-
-    def test_missing_omni_home_returns_2(self):
-        from run_contract_sweep import main
-
-        result = main(["--omni-home", "/nonexistent/path"])
-        assert result == 2

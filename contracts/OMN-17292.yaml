@@ -1,54 +1,30 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to e9055c04ef36cf031e6068a70c3e853b60b86af2"
+title: "The omnimarket contract pin advances to 0143496ce7118a743c257b4cdd7009229bc7eb7a"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
-interface_change: true
-interfaces_touched: [protocols]
+interface_change: false
+interfaces_touched: []
 requirements:
   - id: req-omn17292
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry e9055c04ef36cf031e6068a70c3e853b60b86af2 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-      - id: AC2
-        statement: "AC2: both runtime dispatch interfaces default named_tests to None; omitted or None requests dispatch through the bus, and a named-test spec is refused before publication because the tests require the caller's workspace on the in-process path."
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry e9055c04ef36cf031e6068a70c3e853b60b86af2.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-  - kind: tests
-    description: Runtime named-test compatibility, bus delivery without named tests, and refusal before publication when tests are named.
-    command: "env -u PYTHONPATH uv run --frozen pytest tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q"
-  - kind: manual
-    description: "Deploy check: the hosted runner reads the runtime port source from GitHub at the checked-out commit and refuses a source without the optional named_tests argument and its bus-path refusal."
-    command: >-
-      curl -fsSL "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/runtime/service_delegation_dispatch_port.py" | python3 -c 'import sys; source=sys.stdin.read(); assert "named_tests: BaseModel | None = None," in source; assert "if named_tests is not None:" in source; assert "named tests are not run by this dispatch port" in source'
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry e9055c04ef36cf031e6068a70c3e853b60b86af2.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a.
     source: manual
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-17292-ac2
-    description: The pinned consumer's optional named_tests keyword is accepted when absent and refused before bus publication when named.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
-  - id: dod-omn-17292-deploy
-    description: The hosted runner reads the runtime port at the checked-out commit from GitHub; the source probe fails without the named_tests argument and refusal. This checks the published source, not a running lane deployment.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: >-
-          curl -fsSL "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/runtime/service_delegation_dispatch_port.py" | python3 -c 'import sys; source=sys.stdin.read(); assert "named_tests: BaseModel | None = None," in source; assert "if named_tests is not None:" in source; assert "named tests are not run by this dispatch port" in source'

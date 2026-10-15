@@ -131,14 +131,6 @@ INSTALLED_PACKAGES: tuple[str, ...] = (
 # dependency. These packages are never in ACTIVE_RUNTIME_PACKAGES and so are
 # never runtime_loaded -- they contribute producer/consumer edges only.
 #
-# onex_change_control belongs here for exactly the reason stated above, not as a
-# special case: it is the governance repo, and per operator ruling product code
-# does not depend on it at runtime. Its contracts still matter for census
-# completeness -- a topic whose producer lives in an unscanned package looks
-# like an orphan to every consumer the graph can see -- but reading packaged
-# YAML never justified a runtime pin. It was previously listed under
-# INSTALLED_PACKAGES, which is what made the graph resolve it by import and so
-# quietly required the dependency this repo has now dropped.
 # OMN-18013 re-homed this gate from omnimarket into omnibase_infra so it can be
 # scoped per repo. omnimarket and omnimemory DEPEND ON omnibase_infra, so they
 # are not (and must never become) installed dependencies of it — repo layering
@@ -150,7 +142,6 @@ CHECKOUT_PACKAGES: tuple[str, ...] = (
     "omnimemory",
     "omniclaude",
     "omniintelligence",
-    "onex_change_control",
 )
 
 # The full set the graph is expected to cover. build_graph() fails closed if

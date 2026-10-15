@@ -216,6 +216,67 @@ def test_model_id_mismatch_lists_sorted_valid_ids(
     assert "[local_model_id_mismatch]" in result.message
 
 
+def test_mismatch_on_a_later_local_backend_is_reported(
+    overlay: Path, transport: Mock
+) -> None:
+    # A healthy first chat rung used to hide every rung after it: a host overlay
+    # kept a planner rung pinned to a model its server had stopped serving and
+    # the check stayed healthy (OMN-20489).
+    planner = "https://planner.invalid/v1/chat/completions"
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "backends": [
+                    {"tier": "local", "endpoint_url": _ENDPOINT, "model_name": _MODEL},
+                    {"tier": "local", "endpoint_url": planner, "model_name": "retired"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    check = CheckDelegationLocalModel(overlay_path=overlay, transport=transport)
+
+    diagnosis = check.diagnose()
+
+    assert diagnosis.fault is EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH
+    assert diagnosis.detail == (
+        f"The overlay declares 'retired', but the server reports {_MODEL}."
+    )
+    transport.get.assert_awaited_with(
+        "https://planner.invalid/v1/models",
+        timeout=5.0,
+        headers={"Accept": "application/json"},
+    )
+
+
+def test_every_local_chat_backend_healthy_probes_each_server_once(
+    overlay: Path, transport: Mock
+) -> None:
+    second = "https://second.invalid/v1/chat/completions"
+    overlay.write_text(
+        yaml.safe_dump(
+            {
+                "backends": [
+                    {"tier": "local", "endpoint_url": _ENDPOINT, "model_name": _MODEL},
+                    {"tier": "local", "endpoint_url": _ENDPOINT, "model_name": _MODEL},
+                    {"tier": "local", "endpoint_url": second, "model_name": _MODEL},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    check = CheckDelegationLocalModel(overlay_path=overlay, transport=transport)
+
+    diagnosis = check.diagnose()
+
+    assert diagnosis.fault is None
+    assert diagnosis.detail == (
+        f"Local model '{_MODEL}' is serving at https://model.invalid. "
+        f"Local model '{_MODEL}' is serving at https://second.invalid."
+    )
+    assert transport.get.await_count == 2
+
+
 @pytest.mark.parametrize(
     "model_fields",
     [
