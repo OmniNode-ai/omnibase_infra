@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19445
+title: The daily R1 front-door probe declares the tenant onex delegate requires and names a missing one as runner-env
+summary: Every scheduled run of r1-front-door-probe.yml from 2026-10-05 to 2026-10-14 exited 1 because onex delegate refuses to send to a deployed lane without a tenant (OMN-17427), and the probe graded that refusal as leg front-door. A tenant minted on the runner with onex local init is refused by the lane for want of a registered provider key, so the probe step now declares the lab house tenant through the ONEX_TENANT_ID overlay, and the classifier names a missing tenant identity as runner-env. Workflow and probe script only; no runtime change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-daily-probe-publishes-terminal-with-named-cause
+    statement: The daily R1 front-door probe publishes its terminal and exit code, and a non-zero exit carries the named leg of the failure.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: a scheduled workflow on a lab-host runner runs the probe outside the runtime container at least daily and publishes its terminal and exit code -- falsifier: the workflow''s newest run is older than 26 hours, or exited non-zero without a named cause'
+evidence_requirements:
+  - kind: tests
+    description: The probe step declares the lab house tenant through the ONEX_TENANT_ID overlay and mints no identity, and the classifier names a missing tenant identity as runner-env.
+    command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-r1-probe-tenant-identity-ac2
+    description: The focused tests prove the probe step declares the lab house tenant, that the workflow mints no identity, and that the CLI's missing-tenant refusal is classified runner-env.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

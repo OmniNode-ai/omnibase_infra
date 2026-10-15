@@ -224,6 +224,18 @@ jobs:
           # as ENVIRONMENT so no credential reaches argv or this log.
           KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
           KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+          # `onex delegate` stamps every request bound for a deployed lane with a
+          # tenant and refuses to send one without it (OMN-17427,
+          # omnibase_infra#4503). Every scheduled run from 2026-10-05 to
+          # 2026-10-14 ended there: the runner's install had never minted an
+          # identity. Minting one (`onex local init`) is not the answer either:
+          # the lane refuses a tenant with no provider key registered
+          # (ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT, measured 2026-10-14 on
+          # the pool runner). The lab is one tenant, the house tenant that every
+          # row of lab_run_hosts.yaml names (RULING 2026-10-05T16:18:47Z,
+          # OMN-18829), and this declared overlay is the one the remote-lane
+          # runner exports for the same reason.
+          ONEX_TENANT_ID: 820272f9-4aaf-5add-a2df-0af942852ab2
         run: |
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
