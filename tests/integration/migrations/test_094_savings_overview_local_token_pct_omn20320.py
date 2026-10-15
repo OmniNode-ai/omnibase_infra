@@ -135,13 +135,15 @@ def test_094_reports_unmeasured_when_no_run_carries_a_tier(
     assert any("unmeasured" in w for w in warnings)
 
 
-def test_094_is_the_last_savings_migration() -> None:
+def test_094_pair_is_followed_only_by_the_095_rebackfill() -> None:
     names = sorted(p.name for p in SAVINGS.glob("09*.sql"))
     # Namespaced migrations are keyed by the full filename. OMN-20008 adds a
-    # forward 094 successor without editing the applied local-share migration.
-    # Pin both names in apply order: a prefix match would also pass for a
+    # forward 094 successor without editing the applied local-share migration,
+    # and OMN-19438 adds the 095 house-tenant re-backfill after both.
+    # Pin the tail in apply order: a prefix match would also pass for a
     # misnamed or reordered successor, or a stray third 094 file.
-    assert names[-2:] == [
+    assert names[-3:] == [
         "094_savings_overview_local_token_pct.sql",
         "094_savings_overview_measured_provenance.sql",
+        "095_savings_estimates_house_tenant_uuid_rebackfill.sql",
     ]
