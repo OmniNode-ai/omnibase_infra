@@ -14,6 +14,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_outcome import (
     ModelEvidenceAutocloseOutcome,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_result import (
+    ModelInProgressDemotionResult,
+)
 
 
 class ModelEvidenceAutocloseSweepResult(BaseModel):
@@ -88,6 +91,12 @@ class ModelEvidenceAutocloseSweepResult(BaseModel):
     outcomes: tuple[ModelEvidenceAutocloseOutcome, ...] = Field(
         default_factory=tuple,
         description="One entry per (companion, ticket) pair considered.",
+    )
+    # OMN-18489. None when the leg did not run (demotion_window_hours is 0),
+    # which a receipt must say apart from a leg that ran and demoted nothing.
+    in_progress_demotion: ModelInProgressDemotionResult | None = Field(
+        default=None,
+        description="The In Progress demotion leg's counts and per-ticket outcomes.",
     )
     success: bool = Field(
         default=True,
