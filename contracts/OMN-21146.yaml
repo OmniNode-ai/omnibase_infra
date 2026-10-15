@@ -71,3 +71,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn21146-offer-receipt-integration
+    description: Real local Git refs and watcher state reach the serialized closer receipt with the merged companion or product-contract provenance; a conflicting changed-file binding refuses before verification or Linear writes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_offer_local_companion_receipt_omn21146.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC3
+      - AC4
