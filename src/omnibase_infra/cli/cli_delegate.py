@@ -168,6 +168,7 @@ from omnibase_infra.cli.delegate_lane_credentials import (
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
     DelegateLocusSaslRefusedError,
+    DelegateNoConsumerRefusedError,
     contract_terminal_topic,
     resolve_delegate_locus,
 )
@@ -4442,6 +4443,16 @@ def run_delegate(
                     bus=bus,
                     locus=(locus or EnumDelegateLocus.DEPLOYED_LANE.value),
                     broker=resolved_bootstrap or "",
+                    command_topic=(
+                        exc.command_topic
+                        if isinstance(exc, DelegateNoConsumerRefusedError)
+                        else ""
+                    ),
+                    absent_consumer=(
+                        exc.consumer
+                        if isinstance(exc, DelegateNoConsumerRefusedError)
+                        else ""
+                    ),
                     attempts_permitted=attempts_permitted,
                     bound_seconds=bound_seconds,
                     elapsed_seconds=time.monotonic() - locus_probe_started,
