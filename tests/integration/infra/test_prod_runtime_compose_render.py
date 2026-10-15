@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.lane_overlay_fixtures import LANE_OVERLAY_TARGET
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILES = (
     "docker/docker-compose.infra.yml",
@@ -194,3 +196,36 @@ def test_prod_delegation_routing_tiers_path_binding() -> None:
             "surface and must not bind DELEGATION_ROUTING_TIERS_PATH; got "
             f"{environment.get('DELEGATION_ROUTING_TIERS_PATH')!r}"
         )
+
+
+@pytest.mark.integration
+def test_prod_runtime_services_mount_the_lane_overlay_the_renderer_reads() -> None:
+    """OMN-17101: the prod `volumes: !override` lists must keep the overlay bind.
+
+    The entrypoint's Bifrost render reads ``BIFROST_LANE_OVERLAY_PATH`` and
+    fails the container start when the file is absent. A prod volume list that
+    replaces the base list without the overlay bind starts the container with
+    the env var set and nothing at that path.
+    """
+    rendered_config = _compose_config_json()
+    services = rendered_config["services"]
+
+    for service_name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        service = services[service_name]
+        overlay_path = service["environment"].get("BIFROST_LANE_OVERLAY_PATH")
+        assert overlay_path == LANE_OVERLAY_TARGET, (
+            f"Service '{service_name}' must read its overlay at "
+            f"{LANE_OVERLAY_TARGET!r}; got {overlay_path!r}"
+        )
+        mounted = [
+            volume
+            for volume in service["volumes"]
+            if volume.get("target") == overlay_path
+        ]
+        assert len(mounted) == 1, (
+            f"Service '{service_name}' sets BIFROST_LANE_OVERLAY_PATH="
+            f"{overlay_path!r} but its rendered volumes mount nothing there"
+        )
+        assert mounted[0]["type"] == "bind"
+        assert mounted[0]["read_only"] is True
+        assert mounted[0]["source"].endswith("/omnibase-infra-prod.bifrost.yaml")
