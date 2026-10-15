@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: 'AC2: 45 private repositories are read in three gh api graphql calls with every repository keyed to its own texts, a rate-limited batch raises GitHubRateLimitError, a null repository in a batch raises naming it, and the batched pass still reports a private bare hosted pin -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k batch'
+  - id: req-omn20413-lane-census-refresh-push
+    statement: The lane census refresh leg pushes its bump branch to the CI overlay with the App token and accepts drift whose event it did not publish, so the committed census stops aging past the Lane Census Staleness limit.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the overlay checkout persists no credential, the bump push carries the App token in its URL, and the collect step accepts collector exits 0, 30 and 8 and refuses 2, 3, 4 and 5 -- falsifier: uv run pytest tests/ci/test_lane_census_refresh_push_omn20413.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -23,6 +28,9 @@ evidence_requirements:
   - kind: tests
     description: The batched workflow read counts gh graphql calls across many private repositories and replays the unread shapes.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k batch
+  - kind: tests
+    description: The refresh workflow's overlay checkout, bump push and collect-step exit handling are read from the workflow and the acceptance line is run in bash.
+    command: uv run pytest tests/ci/test_lane_census_refresh_push_omn20413.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -46,3 +54,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn20413-ac3-lane-census-refresh-push
+    description: AC3 tests read lane-census-refresh.yml and run its collect-step acceptance line in bash; four of them fail at the merge base, where the push used the moved clone's missing credential and exit 8 was refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_lane_census_refresh_push_omn20413.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
