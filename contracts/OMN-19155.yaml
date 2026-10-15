@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19155
+title: A paired node-migration vendoring resolves its source ref while the paired omnimarket source is a draft
+summary: The node-migration source-ref resolver no longer refuses a draft paired source. The open state, the dev base, the head repository and the SHA binding stay fail-closed, so a vendoring pull request reaches a real verdict with its source held as a draft.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19155
+    statement: The resolver reads an open draft paired source exactly as it reads a ready one and keeps every other refusal.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a vendoring pull request whose paired source is an open draft with valid trailers resolves its source ref, and a closed, wrong-base or fork-head draft source is still refused -- falsifier: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k "draft"'
+      - id: AC2
+        statement: 'AC2: a trailer SHA that does not match the live source head and is not its ancestor is refused whether the source is draft or ready -- falsifier: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k "sha_binding"'
+      - id: AC3
+        statement: 'AC3: a paired vendoring resolves with the source pull request still a draft, and the resolver only reads the source pull request -- falsifier: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k "whether_draft_or_ready"'
+evidence_requirements:
+  - kind: tests
+    description: The resolver tests cover draft and ready sources for the pinned SHA, the descended head and every retained refusal.
+    command: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19155-ac1
+    description: An open draft paired source resolves and a closed, wrong-base or fork-head draft source is still refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k draft
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19155-ac2
+    description: A mismatched trailer SHA is refused for a draft source and for a ready source.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k sha_binding
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19155-ac3
+    description: The pinned SHA resolves for a draft source and for a ready source.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k whether_draft_or_ready
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
