@@ -112,6 +112,7 @@ def classify_failure(
                 "omnimarket is not installed",
                 "task-class contract",
                 "ONEX_ALLOW_OMNIMARKET_DRIFT",
+                "never minted a tenant identity",
             ),
         ),
         (

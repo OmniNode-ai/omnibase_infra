@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""One auditor of record for branch protection (OMN-18346).
+"""One auditor of record for branch protection (OMN-18346, OMN-20955, OMN-20074).
 
 Until 2026-09-13 this repo ran a SECOND, diverged copy of the branch-protection
-audit. The canonical one is `onex_change_control/scripts/audit_branch_protection.sh`
--- the script omni_home's `branch-protection-guard.yml` and `scheduled-gap-detect.yml`
-both run. OMN-18287 added a code-owner review carve-out to that copy and proved it
-green (0 failures across 102 checks); the in-repo copy never received it, so it kept
-reporting `onex_change_control` as a review violation for a requirement that is
-deliberate, on both `main` and `dev`, indefinitely.
+audit. The shared audit then lived in `onex_change_control` and this workflow
+fetched it at a pinned sha; OMN-20955 moved it to the repository that now owns it, whose own
+`branch-protection-audit.yml` audits this repository through its overlay, so the
+fetch here is gone (OMN-20074). OMN-18287 had added a code-owner review carve-out
+to the shared copy; the in-repo copy never received it, so it kept reporting
+`onex_change_control` as a review violation for a requirement that is deliberate.
 
 Two copies of the same audit that can disagree is worse than one copy that is
 wrong, because the disagreement is silent: each is green or red on its own
@@ -18,7 +18,6 @@ regrowing -- they are cheap, and a re-added local copy fails them by name.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -36,33 +35,26 @@ _DELETED_DUPLICATES = (
     "tests/ci/test_branch_protection_audit.py",
 )
 
-_CANONICAL_SCRIPT = "scripts/audit_branch_protection.sh"
-_PINNED_REF_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHARED_AUDIT_SCRIPT = "audit_branch_protection.sh"
 
 
 @pytest.mark.parametrize("relative", _DELETED_DUPLICATES)
 def test_the_diverged_local_copy_is_gone(relative: str) -> None:
     assert not (_REPO_ROOT / relative).exists(), (
-        f"{relative} is a second branch-protection auditor. The canonical one is "
-        f"onex_change_control/{_CANONICAL_SCRIPT}; extend that instead."
+        f"{relative} is a second branch-protection auditor. The shared one runs "
+        "from the branch-protection-audit.yml of the repository that owns it (OMN-20955); extend that instead."
     )
 
 
-def test_the_workflow_runs_the_canonical_auditor() -> None:
-    body = _WORKFLOW.read_text()
-    assert _CANONICAL_SCRIPT in body, (
-        "branch-protection-audit.yml must invoke the canonical onex_change_control "
-        "auditor for the shared checks"
-    )
-
-
-def test_the_canonical_auditor_is_pinned_to_a_full_commit_sha() -> None:
-    """A floating ref would let a sibling repo's merge change this gate silently."""
+def test_the_workflow_fetches_and_runs_no_shared_auditor() -> None:
+    """The shared checks run from the repository that owns them, never from a fetch here."""
     workflow = yaml.safe_load(_WORKFLOW.read_text())
-    ref = workflow.get("env", {}).get("ONEX_CHANGE_CONTROL_REF")
-    assert isinstance(ref, str) and _PINNED_REF_RE.match(ref), (
-        f"ONEX_CHANGE_CONTROL_REF must be a 40-hex commit sha, got {ref!r}"
+    assert "ONEX_CHANGE_CONTROL_REF" not in (workflow.get("env") or {})
+    runs = "\n".join(
+        str(step.get("run", "")) for step in workflow["jobs"]["audit"]["steps"]
     )
+    assert _SHARED_AUDIT_SCRIPT not in runs
+    assert "git fetch" not in runs
 
 
 def test_the_orphan_check_this_repo_keeps_is_wired() -> None:
@@ -77,8 +69,8 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
 
     `continue-on-error` on an audit step is the shape that turns a red gate green
     without the findings going away, which is the outcome OMN-18346 forbids. The
-    required-context parity ratchet (OMN-14288) is deliberately report-only and
-    is the single exception, named here rather than matched loosely.
+    required-context parity ratchet (OMN-14288) is report-only through its own
+    exit code (``report`` exits 0 with findings), so it needs no exception here.
     """
     workflow = yaml.safe_load(_WORKFLOW.read_text())
     steps = workflow["jobs"]["audit"]["steps"]
@@ -87,6 +79,4 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
         for step in steps
         if step.get("continue-on-error") is True
     ]
-    assert softened == ["Required-context parity report (REPORT-ONLY, non-blocking)"], (
-        f"unexpected advisory audit step(s): {softened}"
-    )
+    assert softened == [], f"unexpected advisory audit step(s): {softened}"

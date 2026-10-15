@@ -71,6 +71,16 @@ requirements:
     acceptance:
       - id: AC16
         statement: 'AC16: .github/sibling-pins.yaml names omniintelligence at 3fcbf795087a79081c0ceeb676216bf64c5d49ae, the merge commit of omniintelligence#1072, and every workflow clone names it -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q fails over the merge base, which pins 64b950973a5686d33e0b439fb80749d66362d06d'
+  - id: req-omn17427-rr-failure-reason
+    statement: A request-response failure terminal raises its own failure_reason instead of a doubled generic message.
+    acceptance:
+      - id: AC17
+        statement: "AC17: a failure terminal carrying failure_reason, flat or in its envelope payload, rejects the pending request with RuntimeError 'Request failed: <failure_reason>', and one without a reason says so instead of 'Request failed: Request failed' -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason fails at the merge base"
+  - id: req-omn17427-runner-fleet-alerts
+    statement: The runner-fleet snapshot reads each watched run's queued and in-progress jobs, and the health verdict carries typed alerts for a runner offline, a runner busy on one job past the job timeout, and a repo/labels queue whose oldest queued job is past the queue-age bound.
+    acceptance:
+      - id: AC18
+        statement: "AC18: the replayed 2026-10-14 fixture (25 pool runners busy, none wedged, doc checks queued up to 44.9 minutes, two second-host runners offline) yields queue_age_exceeded for the three repos that queued past 30 minutes, runner_offline for the two offline runners, and no runner_stuck; a job running past 360 minutes yields runner_stuck -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q fails at the merge base, where the alert models do not exist"
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -120,6 +130,12 @@ evidence_requirements:
   - kind: tests
     description: The sibling pin names the omniintelligence revision with the larger retry budget, and every workflow clone follows it.
     command: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q
+  - kind: tests
+    description: A failure terminal's failure_reason is the raised cause.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+  - kind: tests
+    description: The job reader and the stuck, offline and queue-age alerts, including the replayed 2026-10-14 fixture.
+    command: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -269,3 +285,47 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC16
+  - id: dod-omn-17427-ac17
+    description: A failure terminal's failure_reason is the raised cause.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17
+  - id: dod-omn-17427-ac17-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image's request-response wiring returns a failure terminal's own failure_reason from its envelope payload and names a missing one, which an image without the fix cannot do.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18
+    description: The job reader and the runner-fleet alerts; the replayed 2026-10-14 fixture fires the queue-age and offline alerts and no stuck alert.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18
+  - id: dod-omn-17427-ac18-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image's runner-fleet health verdict declares the alerts field and the snapshot declares the jobs field, which an image without the change cannot do.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18-deploy-dispatch
+    description: Hosted-runner runtime dispatch smoke -- job facts reach the published terminal event through five contract-routed hops and serialized envelopes; overdue queues and jobs alert, below-bound jobs do not. Only external gh/ssh probes are replaced; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

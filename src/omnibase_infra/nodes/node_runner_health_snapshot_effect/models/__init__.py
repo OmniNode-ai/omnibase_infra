@@ -11,6 +11,9 @@ from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
     ModelRunnerFleetSnapshotGatherCommand,
 )
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_job_fact import (
+    ModelRunnerJobFact,
+)
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_zombie_run_candidate import (
     ModelZombieRunCandidate,
 )
@@ -19,5 +22,6 @@ __all__ = [
     "ModelRunnerFleetRunnerFact",
     "ModelRunnerFleetSnapshot",
     "ModelRunnerFleetSnapshotGatherCommand",
+    "ModelRunnerJobFact",
     "ModelZombieRunCandidate",
 ]

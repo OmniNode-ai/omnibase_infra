@@ -54,6 +54,7 @@ STDERR_B = (
     "contract that declares delegate task classes cannot be resolved. "
     "Pass --task-type explicitly, or repair the co-install.\n"
 )
+_HOUSE_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 FRONT_DOOR_STDERR = "Error: delegation terminal refused: quality_gate_failed"
 
 
@@ -223,6 +224,12 @@ def test_classify_runner_environment_uses_the_actual_error(stderr: str) -> None:
         ("Connection refused", "broker-route"),
         (FRONT_DOOR_STDERR, "front-door"),
         ("task-class contract", "runner-env"),
+        (
+            "Error: this install has never minted a tenant identity, so there is "
+            "no tenant to stamp on the request and a deployed lane could not "
+            "attribute its verdict. Run `onex local init` once on this machine.",
+            "runner-env",
+        ),
     ],
 )
 def test_classify_cli_failure_markers(stderr: str, leg: str) -> None:
@@ -231,6 +238,23 @@ def test_classify_cli_failure_markers(stderr: str, leg: str) -> None:
     )
     assert actual_leg == leg
     assert cause == stderr.removeprefix("Error: ")
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19445_missing_tenant_identity.json")
+def test_recorded_missing_tenant_refusal_is_a_runner_env_failure(
+    recorded_response: dict[str, Any],
+) -> None:
+    """Replay the CLI's own refusal recorded from a clean-HOME probe run.
+
+    Scheduled runs 2026-10-05 to 2026-10-14 ended on this stderr and were graded
+    `front-door`; the cause is the runner's install, not the front door.
+    """
+    leg, cause = classify_failure(
+        stderr=str(recorded_response["stderr"]), timeout_reason=None, spawn_error=False
+    )
+    assert leg == "runner-env"
+    assert cause.startswith("this install has never minted a tenant identity")
+    assert "onex local init" in cause
 
 
 @pytest.mark.parametrize(
@@ -486,6 +510,19 @@ def test_workflow_co_installs_omnimarket_before_the_probe_runs() -> None:
     assert "--no-deps" in script
     # a sha checkout is detached, which the drift guard refuses: attach it
     assert "checkout -q -B dev" in script
+
+
+def test_workflow_probe_declares_the_lab_house_tenant_and_mints_nothing() -> None:
+    """OMN-19445 AC2: `onex delegate` refuses a deployed lane with no tenant.
+
+    Every scheduled run from 2026-10-05 to 2026-10-14 exited 1 with "this
+    install has never minted a tenant identity". Minting one on the runner is
+    refused by the lane (no provider key for that tenant), so the probe declares
+    the lab's one house tenant through the overlay `onex delegate` reads first.
+    """
+    step = _step("Run the R1 front-door probe")
+    assert step["env"]["ONEX_TENANT_ID"] == _HOUSE_TENANT
+    assert "mint_tenant" not in _WORKFLOW.read_text()
 
 
 def test_workflow_probe_step_uses_the_composed_cli_and_publishes_the_terminal() -> None:

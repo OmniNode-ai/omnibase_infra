@@ -202,7 +202,6 @@ scripts/ci/release_train.py
 scripts/ci/replay_hook_history.py
 scripts/ci/resolve_modern_bash.sh
 scripts/ci/run_compliance_sweep.py
-scripts/ci/run_contract_sweep.py
 scripts/ci/run_duplication_sweep.py
 scripts/ci/run_on_gate_runner.sh
 scripts/ci/run_validators_in_process.py
@@ -506,7 +505,6 @@ scripts/verify-merge-queue-no-bypass.sh
 scripts/verify-omnidash-health.sh
 scripts/verify-plugin-cache.sh
 scripts/verify_deployed_versions.py
-scripts/verify_error_triage_e2e.py
 scripts/worktree-gc.sh
 scripts/worktree_prune_timer.py
 scripts/worktree_reaper.py

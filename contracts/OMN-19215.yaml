@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19215
+title: The AC2 lab pair for lane-overlay backend placement is committed as evidence
+summary: A lane overlay places an added backend in a routing tier as a fallback. The renderer side is covered by unit tests; the AC2 lab pair (the local rungs bound to a closed port against an unmodified control, read from the receipts) is committed as tests/fixtures/omn19215_ac2_lab_pair.json and checked by a unit test.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19215-placement
+    statement: A lane overlay places an added backend in a named tier as a fallback for named rungs, and the placed sibling answers only when the rung is unavailable.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: A lane overlay places an added backend in a named tier as a fallback for named rungs, and an invalid placement (unknown tier, a rung not in that tier, context larger than the backend declares) fails the render with a typed error -- falsifier: unit tests feeding each invalid placement and asserting ProtocolConfigurationError naming the backend'
+      - id: AC2
+        statement: 'AC2: With the primary lab host''s rung unavailable for one test-scoped run, the placed sibling answers, and with it available the sibling never does -- falsifier: a lab pair, one run whose rendered contract binds local-coder to a closed port and one unmodified control, reading the receipts'' backend_id and host'
+evidence_requirements:
+  - kind: tests
+    description: The renderer passes a placement through and refuses an invalid one with a typed error.
+    command: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_placement_omn19215.py -q -p no:randomly -n 0 --no-cov
+  - kind: tests
+    description: The committed lab pair shows the sibling answering only with the rung down.
+    command: uv run --frozen pytest tests/unit/runtime/test_omn19215_ac2_lab_pair_evidence.py -q -p no:randomly -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19215-ac1
+    description: The renderer passes a placement through and refuses an invalid one with a typed error.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_placement_omn19215.py -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn19215-ac2
+    description: Lab pair on a lab host, three closed-port runs answered by the placed sibling host after the rung host failed, three controls answered by the rung host and never by the sibling, committed with the receipts' attempts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn19215_ac2_lab_pair_evidence.py -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

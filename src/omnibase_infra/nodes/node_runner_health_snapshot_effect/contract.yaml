@@ -63,7 +63,7 @@ input_model:
 output_model:
   name: "ModelRunnerFleetSnapshot"
   module: "omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot"
-  description: "Facts-only runner-fleet snapshot (no classification), incl. OMN-15255 readiness facts: per-runner docker_health / listener_process_count / orphaned_listener_count and snapshot-level host_disk_used_percent."
+  description: "Facts-only runner-fleet snapshot (no classification), incl. OMN-15255 readiness facts: per-runner docker_health / listener_process_count / orphaned_listener_count and snapshot-level host_disk_used_percent. Includes queued/in-progress job facts for runner-fleet alerts (OMN-17427)."
 handler_routing:
   routing_strategy: "payload_type_match"
   handlers:
@@ -113,8 +113,8 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-03-31"
-  updated: "2026-07-26"
-  ticket: "OMN-15195"
+  updated: "2026-10-14"
+  ticket: "OMN-17427"
   tags:
     - effect
     - health

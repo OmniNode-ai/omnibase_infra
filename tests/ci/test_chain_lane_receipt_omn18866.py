@@ -360,6 +360,56 @@ def test_the_recorded_dev_lane_agent_answer_keys_the_receipt(
     ]
 
 
+_LIVE_RECEIPT = "tests/ci/fixtures/omn18866_live_chain_receipt.json"
+
+
+def _with_lane(text: str) -> str:
+    """Restore the lane id the fixture elides (see its ``lane_elision``)."""
+    return text.replace("<lane>", _CHAIN.value)
+
+
+@pytest.mark.live_contact(_LIVE_RECEIPT)
+def test_the_recorded_live_chain_receipt_reads_back_by_its_sha(
+    recorded_response: dict[str, object],
+) -> None:
+    """AC6's readback: the receipt a scheduled canary run really uploaded.
+
+    The body is `receipt.json` out of the artifact a scheduled chain-canary run
+    on dev uploaded, fetched back through the bus-served run-download. It must
+    parse through the same reader the gate uses, carry the chain lane, the
+    sha its artifact name is keyed on, and a PASS whose one check is the
+    delegation check with evidence.
+    """
+    provenance = recorded_response["_provenance"]
+    body = recorded_response["body"]
+    assert isinstance(provenance, dict)
+    assert isinstance(body, dict)
+    receipt = parse_receipt(_with_lane(json.dumps(body)))
+    assert receipt.lane is _CHAIN
+    assert receipt.result is EnumLabPassResult.PASS
+    assert _with_lane(str(provenance["artifact_name"])) == artifact_name(
+        _CHAIN, receipt.sha
+    )
+    assert [c.name for c in receipt.checks] == [DELEGATION_GOLDEN_CHAIN_CHECK]
+    assert receipt.checks[0].ok is True
+    assert receipt.checks[0].evidence.strip()
+
+
+@pytest.mark.live_contact(_LIVE_RECEIPT)
+def test_the_recorded_live_chain_receipt_with_a_failed_check_is_refused(
+    recorded_response: dict[str, object],
+) -> None:
+    """Negative control: the same bytes with the check turned red while the
+    receipt still says PASS must not parse, so the readback above is not a
+    reader that accepts anything."""
+    body = recorded_response["body"]
+    assert isinstance(body, dict)
+    forged = json.loads(json.dumps(body))
+    forged["checks"][0]["ok"] = False
+    with pytest.raises(lpr.ReceiptLookupError, match="malformed"):
+        parse_receipt(_with_lane(json.dumps(forged)))
+
+
 # ---------------------------------------------------------------------------
 # the workflow wiring
 # ---------------------------------------------------------------------------
