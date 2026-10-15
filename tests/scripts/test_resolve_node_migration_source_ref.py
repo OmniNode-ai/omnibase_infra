@@ -875,3 +875,116 @@ def test_paired_source_whose_ancestry_is_unreadable_fails_closed(
     assert resolver.main() == 1
     assert "fail-closed" in capsys.readouterr().err
     assert not output_path.exists()
+
+
+# OMN-19155: a paired vendor PR's source is held as a draft by the draft-first
+# proof rule, and the vendor PR cannot go green until its source ref resolves.
+# Draft is a review-workflow flag; the SHA binding, the open state, the base
+# ref and the head repo are what bind the tree, and each stays fail-closed.
+
+
+def _draft_source_api(
+    *,
+    draft: bool,
+    state: str = "open",
+    base_ref: str = "dev",
+    head_sha: str = _DECLARED,
+    head_repo: str = "OmniNode-ai/omnimarket",
+    compare: _ApiResult = (200, {"status": "diverged"}, "HTTP 200"),
+) -> Callable[[str], _ApiResult]:
+    def api_get(url: str) -> _ApiResult:
+        if "/compare/" in url:
+            return compare
+        return (
+            200,
+            {
+                "state": state,
+                "draft": draft,
+                "base": {"ref": base_ref},
+                "head": {
+                    "ref": "jonah/omn-19977-metering-summary",
+                    "sha": head_sha,
+                    "repo": {"full_name": head_repo},
+                },
+            },
+            "HTTP 200",
+        )
+
+    return api_get
+
+
+@pytest.mark.parametrize("draft", [True, False])
+def test_paired_source_resolves_its_pinned_sha_whether_draft_or_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    draft: bool,
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    monkeypatch.setattr(resolver, "_api_get", _draft_source_api(draft=draft))
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == _DECLARED
+    assert output_path.read_text(encoding="utf-8") == f"ref={_DECLARED}\n"
+
+
+def test_draft_paired_source_that_descends_from_the_declared_sha_resolves_live_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        resolver,
+        "_api_get",
+        _draft_source_api(
+            draft=True,
+            head_sha=_LIVE_HEAD,
+            compare=(200, {"status": "ahead"}, "HTTP 200"),
+        ),
+    )
+
+    assert resolver.main() == 0
+    assert output_path.read_text(encoding="utf-8") == f"ref={_LIVE_HEAD}\n"
+
+
+@pytest.mark.parametrize("draft", [True, False])
+def test_sha_binding_refuses_a_mismatched_head_whether_draft_or_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    draft: bool,
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        resolver,
+        "_api_get",
+        _draft_source_api(draft=draft, head_sha=_LIVE_HEAD),
+    )
+
+    assert resolver.main() == 1
+    assert "head SHA does not match" in capsys.readouterr().err
+    assert not output_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"state": "closed"}, "is not open"),
+        ({"base_ref": "main"}, "must target omnimarket/dev"),
+        ({"head_repo": "external/omnimarket"}, "head repo must be OmniNode-ai"),
+    ],
+)
+def test_draft_paired_source_is_still_refused_for_every_other_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    overrides: dict[str, str],
+    message: str,
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        resolver, "_api_get", _draft_source_api(draft=True, **overrides)
+    )
+
+    assert resolver.main() == 1
+    assert message in capsys.readouterr().err
+    assert not output_path.exists()
