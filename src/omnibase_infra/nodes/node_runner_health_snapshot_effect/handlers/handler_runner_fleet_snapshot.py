@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -38,6 +39,9 @@ from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
     ModelRunnerFleetSnapshotGatherCommand,
+)
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_job_fact import (
+    ModelRunnerJobFact,
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_zombie_run_candidate import (
     ModelZombieRunCandidate,
@@ -59,12 +63,78 @@ _DEFAULT_WATCH_REPOS = (
     "OmniNode-ai/omniclaude",
     "OmniNode-ai/omnimarket",
 )
+# Bound per-repo job API calls to 30 queued/in-progress runs per tick (OMN-17427).
+_JOB_SCAN_RUN_LIMIT = 30
 _CODELOAD_FAILURE_SIGNATURES = (
     "codeload.github.com",
     "GnuTLS",
     "fetch-pack",
     "the remote end hung up unexpectedly",
 )
+
+
+def parse_run_jobs(
+    repo: str,
+    run: Mapping[str, object],
+    payload: Mapping[str, object],
+    *,
+    now: datetime,
+) -> tuple[ModelRunnerJobFact, ...]:
+    """Parse active job facts, skipping missing IDs or unusable timestamps.
+
+    Running jobs age from their start (creation when start is missing);
+    queued jobs age from creation. Future timestamps clamp to zero.
+    """
+    raw_run_id = run.get("id")
+    if not isinstance(raw_run_id, (int, str)):
+        return ()
+    try:
+        run_id = int(raw_run_id)
+    except ValueError:
+        return ()
+    raw_jobs = payload.get("jobs", [])
+    if not isinstance(raw_jobs, list):
+        return ()
+
+    facts: list[ModelRunnerJobFact] = []
+    for job in raw_jobs:
+        if not isinstance(job, Mapping):
+            continue
+        status = job.get("status")
+        if status not in ("queued", "in_progress"):
+            continue
+        raw_job_id = job.get("id")
+        if not isinstance(raw_job_id, (int, str)):
+            continue
+        timestamp = job.get("created_at")
+        if status == "in_progress":
+            timestamp = job.get("started_at") or timestamp
+        if not isinstance(timestamp, str) or not timestamp:
+            continue
+        try:
+            job_id = int(raw_job_id)
+            created_or_started = datetime.fromisoformat(
+                timestamp.replace("Z", "+00:00")
+            )
+            age = max(0.0, (now - created_or_started).total_seconds())
+        except (TypeError, ValueError):
+            continue
+        labels = job.get("labels") or ()
+        facts.append(
+            ModelRunnerJobFact(
+                repo=repo,
+                run_id=run_id,
+                job_id=job_id,
+                workflow=str(job.get("workflow_name") or run.get("name") or ""),
+                job=str(job.get("name") or ""),
+                event=str(run.get("event") or ""),
+                status="queued" if status == "queued" else "in_progress",
+                labels=tuple(str(label) for label in labels),
+                runner=str(job.get("runner_name") or ""),
+                age_seconds=age,
+            )
+        )
+    return tuple(facts)
 
 
 def _optional_count(raw: str) -> int | None:
@@ -259,8 +329,13 @@ class HandlerRunnerFleetSnapshot:
 
     async def _fetch_queue_facts(
         self,
-    ) -> tuple[float | None, tuple[ModelZombieRunCandidate, ...], str | None]:
-        """Fetch oldest-queued-job age + zombie-run candidates across watched repos.
+    ) -> tuple[
+        float | None,
+        tuple[ModelZombieRunCandidate, ...],
+        str | None,
+        tuple[ModelRunnerJobFact, ...],
+    ]:
+        """Fetch queue age, zombie-run candidates, and active job facts across repos.
 
         Cross-references OMN-13109's SILENT-WEDGE signal: a queued job aged
         past the configured wedge queue age is a zombie-run candidate regardless
@@ -269,6 +344,7 @@ class HandlerRunnerFleetSnapshot:
         """
         oldest_age: float | None = None
         candidates: list[ModelZombieRunCandidate] = []
+        jobs: list[ModelRunnerJobFact] = []
         errors: list[str] = []
         now = datetime.now(tz=UTC)
 
@@ -279,7 +355,7 @@ class HandlerRunnerFleetSnapshot:
                 f"/repos/{repo}/actions/runs",
                 "--jq",
                 '.workflow_runs[] | select(.status=="queued" or .status=="in_progress")'
-                " | {id, name, status, created_at}",
+                " | {id, name, status, created_at, event}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -290,10 +366,44 @@ class HandlerRunnerFleetSnapshot:
                     f"{stderr.decode(errors='replace').strip()[:200]}"
                 )
                 continue
+            scanned_runs = 0
             for line in stdout.decode(errors="replace").strip().splitlines():
                 if not line.strip():
                     continue
                 run = json.loads(line)
+                if (
+                    run.get("status") in ("queued", "in_progress")
+                    and scanned_runs < _JOB_SCAN_RUN_LIMIT
+                ):
+                    scanned_runs += 1
+                    run_id = int(run["id"])
+                    try:
+                        job_proc = await asyncio.create_subprocess_exec(
+                            "gh",
+                            "api",
+                            f"/repos/{repo}/actions/runs/{run_id}/jobs",
+                            # Explicit GET puts fields in the query, not a POST body.
+                            "--method=GET",
+                            "--raw-field=per_page=100",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        job_stdout, job_stderr = await job_proc.communicate()
+                        if job_proc.returncode != 0:
+                            errors.append(
+                                f"jobs probe failed for {repo}#{run_id}: "
+                                f"{job_stderr.decode(errors='replace').strip()[:200]}"
+                            )
+                        elif job_stdout.strip():
+                            payload = json.loads(job_stdout)
+                            if not isinstance(payload, Mapping):
+                                errors.append(
+                                    f"jobs probe invalid JSON object for {repo}#{run_id}"
+                                )
+                            else:
+                                jobs.extend(parse_run_jobs(repo, run, payload, now=now))
+                    except (OSError, ValueError) as exc:
+                        errors.append(f"jobs probe failed for {repo}#{run_id}: {exc}")
                 created_at = run.get("created_at", "")
                 if not created_at:
                     continue
@@ -313,7 +423,7 @@ class HandlerRunnerFleetSnapshot:
                     )
 
         error_summary = "; ".join(errors) if errors else None
-        return oldest_age, tuple(candidates), error_summary
+        return oldest_age, tuple(candidates), error_summary, tuple(jobs)
 
     async def _fetch_buildx_available(self) -> tuple[bool | None, str | None]:
         """Probe Docker buildx availability on the runner host (OMN-13932)."""
@@ -431,7 +541,7 @@ class HandlerRunnerFleetSnapshot:
         )
         github_runners, gh_error = gh_result
         docker_facts, docker_error = docker_result
-        oldest_queued_age, zombie_candidates, queue_error = queue_result
+        oldest_queued_age, zombie_candidates, queue_error, jobs = queue_result
         buildx_available, buildx_error = buildx_result
         codeload_signal_count, codeload_examples, codeload_error = codeload_result
         host_disk_used_percent, disk_error = disk_result
@@ -537,6 +647,7 @@ class HandlerRunnerFleetSnapshot:
             host=self._config.runner_host,
             expected_count=self._config.expected_count,
             runners=tuple(facts),
+            jobs=jobs,
             oldest_queued_job_age_seconds=oldest_queued_age,
             zombie_run_candidates=zombie_candidates,
             host_disk_used_percent=host_disk_used_percent,
@@ -555,4 +666,4 @@ class HandlerRunnerFleetSnapshot:
         return snapshot
 
 
-__all__ = ["HandlerRunnerFleetSnapshot"]
+__all__ = ["HandlerRunnerFleetSnapshot", "parse_run_jobs"]
