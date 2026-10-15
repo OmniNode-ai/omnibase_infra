@@ -157,6 +157,30 @@ def test_boot_accepts_a_backend_serving_its_declared_model(
     assert backend["endpoint_url"].endswith("/v1/chat/completions")
 
 
+def test_boot_checks_a_later_backend_after_a_matching_backend(
+    tmp_path: Path,
+    stub_serving_declared_model: int,
+    stub_serving_other_model: int,
+) -> None:
+    source, overlay, target = _files(
+        tmp_path,
+        stub_serving_declared_model,
+        live_sibling_port=stub_serving_other_model,
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="local-sibling") as raised:
+        render_bifrost_delegation_contract(
+            source_path=source,
+            overlay_path=overlay,
+            target_path=target,
+            verify_endpoints=True,
+        )
+
+    assert _DECLARED in str(raised.value)
+    assert "some-other-model" in str(raised.value)
+    assert not target.exists()
+
+
 def test_boot_marks_an_unreachable_backend_dark_and_continues(
     tmp_path: Path, stub_serving_declared_model: int
 ) -> None:

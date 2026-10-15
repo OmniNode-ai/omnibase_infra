@@ -181,7 +181,7 @@ def test_workflow_validates_at_the_locked_core_with_the_binds_ac_rules() -> None
     )[1]
     version = tuple(int(part) for part in block.split('"', 1)[0].split("."))
     assert version >= CORE_WITH_BINDS_AC_RULES, version
-    assert '"omnibase-core==0.47.39"' in PYPROJECT.read_text(encoding="utf-8")
+    assert '"omnibase-core==0.47.44"' in PYPROJECT.read_text(encoding="utf-8")
 
 
 # --- this repository's contract -------------------------------------------------
