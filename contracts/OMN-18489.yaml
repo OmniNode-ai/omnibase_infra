@@ -60,8 +60,10 @@ dod_evidence:
       - check_type: command
         check_value: |-
           set -eu;
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/in_progress_demotion.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'class InProgressDemotionLeg';
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'demotion_window_hours'
+          leg="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/in_progress_demotion.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'class InProgressDemotionLeg' <<<"$leg";
+          node_contract="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -q 'demotion_window_hours' <<<"$node_contract"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k sweep_deploy
