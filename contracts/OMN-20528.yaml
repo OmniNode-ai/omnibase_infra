@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20528
+title: Canonical clones run a stale copy of the ref guard that lacks OMN-18608, and its refusal heredoc can deadlock git for days
+summary: The canonical-clone git guard lives as node_canonical_clone_guard_effect, whose refusal path writes with printf only and which carries the same-branch checkout -B allowance. This repository still tracked the old shell guard, three here-document refusals included, and an installer that copied it into the registry root and pointed core.hooksPath at it. This change deletes the shell guard, its hook-type links, its installer and their four tests from omnibase_infra, so the guard exists in one place, and adds a test that fails if a copy returns. The pull-all.sh test that borrowed the deleted hooks now uses a stand-in post-checkout hook that records any branch switch made without the convergence door. AC1 (hosts run the OMN-18608 guard) is delivered by that node and its installer and is not bound here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-one-guard-no-heredoc
+    statement: The canonical-clone git guard has one copy, and no copy refuses through a here-document.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the guard''s refusal message uses no here-document (printf only), in every copy -- falsifier: `grep -n ''<<'' canonical_clone_ref_guard.sh` returns a line'
+      - id: AC3
+        statement: 'AC3: there is one copy of the guard -- falsifier: two divergent copies are reachable from a hooksPath'
+evidence_requirements:
+  - kind: tests
+    description: No shell copy of the canonical-clone guard, its installer or its hook-type links is tracked in omnibase_infra, and pull-all.sh still opens the convergence door for every branch switch.
+    command: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q -k 'single_copy or stand_in_guard or convergence_door'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-no-heredoc-copy-ac2
+    description: No tracked canonical_clone_ref_guard.sh, canonical_clone_guard.sh or canonical_clone_paths.sh remains in this repository, so no copy carries a here-document refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-single-copy-ac3
+    description: This repository tracks no copy of the guard, no installer that would point core.hooksPath at one and no hook-type links; the pull-all.sh branch-switch test runs against a stand-in hook.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q -k 'single_copy or stand_in_guard or convergence_door'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

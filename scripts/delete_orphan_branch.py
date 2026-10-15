@@ -8,7 +8,7 @@
 A worktree pruner removes a worktree under the worktrees root and then has to
 delete the branch that worktree held. The branch lives in the CLONE, so the
 delete lands on the canonical-clone reference-transaction guard
-(`scripts/git-hooks/canonical_clone_ref_guard.sh`) and is refused. Each half is
+(the `node_canonical_clone_guard_effect` ref guard) and is refused. Each half is
 correct alone; where they meet, the worktree goes and the branch stays.
 
 Measured 2026-09-16: a prune pass removed 171 rescue-only worktrees under the
