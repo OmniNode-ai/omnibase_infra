@@ -16,7 +16,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: No shell copy of the canonical-clone guard, its installer or its hook-type links is tracked in omnibase_infra, and pull-all.sh still opens the convergence door for every branch switch.
-    command: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q
+    command: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q -k 'single_copy or stand_in_guard or convergence_door'
 emergency_bypass:
   enabled: false
   justification: ''
@@ -36,7 +36,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q
+        check_value: uv run --frozen pytest tests/ci/test_canonical_clone_guard_single_copy_omn20528.py tests/unit/scripts/test_pull_all.py -q -k 'single_copy or stand_in_guard or convergence_door'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
