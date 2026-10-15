@@ -94,7 +94,8 @@ class ProtocolDelegationDispatchPort(Protocol):
         model: str | None = None,
         # The consumer owns ModelNamedTestSpec. A BaseModel boundary accepts it
         # without importing the higher-layer package; the deployed bus port
-        # refuses named tests because it cannot access the caller's workspace.
+        # carries it inline on the command (OMN-17427) and refuses a spec that
+        # points at the caller's workspace, which the lane cannot read.
         named_tests: BaseModel | None = None,
     ) -> dict[str, object]: ...
 
