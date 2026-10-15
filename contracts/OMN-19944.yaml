@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_declared_state_reconcile_orchestrator -q -k "four_rounds or moved_after_observation"
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_reconcile_orchestrator/test_declared_state_reconcile.py -q -k "four_rounds or moved_after_observation"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -39,7 +39,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect -q -k "serialize or different_surfaces or lease"
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect/test_declared_state_apply.py -q -k "serialize or different_surfaces or lease"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
@@ -48,7 +48,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect tests/unit/nodes/node_declared_state_reconcile_orchestrator -q -k "policy"
+        check_value: uv run pytest tests/unit/nodes/node_declared_state_apply_effect/test_declared_state_apply.py tests/unit/nodes/node_declared_state_reconcile_orchestrator/test_declared_state_reconcile.py -q -k "policy"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3

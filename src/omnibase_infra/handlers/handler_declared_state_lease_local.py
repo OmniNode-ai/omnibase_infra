@@ -7,6 +7,7 @@ import asyncio
 from omnibase_core.enums.enum_declared_state_surface_kind import (
     EnumDeclaredStateSurfaceKind,
 )
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 
 
 class HandlerDeclaredStateLeaseLocal:
@@ -15,6 +16,16 @@ class HandlerDeclaredStateLeaseLocal:
     def __init__(self) -> None:
         self._locks: dict[tuple[EnumDeclaredStateSurfaceKind, str], asyncio.Lock] = {}
         self._holders: dict[tuple[EnumDeclaredStateSurfaceKind, str], str] = {}
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return the infrastructure role."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return the side-effecting category: holding a lease mutates shared state."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def acquire(
         self,
