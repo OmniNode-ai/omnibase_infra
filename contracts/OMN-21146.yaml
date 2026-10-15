@@ -62,3 +62,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn21146-deploy-local-companion-shipped
+    description: The handler at the merged head resolves the offered companion through offer_companion_sources and no longer names the GitHub search endpoint on the offer path; the deployed surface is the source at the merged head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'offer_companion_sources.read_gateway_candidates'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
