@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "omnimarket config/ci_bus_lanes.yaml, lane dev, transport declaration only (the broker address is left out: it is deployment configuration)",
+    "source_commit": "0143496ce7118a743c257b4cdd7009229bc7eb7a",
+    "captured_utc": "2026-10-15T06:45:00Z",
+    "source_sha256": "88383b6cb55ef9169ded1856a1e0d0b3dada8519ffeddc0e5784f483d748e97c"
+  },
+  "default": "inmemory",
+  "lane": "dev",
+  "security_protocol": "SASL_PLAINTEXT",
+  "sasl_mechanism": "SCRAM-SHA-256"
+}
