@@ -41,10 +41,10 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-deploy
-    description: The CLI source on the landing branch returns None for a host the lab hosts table does not list.
+    description: The CLI source at the fix commit returns None for a host the lab hosts table does not list.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=dev' --jq .content | base64 -d | grep -qF 'is not one, so there is no lab tenant to resolve'
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=f88b8960aebea9bdbccfc58657682ffdaf855c03' --jq .content | base64 -d | grep -qF 'is not one, so there is no lab tenant to resolve'
     binds_ac:
       - AC1

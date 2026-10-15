@@ -68,3 +68,41 @@ def test_no_lab_declaration_falls_through_to_the_install_identity(
 ) -> None:
     monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
     assert resolve_delegate_tenant(in_process=False, environ={}) == _MINTED
+
+
+def test_host_the_table_does_not_list_keeps_the_install_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-21087: a table that does not list this host makes it no lab host.
+    monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+    monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "omnibook")
+    monkeypatch.setattr(cli_delegate, "_lab_target_is_local", lambda _target: False)
+    table = _table(
+        tmp_path / "lab_run_hosts.yaml",
+        "hosts:\n"
+        "  - name: h101\n"
+        "    target: ssh://h101.invalid\n"
+        f"    tenant_id: {_HOST_TENANT}\n",
+    )
+    stamp = resolve_delegate_tenant(
+        in_process=True, environ={"ONEX_LAB_RUN_HOSTS": str(table)}
+    )
+    assert stamp == _MINTED
+
+
+def test_declared_lane_host_without_a_row_still_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+    table = _table(
+        tmp_path / "lab_run_hosts.yaml",
+        "hosts:\n"
+        "  - name: h101\n"
+        "    target: ssh://h101.invalid\n"
+        f"    tenant_id: {_HOST_TENANT}\n",
+    )
+    with pytest.raises(DelegateTenantRefusedError, match="found 0"):
+        resolve_delegate_tenant(
+            in_process=True,
+            environ={"ONEX_LANE_HOST": "h999", "ONEX_LAB_RUN_HOSTS": str(table)},
+        )
