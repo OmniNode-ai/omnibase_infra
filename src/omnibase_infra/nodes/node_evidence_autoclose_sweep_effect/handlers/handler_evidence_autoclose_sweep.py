@@ -228,6 +228,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersess
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.declared_supersession import (
     resolve_declared_supersession,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.in_progress_demotion import (
+    InProgressDemotionLeg,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_ac_binding_check_status import (
     EnumAcBindingCheckStatus,
 )
@@ -261,6 +264,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evid
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result import (
     ModelEvidenceAutocloseSweepResult,
+)
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_request import (
+    ModelInProgressDemotionRequest,
 )
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
@@ -443,6 +449,34 @@ query TeamStates($teamId: String!) {
 }
 """
 
+# OMN-18489. The In Progress demotion leg's enumeration. Filtered on the state
+# NAME as well as the type, because "In Review" is also a started-type state and
+# the leg demotes In Progress only. `comments` is filtered to the idle window, so
+# its nodes are exactly the comments that would withhold a demotion; the
+# `hasNextPage` flag is read by the caller as "more than a page of them".
+_IN_PROGRESS_ISSUES_QUERY = """
+query InProgressIssues($after: String, $since: DateTimeOrDuration!) {
+  issues(
+    first: 50
+    after: $after
+    filter: { state: { type: { eq: "started" }, name: { eq: "In Progress" } } }
+  ) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      identifier
+      startedAt
+      state { id name type }
+      team { id }
+      comments(first: 20, filter: { createdAt: { gte: $since } }) {
+        pageInfo { hasNextPage }
+        nodes { createdAt body }
+      }
+    }
+  }
+}
+"""
+
 _ISSUE_UPDATE_STATE_MUTATION = """
 mutation UpdateIssueState($issueId: String!, $stateId: String!) {
   issueUpdate(id: $issueId, input: { stateId: $stateId }) {
@@ -604,6 +638,9 @@ _MAX_CITED_PR_REFS = 25
 # a ticket that somehow exceeds it stops receiving sweep comments rather than
 # receiving duplicates, which is the correct direction to be wrong in.
 _MAX_COMMENT_PAGES = 5
+# OMN-18489. 50 issues a page; the census has been 360 and a leg that cannot
+# read the whole of it must refuse rather than demote on a fragment.
+_MAX_IN_PROGRESS_PAGES = 20
 
 # OMN-16106, class (c). Signals that a dod_verify check failed because the LIVE
 # SURFACE it reads was unreachable, rather than because the behaviour it
@@ -2633,6 +2670,63 @@ class _LinearClient:
                 return str(state_id) if state_id else None
         return None
 
+    async def fetch_backlog_state_id(self, team_id: str) -> str | None:
+        """Resolve the team's backlog-type state named 'Backlog'. None if absent."""
+        data = await self._query(_TEAM_STATES_QUERY, {"teamId": team_id})
+        if data is None:
+            return None
+        team = data.get("team")
+        states_conn = team.get("states") if isinstance(team, dict) else None
+        nodes = states_conn.get("nodes") if isinstance(states_conn, dict) else None
+        if not isinstance(nodes, list):
+            return None
+        for state in nodes:
+            if (
+                isinstance(state, dict)
+                and state.get("type") == "backlog"
+                and str(state.get("name", "")).strip().lower() == "backlog"
+            ):
+                state_id = state.get("id")
+                return str(state_id) if state_id else None
+        return None
+
+    async def fetch_in_progress_issues(
+        self, since_iso: str
+    ) -> tuple[list[dict[str, object]] | None, str]:
+        """Every In Progress issue with its in-window comments, or ``(None, error)``.
+
+        OMN-18489. Fails closed on any failed page: a partial enumeration
+        would be read as the whole census, and the leg demotes on what it
+        saw. A cursor the connection did not supply is also a failure, never
+        the end of the list.
+        """
+        collected: list[dict[str, object]] = []
+        cursor: str | None = None
+        for _ in range(_MAX_IN_PROGRESS_PAGES):
+            data = await self._query(
+                _IN_PROGRESS_ISSUES_QUERY, {"after": cursor, "since": since_iso}
+            )
+            if data is None:
+                detail = f" ({self.last_error})" if self.last_error else ""
+                return None, f"Failed to fetch In Progress issues from Linear.{detail}"
+            connection = data.get("issues")
+            nodes = connection.get("nodes") if isinstance(connection, dict) else None
+            if not isinstance(connection, dict) or not isinstance(nodes, list):
+                return None, "Malformed issues connection in Linear response."
+            collected.extend(node for node in nodes if isinstance(node, dict))
+            page_info = connection.get("pageInfo")
+            page_info = page_info if isinstance(page_info, dict) else {}
+            if not page_info.get("hasNextPage"):
+                return collected, ""
+            end_cursor = page_info.get("endCursor")
+            if not isinstance(end_cursor, str) or not end_cursor:
+                return None, "Linear returned no cursor for the next issues page."
+            cursor = end_cursor
+        return None, (
+            f"The In Progress census is longer than {_MAX_IN_PROGRESS_PAGES} "
+            "pages; a partial census is not read as the whole."
+        )
+
     async def update_issue_state(self, issue_id: str, state_id: str) -> bool:
         """Flip an issue to the given workflow state. False on any failure."""
         data = await self._query(
@@ -3672,6 +3766,30 @@ class HandlerEvidenceAutocloseSweep:
         # comment is on the ticket -- a reverted hand flip is a revert of
         # somebody else's judgement and is deliberately not in this number.
         closer_flips_reverted = sum(1 for o in outcomes if o.closer_flip_reverted)
+
+        # OMN-18489. The In Progress demotion leg: a decision branch beside the
+        # flip and gap branches, run on the same tick with the same Linear
+        # client, the same arming and the same exclusion fence. Off when the
+        # contract-declared window is 0. A disarmed run (a closer flip found
+        # unsafe) writes no demotion either: the disarm is a statement about
+        # this mechanism's authority to write, not about Done flips alone.
+        in_progress_demotion = (
+            await InProgressDemotionLeg(
+                linear_client=self._linear, run_gh_command=self._run_gh_command
+            ).handle(
+                ModelInProgressDemotionRequest(
+                    correlation_id=correlation_id,
+                    window_hours=request.demotion_window_hours,
+                    apply=effective_apply and not disarm_ticket,
+                    max_demotions_per_run=request.max_demotions_per_run,
+                    pr_owner=request.occ_repo.split("/", 1)[0],
+                    gh_timeout_seconds=request.gh_timeout_seconds,
+                    exclude_tickets=tuple(sorted(_excluded_tickets(request))),
+                )
+            )
+            if request.demotion_window_hours > 0
+            else None
+        )
         errored = sum(
             1
             for o in outcomes
@@ -3745,6 +3863,7 @@ class HandlerEvidenceAutocloseSweep:
             tickets_errored=errored,
             tickets_closer_flip_reverted=closer_flips_reverted,
             outcomes=tuple(outcomes),
+            in_progress_demotion=in_progress_demotion,
         )
 
     # -- comment idempotency funnel (OMN-16808) --------------------------
