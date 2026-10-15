@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: the overlay checkout persists no credential, the bump push carries the App token in its URL, and the collect step accepts collector exits 0, 30 and 8 and refuses 2, 3, 4 and 5 -- falsifier: uv run pytest tests/ci/test_lane_census_refresh_push_omn20413.py -q'
+  - id: req-omn20413-lane-census-pr-advisory
+    statement: The Lane Census Staleness + E-5 Env Drift (OMN-13034) check reports the private overlay census's age as a warning on pull requests, because no pull request in this repository can move it, and still fails on push, workflow_dispatch, and a missing or malformed snapshot.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: check_lane_census_age.py --stale-advisory exits 0 with a warning on a stale snapshot and 1 on a missing or malformed one, exits 1 on a stale snapshot without the flag, and the staleness workflow passes the flag only when github.event_name is pull_request -- falsifier: uv run pytest tests/unit/scripts/test_check_lane_census_age.py tests/ci/test_lane_census_staleness_pr_advisory_omn20413.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -31,6 +36,9 @@ evidence_requirements:
   - kind: tests
     description: The refresh workflow's overlay checkout, bump push and collect-step exit handling are read from the workflow and the acceptance line is run in bash.
     command: uv run pytest tests/ci/test_lane_census_refresh_push_omn20413.py -q
+  - kind: tests
+    description: The age checker's advisory flag and the workflow's pull_request-only use of it.
+    command: uv run pytest tests/unit/scripts/test_check_lane_census_age.py tests/ci/test_lane_census_staleness_pr_advisory_omn20413.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -63,3 +71,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn20413-ac4-lane-census-pr-advisory
+    description: AC4 tests drive check_lane_census_age.py with and without --stale-advisory and read lane-census-staleness.yml; the advisory tests fail at the merge base, where the flag does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_check_lane_census_age.py tests/ci/test_lane_census_staleness_pr_advisory_omn20413.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

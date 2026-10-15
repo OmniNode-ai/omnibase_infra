@@ -1,0 +1,63 @@
+schema_version: 1.0.0
+ticket_id: OMN-19455
+title: Runtime boot refuses a backend whose served model id differs from its declared one, and marks an unreachable backend dark
+summary: 'Evidence for the three criteria of OMN-19455. AC1 and AC2 are the boot-time served-model probe merged in omnibase_infra#4277, exercised by tests that boot against a real local stub server. AC3 is the backend-id rename merged in omnimarket#3231; the rename lives in the omnimarket delegation config, so its falsifier reads that file at the merge commit through the contents API.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: at boot each enabled backend with an endpoint is compared with its /v1/models id, and a mismatch refuses boot naming the backend -- falsifier: a pytest booting against a stub server that serves a different id asserting the refusal'
+      - id: AC2
+        statement: 'AC2: an unreachable backend is marked dark and boot continues -- falsifier: a pytest with a closed port asserting boot completes and the backend reads dark'
+      - id: AC3
+        statement: 'AC3: backend ids that misdescribe what they serve are renamed -- falsifier: a grep of the lab delegation config for a backend id naming a model that backend does not serve'
+evidence_requirements:
+  - kind: tests
+    description: The boot served-model check suite passes against a real local stub server.
+    command: uv run pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19455-ac1-served-model-mismatch
+    description: 'AC1. test_boot_refuses_a_backend_whose_served_model_differs renders the delegation contract with endpoint verification on against a stub /v1/models server that serves a different id and asserts the boot refusal names the backend; test_boot_accepts_a_backend_serving_its_declared_model is the positive control where the served id equals the declared one and boot completes. test_boot_checks_a_later_backend_after_a_matching_backend asserts that a matching first backend does not hide a later mismatch, and the refusal names that later backend and its served id without writing the target.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py -k "refuses_a_backend_whose_served_model_differs or accepts_a_backend_serving_its_declared_model or checks_a_later_backend_after_a_matching_backend" -q
+    binds_ac:
+      - AC1
+  - id: dod-omn-19455-ac2-unreachable-backend-dark
+    description: 'AC2. test_boot_marks_an_unreachable_backend_dark_and_continues renders with one backend on a closed port and a live sibling, and asserts the render completes and the closed-port backend reads dark (endpoint_url is None) while the sibling keeps its endpoint.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py -k "marks_an_unreachable_backend_dark_and_continues" -q
+    binds_ac:
+      - AC2
+  - id: dod-omn-19455-ac3-backend-ids-renamed
+    description: 'AC3. The lab delegation config bifrost_delegation.yaml in omnimarket at the squash commit of omnimarket#3231 carries the renamed ids (positive control) and carries none of the three ids the ticket named as misdescribing what they serve: cloud-gemini-pro, openrouter-qwen3-coder-480b and cloud-glm-judge. The contents API read is the same read the hosted runner can make.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "bash -c 'set -euo pipefail; cfg=$(gh api \"repos/OmniNode-ai/omnimarket/contents/src/omnimarket/configs/bifrost_delegation.yaml?ref=3974d94f0d1c30c0158fc40b50c4465b0b32f003\" --jq .content | base64 -d); grep -qE \"backend_id: openrouter-nemotron-ultra\" <<<\"$cfg\"; grep -qE \"backend_id: cloud-gemini-2-5-flash\" <<<\"$cfg\"; grep -qE \"backend_id: cloud-gemini-judge\" <<<\"$cfg\"; ! grep -qE \"backend_id: (cloud-gemini-pro|openrouter-qwen3-coder-480b|cloud-glm-judge)\" <<<\"$cfg\"'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-deploy
+    description: The boot probe failure-kind enum from omnibase_infra#4277 is present in the source at the evaluated checkout revision.
+    source: manual
+    checks:
+      - check_type: command
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/models/enum_bifrost_endpoint_probe_failure_kind.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class EnumBifrostEndpointProbeFailureKind' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
