@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-19445
 title: The daily R1 front-door probe declares the tenant onex delegate requires and names a missing one as runner-env
-summary: Every scheduled run of r1-front-door-probe.yml from 2026-10-05 to 2026-10-14 exited 1 because onex delegate refuses to send to a deployed lane without a tenant (OMN-17427), and the probe graded that refusal as leg front-door. A tenant minted on the runner with onex local init is refused by the lane for want of a registered provider key, so the probe step now declares the lab house tenant through the ONEX_TENANT_ID overlay, and the classifier names a missing tenant identity as runner-env. Workflow and probe script only; no runtime change.
+summary: Every scheduled run of r1-front-door-probe.yml from 2026-10-05 to 2026-10-14 exited 1 because onex delegate refuses to send to a deployed lane without a tenant (OMN-17427), and the probe graded that refusal as leg front-door. A tenant minted on the runner with onex local init is refused by the lane for want of a registered provider key, so the probe step now declares the lab house tenant through the ONEX_TENANT_ID overlay, and the classifier names a missing tenant identity as runner-env. The probe's own kill timeout now outlasts the CLI's declared terminal wait, so a queued lane is graded by the CLI and not killed as probe-timeout (scheduled run of 2026-10-15T05:28Z). Workflow and probe script only; no runtime change.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -26,6 +26,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-r1-probe-timeout-outlasts-cli-wait-ac2
+    description: The probe's kill timeout outlasts the CLI's declared terminal wait plus its hard-timeout grace, and the workflow job timeout leaves setup headroom above it, so a queued lane is graded by the CLI and not killed as probe-timeout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k outlasts
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2

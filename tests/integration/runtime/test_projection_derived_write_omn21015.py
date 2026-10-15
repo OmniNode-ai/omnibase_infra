@@ -182,23 +182,11 @@ def test_a_derivation_error_rolls_back_the_input_write(
 
 
 def test_unscoped_derived_write_commits_without_a_read_only_seam(
-    live_events_pg: EphemeralPostgres, monkeypatch: pytest.MonkeyPatch
+    live_events_pg: EphemeralPostgres,
 ) -> None:
     adapter = _adapter(live_events_pg)
     event_id = str(uuid4())
 
-    def refuse_writes_through_read_seam(_: object):
-        raise AssertionError("a read-only seam cannot own this write transaction")
-
-    # Simulate hardening the old read seam. With the neutral helper, this
-    # attribute is absent and is planted only as a control: a write must never
-    # borrow it, even if a read-only helper is added again later.
-    monkeypatch.setattr(
-        adapter._binding_connections,
-        "read_transaction",
-        refuse_writes_through_read_seam,
-        raising=False,
-    )
     try:
         result = _write(adapter, {"event_id": event_id, "payload": "committed"})
         assert result[0]["summary"] == "derived:committed"

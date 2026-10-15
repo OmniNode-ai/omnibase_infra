@@ -76,7 +76,9 @@ DEFAULT_RUNNER_HOST_DIR = "/home/jonah/.omnibase/runners"
 RUNNER_FLEET_CONFIG_DEFAULT_PATH = "config/runner_fleet.yaml"
 
 _SYNC_PATHS_BLOCK_RE = re.compile(r"SYNC_PATHS=\((.*?)\)", re.DOTALL)
-_QUOTED_ENTRY_RE = re.compile(r'"([^"]*)"')
+# Anchored to the start of the line: an entry is the line's leading quoted
+# string, so quoted prose in a comment line (or after an entry) is not a path.
+_QUOTED_ENTRY_RE = re.compile(r'^\s*"([^"]*)"')
 
 
 class ModelPathDriftFinding:
@@ -111,7 +113,7 @@ def parse_sync_paths(deploy_script_text: str) -> list[str]:
     if not match:
         raise ValueError("SYNC_PATHS array not found in deploy script text")
     block = match.group(1)
-    # Extract the (at most one) quoted entry per line independently, so a
+    # Extract the (at most one) leading quoted entry per line independently, so a
     # variable-expansion entry earlier in the array (e.g.
     # "${RUNNER_FLEET_CONFIG}") can never shift quote-pairing for a later
     # literal entry -- a naive single findall() over the whole block mismatches
@@ -119,8 +121,9 @@ def parse_sync_paths(deploy_script_text: str) -> list[str]:
     # contains an internal '$'.
     entries: list[str] = []
     for line in block.splitlines():
-        found = _QUOTED_ENTRY_RE.findall(line)
-        entries.extend(found)
+        found = _QUOTED_ENTRY_RE.match(line)
+        if found:
+            entries.append(found.group(1))
     return [entry for entry in entries if entry.strip() and "$" not in entry]
 
 

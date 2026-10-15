@@ -42,6 +42,7 @@ _OPERATOR_KEYS = (
     "VALKEY_PASSWORD",
     "OMNINODE_RUNTIME_PASSWORD",
     "TENANT_PROJECTION_WRITER_PASSWORD",
+    "REDPANDA_SUPERUSER_PASSWORD",
     "ONEX_LOCAL_BIFROST_OVERLAY",
 )
 
@@ -56,6 +57,7 @@ def _write_laptop_files(tmp_path: Path) -> tuple[Path, Path]:
         "VALKEY_PASSWORD": secrets.token_hex(32),
         "OMNINODE_RUNTIME_PASSWORD": secrets.token_hex(32),
         "TENANT_PROJECTION_WRITER_PASSWORD": secrets.token_hex(32),
+        "REDPANDA_SUPERUSER_PASSWORD": secrets.token_hex(32),
         "ONEX_LOCAL_BIFROST_OVERLAY": str(overlay),
     }
     lines = []

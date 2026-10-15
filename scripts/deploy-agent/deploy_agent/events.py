@@ -650,6 +650,60 @@ class ModelVerifyRecreate(BaseModel):
         return line
 
 
+class EnumOneShotRerunReason(StrEnum):
+    """Why a control-plane one-shot was re-run by a no-deps runtime rebuild."""
+
+    #: The container exists and its running config hash differs from the one
+    #: compose renders now: the one-shot's declaration moved since it last ran.
+    CONFIG_CHANGED = "config_changed"
+    #: No container for the one-shot exists on the lane, so it has never run.
+    NEVER_RAN = "never_ran"
+
+
+class ModelOneShotRerun(BaseModel):
+    """One control-plane one-shot a runtime rebuild re-ran, and how it ended (OMN-19911).
+
+    A runtime rebuild starts its services with ``up -d --no-deps``, and compose
+    never revisits a completed one-shot it was not asked to start. On a lab dev lane on
+    2026-09-28 that left ``redpanda-partition-cap`` on a config hash that
+    predated the change moving the control-plane topic's creation into it, and
+    the writers started against a broker without the topic. The re-run is a
+    mutation the agent decides to perform on a lane, so it is a durable fact on
+    the job record and the terminal event rather than a log line.
+
+    ``exit_code`` is ``None`` until the one-shot has been run, and when compose
+    reports no exit code for it; ``completed`` is true only for a one-shot that
+    exited 0.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    service: str
+    lane: EnumRuntimeLane
+    compose_project: str
+    reason: EnumOneShotRerunReason
+    running_config_hash: str = ""
+    rendered_config_hash: str
+    exit_code: int | None = None
+    completed: bool = False
+
+    def describe(self) -> str:
+        """One-line, log-ready statement of what was re-run and how it ended."""
+        if self.reason == EnumOneShotRerunReason.NEVER_RAN:
+            why = "never ran on this lane"
+        else:
+            why = (
+                f"config hash {self.running_config_hash[:12]} -> "
+                f"{self.rendered_config_hash[:12]}"
+            )
+        if self.completed:
+            outcome = "exited 0"
+        elif self.exit_code is None:
+            outcome = "no exit code recorded"
+        else:
+            outcome = f"did not complete (exit code {self.exit_code})"
+        return f"{self.service} on {self.compose_project} re-run ({why}): {outcome}"
+
+
 #: The build-context repository. ``git_ref`` is always a commit of this one.
 INFRA_REPOSITORY: Final = "omnibase_infra"
 
@@ -1242,6 +1296,10 @@ class ModelRebuildCompleted(BaseModel):
     # only that the job failed, which is why the same wedge recurred three
     # times across two nights with nothing to distinguish the occurrences.
     verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
+    # OMN-19911: the control-plane one-shots a runtime rebuild re-ran because
+    # their config hash moved (or they never ran), each with its exit code.
+    # Empty is the normal reading and a FACT: nothing needed re-running.
+    oneshot_reruns: list[ModelOneShotRerun] = Field(default_factory=list)
     # OMN-18640: what the deps leg found before it acted -- per core service,
     # the running config hash, the rendered one, and whether convergence was
     # therefore about to replace that container. Empty for a deploy whose deps

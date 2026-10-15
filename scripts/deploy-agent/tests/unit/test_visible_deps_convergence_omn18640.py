@@ -386,6 +386,7 @@ class TestTheArgvIsRecorded:
             patch.object(
                 DeployExecutor, "_ensure_runtime_migrations_ready", return_value=None
             ),
+            patch.object(DeployExecutor, "rerun_changed_oneshots", return_value=[]),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),

@@ -41,8 +41,12 @@ class HandlerProjectionDerivedWrite:
         returning: Sequence[str],
     ) -> tuple[str, ...]:
         """Validate the capability before any SQL, and name its internal readback."""
-        for columns in (input_columns, derived_columns, returning):
-            if not columns or len(set(columns)) != len(columns):
+        for columns, required in (
+            (input_columns, True),
+            (derived_columns, True),
+            (returning, False),
+        ):
+            if (required and not columns) or len(set(columns)) != len(columns):
                 raise ValueError(
                     "derived write requires non-empty, distinct column lists"
                 )
@@ -115,7 +119,8 @@ class HandlerProjectionDerivedWrite:
                     sql.Identifier(column), sql.Placeholder(f"input_{index}")
                 )
             )
-        columns = sql.SQL(", ").join(sql.Identifier(column) for column in returning)
+        readback = tuple(returning) or tuple(conflict_columns)
+        columns = sql.SQL(", ").join(sql.Identifier(column) for column in readback)
         rows = cursor.run_guarded_derived_update(
             sql.SQL("UPDATE {}.{} SET {} WHERE {} RETURNING {}").format(
                 sql.Identifier(schema),
@@ -125,10 +130,10 @@ class HandlerProjectionDerivedWrite:
                 columns,
             ),
             parameters,
-            returning=returning,
+            returning=readback,
         )
         if len(rows) != 1:
             raise RuntimeError(
                 "derived write input guard did not update exactly one row"
             )
-        return rows
+        return rows if returning else []

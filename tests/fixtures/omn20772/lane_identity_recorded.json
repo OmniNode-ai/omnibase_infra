@@ -1,0 +1,25 @@
+{
+  "_provenance": {
+    "source": "scripts/ci/lab_pass_receipt.py lane-identity, read-only, against the running dev-lane runtime containers and their migration ledger",
+    "captured_utc": "2026-10-15T10:04:00Z"
+  },
+  "identity": {
+    "generation": {
+      "container": "omninode-runtime",
+      "container_id": "61c0ec8f3d19079e4deaa9921ebe265f2130fc3f6f966d3c040f533eb09b618d",
+      "image": "sha256:063b680c7fc100d401a6d5e6d3977bfbbc405bc608f4048f57bfc410266d0096",
+      "revision": "d9aec20ce7e0107a15dd55cdbfa74643290b5fc2"
+    },
+    "pins": {
+      "omnibase-core": "omnibase-core==0.47.39",
+      "omnibase-spi": "omnibase-spi==0.23.5",
+      "omnibase-compat": "omnibase-compat==0.5.7"
+    },
+    "image_ids": {
+      "omninode-runtime": "sha256:063b680c7fc100d401a6d5e6d3977bfbbc405bc608f4048f57bfc410266d0096",
+      "omninode-runtime-effects": "sha256:6cf2d1e64c5baef77772588acaf644260ef852f94de9e0c8296f310b96c4091a"
+    },
+    "overlay_digest": "sha256:898d78eaaba58ae9dd0063bae9de5bc2f31cdec10c87636471d2b9d6cf1252c0",
+    "migration_fingerprint": "sha256:bd021bd991d78044f2a0250319fbbb68fc58d2ab6c18e15530050d2b5fe67b09"
+  }
+}

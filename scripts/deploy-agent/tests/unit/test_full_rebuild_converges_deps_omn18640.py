@@ -120,6 +120,7 @@ def _capture_full_rebuild(lane: EnumRuntimeLane, **kwargs: Any) -> list[list[str
         patch.object(
             DeployExecutor, "_ensure_runtime_migrations_ready", return_value=None
         ),
+        patch.object(DeployExecutor, "rerun_changed_oneshots", return_value=[]),
         patch.object(DeployExecutor, "_pull_pinned_image", return_value=None),
         patch.object(DeployExecutor, "_resolve_prod_image_env", return_value={}),
         patch("deploy_agent.executor.verify_containers_up", return_value=(True, [])),

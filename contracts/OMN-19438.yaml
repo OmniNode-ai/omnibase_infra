@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19438
+title: savings_estimates rows carry the registry tenant UUID, never the house slug
+summary: Vendors the omnimarket savings re-backfill migration (095), declares its checksum and class, so the lab runner re-attributes the savings_estimates rows stored under the house slug after 091 was recorded as applied.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19438-vendor-rebackfill
+    statement: The omnimarket savings re-backfill migration is vendored byte-identical, bound to a content checksum in the application migration manifest and declared forward-only.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the vendored 095 file, its manifest row and its class declaration validate together -- falsifier: scripts/validation/validate_application_migration_manifest.py --require-complete or scripts/validation/check_migration_class.py exits nonzero when any of the three is missing or disagrees'
+evidence_requirements:
+  - kind: tests
+    description: The manifest validator, the migration class check and the vendor sync check.
+    command: python3 scripts/validation/validate_application_migration_manifest.py --require-complete
+  - kind: tests
+    description: Regression tests bind the vendored bytes, ledger row and forward-only class; live PostgreSQL applies 095 to slug rows written after 091 and reads back tenant isolation and idempotence.
+    command: uv run pytest tests/unit/migrations/test_095_savings_rebackfill_omn19438.py tests/integration/migrations/test_095_savings_rebackfill_omn19438.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19438-rebackfill-regression
+    description: The regression fails without 095, its checksum-bound manifest entry or its forward-only declaration. The live proof checks post-091 slug rows, other tenants, forced RLS, idempotence and registry drift refusal on a throwaway PostgreSQL cluster.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_095_savings_rebackfill_omn19438.py tests/integration/migrations/test_095_savings_rebackfill_omn19438.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19438-infra-manifest
+    description: The application migration manifest binds the vendored 095 file to its checksum.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "python3 scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill\\.sql\\t.*\\t778e9b2a9aa566ebc4a2479079c096992d8c1de0be5949aab777bbf6aa921663$' docker/migrations/forward/_ledger/application-migrations.tsv"
+    binds_ac:
+      - AC1
+  - id: dod-omn19438-infra-class
+    description: The migration class declaration covers the vendored 095 file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "python3 scripts/validation/check_migration_class.py && grep -qF 'forward/nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill.sql: forward-only' config/migration_classes.yaml"
+    binds_ac:
+      - AC1
+  - id: dod-omn19438-deploy-probe-vendored
+    description: Deploy probe. It reads the vendored migration from GitHub at the evaluated checkout's commit and requires the exact-slug UPDATE. It does not claim the lab database has been migrated. It fails on the merge-base tree, which has no 095 file.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/forward/nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill.sql?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF "WHERE tenant_id = ''omninode''"'

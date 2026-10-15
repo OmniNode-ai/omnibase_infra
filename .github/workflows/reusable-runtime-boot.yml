@@ -1021,13 +1021,67 @@ jobs:
           make local-env \
             LOCAL_ENV_FILE="${RUNNER_TEMP}/omnibase/local.env" \
             LOCAL_OVERLAY_FILE="${RUNNER_TEMP}/omnibase/local.bifrost.yaml"
-          # Names only: the file carries two generated passwords.
+          # Names only: the file carries five generated passwords.
           sed -e 's/=.*$/=<set>/' "${RUNNER_TEMP}/omnibase/local.env" | grep -v '^#' | grep .
 
       - name: Boot the laptop profile (make up-local)
         run: |
           set -euo pipefail
           make up-local LOCAL_ENV_FILE="$LOCAL_ENV_FILE" LOCAL_OVERLAY_FILE="$LOCAL_OVERLAY_FILE"
+
+      # OMN-20820: the laptop broker requires authentication. `make
+      # check-sasl-local` makes one anonymous probe, which must be refused with
+      # "SASL is required but not provided", and one probe as the local
+      # superuser, which must be accepted: the second is the positive control
+      # that keeps a dead broker (which refuses everyone) from reading as a
+      # secured one. Removing redpanda-local-sasl from the bundle fails the
+      # render or the first probe; stripping the credentials from the second
+      # probe fails it. Regression test:
+      # tests/unit/infra/test_catalog_local_profile.py -k sasl and
+      # tests/ci/test_runtime_boot_catalog_local_sasl_omn20820.py.
+      - name: Broker requires SASL - anonymous client refused, local superuser accepted
+        run: |
+          set -euo pipefail
+          make check-sasl-local LOCAL_ENV_FILE="$LOCAL_ENV_FILE"
+
+      # OMN-20820: every one-shot of the render (a service with `restart: "no"`)
+      # has run to completion and exited 0, including redpanda-local-sasl. The
+      # list is derived from the `local` render, so a one-shot added later is
+      # covered, and one that never ran fails the step instead of being skipped.
+      - name: Every laptop one-shot exited 0
+        run: |
+          set -euo pipefail
+          services="$(uv run python - <<'PY'
+          from omnibase_infra.docker.catalog.generator import generate_compose
+          from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
+          compose = generate_compose(CatalogResolver(catalog_dir="docker/catalog").resolve(["local"]))
+          for name, svc in compose["services"].items():
+              if svc.get("restart") == "no":
+                  print(name)
+          PY
+          )"
+          if [ -z "$services" ]; then
+            echo "::error::the local render lists no one-shot"
+            exit 1
+          fi
+          failed=()
+          for svc in $services; do
+            container="${LOCAL_PROJECT}-${svc}"
+            state="$(docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}}' "$container" 2>/dev/null || echo missing)"
+            echo "${svc}: ${state}"
+            if [ "$state" != "exited exit=0" ]; then
+              failed+=("${svc}=${state}")
+            fi
+          done
+          if ! grep -qx redpanda-local-sasl <<< "$services"; then
+            echo "::error::the local render lists no redpanda-local-sasl one-shot"
+            exit 1
+          fi
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::laptop one-shots that did not exit 0: ${failed[*]}"
+            exit 1
+          fi
 
       - name: Migration gate healthy
         run: |
@@ -1198,8 +1252,20 @@ jobs:
           # with the group live (job 107881660050). The regression test
           # tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py runs
           # this step's own text against a stub broker.
+          #
+          # OMN-20820: the broker requires SASL, so every rpk call here
+          # authenticates as the local superuser. The password is read from the
+          # env file and handed to docker by name, never on a command line.
+          pass="$(sed -n 's/^REDPANDA_SUPERUSER_PASSWORD=//p' "$LOCAL_ENV_FILE")"
+          if [ -z "$pass" ]; then
+            echo "::error::REDPANDA_SUPERUSER_PASSWORD is absent from the laptop env file"
+            exit 1
+          fi
+          broker_rpk() {
+            RPK_PASS="$pass" docker exec -e RPK_USER=onex-local -e RPK_PASS -e RPK_SASL_MECHANISM=SCRAM-SHA-256 "$broker" rpk "$@"
+          }
           for _ in $(seq 1 30); do
-            if ! groups="$(docker exec "$broker" rpk group list)"; then
+            if ! groups="$(broker_rpk group list)"; then
               echo "rpk group list failed; retrying"
               groups=""
             fi
@@ -1207,7 +1273,7 @@ jobs:
                 '$2 ~ /node_delegate_skill_orchestrator/ && index($2, topic) && $3 == "Stable" {print $2; exit}' \
                 <<< "$groups")"
             if [ -n "$group" ]; then
-              describe="$(docker exec "$broker" rpk group describe "$group")"
+              describe="$(broker_rpk group describe "$group")"
               head -12 <<< "$describe"
               members="$(awk '$1 == "MEMBERS" {print $2}' <<< "$describe")"
               if [ "${members:-0}" -ge 1 ]; then
@@ -1217,7 +1283,7 @@ jobs:
             fi
             sleep 10
           done
-          docker exec "$broker" rpk group list | grep -i delegate || true
+          broker_rpk group list | grep -i delegate || true
           echo "::error::no live node_delegate_skill_orchestrator consumer group on ${DELEGATE_COMMAND_TOPIC}"
           exit 1
 
@@ -1430,7 +1496,7 @@ jobs:
         if: always()
         run: |
           docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
-          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap projection-api omnimarket-projection-llm-cost consumer-health-projection; do
+          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap redpanda-local-sasl projection-api omnimarket-projection-llm-cost consumer-health-projection; do
             echo "::group::${svc} logs (tail)"
             docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
             echo "::endgroup::"
