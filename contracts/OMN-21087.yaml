@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21087
+title: onex delegate on a host with no lab row delegates under its own install identity instead of refusing on the lab host declaration
+summary: On a developer laptop whose registry sits beside the lab hosts table, onex delegate located lab_run_hosts.yaml through OMNI_HOME, found no row for the laptop, and refused with "expected one host row for <host>, found 0" before dispatching, on the in-memory transport as well. read_lab_host_tenant now returns None for a host the table does not list, so the install identity stands; a declared ONEX_LANE_HOST with no row, a row without a tenant_id and a host matching two rows still refuse, and a declared lab host still resolves its lab tenant. CLI resolution only; no runtime change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-undeclared-host-delegates-locally
+    statement: A host with no row in the lab hosts table delegates under its own install identity, and the lab declaration binds only declared lab hosts.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: onex delegate on a host that the lab hosts table does not list dispatches in memory under the install identity -- falsifier: the command refuses with "expected one host row" for such a host'
+      - id: AC2
+        statement: 'AC2: a declared lab host still resolves its lab tenant from the table -- falsifier: a declared host stamps the install identity, or a declared host with no row does not refuse'
+evidence_requirements:
+  - kind: tests
+    description: The focused tests dispatch an in-memory delegation on a host absent from a lab hosts file, resolve the lab tenant for a declared host, and refuse a declared lane host with no row.
+    command: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-undeclared-host-local-identity-ac1
+    description: A fixture lab hosts file that lacks the current host, with the in-memory transport, dispatches under the install identity.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q -k HostWithNoLabRow
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-declared-lab-host-tenant-ac2
+    description: A declared lab host still resolves its lab tenant and a declared lane host with no row still refuses.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py tests/integration/cli/test_delegate_lab_host_tenant_omn18829.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-deploy
+    description: The CLI source at the evaluated checkout revision returns None for a host the lab hosts table does not list; the merge base lacks this branch.
+    source: manual
+    checks:
+      - check_type: command
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        # Resolve the revision in the evaluated tree, including the base control.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'if not matches and not host:' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

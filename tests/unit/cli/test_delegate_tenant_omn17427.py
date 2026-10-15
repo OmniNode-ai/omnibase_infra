@@ -426,3 +426,101 @@ class TestLabHostTenant:
             omni_home=registry,
         )
         assert TestRunDelegate._sent_payload(captured)["tenant_id"] == house
+
+
+class TestHostWithNoLabRow:
+    """A host the lab table does not list is not a lab host (OMN-21087).
+
+    A developer laptop that finds the lab table (through OMNI_HOME or
+    ONEX_LAB_RUN_HOSTS) is not thereby a lab host. The table declares the lab
+    hosts; a host with no row in it has no lab tenant to resolve and delegates
+    under its own install identity. Only a lab host that is declared, by name or
+    by ONEX_LANE_HOST, is held to the table.
+    """
+
+    _HOUSE = "820272f9-4aaf-5add-a2df-0af942852ab2"
+
+    def _row(self, name: str, target: str | None = None) -> str:
+        return (
+            f"  - name: {name}\n    target: {target or name + '.invalid'}\n"
+            f"    tenant_id: {self._HOUSE}\n"
+        )
+
+    def _table(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *rows: str
+    ) -> dict[str, str]:
+        table = tmp_path / "lab_run_hosts.yaml"
+        table.write_text("hosts:\n" + "".join(rows), encoding="utf-8")
+        monkeypatch.setenv("ONEX_LAB_RUN_HOSTS", str(table))
+        return {"ONEX_LAB_RUN_HOSTS": str(table)}
+
+    @pytest.fixture(autouse=True)
+    def _laptop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "omnibook")
+        monkeypatch.setattr(cli_delegate, "_lab_target_is_local", lambda _target: False)
+        monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+
+    @pytest.mark.parametrize("in_process", [True, False])
+    def test_table_without_this_host_keeps_install_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_process: bool
+    ) -> None:
+        environ = self._table(
+            tmp_path, monkeypatch, self._row("h201"), self._row("h202")
+        )
+        assert (
+            resolve_delegate_tenant(in_process=in_process, environ=environ) == _MINTED
+        )
+
+    def test_uninitialised_laptop_in_process_carries_no_stamp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # OMN-19966 still applies: no row, no identity, in process.
+        monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: None)
+        environ = self._table(tmp_path, monkeypatch, self._row("h201"))
+        assert resolve_delegate_tenant(in_process=True, environ=environ) is None
+
+    def test_inmemory_delegation_dispatches_under_the_install_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._table(tmp_path, monkeypatch, self._row("h201"), self._row("h202"))
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+        )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == _MINTED
+
+    def test_declared_lab_host_still_resolves_its_lab_tenant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._table(tmp_path, monkeypatch, self._row("h201"), self._row("h202"))
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "h202")
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+        )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == self._HOUSE
+
+    def test_lane_host_declared_but_absent_from_the_table_still_refuses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        environ = self._table(tmp_path, monkeypatch, self._row("h201"))
+        with pytest.raises(DelegateTenantRefusedError, match="found 0"):
+            resolve_delegate_tenant(
+                in_process=True, environ={**environ, "ONEX_LANE_HOST": "h999"}
+            )
+
+    def test_host_matching_two_rows_still_refuses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        environ = self._table(
+            tmp_path,
+            monkeypatch,
+            self._row("omnibook", "a.invalid"),
+            self._row("h201", "omnibook"),
+        )
+        with pytest.raises(DelegateTenantRefusedError, match="found 2"):
+            resolve_delegate_tenant(in_process=True, environ=environ)
