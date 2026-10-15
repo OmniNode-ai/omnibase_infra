@@ -12,8 +12,7 @@ multi-provider finish-reason mapping); it implements exactly what one
 delegation-inference cycle needs: build the request, POST it, parse the
 response, fail closed on anything else.
 
-The model base URL is always caller-supplied (``--model-base``). Nothing
-here defaults to ``127.0.0.1:8099`` or any other literal -- the operator
+The model base URL is always caller-supplied (``--model-base``). The operator
 names their own local model's address explicitly, every run.
 """
 
@@ -72,6 +71,8 @@ async def run_chat_completion(
       -> ``InfraProtocolError``. There is no fallback that returns an empty
       or synthesized completion.
     """
+    if not model_base.strip():
+        raise ValueError("model_base is required; supply the model endpoint explicitly")
     url = model_base.rstrip("/") + _CHAT_COMPLETIONS_PATH
     try:
         response = await http_client.post(url, json=_build_wire_payload(request))

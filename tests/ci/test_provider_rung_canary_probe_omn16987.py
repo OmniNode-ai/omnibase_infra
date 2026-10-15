@@ -76,7 +76,6 @@ def test_the_recorded_lab_reading_grades_each_rung_as_observed() -> None:
         "cloud-glm-judge": probe.LIVE,
         "cloud-gemini-flash": probe.LIVE,
         "cloud-vertex-gemini": probe.SKIPPED_NO_ENDPOINT,
-        "local-ds-v4-flash": probe.SKIPPED_NO_ENDPOINT,
         OPENROUTER: probe.UNRESOLVED,
         "local-omnipc2-chat": probe.SKIPPED_NO_REF,
     }

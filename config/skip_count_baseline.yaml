@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 569
+    max_skips: 568
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -71,7 +71,7 @@ suites:
           measured_by: OMN-19251
           delta: 1
           reason: >-
-            One `[NOTSET]` id, from an empty pytest.mark.parametrize. OMN-19251 deleted the last `serving: false` (dark) lab binding -- the dead local-ds-v4-flash rung on the retired .200:8101 host -- from every .201 lane overlay. tests/unit/runtime/test_bifrost_served_model_probe_fixture.py parametrizes test_non_serving_bindings_have_a_failed_probe_on_record over the dark-binding set collected from those overlays; with that set now empty, pytest auto-skips the parametrization with reason "got empty parameter set for (pair)" and reports the single `[NOTSET]` id below instead of silently vanishing. It is not a broken proof: the positive control beside it (test_the_lab_overlays_bind_a_serving_backend) still asserts a serving binding exists, and the parametrized test itself resumes running the moment a lane overlay declares a dark binding again -- an empty parametrization, not a deleted test.
+            One `[NOTSET]` id, from an empty pytest.mark.parametrize. OMN-19251 deleted the last `serving: false` (dark) lab binding -- the dead reasoning rung on its retired host -- from every lab lane overlay. tests/unit/runtime/test_bifrost_served_model_probe_fixture.py parametrizes test_non_serving_bindings_have_a_failed_probe_on_record over the dark-binding set collected from those overlays; with that set now empty, pytest auto-skips the parametrization with reason "got empty parameter set for (pair)" and reports the single `[NOTSET]` id below instead of silently vanishing. It is not a broken proof: the positive control beside it (test_the_lab_overlays_bind_a_serving_backend) still asserts a serving binding exists, and the parametrized test itself resumes running the moment a lane overlay declares a dark binding again -- an empty parametrization, not a deleted test.
           node_ids:
             - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
         - measured_at: '2026-09-24'
@@ -663,7 +663,6 @@ suites:
       - tests.unit.nodes.reducers.test_registration_reducer.TestPropertyBasedStateInvariants::test_state_failure_reason_consistency
       - tests.unit.nodes.reducers.test_registration_reducer.TestPropertyBasedStateInvariants::test_state_node_id_consistency
       - tests.unit.nodes.test_registry_api_effect_handler_stubs::test_handler_raises_not_implemented[NOTSET]
-      - tests.unit.runtime.test_bifrost_parameter_count_matches_served_id::test_parameter_count_agrees_with_the_served_model_id[local-ds-v4-flash]
       - tests.unit.runtime.test_bifrost_served_model_probe_fixture::test_non_serving_bindings_have_a_failed_probe_on_record[NOTSET]
       - tests.unit.runtime.test_dispatch_result_applier_topic_routing.TestDelegationTopicRegistryNoDrift::test_applier_resolved_topics_match_owning_contract
       - tests.unit.runtime.test_event_bus_subscriber_container_resolution::test_delegation_plugin_falls_back_to_config_event_bus_when_container_absent

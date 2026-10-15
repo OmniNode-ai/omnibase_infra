@@ -85,14 +85,13 @@ _RUNTIME_REQUIRED_URL_ENV_VARS: frozenset[str] = frozenset(
     [
         "LLM_CODER_URL",
         "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
     ]
 )
 
 # OMN-16442: slots whose backing hardware/listener is gone. Asserted `disabled`
 # so a future edit cannot flip one back to `running` without re-probing.
 _DECOMMISSIONED_SLOT_IDS: frozenset[str] = frozenset(
-    {"coder-fast-4090", "reasoning-moe-35b", "embeddings-200"}
+    {"coder-fast-4090", "reasoning-deepseek-32b", "reasoning-moe-35b", "embeddings-200"}
 )
 _SUPPORTED_TOPOLOGY_FIELDS: frozenset[str] = frozenset(
     [
@@ -258,6 +257,22 @@ class TestLlmEndpointsContract:
                 f"disabled slot {slot_id!r} must not own a runtime env var"
             )
 
+    def test_retired_reasoning_slot_releases_all_deployment_fields(self) -> None:
+        by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
+        slot = by_slot["reasoning-deepseek-32b"]
+        assert slot["status"] == "disabled"
+        for field in (
+            "host",
+            "port",
+            "endpoint_url",
+            "url_env_var",
+            "role_env_alias",
+            "model_hf_id",
+            "context_window_budgeted",
+            "launchd_unit_or_none",
+        ):
+            assert slot[field] is None, field
+
     def test_live_slots_record_their_probed_served_identity(self) -> None:
         """The running slots carry their last live-probed identities.
 
@@ -265,7 +280,7 @@ class TestLlmEndpointsContract:
         OMN-16419 and OMN-16407) shows up as a red test rather than as silent
         mis-attribution to a model that is not running.
 
-        coder-5090 re-pinned 2026-09-03 (OMN-14379); the other two remain on
+        coder-5090 re-pinned 2026-09-03 (OMN-14379); embeddings remain on
         their 2026-08-28 probe (OMN-16442).
         """
         by_slot = {ep["slot_id"]: ep for ep in _load_endpoints()}
@@ -288,12 +303,6 @@ class TestLlmEndpointsContract:
         assert emb["status"] == "running"
         assert emb["endpoint_url"] == "http://192.168.86.201:8002"
         assert emb["model_hf_id"] == "Qwen/Qwen3-Embedding-0.6B"
-
-        # GET .200:8101/v1/models -> {"deepseek-v4-flash", "deepseek-v4-pro"}.
-        ds = by_slot["reasoning-deepseek-32b"]
-        assert ds["status"] == "running"
-        assert ds["endpoint_url"] == "http://192.168.86.200:8101"
-        assert ds["model_hf_id"] == "antirez/deepseek-v4-gguf"
 
     def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
         """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.
