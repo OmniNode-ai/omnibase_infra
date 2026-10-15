@@ -2539,10 +2539,15 @@ class EventBusKafka(
 
         while True:
             try:
-                await asyncio.wait_for(
-                    consumer.start(),
-                    timeout=self._timeout_seconds,
-                )
+                # Assignment alone is not readiness: aiokafka resolves the
+                # initial fetch positions in the background after start(). A
+                # late reset to "latest" can skip a record published as soon
+                # as subscribe() returns. Resolve every assigned position
+                # before exposing the consumer, within the startup budget.
+                async with asyncio.timeout_at(metadata_retry_deadline):
+                    await consumer.start()
+                    for partition in consumer.assignment():
+                        await consumer.position(partition)
                 break  # success — exit retry loop
 
             except asyncio.CancelledError:
