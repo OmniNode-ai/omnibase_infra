@@ -173,6 +173,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -620,6 +621,11 @@ class ModelLabProofSubject:
         )
 
 
+#: OMN-20772. The values ``ModelLabPassCheck.error_class`` may carry besides the
+#: empty "unclassified".
+CHECK_ERROR_CLASSES: Final[frozenset[str]] = frozenset({"", "transport", "assertion"})
+
+
 @dataclass(frozen=True)
 class ModelLabPassCheck:
     """One named integration check and the evidence for its verdict."""
@@ -639,8 +645,26 @@ class ModelLabPassCheck:
     #: OMN-18488: author-declared labels, never inferred from probe names.
     binds_ac: tuple[str, ...] = ()
     ac_binding_hashes: tuple[tuple[str, str], ...] = ()
+    #: OMN-20772. How a non-passing check failed: ``transport`` when the probe
+    #: never got an answer (refused, timed out, unreachable), ``assertion`` when
+    #: it read an answer and the answer was wrong. Empty means unclassified: a
+    #: failing check then reads as ``assertion`` and an INDETERMINATE one as
+    #: ``indeterminate`` in the post-merge event. A passing check carries none.
+    #: Written to the wire only when non-empty, so every receipt written before
+    #: this field parses byte-identically.
+    error_class: str = ""
 
     def __post_init__(self) -> None:
+        if self.error_class not in CHECK_ERROR_CLASSES:
+            raise ValueError(
+                f"check {self.name!r}: error_class={self.error_class!r} is not "
+                f"one of {sorted(CHECK_ERROR_CLASSES)}"
+            )
+        if self.ok and self.error_class:
+            raise ValueError(
+                f"check {self.name!r}: a passing check cannot carry "
+                f"error_class={self.error_class!r}"
+            )
         if (
             not isinstance(self.binds_ac, tuple)
             or any(
@@ -734,6 +758,8 @@ class ModelLabPassCheck:
             payload["binds_ac"] = list(self.binds_ac)
         if self.ac_binding_hashes:
             payload["ac_binding_hashes"] = dict(self.ac_binding_hashes)
+        if self.error_class:
+            payload["error_class"] = self.error_class
         return payload
 
     @classmethod
@@ -743,7 +769,15 @@ class ModelLabPassCheck:
             raise ValueError(msg)
         unknown = sorted(
             set(payload)
-            - {"name", "ok", "evidence", "outcome", "binds_ac", "ac_binding_hashes"}
+            - {
+                "name",
+                "ok",
+                "evidence",
+                "outcome",
+                "binds_ac",
+                "ac_binding_hashes",
+                "error_class",
+            }
         )
         if unknown:
             # extra="forbid", by hand: an unrecognised field means the writer
@@ -786,6 +820,7 @@ class ModelLabPassCheck:
                 indeterminate=indeterminate,
                 binds_ac=tuple(labels),
                 ac_binding_hashes=tuple(pins.items()),
+                error_class=payload.get("error_class", ""),
             )
         except KeyError as exc:
             msg = f"check is missing required field {exc.args[0]!r}"
@@ -1544,6 +1579,11 @@ def _http_get(url: str, timeout_seconds: float) -> tuple[int, str]:
     return status, body
 
 
+def _transport_class(status: int) -> str:
+    """``transport`` when ``_http_get`` got no answer at all (it reports 0)."""
+    return "transport" if status == 0 else ""
+
+
 def _truncate(text: str, limit: int = 240) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
@@ -1558,6 +1598,7 @@ def check_ready(name: str, url: str, timeout_seconds: float) -> ModelLabPassChec
         name=name,
         ok=status == 200,
         evidence=f"GET {url} -> {status} {_truncate(body)}",
+        error_class=_transport_class(status),
     )
 
 
@@ -1578,6 +1619,7 @@ def check_projections_ready(url: str, timeout_seconds: float) -> ModelLabPassChe
             name="projection_ready",
             ok=False,
             evidence=f"GET {url} -> {status} {_truncate(body)}",
+            error_class=_transport_class(status),
         )
     try:
         payload = json.loads(body)
@@ -1673,6 +1715,7 @@ def check_health_dimensions(url: str, timeout_seconds: float) -> ModelLabPassChe
             name="health_dimensions",
             ok=False,
             evidence=f"GET {url} -> {status} {_truncate(body)}",
+            error_class=_transport_class(status),
         )
     try:
         payload = json.loads(body)
@@ -1882,6 +1925,7 @@ def check_node_inventory(url: str, timeout_seconds: float) -> ModelNodeInventory
                 name=NODE_INVENTORY_CHECK,
                 ok=False,
                 evidence=f"GET {url} -> {status} {_truncate(body)}",
+                error_class=_transport_class(status),
             ),
             triples=(),
         )
@@ -3391,6 +3435,273 @@ def load_node_inventory_json(
         return ()
     payload = json.loads(path.read_text(encoding="utf-8"))
     return parse_node_inventory(payload)
+
+
+# ---------------------------------------------------------------------------
+# OMN-20772 -- the post-merge lab-pass receipt event
+# ---------------------------------------------------------------------------
+
+#: The topic the post-merge receipt event is published on. Typed as
+#: ``omnibase_infra.models.lab_pass.ModelPostMergeLabPassReceiptEvent``; this
+#: module is stdlib only, so it builds the document and the typed model is what
+#: a consumer (and the tests) validate it with.
+POST_MERGE_EVENT_TOPIC: Final[str] = (
+    "onex.evt.omnibase-infra.post-merge-lab-pass-receipt.v1"
+)
+
+#: Fixed, so ``event_id`` is a pure function of the receipt: a republish of the
+#: same receipt carries the same id and a consumer can drop the duplicate.
+_POST_MERGE_EVENT_NAMESPACE: Final[uuid.UUID] = uuid.uuid5(
+    uuid.NAMESPACE_URL, "omnibase_infra/post-merge-lab-pass-receipt-event"
+)
+
+_IDENTITY_FIELDS: Final[frozenset[str]] = frozenset(
+    {"generation", "pins", "image_ids", "overlay_digest", "migration_fingerprint"}
+)
+
+
+@dataclass(frozen=True)
+class ModelPostMergeIdentity:
+    """What the lane was running when the pass was taken (OMN-20772).
+
+    Every field is required and non-empty: an identity with a hole in it binds
+    nothing, so :func:`parse_post_merge_identity` refuses it and the event then
+    carries ``binding_valid=false`` instead of a half-bound PASS.
+    """
+
+    generation: ModelLaneGeneration
+    pins: tuple[tuple[str, str], ...]
+    image_ids: tuple[tuple[str, str], ...]
+    overlay_digest: str
+    migration_fingerprint: str
+
+
+def _string_map(payload: Any, field: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(payload, dict) or not payload:
+        msg = f"identity field {field!r} must be a non-empty object"
+        raise ValueError(msg)
+    for key, value in payload.items():
+        if (
+            not isinstance(key, str)
+            or not key
+            or not isinstance(value, str)
+            or not value
+        ):
+            msg = f"identity field {field!r} must map non-empty strings to non-empty strings"
+            raise ValueError(msg)
+    return tuple(sorted(payload.items()))
+
+
+def parse_post_merge_identity(payload: Any) -> ModelPostMergeIdentity:
+    """Parse the identity record, refusing a partial or unrecognised one."""
+    if not isinstance(payload, dict):
+        msg = f"an identity record must be an object, got {type(payload).__name__}"
+        raise ValueError(msg)
+    unknown = sorted(set(payload) - _IDENTITY_FIELDS)
+    if unknown:
+        msg = f"unknown identity field(s) {unknown}"
+        raise ValueError(msg)
+    missing = sorted(_IDENTITY_FIELDS - set(payload))
+    if missing:
+        msg = f"identity record is missing required field(s) {missing}"
+        raise ValueError(msg)
+    generation = parse_generation(payload["generation"])
+    for name in ("container", "container_id", "image", "revision"):
+        if not getattr(generation, name):
+            msg = (
+                f"identity generation carries an empty {name!r}; a generation "
+                "with a hole in it cannot be compared"
+            )
+            raise ValueError(msg)
+    digests = {}
+    for name in ("overlay_digest", "migration_fingerprint"):
+        value = payload[name]
+        if not isinstance(value, str) or not value:
+            msg = f"identity field {name!r} must be a non-empty string"
+            raise ValueError(msg)
+        digests[name] = value
+    return ModelPostMergeIdentity(
+        generation=generation,
+        pins=_string_map(payload["pins"], "pins"),
+        image_ids=_string_map(payload["image_ids"], "image_ids"),
+        overlay_digest=digests["overlay_digest"],
+        migration_fingerprint=digests["migration_fingerprint"],
+    )
+
+
+def load_post_merge_identity(
+    path: Path | None,
+) -> tuple[ModelPostMergeIdentity | None, str]:
+    """Read the identity file; ``(None, reason)`` when its provenance is unreadable.
+
+    Never raises: an unreadable identity is a FINDING the event reports as
+    ``binding_valid=false``, not a reason to publish nothing.
+    """
+    if path is None:
+        return None, "no --identity-json was supplied, so the pass is bound to nothing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return parse_post_merge_identity(payload), ""
+    except (OSError, UnicodeError, ValueError) as exc:
+        return None, f"identity {path} is unreadable: {type(exc).__name__}: {exc}"
+
+
+def check_error_class(check: ModelLabPassCheck) -> str:
+    """The event's error class for one check: transport, assertion, indeterminate or none."""
+    if check.ok:
+        return "none"
+    if check.error_class:
+        return check.error_class
+    if check.indeterminate:
+        return "indeterminate"
+    return "assertion"
+
+
+def post_merge_event_id(receipt: ModelLabPassReceipt) -> str:
+    """A pure function of the receipt: the same receipt always has the same id."""
+    digest = hashlib.sha256(receipt.to_json().encode("utf-8")).hexdigest()
+    return str(
+        uuid.uuid5(
+            _POST_MERGE_EVENT_NAMESPACE,
+            f"{artifact_name(receipt.lane, receipt.sha)}|{digest}",
+        )
+    )
+
+
+def build_post_merge_event(
+    receipt: ModelLabPassReceipt,
+    identity: ModelPostMergeIdentity | None,
+    unreadable_reason: str = "",
+) -> dict[str, Any]:
+    """Render a receipt as the post-merge event; PASS and FAIL alike.
+
+    The verdict is PASS only when the receipt passed AND its provenance binds
+    it to the lane: an unreadable identity (``identity is None``) or a failing
+    binding-class check (:data:`BINDING_CLASS_CHECKS`) publishes FAIL with
+    ``binding_valid`` false, whatever the other checks said.
+    """
+    binding_failures = sorted(
+        c.name for c in receipt.checks if not c.ok and c.name in BINDING_CLASS_CHECKS
+    )
+    if identity is None:
+        binding_valid = False
+        binding_reason = unreadable_reason or "the identity record was not readable"
+    elif binding_failures:
+        binding_valid = False
+        binding_reason = f"binding-class check(s) failed: {', '.join(binding_failures)}"
+    else:
+        binding_valid = True
+        binding_reason = ""
+    failing = [c.name for c in receipt.checks if not c.ok]
+    dimensions = ([] if binding_valid else ["binding"]) + failing
+    generation = dict.fromkeys(("container", "container_ref", "image", "revision"), "")
+    if identity is not None:
+        recorded = identity.generation
+        generation = {
+            "container": recorded.container,
+            "container_ref": recorded.container_id,
+            "image": recorded.image,
+            "revision": recorded.revision,
+        }
+    return {
+        "schema_version": "1.0.0",
+        "event_type": "post-merge-lab-pass-receipt",
+        "topic": POST_MERGE_EVENT_TOPIC,
+        "event_id": post_merge_event_id(receipt),
+        "receipt_key": artifact_name(receipt.lane, receipt.sha),
+        # The partition key publish_lab_fact_event.py reads.
+        "lane": receipt.lane.value,
+        "sha": receipt.sha,
+        "generation": generation,
+        "identity": {
+            "pins": dict(identity.pins) if identity is not None else {},
+            "image_ids": dict(identity.image_ids) if identity is not None else {},
+            "overlay_digest": identity.overlay_digest if identity is not None else "",
+            "migration_fingerprint": (
+                identity.migration_fingerprint if identity is not None else ""
+            ),
+        },
+        "verdict": (
+            "PASS"
+            if receipt.result is EnumLabPassResult.PASS and binding_valid
+            else "FAIL"
+        ),
+        "receipt_result": receipt.result.value,
+        "binding_valid": binding_valid,
+        "binding_reason": binding_reason,
+        "checks": [
+            {
+                "name": c.name,
+                "outcome": c.outcome.value,
+                "error_class": check_error_class(c),
+                "evidence": c.evidence,
+            }
+            for c in receipt.checks
+        ],
+        "failing_dimensions": dimensions,
+        "started_at": receipt.started_at.isoformat(),
+        "finished_at": receipt.finished_at.isoformat(),
+        "agent_command_id": receipt.agent_command_id,
+    }
+
+
+def read_uv_override_pins(pyproject: Path) -> dict[str, str]:
+    """The exact dependency pins the delivered tree declares.
+
+    Read from ``[tool.uv] override-dependencies``, which is where this
+    repository pins ``omnibase-core`` exactly; a tree declaring none has no pins
+    to attest and RAISES rather than reporting an empty set as an identity.
+    """
+    import tomllib  # stdlib since 3.11, imported here to keep import time flat
+
+    document = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    entries = document.get("tool", {}).get("uv", {}).get("override-dependencies", [])
+    pins: dict[str, str] = {}
+    for entry in entries:
+        match = re.match(r"^\s*([A-Za-z0-9_.-]+)", str(entry))
+        if match:
+            pins[match.group(1).lower()] = str(entry).strip()
+    if not pins:
+        msg = f"{pyproject} declares no [tool.uv] override-dependencies pins"
+        raise ValueError(msg)
+    return pins
+
+
+def digest_files(paths: Sequence[Path]) -> str:
+    """One sha256 over the named files' names and bytes, in the order given."""
+    if not paths:
+        msg = "no overlay file was named, so there is nothing to digest"
+        raise ValueError(msg)
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode("utf-8") + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def collect_post_merge_identity(
+    *,
+    container: str,
+    image_containers: Sequence[str],
+    pyproject: Path,
+    overlay_files: Sequence[Path],
+    ledger: ModelMigrationLedger,
+) -> dict[str, Any]:
+    """Read the lane's deployment identity. Raises ValueError when any part is unreadable."""
+    generation = read_lane_generation(container)
+    image_ids = {name: read_lane_generation(name).image for name in image_containers}
+    applied = read_applied_migrations(ledger)
+    if not applied:
+        msg = f"{ledger.database} returned no applied migrations to fingerprint"
+        raise ValueError(msg)
+    fingerprint = hashlib.sha256("\n".join(sorted(applied)).encode("utf-8")).hexdigest()
+    return {
+        "generation": generation.to_dict(),
+        "pins": read_uv_override_pins(pyproject),
+        "image_ids": image_ids,
+        "overlay_digest": digest_files(overlay_files),
+        "migration_fingerprint": f"sha256:{fingerprint}",
+    }
 
 
 def build_receipt(
@@ -6275,6 +6586,47 @@ def build_parser() -> argparse.ArgumentParser:
             "publish failure must never fail a lab pass that genuinely ran."
         ),
     )
+    emit.add_argument(
+        "--identity-json",
+        type=Path,
+        default=None,
+        help=(
+            "OMN-20772. The identity record `lane-identity` wrote (generation, "
+            "pins, image ids, overlay digest, migration fingerprint). A missing "
+            "or unreadable file does not stop the receipt: the post-merge event "
+            "then publishes FAIL with binding_valid false."
+        ),
+    )
+    emit.add_argument(
+        "--post-merge-event-out",
+        type=Path,
+        default=None,
+        help=(
+            "OMN-20772. Also write the post-merge receipt event document to this "
+            "path, for publish_lab_fact_event.py. Written for a FAIL exactly as "
+            "for a PASS."
+        ),
+    )
+
+    identity = sub.add_parser(
+        "lane-identity",
+        help=(
+            "OMN-20772. Write the deployment identity record `emit "
+            "--identity-json` binds a post-merge event to"
+        ),
+    )
+    identity.add_argument("--container", required=True)
+    identity.add_argument(
+        "--image-container",
+        action="append",
+        default=[],
+        help="a container whose image id joins the identity; repeatable",
+    )
+    identity.add_argument("--pyproject", required=True, type=Path)
+    identity.add_argument("--overlay-file", action="append", default=[], type=Path)
+    identity.add_argument("--migration-container", required=True)
+    identity.add_argument("--migration-database", required=True)
+    identity.add_argument("--out", required=True, type=Path)
 
     revision = sub.add_parser(
         "lane-revision",
@@ -7015,6 +7367,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(build_bus_event(receipt), indent=2), encoding="utf-8"
             )
             print(f"wrote lab-pass bus event -> {args.event_out}")
+        if args.post_merge_event_out is not None:
+            identity, unreadable_reason = load_post_merge_identity(args.identity_json)
+            args.post_merge_event_out.parent.mkdir(parents=True, exist_ok=True)
+            args.post_merge_event_out.write_text(
+                json.dumps(
+                    build_post_merge_event(receipt, identity, unreadable_reason),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            print(f"wrote post-merge lab-pass event -> {args.post_merge_event_out}")
         print(f"wrote {artifact_name(receipt.lane, receipt.sha)} -> {args.out}")
         if args.github_output is not None:
             with args.github_output.open("a", encoding="utf-8") as handle:
@@ -7025,6 +7388,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         # exactly as valuable as the record of a passing one — but the emitting
         # step goes red so the failure is visible on the run that produced it.
         return 0 if receipt.result == EnumLabPassResult.PASS else 1
+
+    if args.command == "lane-identity":
+        try:
+            record = collect_post_merge_identity(
+                container=args.container,
+                image_containers=args.image_container or [args.container],
+                pyproject=args.pyproject,
+                overlay_files=args.overlay_file,
+                ledger=ModelMigrationLedger(
+                    container=args.migration_container,
+                    database=args.migration_database,
+                ),
+            )
+            parse_post_merge_identity(record)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            # No file is written. `emit` then finds no identity and publishes
+            # FAIL with binding_valid false, which is the honest answer.
+            print(
+                f"::warning::lane identity unreadable, the post-merge event will "
+                f"publish binding_valid=false: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return 0
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        print(f"wrote lane identity -> {args.out}")
+        return 0
 
     if args.command == "verify":
         return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
