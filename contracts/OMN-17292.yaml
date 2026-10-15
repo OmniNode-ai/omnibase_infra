@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 7126c39946cc6ca31686bfb7e02abc5b5874b15e"
+title: "The omnimarket contract pin advances to 0143496ce7118a743c257b4cdd7009229bc7eb7a"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,10 +10,10 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 emergency_bypass:
   enabled: false
@@ -21,7 +21,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 0143496ce7118a743c257b4cdd7009229bc7eb7a.
     source: manual
     checks:
       - check_type: test_passes
