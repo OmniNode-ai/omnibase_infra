@@ -13,7 +13,9 @@
 # PR's own changed paths deciding its conditional checks), runs the
 # offline verifier, and posts one check run named `lab-proof-receipt` on the
 # PROVEN head: `success` only for the verifier's ACCEPTED, `failure` with the
-# token in its title for anything else.
+# token in its title for anything else. A head carries exactly one such run:
+# when the onexbot App already posted one there (a rerun, a re-dispatch, a retry
+# after a post that landed), it is updated in place, never stacked (OMN-19566).
 #
 # WHY IT IS NEVER A REQUIRED CONTEXT. A check run posted on the PR head sha
 # never appears on a merge_group build, so a required context of this name
@@ -152,6 +154,7 @@ jobs:
       - name: Verify at the live head and post the check run
         env:
           LAB_PROOF_CHECK_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           HEAD_SHA: ${{ steps.live.outputs.head }}
           DIGEST: ${{ steps.live.outputs.digest }}
           DETAILS_URL: ${{ inputs.details_url }}
@@ -169,6 +172,7 @@ jobs:
           uv run python scripts/ci/lab_pass_receipt.py post-pr-head-check \
             --receipt "${RUNNER_TEMP}/receipt.json" \
             --head-sha "${HEAD_SHA}" \
+            --app-slug "${APP_SLUG}" \
             --profile-pin "${RUNNER_TEMP}/pin.json" \
             --current-pr-diff-digest "${DIGEST}" \
             --details-url "${DETAILS_URL:-${RUN_URL}}" \
