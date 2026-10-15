@@ -386,8 +386,11 @@ def observe_lane(
     interval: float,
     settle_seconds: float,
     injection_wait: float,
+    boot_grace_seconds: float = 0.0,
 ) -> TypedDictConsumerFlowCollected:
-    ident_before = lane.wait_settled(settle_seconds)
+    ident_before = lane.wait_settled(
+        settle_seconds, boot_grace_seconds=boot_grace_seconds
+    )
     try:
         return _observe_settled(
             lane,

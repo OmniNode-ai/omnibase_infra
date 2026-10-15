@@ -78,9 +78,20 @@ class ConsumerFlowLane:
         return out
 
     def wait_settled(
-        self, settle_seconds: float, poll: float = 15.0
+        self,
+        settle_seconds: float,
+        poll: float = 15.0,
+        *,
+        boot_grace_seconds: float = 0.0,
     ) -> dict[str, TypedDictConsumerFlowIdentity]:
-        deadline = self.monotonic() + settle_seconds
+        # OMN-19812: Docker reports health "starting" only while a container is
+        # inside its declared start period, so a lane whose every unsettled
+        # container is ('running', 'starting') is booting, not unsettled; it
+        # earns boot_grace_seconds past the settle window. Any other state ends
+        # the window at settle_seconds as before.
+        start = self.monotonic()
+        deadline = start + settle_seconds
+        boot_deadline = deadline + boot_grace_seconds
         while True:
             ident = self.identity()
             unsettled = {
@@ -90,7 +101,9 @@ class ConsumerFlowLane:
             }
             if not unsettled:
                 return ident
-            if self.monotonic() >= deadline:
+            now = self.monotonic()
+            booting = all(sh == ("running", "starting") for sh in unsettled.values())
+            if now >= (boot_deadline if booting else deadline):
                 raise ConsumerFlowLaneUnsettledError(
                     f"lane containers not running and healthy after {settle_seconds:.0f}s: {unsettled}"
                 )

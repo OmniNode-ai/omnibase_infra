@@ -270,3 +270,73 @@ def test_full_window_walk_proves_end_of_final_full_page() -> None:
         "proven": True,
     }
     assert lane.queries[-1] == {"since": "2000"}
+
+
+class _BootingLane(_RecordedLane):
+    """A recorded lane whose containers report health starting until boot_at."""
+
+    def __init__(self, recorded: dict[str, Any], clock: list[float]) -> None:
+        super().__init__(recorded)
+        self.clock = clock
+        self.boot_at = 700.0
+
+    def run(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = super().run(argv, **kwargs)
+        if (
+            argv[0] == "fake-docker"
+            and argv[1] == "inspect"
+            and self.clock[0] < self.boot_at
+        ):
+            body = json.loads(proc.stdout)
+            body[0]["State"]["Health"]["Status"] = "starting"
+            proc.stdout = json.dumps(body)
+        return proc
+
+
+def test_booting_lane_past_two_settle_windows_grades_pass_omn19812(
+    tmp_path: Path,
+) -> None:
+    """OMN-19812: C28 run 38653017024 graded a booting runtime INDETERMINATE.
+
+    The dev runtime stayed ('running', 'starting') past the two default 300 s
+    settle windows and turned healthy about 12 minutes after compose-up. With
+    the default request controls a lane that boots at 700 s is measured, not
+    graded unreadable.
+    """
+    wiring = tmp_path / script.WIRING_MODULE
+    wiring.parent.mkdir(parents=True)
+    wiring.write_text(
+        "\n".join(
+            f'def {factory}():\n    flow_counters.register("group")\n'
+            for factory in script.BRANCHES.values()
+        )
+    )
+    clock = [0.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    lane = _BootingLane(json.loads(FIXTURE.read_text()), clock)
+    target = HandlerDockerConsumerFlowTarget(
+        runner=lane.run,
+        urlopen=lane.http,
+        sleep=sleep,
+        monotonic=lambda: clock[0],
+        repo_root=tmp_path,
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        base_url="http://projection.test",
+        samples=2,
+        sample_interval=0,
+        injection_wait=0,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+        record=tmp_path / "c28.json",
+    )
+
+    result = asyncio.run(HandlerConsumerFlow(target=target).handle(request))
+
+    assert result.outcome == "PASS", result.reasons
+    assert clock[0] >= lane.boot_at
