@@ -42,9 +42,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
   - id: dod-omn19214-deploy-scope
-    description: The renderer source on the dev branch carries the store-backed resolver; it is absent from dev until this change merges, so the check fails before the merge and passes after it.
+    description: The renderer source published at the checked-out commit carries the store-backed resolver. At that same commit, an integration test reads the real environment-backed secret-store adapter, records store precedence, restores the file render byte for byte when the row is removed, and refuses invalid rows without replacing the existing render. Both checks run on a hosted runner without access to a deployed lane.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/render_bifrost_delegation_contract.py?ref=dev' --jq .content | base64 -d | grep -qF 'def render_bifrost_delegation_contract_with_source'
-    binds_ac: []
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/render_bifrost_delegation_contract.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF 'def render_bifrost_delegation_contract_with_source'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC3]
