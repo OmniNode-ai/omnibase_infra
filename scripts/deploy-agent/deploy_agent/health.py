@@ -288,6 +288,12 @@ async def _job_handler(request: web.Request) -> web.Response:
             "verify_recreate": [
                 record.model_dump(mode="json") for record in job.verify_recreate
             ],
+            # OMN-19911. The control-plane one-shots this job re-ran, each with
+            # its exit code, so a reader can tell a writer that started after
+            # the broker's one-shot config moved from one that did not.
+            "oneshot_reruns": [
+                record.model_dump(mode="json") for record in job.oneshot_reruns
+            ],
         }
     )
 
