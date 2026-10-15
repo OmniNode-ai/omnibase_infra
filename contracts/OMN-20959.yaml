@@ -54,7 +54,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          rg -q 'evidence_source: str = "[0-9a-f]{40}"' tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py
+          grep -Eq 'evidence_source: str = "[0-9a-f]{40}"' tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py -q --no-cov
