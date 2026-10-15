@@ -14,7 +14,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The manifest validator, the migration class check and the RLS policy gate over the vendored files.
-    command: python3 scripts/validation/validate_application_migration_manifest.py --require-complete
+    command: uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete
 emergency_bypass:
   enabled: false
   justification: ''
@@ -25,7 +25,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "python3 scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable\\.sql\\t.*\\t25209bbaab6a3a285da61fb9007d6dd695ab0a336c8f179e2ff972d7e4248866$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls\\.sql\\t.*\\t52ba6d0bb1111cc5b02c33b3ce6563399e042ebc4eb86d99cf99aa8f03b623f7$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_savings/096_delegation_savings_unpriced_calls\\.sql\\t.*\\t8364fb62069d8ecb2cc7f6bf4a6767e600f6300d61d285b2e7057962538dd60e$' docker/migrations/forward/_ledger/application-migrations.tsv"
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable\\.sql\\t.*\\t25209bbaab6a3a285da61fb9007d6dd695ab0a336c8f179e2ff972d7e4248866$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls\\.sql\\t.*\\t52ba6d0bb1111cc5b02c33b3ce6563399e042ebc4eb86d99cf99aa8f03b623f7$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_savings/096_delegation_savings_unpriced_calls\\.sql\\t.*\\t8364fb62069d8ecb2cc7f6bf4a6767e600f6300d61d285b2e7057962538dd60e$' docker/migrations/forward/_ledger/application-migrations.tsv"
     binds_ac:
       - AC2
   - id: dod-omn20717-infra-class
@@ -33,7 +33,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "python3 scripts/validation/check_migration_class.py && grep -qF 'forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only' config/migration_classes.yaml"
+        check_value: "uv run --frozen python scripts/validation/check_migration_class.py && grep -qF 'forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only' config/migration_classes.yaml"
     binds_ac:
       - AC2
   - id: dod-omn20717-infra-rls-policy
@@ -41,7 +41,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "python3 scripts/validation/check_migration_rls_policy_atomicity.py && grep -qF 'CREATE POLICY tenant_isolation ON delegation_events' docker/migrations/forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql"
+        check_value: "uv run --frozen python scripts/validation/check_migration_rls_policy_atomicity.py && grep -qF 'CREATE POLICY tenant_isolation ON delegation_events' docker/migrations/forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql"
     binds_ac:
       - AC2
   - id: dod-omn20717-vendored-null-column
