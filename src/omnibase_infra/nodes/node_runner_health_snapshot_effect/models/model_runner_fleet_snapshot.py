@@ -19,6 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
     ModelRunnerFleetRunnerFact,
 )
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_job_fact import (
+    ModelRunnerJobFact,
+)
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_zombie_run_candidate import (
     ModelZombieRunCandidate,
 )
@@ -37,6 +40,10 @@ class ModelRunnerFleetSnapshot(BaseModel):
     )
     runners: tuple[ModelRunnerFleetRunnerFact, ...] = Field(
         default_factory=tuple, description="Per-runner raw facts."
+    )
+    jobs: tuple[ModelRunnerJobFact, ...] = Field(
+        default=(),
+        description="Queued/in-progress job facts from watched runs (OMN-17427).",
     )
     oldest_queued_job_age_seconds: float | None = Field(
         default=None,

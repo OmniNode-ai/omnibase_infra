@@ -140,6 +140,9 @@ make local-env
 # the /v1/chat/completions URL of an OpenAI-compatible server that serves the
 # model id omnimarket's routing contract declares (Qwen3.8-27B today).
 
+# Delegation refuses to run ("never minted a tenant identity") while the env
+# file names no tenant; this generates one into ~/.omnibase/local.env.
+make tenant-local
 make up-local        # builds the runtime image and boots everything
 make status-local    # migration gate, both runtime /health bodies, delegate consumer
 make delegate-local PROMPT="Reply with exactly one word: hello"

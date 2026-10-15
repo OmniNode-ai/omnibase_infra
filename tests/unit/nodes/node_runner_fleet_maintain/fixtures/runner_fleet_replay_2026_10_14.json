@@ -1,0 +1,658 @@
+{
+ "_source": "Replay of one night's hand measurements (2026-10-14 15:00-23:56Z): pool of 25 runners, 11 on host a and 14 on host b, all busy at 23:34Z, none wedged; queue wait p50/p90 at 22-23Z: docs-repo pull_request 34.3/44.9 min, repo-a merge_group 32.8/40.6, repo-b merge_group 32.8/42.7, omnibase_infra under 1. Two host-b runner containers exited since 2026-10-06; their GitHub status offline is inferred, not read. Repo and host names are neutral stand-ins.",
+ "snapshot": {
+  "correlation_id": "6f1d2c3a-0000-4000-8000-201410142334",
+  "collected_at": "2026-10-14T23:34:00Z",
+  "host": "runner-host-a",
+  "expected_count": 26,
+  "runners": [
+   {
+    "name": "omninode-runner-1",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-2",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-3",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-4",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-5",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-6",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-7",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-8",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-9",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-10",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "omninode-runner-18",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-1",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-2",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-3",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-4",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-5",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-7",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-8",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-9",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-11",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-12",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-13",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-14",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-15",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-16",
+    "github_status": "online",
+    "github_busy": true,
+    "docker_status": "running"
+   },
+   {
+    "name": "host2-ci-runner-6",
+    "github_status": "offline",
+    "github_busy": false,
+    "docker_status": "exited"
+   },
+   {
+    "name": "host2-ci-runner-10",
+    "github_status": "offline",
+    "github_busy": false,
+    "docker_status": "exited"
+   }
+  ],
+  "oldest_queued_job_age_seconds": 2694.0,
+  "jobs": [
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000000,
+    "job_id": 98600000000,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1440.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "omninode-runner-1"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000001,
+    "job_id": 98600000001,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1320.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "omninode-runner-2"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000002,
+    "job_id": 98600000002,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 150.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-3"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000003,
+    "job_id": 98600000003,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 180.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-4"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000004,
+    "job_id": 98600000004,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 300.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-5"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000005,
+    "job_id": 98600000005,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 240.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-6"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000006,
+    "job_id": 98600000006,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1380.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "omninode-runner-7"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000007,
+    "job_id": 98600000007,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 200.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-8"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000008,
+    "job_id": 98600000008,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 160.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-9"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000009,
+    "job_id": 98600000009,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1260.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "omninode-runner-10"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000010,
+    "job_id": 98600000010,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 220.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "omninode-runner-18"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000011,
+    "job_id": 98600000011,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1020.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "host2-ci-runner-1"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000012,
+    "job_id": 98600000012,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1140.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "host2-ci-runner-2"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000013,
+    "job_id": 98600000013,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 300.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-3"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000014,
+    "job_id": 98600000014,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 280.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-4"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000015,
+    "job_id": 98600000015,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 310.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-5"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000016,
+    "job_id": 98600000016,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1200.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "host2-ci-runner-7"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000017,
+    "job_id": 98600000017,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 250.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-8"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000018,
+    "job_id": 98600000018,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 240.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-9"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000019,
+    "job_id": 98600000019,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1080.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "host2-ci-runner-11"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000020,
+    "job_id": 98600000020,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 260.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-12"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000021,
+    "job_id": 98600000021,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 230.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-13"
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38600000022,
+    "job_id": 98600000022,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1110.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": "host2-ci-runner-14"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000023,
+    "job_id": 98600000023,
+    "event": "merge_group",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 290.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-15"
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38600000024,
+    "job_id": 98600000024,
+    "event": "pull_request",
+    "status": "in_progress",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 270.0,
+    "workflow": "CI",
+    "job": "pytest (shard 3/8)",
+    "runner": "host2-ci-runner-16"
+   },
+   {
+    "repo": "OmniNode-ai/docs-repo",
+    "run_id": 38700000025,
+    "job_id": 98700000025,
+    "event": "pull_request",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 2058.0,
+    "workflow": "Doc checks",
+    "job": "doc-lint",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/docs-repo",
+    "run_id": 38700000026,
+    "job_id": 98700000026,
+    "event": "pull_request",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 2694.0,
+    "workflow": "Doc checks",
+    "job": "doc-lint",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38700000027,
+    "job_id": 98700000027,
+    "event": "merge_group",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1968.0,
+    "workflow": "CI",
+    "job": "pytest (shard 1/8)",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/repo-a",
+    "run_id": 38700000028,
+    "job_id": 98700000028,
+    "event": "merge_group",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 2436.0,
+    "workflow": "CI",
+    "job": "pytest (shard 1/8)",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38700000029,
+    "job_id": 98700000029,
+    "event": "merge_group",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 1968.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/repo-b",
+    "run_id": 38700000030,
+    "job_id": 98700000030,
+    "event": "merge_group",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 2562.0,
+    "workflow": "Validate Plugin",
+    "job": "validate-plugin",
+    "runner": ""
+   },
+   {
+    "repo": "OmniNode-ai/omnibase_infra",
+    "run_id": 38700000031,
+    "job_id": 98700000031,
+    "event": "pull_request",
+    "status": "queued",
+    "labels": [
+     "self-hosted",
+     "omnibase-ci"
+    ],
+    "age_seconds": 42.0,
+    "workflow": "CI",
+    "job": "lint",
+    "runner": ""
+   }
+  ],
+  "github_source_ok": true,
+  "docker_source_ok": true
+ }
+}

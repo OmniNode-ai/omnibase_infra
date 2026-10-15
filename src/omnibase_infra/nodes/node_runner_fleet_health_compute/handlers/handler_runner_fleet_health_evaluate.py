@@ -6,6 +6,9 @@ This is a COMPUTE handler -- pure, deterministic, no I/O. It performs NO
 probing; every fact it classifies was gathered upstream by
 ``node_runner_health_snapshot_effect``.
 
+OMN-17427 adds typed offline-runner, stuck-job, and repo/labels queue-age
+alerts alongside the existing classification and readiness verdict.
+
 Classification precedence (most severe first) ports:
   - ``collector_runner_health.py::_classify_runner`` (CRASH_LOOPING via
     RestartCount, OFFLINE_IDLE via GitHub status)
@@ -71,6 +74,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_readiness
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_recommended_action_type import (
     EnumRecommendedActionType,
 )
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_fleet_alert_kind import (
+    EnumRunnerFleetAlertKind,
+)
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.enum_runner_fleet_health_state import (
     EnumRunnerFleetHealthState,
 )
@@ -85,6 +91,9 @@ from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_readines
 )
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_recommended_action import (
     ModelRecommendedAction,
+)
+from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_alert import (
+    ModelRunnerFleetAlert,
 )
 from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_evaluate_command import (
     ModelRunnerFleetHealthEvaluateCommand,
@@ -120,6 +129,11 @@ _CRASHLOOP_RESTART_THRESHOLD = 5
 # verdict and the container healthcheck disagree about what "stale" means.
 _RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS = 4500
 _WEDGE_QUEUE_AGE_SECONDS = 600
+# GitHub's default job timeout is 360 minutes (OMN-17427). Reading per-job
+# timeout-minutes from the workflow file is a later slice.
+_RUNNER_STUCK_JOB_AGE_SECONDS = 21600
+# Alert when a repo/labels queue waits longer than 30 minutes (OMN-17427).
+_QUEUE_AGE_ALERT_SECONDS = 1800
 # OMN-15255: ceiling on runner-host disk usage. A host past this is out of
 # space for checkouts/caches; every container on it is unfit for work even
 # though each one still registers online and reports a fresh heartbeat.
@@ -600,6 +614,64 @@ def _recommend_for_assessment(
     return None
 
 
+def _evaluate_alerts(
+    request: ModelRunnerFleetHealthEvaluateCommand,
+) -> tuple[ModelRunnerFleetAlert, ...]:
+    """Evaluate offline runners, stuck jobs, and queue ages without I/O."""
+    snapshot = request.snapshot
+    alerts: list[ModelRunnerFleetAlert] = []
+    if snapshot.github_source_ok:
+        for runner in snapshot.runners:
+            if runner.github_status == "offline":
+                alerts.append(
+                    ModelRunnerFleetAlert(
+                        kind=EnumRunnerFleetAlertKind.RUNNER_OFFLINE,
+                        subject=runner.name,
+                        detail=f"GitHub runner offline; docker_status={runner.docker_status}",
+                    )
+                )
+
+    queued: dict[tuple[str, tuple[str, ...]], tuple[float, int]] = {}
+    for job in snapshot.jobs:
+        if (
+            job.status == "in_progress"
+            and job.runner
+            and job.age_seconds >= _RUNNER_STUCK_JOB_AGE_SECONDS
+        ):
+            alerts.append(
+                ModelRunnerFleetAlert(
+                    kind=EnumRunnerFleetAlertKind.RUNNER_STUCK,
+                    subject=job.runner,
+                    repo=job.repo,
+                    labels=job.labels,
+                    workflow=job.workflow,
+                    job=job.job,
+                    run_id=job.run_id,
+                    observed_seconds=job.age_seconds,
+                    threshold_seconds=_RUNNER_STUCK_JOB_AGE_SECONDS,
+                )
+            )
+        elif job.status == "queued":
+            key = (job.repo, tuple(sorted(job.labels)))
+            oldest_age, count = queued.get(key, (0.0, 0))
+            queued[key] = (max(oldest_age, job.age_seconds), count + 1)
+
+    for (repo, labels), (oldest_age, count) in sorted(queued.items()):
+        if oldest_age > _QUEUE_AGE_ALERT_SECONDS:
+            alerts.append(
+                ModelRunnerFleetAlert(
+                    kind=EnumRunnerFleetAlertKind.QUEUE_AGE_EXCEEDED,
+                    subject=repo,
+                    repo=repo,
+                    labels=labels,
+                    observed_seconds=oldest_age,
+                    threshold_seconds=_QUEUE_AGE_ALERT_SECONDS,
+                    queued_count=count,
+                )
+            )
+    return tuple(alerts)
+
+
 class HandlerRunnerFleetHealthEvaluate:
     """Classifies a runner-fleet snapshot into a typed health verdict.
 
@@ -772,6 +844,7 @@ class HandlerRunnerFleetHealthEvaluate:
             correlation_id=correlation_id,
             evaluated_at=datetime.now(tz=UTC),
             assessments=tuple(assessments),
+            alerts=_evaluate_alerts(request),
             ready_count=ready_count,
             not_ready_count=not_ready_count,
             readiness_unknown_count=readiness_unknown_count,
