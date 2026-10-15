@@ -76,6 +76,13 @@ requirements:
     acceptance:
       - id: AC17
         statement: "AC17: a failure terminal carrying failure_reason, flat or in its envelope payload, rejects the pending request with RuntimeError 'Request failed: <failure_reason>', and one without a reason says so instead of 'Request failed: Request failed' -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason fails at the merge base"
+  - id: req-omn17427-delegate-named-tests
+    statement: onex delegate names the tests a code delegation is graded by, carries them in the request metadata under the keys omnimarket's delegation port reads, and refuses a run that would reach the deployed lane, whose dispatch port cannot carry them.
+    acceptance:
+      - id: AC18
+        statement: 'AC18: --test-file, --named-test and --answer-path write named_tests, named_tests_answer_path and named_tests_files into the request payload the run is handed, and a partial or unsafe naming is a usage error -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"'
+      - id: AC19
+        statement: 'AC19: a run that resolves to the deployed lane with named tests is refused before anything is published, naming --locus in-process -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -128,6 +135,12 @@ evidence_requirements:
   - kind: tests
     description: A failure terminal's failure_reason is the raised cause.
     command: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+  - kind: tests
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+  - kind: tests
+    description: A named-test run that would reach the deployed lane is refused before anything is published.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
 emergency_bypass:
   enabled: false
   justification: ''
@@ -294,3 +307,21 @@ dod_evidence:
       - check_type: command
         check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac18
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18
+  - id: dod-omn-17427-ac19
+    description: A named-test run that would reach the deployed lane is refused before anything is published.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19
