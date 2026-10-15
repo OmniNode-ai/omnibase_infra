@@ -36,3 +36,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
