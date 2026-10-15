@@ -6,7 +6,7 @@ summary: >-
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - docker_compose_catalog
+  - protocols
 requirements:
   - id: req-local-broker-sasl
     statement: The laptop broker refuses anonymous clients and every client of the bundle authenticates as one local superuser, without changing any other bundle.
