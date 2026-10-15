@@ -11,10 +11,15 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 7067871a17e5ec1b6da53b543e77c4194822a794 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+      - id: AC2
+        statement: "AC2: the runtime's exact omnibase-core pin is 0.47.44, the floor omnimarket dev requires for EnumContextFactor.LANE_RULES, so the catalog-local runtime boots -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py tests/ci/test_contract_validation_core_validator_omn20074.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 7067871a17e5ec1b6da53b543e77c4194822a794.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The omnibase-core override pin, uv.lock and the released core seam fixture carry 0.47.44.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py tests/ci/test_contract_validation_core_validator_omn20074.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -26,5 +31,22 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn-17292-ac2
+    description: The omnibase-core override pin, uv.lock and the released core seam fixture carry 0.47.44.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py tests/ci/test_contract_validation_core_validator_omn20074.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn-17292-deploy-pin
+    description: Hosted-runner deploy-input probe reads the contract pin at this checkout's commit from GitHub and requires the advanced ref. It fails on the merge base's older pin and needs no private lane or running containers.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/.github/omnimarket-contract-pin.yaml" | grep -qx 'omnimarket_contract_ref: 7067871a17e5ec1b6da53b543e77c4194822a794'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
