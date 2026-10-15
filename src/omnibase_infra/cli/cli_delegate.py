@@ -2273,6 +2273,9 @@ def read_lab_host_tenant(
 ) -> str | None:
     """Read the declared host tenant, or None outside a lab registry.
 
+    A host the lab table has no row for is outside the lab and returns None
+    (OMN-21087); only a declared ``ONEX_LANE_HOST`` with no row is refused.
+
     Native host jobs locate their row by hostname or the table's SSH target.
     Containers and remote lanes declare ONEX_LANE_HOST because their own
     network namespace need not carry the host's address. The table is the
@@ -2330,6 +2333,12 @@ def read_lab_host_tenant(
                 or row["target"] == hostname
                 or _lab_target_is_local(str(row["target"]))
             ]
+        if not matches and not host:
+            # OMN-21087: the table declares the lab hosts. A host it does not
+            # list is not one, so there is no lab tenant to resolve and the
+            # install identity stands. A declared ONEX_LANE_HOST claims a row
+            # and is still refused when it has none.
+            return None
         if len(matches) != 1:
             raise ValueError(
                 f"expected one host row for {host or socket.gethostname()}, found {len(matches)}"
