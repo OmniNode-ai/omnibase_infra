@@ -29,7 +29,7 @@
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
-#     make tenant-local        # give your runtime a tenant (only if you use your own provider key), then make up-local
+#     make tenant-local        # give your runtime a tenant (delegation refuses without one), then make up-local
 #     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
 #     make down-local          # stop the laptop profile (keeps its volumes)
 #     make down-local-volumes  # stop it and delete its volumes (local data)
@@ -159,7 +159,7 @@ status-local: _check-docker ## Laptop profile: migration gate, runtime /health b
 
 delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
 	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
-	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate $(DELEGATE_FLAGS) "$(PROMPT)" \
+	docker exec -u omniinfra -e HOME=/home/omniinfra $(LOCAL_PROJECT)-runtime-effects onex delegate $(DELEGATE_FLAGS) "$(PROMPT)" \
 	  --bus kafka --kafka-bootstrap redpanda:9092 --locus deployed-lane
 
 tenant-local: local-env ## Laptop profile: give your runtime a tenant (needed to use your own provider key); then make up-local
