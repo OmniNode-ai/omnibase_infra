@@ -106,6 +106,7 @@ def _capture_compose_up(
     with (
         patch("deploy_agent.executor._run", side_effect=fake_run),
         patch.object(executor, "_ensure_runtime_migrations_ready"),
+        patch.object(executor, "rerun_changed_oneshots"),
         patch("deploy_agent.executor.verify_containers_up", return_value=(True, [])),
     ):
         executor._compose_up(Phase.RUNTIME, scope, [], _noop, lane=EnumRuntimeLane.DEV)
@@ -269,6 +270,7 @@ class _FakeExecutor:
         self.sibling_source_refs: dict[str, str] = {}
         self.recreate_supervision: list[object] = []
         self.verify_recreate: list[object] = []
+        self.oneshot_reruns: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
         self.health_checks: list[object] = []

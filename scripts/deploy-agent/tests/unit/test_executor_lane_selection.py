@@ -106,6 +106,7 @@ class TestComposeUpLaneSelection:
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(executor, "_ensure_runtime_migrations_ready"),
+            patch.object(executor, "rerun_changed_oneshots"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),
@@ -140,6 +141,7 @@ class TestComposeUpLaneSelection:
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(executor, "_ensure_runtime_migrations_ready"),
+            patch.object(executor, "rerun_changed_oneshots"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),
@@ -170,6 +172,7 @@ class TestComposeUpLaneSelection:
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(executor, "_ensure_runtime_migrations_ready"),
+            patch.object(executor, "rerun_changed_oneshots"),
             patch(
                 "deploy_agent.executor.verify_containers_up", return_value=(True, [])
             ),

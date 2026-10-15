@@ -9,8 +9,15 @@ requirements:
   - id: req-omn19812-boot-grace
     statement: The C28 consumer-flow probe does not grade a lane INDETERMINATE while its unsettled containers are still inside their declared start period, within a bounded grace.
     acceptance:
+      - id: AC5
+        statement: "AC5: a lane whose containers report ('running', 'starting') until 700 s grades PASS with the default request controls, and a lane that never leaves starting grades INDETERMINATE within attempts x (settle + grace) -- falsifier: the new unit and integration tests fail against the merge-base handler"
+  - id: req-omn19812-exit-codes
+    statement: The C28 consumer-flow probe's process exit code is its verdict.
+    acceptance:
       - id: AC1
-        statement: "AC1: a lane whose containers report ('running', 'starting') until 700 s grades PASS with the default request controls, and a lane that never leaves starting grades INDETERMINATE within attempts x (settle + grace) -- falsifier: the new unit and integration tests fail against the merge-base handler"
+        statement: "AC1: a probe script grades all three C28 clauses and the boot premise and exits 0 only when every one holds, 1 when one fails, 2 when it could not look -- falsifier: uv run pytest tests/ci/test_c28_consumer_flow_probe.py fails when any grading branch is removed"
+      - id: AC4
+        statement: "AC4: a deliberately broken run is RED, not green: the probe exits 1 when a named subscription kind has no instrumented row or a live group is unreachable -- falsifier: uv run pytest tests/ci/test_c28_consumer_flow_probe.py -k red"
 evidence_requirements:
   - kind: tests
     description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
@@ -31,7 +38,25 @@ dod_evidence:
         check_value: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_omn19931.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
+      - AC5
+  - id: dod-omn19812-ac1-literal-exit-codes
+    description: The probe tests pin the literal exit codes 0, 1 and 2 on the probe process itself, so a mutated EXIT_OK, EXIT_FINDINGS or EXIT_INPUT, a Record.exit_code that always returns 0, or a main that drops its return value fails them; every grading branch (kinds, negative, cursor, boot) keeps its own failing test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
       - AC1
+  - id: dod-omn19812-ac4-red-exits-1
+    description: The red cases assert the process exit code 1 for a named subscription kind with no instrumented row and for an unreachable live group, and every red grading test still asserts its named failed check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py -q --no-cov -k red
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
   - id: dod-omn19812-deploy-boot-grace-shipped
     description: The C28 producer runs node_board_probe_effect from the dev checkout on the lab runner, so the deployed surface is the source at the merged head; the boot grace is present in the lane transport there.
     source: manual
@@ -40,4 +65,4 @@ dod_evidence:
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'boot_deadline = deadline + boot_grace_seconds'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC1
+      - AC5

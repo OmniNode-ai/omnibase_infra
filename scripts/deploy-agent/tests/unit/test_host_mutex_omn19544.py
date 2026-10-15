@@ -405,6 +405,7 @@ class _FakeExecutor:
         self.sibling_source_refs: dict[str, str] = {}
         self.recreate_supervision: list[object] = []
         self.verify_recreate: list[object] = []
+        self.oneshot_reruns: list[object] = []
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
         self.health_checks: list[object] = []

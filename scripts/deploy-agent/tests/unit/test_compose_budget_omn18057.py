@@ -294,6 +294,11 @@ class TestComposeUpUsesTheDerivedCeiling:
             "_ensure_runtime_migrations_ready",
             lambda self, **kwargs: None,
         )
+        monkeypatch.setattr(
+            executor_mod.DeployExecutor,
+            "rerun_changed_oneshots",
+            lambda self, **kwargs: [],
+        )
 
         DeployExecutor()._compose_up(
             Phase.RUNTIME,
