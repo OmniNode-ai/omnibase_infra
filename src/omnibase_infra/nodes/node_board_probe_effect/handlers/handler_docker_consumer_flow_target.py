@@ -105,6 +105,7 @@ class HandlerDockerConsumerFlowTarget(ProtocolConsumerFlowTarget):
                         samples=request.samples,
                         interval=request.sample_interval,
                         settle_seconds=request.settle_seconds,
+                        boot_grace_seconds=request.boot_grace_seconds,
                         injection_wait=request.injection_wait,
                     )
                     break

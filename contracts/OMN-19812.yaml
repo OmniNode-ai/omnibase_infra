@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19812
+title: C28 consumer-flow probe gives a booting dev runtime a bounded boot grace
+summary: C28 run 38653017024 (2026-10-14T23:16Z) graded the dev lane INDETERMINATE because omninode-runtime stayed ('running', 'starting') after two 300 s settle windows; the runtime was booting after a deploy (compose-up 23:15:53Z) and its /health passed at 23:28:29Z, inside its declared start budget. A settle window in which every unsettled container reports Docker health starting is now extended by boot_grace_seconds (default 300 s), so a booting lane is measured; an unhealthy or stopped container still ends the window at settle_seconds and grades INDETERMINATE.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19812-boot-grace
+    statement: The C28 consumer-flow probe does not grade a lane INDETERMINATE while its unsettled containers are still inside their declared start period, within a bounded grace.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a lane whose containers report ('running', 'starting') until 700 s grades PASS with the default request controls, and a lane that never leaves starting grades INDETERMINATE within attempts x (settle + grace) -- falsifier: the new unit and integration tests fail against the merge-base handler"
+evidence_requirements:
+  - kind: tests
+    description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
+    command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py tests/integration/nodes/test_board_probe_consumer_flow_omn19931.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19812-ac1-boot-grace
+    description: The focused C28 tests pass at this head; the booting-lane tests fail at the merge base with the run's own ConsumerFlowLaneUnsettledError.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_omn19931.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19812-deploy-boot-grace-shipped
+    description: The C28 producer runs node_board_probe_effect from the dev checkout on the lab runner, so the deployed surface is the source at the merged head; the boot grace is present in the lane transport there.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_board_probe_effect/handlers/_consumer_flow_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'boot_deadline = deadline + boot_grace_seconds'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
