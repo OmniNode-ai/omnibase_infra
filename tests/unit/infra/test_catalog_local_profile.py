@@ -399,6 +399,25 @@ def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments()
     assert "read -r -s" in target  # Terminal input must be hidden.
 
 
+def test_delegate_local_make_target_runs_the_cli_as_the_runtime_user() -> None:
+    # `docker exec` defaults to root. The CLI creates <state root> on its first
+    # run, so a root-run delegation leaves a root-owned directory in the
+    # runtime's data volume and every later delegation by the runtime user
+    # fails with "Permission denied: .../.onex_state/delegation".
+    makefile = (_REPO / "Makefile").read_text(encoding="utf-8")
+    target = makefile.split("\ndelegate-local:", 1)[1].split("\n\n", 1)[0]
+    commands = [line for line in target.splitlines() if "docker exec" in line]
+    assert len(commands) == 1
+    assert (
+        commands[0]
+        .strip()
+        .startswith(
+            "docker exec -u omniinfra -e HOME=/home/omniinfra "
+            "$(LOCAL_PROJECT)-runtime-effects onex delegate"
+        )
+    )
+
+
 def _make(target: str, env_file: Path, overlay_file: Path) -> None:
     result = subprocess.run(
         [

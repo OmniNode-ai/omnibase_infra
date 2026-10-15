@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20113
+title: The laptop profile delegates end to end on a clean machine
+summary: >-
+  The laptop bundle's delegation writer binds the lab principals (AC1), its env file generates exactly four passwords (AC2), reconcile-host.sh runs its as-owner step under macOS bash 3.2 (AC4), and make up-local then make delegate-local writes one delegation_events row with the writer at 0 restarts (AC3). A lab run of AC3 on host h101 (2026-10-15) found that make delegate-local ran the CLI as root through docker exec, so the CLI created the runtime's state root root-owned and the runtime user's next write failed with "Permission denied: .../.onex_state/delegation". The target now runs the CLI as the runtime user, as secret-local already does.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-laptop-delegation
+    statement: A clean laptop delegates through its own runtime and the delegation is projected to delegation_events.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The local render gives the delegation writer the topology profile and the non-superuser tenant and internal DSNs, and gives forward-migration both principal passwords -- falsifier: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k binds_the_lab_principals -q fails on the pre-change bundle'
+      - id: AC2
+        statement: 'AC2: The laptop profile requires exactly four passwords and the overlay path, and make local-env generates all four -- falsifier: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/integration/infra/test_laptop_profile_env_file_render_omn19496.py -q fails on the pre-change template'
+      - id: AC3
+        statement: 'AC3: On a laptop, make up-local then make delegate-local writes one delegation_events row, with the writer at 0 restarts -- falsifier: the psql count in guide section 6 reads 0 for the delegation''s correlation id, or docker inspect shows the writer''s RestartCount above 0'
+      - id: AC4
+        statement: 'AC4: reconcile-host.sh runs its as-owner step under macOS /bin/bash 3.2 with an empty RUN_AS -- falsifier: /bin/bash -uc with an empty array expanded as in line 450 exits non-zero with "unbound variable"'
+evidence_requirements:
+  - kind: tests
+    description: The laptop profile tests, including the delegate-local target running the CLI as the runtime user.
+    command: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/integration/infra/test_laptop_profile_env_file_render_omn19496.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-ac1-ac2-laptop-profile-tests
+    description: The local bundle binds the lab principals and the env file generates the four passwords.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/integration/infra/test_laptop_profile_env_file_render_omn19496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-ac3-delegate-local-runs-as-runtime-user
+    description: >-
+      make delegate-local runs onex delegate as the runtime user, so the state root the CLI creates is writable by the runtime. Lab run on host h101, 2026-10-15, compose project renamed only to clear the lane compose guard, model endpoint on the lab GPU host - make tenant-local, make up-local (all services healthy), make delegate-local printed "hello" and delegation_events held 1 row for correlation id 638b4aae-b2ae-44b8-b4e0-a9838c266323 (task_type document, model Qwen3.8-27B, quality_gate_passed true); RestartCount was 0 for omnimarket-projection-delegation, omninode-runtime, runtime-effects and tenant-projection-writer. Before the change the same stack answered the delegation with PermissionError on /app/data/.onex_state/delegation and wrote 0 rows.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -k delegate_local_make_target -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-ac4-reconcile-host-bash32
+    description: >-
+      The shared as_owner helper retained after reconcile-host.sh was retired executes commands with intact arguments under nounset when RUN_AS is empty. It also renders the laptop delegation command through make with a spaced prompt, requiring the runtime user and its HOME so that the rendered command cannot create root-owned runtime state. This composed probe runs without Docker on hosted runners and under macOS Bash 3.2 on the lab host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          /bin/bash -euc '
+            source scripts/reconcile_privilege_lib.sh
+            RUN_AS=()
+            actual=$(as_owner printf "%s|" "two words" tail)
+            [[ "$actual" == "two words|tail|" ]] || exit 1
+            rendered=$(as_owner make -s -n delegate-local "PROMPT=two words" LOCAL_PROJECT=landing-l7926-lab)
+            [[ "$rendered" == *"docker exec -u omniinfra -e HOME=/home/omniinfra landing-l7926-lab-runtime-effects onex delegate"* ]] || exit 1
+            [[ "$rendered" == *\"two\ words\"* ]] || exit 1
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
