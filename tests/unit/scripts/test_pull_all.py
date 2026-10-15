@@ -152,6 +152,30 @@ def _commit_file(repo: Path, rel_path: str, contents: str, message: str) -> None
     )
 
 
+def _write_stand_in_branch_switch_guard(root: Path) -> Path:
+    """A post-checkout hook that records a branch switch made without the convergence door.
+
+    The real guard (the canonical-clone guard node, OMN-20528) refuses such a
+    switch, but only on a git that reports the HEAD symref move to the
+    reference-transaction hook (2.50 or later). A post-checkout hook sees every branch
+    switch on any git, so the stand-in records the violation in `violations` beside it
+    and the tests read that file. printf only, no here-document.
+    """
+    hooks_dir = root / "stand-in-hooks"
+    hooks_dir.mkdir()
+    hook = hooks_dir / "post-checkout"
+    hook.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        '[[ "${3:-}" == "1" ]] || exit 0\n'
+        '[[ "${ONEX_CANONICAL_CONVERGE:-}" == "1" ]] && exit 0\n'
+        'printf \'switch without the convergence door: %s -> %s\\n\' "$1" "$2" '
+        '>> "$(dirname "$0")/violations"\n'
+    )
+    hook.chmod(0o755)
+    return hook
+
+
 def _make_versioned_cache(
     home: Path, initial_files: dict[str, str] | None = None
 ) -> Path:
@@ -440,10 +464,33 @@ class TestPullAllScript:
         assert main_sha == origin_main_sha
         assert dev_sha == origin_dev_sha
 
-    def test_script_syncs_a_clone_with_the_canonical_clone_guard_installed(
+    def test_stand_in_guard_records_a_switch_unless_the_door_is_open(
         self, tmp_path: Path
     ) -> None:
-        """The sanctioned sync must pass the guard that landed over it.
+        """Control: the stand-in records a switch made without the door, so a clean log means something."""
+        hook = _write_stand_in_branch_switch_guard(tmp_path)
+        env = {k: v for k, v in os.environ.items() if k != "ONEX_CANONICAL_CONVERGE"}
+
+        subprocess.run(
+            [str(hook), "aaa", "bbb", "1"], check=True, capture_output=True, env=env
+        )
+        assert (hook.parent / "violations").read_text().count("\n") == 1
+
+        subprocess.run(
+            [str(hook), "aaa", "bbb", "1"],
+            check=True,
+            capture_output=True,
+            env={**env, "ONEX_CANONICAL_CONVERGE": "1"},
+        )
+        subprocess.run(
+            [str(hook), "aaa", "bbb", "0"], check=True, capture_output=True, env=env
+        )
+        assert (hook.parent / "violations").read_text().count("\n") == 1
+
+    def test_script_switches_branches_only_through_the_convergence_door(
+        self, tmp_path: Path
+    ) -> None:
+        """The sanctioned sync must open the convergence door for every branch switch.
 
         `pull-all.sh` switches `main` <-> `dev` INSIDE the canonical clone as
         its ordinary job. The OMN-16497 reference-transaction guard refuses a
@@ -455,8 +502,9 @@ class TestPullAllScript:
 
         The test above is blind to this: its fixture clone has no
         `core.hooksPath`, so it exercises a repository no host actually has.
-        This one installs the guard exactly as `install-canonical-clone-git-
-        hooks.sh` does.
+        This one points the clone at a stand-in that records any switch made
+        without the door. The real guard is the canonical-clone guard
+        node (OMN-20528); this repository keeps no copy of it.
         """
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
@@ -464,12 +512,7 @@ class TestPullAllScript:
         fake_home.mkdir()
 
         omniclaude = _make_omniclaude_source(omni_home)
-        hooks_dir = (
-            Path(__file__).resolve().parents[3]
-            / "scripts"
-            / "git-hooks"
-            / "canonical-clone"
-        )
+        hooks_dir = _write_stand_in_branch_switch_guard(tmp_path).parent
         _git(["config", "core.hooksPath", str(hooks_dir)], cwd=omniclaude)
 
         upstream = omni_home / "omniclaude.git"
@@ -492,9 +535,8 @@ class TestPullAllScript:
             env=scrub_git_location_env(),
         ).strip()
         assert current_branch == "dev"
-        # And the sanctioned path refused nothing, so it recorded nothing: a
-        # refusal log that fills up with permitted commands stops being read.
-        assert not (omniclaude / ".git" / "onex-canonical-clone-refusals.log").exists()
+        # And every switch went through the door, so the stand-in recorded nothing.
+        assert not (hooks_dir / "violations").exists()
         # The clone is clean -- the half-apply this guard used to leave behind
         # (OMN-18358) would show here as staged paths.
         assert (
