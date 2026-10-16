@@ -227,6 +227,101 @@ def test_ci_runs_are_attributed_from_the_runner_worker_logs() -> None:
     assert len(event["ci_runs"]) == 2
 
 
+def test_an_abandoned_unfinished_run_is_not_listed_in_later_windows() -> None:
+    runs = _observation()["worker_runs"]
+    runs = [runs[0], runs[2]]  # Same runner, deliberately newest first.
+    runs[1]["job_completed_at"] = None
+
+    assert (
+        mem.select_ci_runs(
+            runs,
+            window_start=mem.parse_ts("2026-09-28T19:00:00Z"),
+            window_end=mem.parse_ts("2026-09-28T20:00:00Z"),
+        )
+        == []
+    )
+
+
+def test_the_newest_unfinished_run_of_a_runner_is_still_listed() -> None:
+    run = _observation()["worker_runs"][1]
+
+    selected = mem.select_ci_runs(
+        [run],
+        window_start=mem.parse_ts("2026-09-28T19:00:00Z"),
+        window_end=mem.parse_ts("2026-09-28T20:00:00Z"),
+    )
+    assert selected == [run]
+    assert selected[0]["job_completed_at"] is None
+
+
+def test_an_abandoned_run_overlapping_the_window_is_listed() -> None:
+    runs = _observation()["worker_runs"]
+    runs = [runs[0], runs[2]]
+    runs[1]["job_completed_at"] = None
+
+    selected = mem.select_ci_runs(
+        runs,
+        window_start=mem.parse_ts("2026-09-28T18:00:00Z"),
+        window_end=mem.parse_ts("2026-09-28T19:00:00Z"),
+    )
+    assert selected == [runs[1], runs[0]]
+    assert selected[0]["job_completed_at"] is None
+    assert runs[1]["job_completed_at"] is None
+
+
+def test_a_long_window_lists_only_the_last_two_hours_and_alerts() -> None:
+    observation = _observation()
+    runner = observation["worker_runs"][0]["runner_name"]
+    observation["worker_runs"] = _runs(
+        {
+            "runner_name": runner,
+            "log_name": "Worker_20260928-140000-utc.log",
+            "text": fake.worker_log(
+                repo="OmniNode-ai/omnibase_infra",
+                run_id="old",
+                started="2026-09-28 14:00:00Z",
+                completed="2026-09-28 14:05:00Z",
+            ),
+        },
+        {
+            "runner_name": runner,
+            "log_name": "Worker_20260928-183000-utc.log",
+            "text": fake.worker_log(
+                repo="OmniNode-ai/omnibase_infra",
+                run_id="recent",
+                started="2026-09-28 18:30:00Z",
+                completed="2026-09-28 18:35:00Z",
+            ),
+        },
+    )
+    previous = _previous_state()
+    previous["window_end"] = "2026-09-28T13:00:00.000000Z"
+
+    event, state, alerts = _build(observation, previous)
+
+    assert event["ci_runs"] == [observation["worker_runs"][1]]
+    assert event["window_start"] == previous["window_end"]
+    assert event["window_end"] == observation["read_at"]
+    assert state["window_end"] == observation["read_at"]
+    assert event["records"] == _build()[0]["records"]
+    assert not any(a.startswith("CI_RUNS_TRUNCATED") for a in alerts)
+    assert mem.ci_runs_truncation_notice(event) == (
+        f"CI_RUNS_TRUNCATED host={event['host']} window_start=2026-09-28T13:00:00.000000Z "
+        "ci_runs_from=2026-09-28T17:00:00.000000Z "
+        "(window longer than 2h; earlier jobs not attributed)"
+    )
+
+
+def test_an_hourly_window_is_not_truncated() -> None:
+    observation = _observation()
+
+    event, _state, alerts = _build(observation)
+
+    assert event["ci_runs"] == observation["worker_runs"][:2]
+    assert not any(a.startswith("CI_RUNS_TRUNCATED") for a in alerts)
+    assert mem.ci_runs_truncation_notice(event) is None
+
+
 def test_building_the_same_fixture_twice_gives_the_same_keys() -> None:
     first, first_state, first_alerts = _build()
     second, second_state, second_alerts = _build()
@@ -291,6 +386,11 @@ def test_first_pass_after_a_boot_opens_the_window_at_boot() -> None:
     assert consumer["max_delta"] == 1060
     assert consumer["oom_kill_delta"] == 1
     assert any(a.startswith("OOM_KILL") for a in alerts)
+    assert mem.ci_runs_truncation_notice(event) == (
+        f"CI_RUNS_TRUNCATED host={event['host']} window_start=2026-09-28T12:10:00.000000Z "
+        "ci_runs_from=2026-09-28T17:00:00.000000Z "
+        "(window longer than 2h; earlier jobs not attributed)"
+    )
 
 
 def test_an_unreadable_counter_is_refused_never_a_zero() -> None:
@@ -549,6 +649,7 @@ def test_a_clean_pass_publishes_one_event_and_exits_0(
     finally:
         host.close()
     assert result.returncode == 0, result.stderr
+    assert "MEMORY: CI_RUNS_TRUNCATED host=" in result.stderr
     lines = census.produced.read_text().splitlines()
     assert len(lines) == 1, "one event per host per pass"
     event = json.loads(lines[0])
@@ -558,9 +659,7 @@ def test_a_clean_pass_publishes_one_event_and_exits_0(
         "omnibase-infra-sim-202-redpanda",
         "omninode-sim-202-runtime-effects",
     }, "runner containers are not lane containers"
-    assert [(r["repo"], r["run_id"]) for r in event["ci_runs"]] == [
-        ("OmniNode-ai/knowledge-base-internal", "36468089372")
-    ]
+    assert event["ci_runs"] == [], "the fixture job is outside the last two hours"
     call = census.docker_calls.read_text()
     assert "exec -i omnibase-infra-dev-202-redpanda sh -c" in call
     assert (
@@ -704,6 +803,7 @@ def test_dry_run_neither_publishes_nor_advances(census: _Pass, tmp_path: Path) -
     finally:
         host.close()
     assert result.returncode == 0, result.stderr
+    assert "MEMORY: CI_RUNS_TRUNCATED host=" in result.stderr
     assert not census.produced.exists()
     assert not census.state.exists()
     mem.validate_event(json.loads(out.read_text()))

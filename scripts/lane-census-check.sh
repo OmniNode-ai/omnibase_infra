@@ -310,6 +310,9 @@ memory_pass() {
     return 0
   fi
 
+  # The builder's notices (CI_RUNS_TRUNCATED) are logged, never an alert.
+  while IFS= read -r line; do [[ -n "$line" ]] && log "MEMORY: $line"; done <"$SCRATCH/memory-build.err"
+
   if [[ -n "$MEMORY_EVENT_OUT" ]]; then
     mkdir -p "$(dirname "$MEMORY_EVENT_OUT")"
     cp "$event_file" "$MEMORY_EVENT_OUT"
