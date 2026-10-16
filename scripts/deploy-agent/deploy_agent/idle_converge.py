@@ -106,6 +106,18 @@ flag, the load gate, and one converge per head. And the lag is loud:
 :func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
 serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
 
+THE STABILITY LANE FOLLOWS THE TAG DEV RUNS (OMN-19998)
+------------------------------------------------------
+A dev agent whose fence also admits the stability lane
+(``lane_policy.follows_stability``) keeps it on dev's tag. On the same idle
+tick that follows the newest omnimarket dev tag for the dev lane, once the
+dev lane runs that tag (or a commit that contains it) and the stability lane
+does not, the agent runs one stability-lane rebuild named
+:data:`STABILITY_FOLLOW_REQUESTER` (:func:`decide_stability_follow`,
+:func:`stability_follow_command`). Stability therefore builds only a tag dev
+already runs, and trails dev by at most the one tag in flight. One attempt per
+tag; the instance's freeze flag and load gate hold it like any converge.
+
 THE LAB FOLLOWS omnimarket's DEV TAGS, NOT ITS RELEASES (OMN-19998)
 ------------------------------------------------------------------
 Operator RULING 2026-10-16T09:35:49Z: in the lab, omnimarket deploys from a
@@ -159,6 +171,11 @@ IDLE_CONVERGE_REQUESTER: Final = "agent/idle-converge"
 
 #: ``requested_by`` of a restore of a lane with no running runtime (OMN-20864).
 IDLE_RESTORE_REQUESTER: Final = "agent/idle-restore"
+
+#: ``requested_by`` of a stability-lane rebuild that follows dev's newest
+#: omnimarket tag (OMN-19998), so its job record and terminal event are that
+#: lane's own receipt, never mistaken for a merge's or a dev converge's.
+STABILITY_FOLLOW_REQUESTER: Final = "agent/stability-follow-tag"
 
 #: OMN-20864: how long a lane with no running runtime must have run no job
 #: before a restore starts. Long enough that a deploy's own recovery, or an
@@ -850,4 +867,118 @@ def dev_tag_heartbeat(
             and running_ref != newest.sha
             and lag > alarm_after
         ),
+    )
+
+
+class EnumStabilityFollowVerdict(StrEnum):
+    FOLLOW = "follow"
+    FROZEN = "frozen"
+    JOB_ACTIVE = "job_active"
+    NO_TAG = "no_tag"
+    DEV_BEHIND = "dev_behind"
+    RUNNING_UNREADABLE = "running_unreadable"
+    UP_TO_DATE = "up_to_date"
+    ALREADY_ATTEMPTED = "already_attempted"
+
+
+class ModelStabilityFollowInputs(BaseModel):
+    """Every read the stability follow rule takes, taken before it decides."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tags: tuple[ModelDevTag, ...] | None
+    dev_running_ref: str | None
+    dev_contains_newest: bool = False
+    stability_running_ref: str | None
+    stability_contains_newest: bool = False
+    job_active: bool
+    frozen_reason: str | None = None
+    attempted: frozenset[str] = frozenset()
+
+
+class ModelStabilityFollowDecision(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: EnumStabilityFollowVerdict
+    newest_tag: str | None = None
+    newest_tag_sha: str | None = None
+    detail: str
+
+
+def decide_stability_follow(
+    inputs: ModelStabilityFollowInputs,
+) -> ModelStabilityFollowDecision:
+    """Whether the stability lane rebuilds now onto the tag dev runs (OMN-19998).
+
+    FOLLOW only when the newest dev tag is read, the dev lane runs it (or a
+    commit containing it), the stability lane reads as running something else, no
+    job is in flight, the instance is not frozen, and this tag was not already
+    attempted. Every unread input refuses: an unread lane is never rebuilt on
+    a guess.
+    """
+    if inputs.frozen_reason:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.FROZEN, detail=inputs.frozen_reason
+        )
+    if inputs.job_active:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.JOB_ACTIVE, detail="a job is in flight"
+        )
+    if not inputs.tags:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.NO_TAG,
+            detail="no dev tag read on omnimarket's origin",
+        )
+    newest = inputs.tags[-1]
+    named = {"newest_tag": newest.name, "newest_tag_sha": newest.sha}
+    if not (inputs.dev_running_ref == newest.sha or inputs.dev_contains_newest):
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.DEV_BEHIND,
+            detail=(
+                f"dev runs {(inputs.dev_running_ref or 'unread')[:12]}, not "
+                f"{newest.name}; stability takes a tag only once dev runs it"
+            ),
+            **named,
+        )
+    if inputs.stability_running_ref is None:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.RUNNING_UNREADABLE,
+            detail="the stability lane's running omnimarket revision is unread",
+            **named,
+        )
+    if inputs.stability_running_ref == newest.sha or inputs.stability_contains_newest:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.UP_TO_DATE,
+            detail=f"the stability lane runs {newest.name}",
+            **named,
+        )
+    if newest.sha in inputs.attempted:
+        return ModelStabilityFollowDecision(
+            verdict=EnumStabilityFollowVerdict.ALREADY_ATTEMPTED,
+            detail=f"{newest.name} was already attempted on the stability lane",
+            **named,
+        )
+    return ModelStabilityFollowDecision(
+        verdict=EnumStabilityFollowVerdict.FOLLOW,
+        detail=(
+            f"the stability lane runs {inputs.stability_running_ref[:12]}; dev runs "
+            f"{newest.name}"
+        ),
+        **named,
+    )
+
+
+def stability_follow_command() -> ModelRebuildRequested:
+    """The one rebuild a stability follow runs: the stability lane, workspace-built.
+
+    Workspace-sourced at the tracking ref, like a dev converge, so the build
+    stages omnimarket at its newest dev tag (``DEPLOY_FOLLOW_DEV_TAG_REPOS``,
+    set by the executor for every lab build).
+    """
+    return ModelRebuildRequested(
+        correlation_id=uuid4(),
+        requested_by=STABILITY_FOLLOW_REQUESTER,
+        scope=Scope.RUNTIME,
+        runtime_lane=EnumRuntimeLane.STABILITY_TEST,
+        build_source=BuildSource.WORKSPACE,
     )
