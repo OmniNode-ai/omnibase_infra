@@ -3023,7 +3023,7 @@ jobs:
 
   # ============================================================================
   # CROSS-REPO MIGRATION CONFLICT CHECK (OMN-5772)
-  # Validates migration schema conflicts against onex_change_control.
+  # Validates migration schema conflicts against the sibling repos named in its repos: input.
   # ============================================================================
 
   migration-conflict-check:

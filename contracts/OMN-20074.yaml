@@ -65,6 +65,11 @@ requirements:
     acceptance:
       - id: AC13
         statement: 'AC13: connect_with_retry retries ConnectionError and CannotConnectNowError up to its attempt limit, re-raises the last error, and does not retry an authentication failure -- falsifier: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry fails at the merge base'
+  - id: req-occ-dead-entries-infra
+    statement: omnibase_infra's pinned-wheel drift check must map no onex_change_control repository, its validator requirements must name no onex_change_control central source, and no comment may claim a pin or read of onex_change_control that omnibase_infra no longer has.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: check-pinned-wheels.py maps no onex_change_control repository and its docstring names none, validator-requirements.yaml names no onex_change_control central_source, and ci.yml, check_dep_provenance.py, dep-provenance-gate.yml and .pre-commit-config.yaml carry none of the five stale sentences claiming an onex_change_control pin, read or repo block -- falsifier: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -93,6 +98,9 @@ evidence_requirements:
   - kind: tests
     description: The branch-protection audit and the deploy-scope hook read no onex_change_control, and the two caller-less scripts are deleted.
     command: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q
+  - kind: tests
+    description: The pinned-wheel drift check maps no onex_change_control repository, no validator names it as central source, and the five stale sentences are gone.
+    command: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -274,3 +282,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC13
+  - id: dod-occ-dead-entries-infra-ac14
+    description: The repository tests prove the pinned-wheel drift check maps no onex_change_control repository, no validator names it as central source, and the five stale sentences are gone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14

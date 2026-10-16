@@ -93,7 +93,7 @@ required_validators:
   no-hardcoded-topics:
     description: |
       Kafka topic strings must come from contract.yaml, not hardcoded in source.
-    central_source: "onex_change_control (centralized hook)"
+    central_source: "omnibase_core.handlers.handler_no_hardcoded_topics"
     pre_commit: required
     ci_workflow: required
     required_check_on_main: "ARCH-Invariants / no-hardcoded-topics"
@@ -401,7 +401,7 @@ required_validators:
   no-untracked-todos:
     description: |
       Blocks bare TODO/FIXME. Requires # TODO(OMN-XXXX): format.
-    central_source: "onex_change_control (centralized)"
+    central_source: "omnibase_core.handlers.handler_todo_format"
     pre_commit: required
     ci_workflow: required
     required_check_on_main: "ARCH-Invariants / no-untracked-todos"
