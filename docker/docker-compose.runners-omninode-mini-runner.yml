@@ -54,7 +54,7 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${MINI_RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       # Points kubectl at the least-privilege lab-ci-reader ServiceAccount
       # token in the read-only credentials directory below, never at a node
       # admin kubeconfig (OMN-18188).
@@ -81,7 +81,7 @@ services:
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
-        exec /usr/local/bin/entrypoint.sh
+        exec /opt/onex-runner-hooks/entrypoint.sh
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Read-only lab credentials DIRECTORY, the same shape as the primary
@@ -90,9 +90,7 @@ services:
       # load-bearing -- no job may mutate a lab credential.
       - ${MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR:?MINI_RUNNER_LAB_CREDENTIALS_HOST_DIR must be set (host path of the read-only lab credentials directory)}:/home/runner/.lab-credentials:ro
       - ${MINI_RUNNER_OPERATOR_ENV_FILE:?MINI_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file)}:/run/omnibase-operator.env:ro
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       # OMN-19070: the disk-admission self-pause marker directory, the same
       # mount every primary-host runner carries (OMN-16363). Without it the
       # job-started hook logs `self-pause skipped ... not mounted` and a runner
@@ -103,7 +101,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3

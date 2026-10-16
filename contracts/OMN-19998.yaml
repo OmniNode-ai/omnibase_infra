@@ -61,6 +61,11 @@ requirements:
     acceptance:
       - id: AC11
         statement: 'AC11: the deployment copy hashes to 2a1141966f9b9cdc83caf6e60d64cf866953312453d560f32efcd00a59651309, reversing only the two pg_catalog qualifications recovers source digest 68c4220235df46969883a9febc3887cc7b867a5d18b928aaeba6cc2c72be6634, its catalog reads pass application database domain enforcement, it deletes duplicates before adding UNIQUE (repo, pr_number), has exactly one ledger row carrying that checksum and is declared forward-only -- falsifier: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py fails at the dev base, where the file is absent'
+  - id: req-omn19998-runner-hook-dir-mount
+    statement: A runner container must see a hook file that a deploy replaced, and a runner whose job-started hook is missing, empty or not a script must stop taking jobs instead of staying unhealthy while it runs them.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -220,3 +225,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC11
+  - id: dod-omn19998-ac10-runner-hook-dir-mount
+    description: AC12 tests parse every runner compose service for the directory mount and the paths inside it, and run healthcheck.sh against a missing, empty, truncated and intact hook with a stub docker that records the stop.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
+  - id: dod-omn19998-runner-hook-deploy-artifact-probe
+    description: Hosted-runner deployment artifact check for AC12. Parses all runner compose services to reject individual hook mounts and require the read-only hook directory, job hook path, entrypoint and healthcheck paths in that directory. This checks deployment configuration and does not claim live runner activation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 -k "population or bind_mounts or mounts_the_hook_directory or point_inside_the_hook_directory"
+        cwd: .
+    binds_ac:
+      - AC12

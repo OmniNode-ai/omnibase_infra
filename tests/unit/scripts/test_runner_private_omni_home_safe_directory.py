@@ -385,7 +385,7 @@ def test_compose_deploy_runner_has_no_shared_gid_and_has_init_wrapper() -> None:
     )
     wrapper = " ".join(str(part) for part in entrypoint)
     assert "chown" in wrapper
-    assert "exec /usr/local/bin/entrypoint.sh" in wrapper
+    assert "exec /opt/onex-runner-hooks/entrypoint.sh" in wrapper
 
 
 # ---------------------------------------------------------------------------
