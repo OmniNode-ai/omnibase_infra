@@ -36,7 +36,6 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: the Mac Studio host declares pool omninode-studio-ci-runner (4 runners, class action-multiarch); its compose services carry omnibase-ci-multiarch and arch-arm64, never omnibase-ci, x64, arch-amd64 or a host label, mount no docker socket or credential, and are capped at 1.5 CPU and 3g; both amd64 action pools carry omnibase-ci-multiarch; declared_total(action) stays 26 -- falsifier: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0 fails on the merge-base tree'
-<<<<<<< HEAD
   - id: req-omn19998-dev-maintenance-check-fences
     statement: Dev maintenance checks must assert that fences naming prod or excluding dev suppress migration convergence and lane mirroring, and that lane mirroring never targets a governed lane even on a mixed lab fence.
     acceptance:
@@ -57,13 +56,11 @@ requirements:
     acceptance:
       - id: AC10
         statement: 'AC10: .github/workflows/dev-merge-tag.yml triggers only on push to dev, and its tag step, run against a throwaway repository with a +05:30 committer date, pushes one lightweight tag named dev-<committer time in UTC>-<sha12> at the commit, pushes nothing on a second run or when a dev tag for that sha already exists, pushes nothing in a dry run, and refuses a value that is not a full sha -- falsifier: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py -q -n 0 fails at the merge base, where the workflow does not exist'
-=======
   - id: req-omn19998-infra-no-omnimarket-dependency
     statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
     acceptance:
-      - id: AC7
-        statement: 'AC7: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
->>>>>>> 440aaaee8 (feat(OMN-19998): add no-omnimarket-dependency guard for omnibase_infra)
+      - id: AC11
+        statement: 'AC11: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -84,16 +81,14 @@ evidence_requirements:
     description: The structural tests read config/runner_fleet.yaml through the fleet model, the three runner compose files and the fleet panel's label classifier.
     command: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
   - kind: tests
-<<<<<<< HEAD
     description: The builder tests drive select_ci_runs and build_event over fixture worker runs; the census pass tests run lane-census-check.sh against a stubbed docker and broker.
     command: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0
   - kind: tests
     description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
-=======
+  - kind: tests
     description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
     command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
->>>>>>> 440aaaee8 (feat(OMN-19998): add no-omnimarket-dependency guard for omnibase_infra)
 emergency_bypass:
   enabled: false
   justification: ''
@@ -160,7 +155,6 @@ dod_evidence:
       - check_type: command
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-omninode-studio-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys, yaml; data = yaml.safe_load(sys.stdin); services = data[\"services\"]; assert set(services) == {f\"omninode-studio-ci-runner-{n}\" for n in range(1, 5)}; expected = {\"self-hosted\", \"omnibase-ci-multiarch\", \"linux\", \"arm64\", \"arch-arm64\"}; assert all(set(s[\"environment\"][\"RUNNER_LABELS\"].split(\",\")) == expected and s[\"cpus\"] == \"1.5\" and s[\"mem_limit\"] == s[\"memswap_limit\"] == \"3g\" and not any(term in str(s) for term in (\"docker.sock\", \"lab-credentials\", \"operator.env\", \"KUBECONFIG\", \"LOCAL_LLM_SHARED_SECRET\")) for s in services.values())'"
         cwd: .
-<<<<<<< HEAD
   - id: dod-omn19998-ac6-dev-maintenance-check-fences
     description: AC7 tests exercise excluded process fences and non-dev mirror targets through the real agent and executor entry points with isolated subprocess seams.
     source: manual
@@ -208,9 +202,8 @@ dod_evidence:
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/dev-merge-tag.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/branches: \[dev\]/{a=1} /git push origin "refs\/tags\//{b=1} END{exit !(a&&b)}'
         cwd: .
-=======
   - id: dod-omn19998-ac6-infra-no-omnimarket-dependency
-    description: AC7 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
+    description: AC11 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
     source: manual
     checks:
       - check_type: test_passes
@@ -223,5 +216,4 @@ dod_evidence:
         check_value: 'gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=eeba91e21e702d29c420e5fe8ceaf4a43e334572 --jq .content | base64 -d | python3 -c "import sys; s = sys.stdin.read(); sys.exit(len(s) < 100 or ''omnimarket'' in s)"'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC7
->>>>>>> 440aaaee8 (feat(OMN-19998): add no-omnimarket-dependency guard for omnibase_infra)
+      - AC11
