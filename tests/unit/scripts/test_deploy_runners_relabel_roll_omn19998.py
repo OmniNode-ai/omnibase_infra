@@ -218,7 +218,12 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
     bindir.mkdir()
     (tmp_path / "home").mkdir()
     ssh = bindir / "ssh"
-    ssh.write_text('#!/usr/bin/env bash\nset -euo pipefail\nshift\nexec bash -c "$1"\n')
+    # A remote mkdir is recorded, not run: the host path (/home/jonah/...) does
+    # not exist, and may not be created, on a hosted CI runner.
+    ssh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\nshift\n"
+        'exec bash -c \'mkdir() { echo "MKDIR $*" >> "$FAKE_CALLS"; }; \'"$1"\n'
+    )
     rsync = bindir / "rsync"
     rsync.write_text('#!/usr/bin/env bash\necho "RSYNC $*" >> "$FAKE_CALLS"\nexit 0\n')
     (bindir / "docker").write_text(FAKE_DOCKER)
