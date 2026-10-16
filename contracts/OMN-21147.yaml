@@ -16,11 +16,11 @@ requirements:
   - id: req-omn21147-catalog-checks
     statement: Checks cover the current registry without requiring a retired endpoint or silently skipping live calls.
     acceptance:
-      - id: AC-CHECK1
+      - id: AC3
         statement: Every current local inference model has a health path, and the primary model remains required.
-      - id: AC-CHECK2
+      - id: AC4
         statement: Measured-metric scoring selects a model that exists in the loaded registry.
-      - id: AC-CHECK3
+      - id: AC5
         statement: Live adapter tests use marker selection and require an explicit reachable endpoint when selected.
 evidence_requirements:
   - kind: tests
@@ -57,7 +57,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/docker/test_model_registry_health_paths.py -q --no-cov -k local_inference_models_have_health_paths
     binds_ac:
-      - AC-CHECK1
+      - AC3
   - id: dod-omn21147-registry-scoring-check
     description: Scoring reads a local candidate from the loaded registry and retains its measured-metric assertions.
     source: manual
@@ -67,7 +67,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
     binds_ac:
-      - AC-CHECK2
+      - AC4
   - id: dod-omn21147-live-adapter-fail-closed
     description: The live suite requires a configured endpoint and carries no environment-gated skip.
     source: manual
@@ -77,7 +77,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py -q --no-cov
     binds_ac:
-      - AC-CHECK3
+      - AC5
   - id: dod-omn21147-hosted-routing-readback
     description: Hosted-runner readback loads the real catalog through the installed routing loader and requires a local code-generation candidate. No private lane is needed.
     source: manual
