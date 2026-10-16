@@ -65,6 +65,11 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_contract_scan.py",
         "handler_event_bus_wiring.py",
         "handler_runtime_lifecycle.py",
+        # In-process derived-write SQL plumbing called by the projection topology
+        # operation: static helpers and a typed cursor wrapper, not ONEX handler
+        # classes (no envelope, never dispatched; OMN-21015)
+        "handler_projection_derived_write.py",
+        "handler_projection_write_cursor.py",
     }
 )
 
