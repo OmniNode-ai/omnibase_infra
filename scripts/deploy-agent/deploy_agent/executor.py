@@ -85,7 +85,11 @@ from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
 )
-from deploy_agent.lane_policy import ENV_ALLOWED_LANES, parse_allowed_lanes
+from deploy_agent.lane_policy import (
+    ENV_ALLOWED_LANES,
+    is_lab_dev_fence,
+    parse_allowed_lanes,
+)
 from deploy_agent.loaded_code import loaded_code_sha
 from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
@@ -1383,7 +1387,11 @@ def _lane_env_overlay() -> dict[str, str]:
     raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
     if clone is None or not raw:
         return {}
-    if parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV}):
+    if not is_lab_dev_fence(parse_allowed_lanes(raw)):
+        return {}
+    # OMN-19998: a lab dev agent may also deploy the stability lane; a compose
+    # command of that job must never take the dev lane's settings.
+    if _ActiveDeployLane.lane not in (None, EnumRuntimeLane.DEV):
         return {}
     lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
     overlay = read_lane_env_fragment(clone, lane_id)
@@ -1396,6 +1404,29 @@ def _lane_env_overlay() -> dict[str, str]:
         )
         _LaneEnvOverlayLog.last = dict(overlay)
     return overlay
+
+
+class _ActiveDeployLane:
+    """The lane of the job in flight, or ``None`` between jobs (OMN-19998).
+
+    ``_compose_env`` serves every compose command and is not told the lane;
+    the agent sets this around a job with :func:`active_deploy_lane`, so the
+    dev lane's env fragment is applied to a dev job (or a dev-lane converge
+    outside a job) and never to a stability-lane job of the same agent.
+    """
+
+    lane: EnumRuntimeLane | None = None
+
+
+@contextlib.contextmanager
+def active_deploy_lane(lane: EnumRuntimeLane) -> Iterator[None]:
+    """Mark ``lane`` as the lane of the job in flight for its duration."""
+    previous = _ActiveDeployLane.lane
+    _ActiveDeployLane.lane = lane
+    try:
+        yield
+    finally:
+        _ActiveDeployLane.lane = previous
 
 
 class _LaneEnvOverlayLog:
@@ -2617,7 +2648,7 @@ class DeployExecutor:
             lane is not EnumRuntimeLane.DEV
             or clone is None
             or not raw
-            or parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV})
+            or not is_lab_dev_fence(parse_allowed_lanes(raw))
         ):
             return None
         env = _compose_env()

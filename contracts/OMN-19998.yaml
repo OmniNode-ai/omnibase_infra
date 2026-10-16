@@ -46,11 +46,16 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: an abandoned unfinished run is not listed in a later window, the newest unfinished run of a runner is still listed, a window longer than two hours lists only its last two hours and yields the CI_RUNS_TRUNCATED notice while a one-hour window yields none, and a clean census pass still exits 0 and logs the notice -- falsifier: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass" fails on the merge-base builder'
+  - id: req-omn19998-stability-follows-dev-tag
+    statement: A lab dev deploy agent whose fence admits the stability lane beside dev must keep the dev lane's own behaviour, and on its idle tick it must rebuild the stability lane, as its own job named agent/stability-follow-tag, onto the newest omnimarket dev tag once the dev lane runs that tag, so the stability lane never trails dev by more than one tag; the dev lane's env fragment must never reach a stability-lane job.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: an agent whose fence names dev and the stability lane runs one stability-lane rebuild requested by agent/stability-follow-tag when dev runs the newest tag and the stability lane does not, none while dev runs an older tag, none when the stability lane already runs it, none on a fence of dev alone or one naming prod, one attempt per tag; a stability-lane job takes no dev env fragment -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly fails against the merge-base deploy_agent'
   - id: req-omn19998-runner-hook-dir-mount
     statement: A runner container must see a hook file that a deploy replaced, and a runner whose job-started hook is missing, empty or not a script must stop taking jobs instead of staying unhealthy while it runs them.
     acceptance:
-      - id: AC9
-        statement: 'AC9: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
+      - id: AC10
+        statement: 'AC10: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -73,6 +78,9 @@ evidence_requirements:
   - kind: tests
     description: The builder tests drive select_ci_runs and build_event over fixture worker runs; the census pass tests run lane-census-check.sh against a stubbed docker and broker.
     command: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0
+  - kind: tests
+    description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -157,12 +165,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
-  - id: dod-omn19998-ac9-runner-hook-dir-mount
-    description: AC9 tests parse every runner compose service for the directory mount and the paths inside it, and run healthcheck.sh against a missing, empty, truncated and intact hook with a stub docker that records the stop.
+  - id: dod-omn19998-ac5-stability-follows-dev-tag
+    description: AC9 tests run the agent's idle tick with a dev and stability-lane fence and assert one stability-lane job named agent/stability-follow-tag per tag dev runs, and no dev fragment inside a stability-lane job.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
+  - id: dod-omn19998-ac10-runner-hook-dir-mount
+    description: AC10 tests parse every runner compose service for the directory mount and the paths inside it, and run healthcheck.sh against a missing, empty, truncated and intact hook with a stub docker that records the stop.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC9
+      - AC10
