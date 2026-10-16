@@ -1,0 +1,63 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20717
+title: An unpriced delegation call is stored and served as null on Postgres, never 0
+summary: Vendors the omnimarket delegation migrations 0061 (cost_usd nullable, unpriced zero rows backfilled to null, tenant policy restated unchanged) and 0062 (token-usage totals over priced calls with an unpriced-call count), and savings 096 (the savings view appends an unpriced-call count), each bound to its checksum and declared forward-only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20717-postgres-unpriced-null
+    statement: The delegation store on Postgres holds null for an unpriced call, and the sums the dashboards read count priced calls only with the unpriced calls counted beside them.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: an unpriced call returns null, never 0 -- falsifier: the same test finds 0.0 for an unpriced call'
+evidence_requirements:
+  - kind: tests
+    description: The manifest validator, the migration class check and the RLS policy gate over the vendored files.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn20717_unpriced_cost_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20717-vendored-unpriced-cost-test
+    description: The vendored files match the omnimarket sources' checksums, each has its ledger row and forward-only class, and 0061 backfills under a helper policy it drops, never toggling forced RLS or restating tenant_isolation. At the merge base the files are absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn20717_unpriced_cost_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20717-infra-manifest
+    description: The application migration manifest binds the three vendored files to the checksums of the omnimarket sources.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable\\.sql\\t.*\\tc784d907eba59133e902c7f192a314035f56f8a2e66f9bd4e8806f71fefc8d95$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls\\.sql\\t.*\\t0512d4962588a0a03d32996ebf859d297c933bbe17a4f462877fa44e55ab1729$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_savings/096_delegation_savings_unpriced_calls\\.sql\\t.*\\t8364fb62069d8ecb2cc7f6bf4a6767e600f6300d61d285b2e7057962538dd60e$' docker/migrations/forward/_ledger/application-migrations.tsv"
+    binds_ac:
+      - AC2
+  - id: dod-omn20717-infra-class
+    description: The migration class declarations cover the three vendored files as forward-only.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/check_migration_class.py && grep -qF 'forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only' config/migration_classes.yaml && grep -qF 'forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only' config/migration_classes.yaml"
+    binds_ac:
+      - AC2
+  - id: dod-omn20717-infra-rls-policy
+    description: 0061 backfills under a transaction-scoped helper policy that it drops in the same block, and never changes the table's forced row-level security or tenant_isolation, so the RLS policy gate passes over the forward tree.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/check_migration_rls_policy_atomicity.py && grep -qF 'DROP POLICY omn20717_unpriced_backfill ON delegation_events' docker/migrations/forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql"
+    binds_ac:
+      - AC2
+  - id: dod-omn20717-vendored-null-column
+    description: The vendored 0061 drops the NOT NULL and the DEFAULT on delegation_events.cost_usd and nulls only no_cost_model zero rows.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -qF 'ALTER COLUMN cost_usd DROP NOT NULL' docker/migrations/forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql && grep -qF \"WHERE cost_measurement_source = 'no_cost_model'\" docker/migrations/forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql"
+    binds_ac:
+      - AC2
