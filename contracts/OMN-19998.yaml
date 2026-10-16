@@ -26,6 +26,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
+  - id: req-omn19998-prepr-isolated-docker-auths
+    statement: The pre-PR pool prover's isolated docker config must hold no credential store, no credential helper and no credential, and must keep a non-empty auths map so the docker CLI stays on the plain file store instead of detecting the macOS keychain again.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the config snippet in prepr_pool_prove.sh, run against a keychain-backed config, writes one with no credsStore or credHelpers, a non-empty auths map and no auths entry holding a credential -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential fails on the merge-base prepr_pool_prove.sh'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -39,6 +44,9 @@ evidence_requirements:
   - kind: tests
     description: The checkout tests build tags against a local origin; the agent tests drive the heartbeat, the alarm and the followed head through the agent's seams.
     command: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+  - kind: tests
+    description: The isolated-config test runs the prover's own config snippet against a fake keychain-backed docker config and reads the written file.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
 emergency_bypass:
   enabled: false
   justification: ''
@@ -80,3 +88,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn19998-ac4-prepr-isolated-docker-auths
+    description: AC5 test runs the prover's isolated-config snippet and checks the written config names no credential store and keeps an empty-entry auths map.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5

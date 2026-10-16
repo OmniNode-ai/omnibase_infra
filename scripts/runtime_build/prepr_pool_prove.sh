@@ -383,6 +383,10 @@ except (OSError, ValueError):
     cfg={}
 for k in ("credsStore","credHelpers","auths"):
     cfg.pop(k, None)
+# With no auths at all the CLI detects the platform default store again (the
+# keychain on macOS), so keep one empty entry: it holds no credential and pins
+# the plain file store (reproduced on a macOS lab host, 2026-10-16).
+cfg["auths"]={"lab.invalid":{}}
 json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
     for d in cli-plugins contexts buildx; do [ -e "$HOME/.docker/$d" ] && ln -s "$HOME/.docker/$d" "$DC/$d"; done
     export DOCKER_CONFIG="$DC"; echo "docker config isolated at $DC (no credential store)"

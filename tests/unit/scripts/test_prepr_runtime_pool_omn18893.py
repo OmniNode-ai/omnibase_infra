@@ -331,6 +331,43 @@ def test_probe_waits_for_the_runtimes_before_reading_health() -> None:
     assert "health: starting" in probe and "PROBE_WAIT_S" in probe
 
 
+def test_isolated_docker_config_pins_the_file_store_and_holds_no_credential(
+    tmp_path: Path,
+) -> None:
+    # OMN-19998: on a macOS lab host a config with no auths key made the docker CLI
+    # detect the keychain store again, so every isolated build from a
+    # non-interactive session failed at "keychain cannot be accessed".
+    text = PROVE_SH.read_text(encoding="utf-8")
+    branch = text[text.index("= isolated ]; then") :]
+    start = branch.index("python3 -c '") + len("python3 -c '")
+    snippet = branch[start : branch.index('\' "$DC/config.json"')]
+    home = tmp_path / "home"
+    (home / ".docker").mkdir(parents=True)
+    (home / ".docker" / "config.json").write_text(
+        json.dumps(
+            {
+                "credsStore": "osxkeychain",
+                "credHelpers": {"ghcr.io": "osxkeychain"},
+                "auths": {"ghcr.io": {"auth": "c2VjcmV0"}},
+                "currentContext": "desktop-linux",
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "config.json"
+    subprocess.run(
+        [sys.executable, "-c", snippet, str(out)],
+        check=True,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+    )
+    cfg = json.loads(out.read_text(encoding="utf-8"))
+    assert "credsStore" not in cfg and "credHelpers" not in cfg
+    assert cfg["currentContext"] == "desktop-linux"
+    # a non-empty auths keeps the CLI on the plain file store; no entry holds a credential
+    assert cfg.get("auths"), cfg
+    assert all(not entry for entry in cfg["auths"].values()), cfg
+
+
 # ------------------------------------------------------------------ ledger
 
 
