@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -19,7 +20,12 @@ from omnibase_core.models.delegation.wire import (
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.models.delegation.model_delegation_run_step_event import (
+    ModelDelegationRunStepEvent,
+    RunStepKind,
+)
 from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
     ProtocolPatternBBrokerTransport,
 )
@@ -56,6 +62,10 @@ _DELEGATION_CONTRACT_NAME = "node_delegation_orchestrator"
 _DELEGATION_OPERATION_ALIAS = "delegation.orchestrate"
 _PREFERRED_DELEGATION_PACKAGE = "omnimarket"
 _REQUESTER = "delegate_skill"
+_RUN_STEP_EVENT_TYPE = "delegation.run_step"
+_RUN_STEP_SOURCE_TOOL = "omnibase_infra.runtime_delegation_dispatch_port"
+# A step's free text is a short explanation, not a transcript.
+_RUN_STEP_REASON_LIMIT = 500
 
 
 @dataclass(
@@ -464,6 +474,10 @@ class RuntimeDelegationDispatchPort:
             command_topic=self._command_topic or selected.route.command_topic,
             routes=routes,
         )
+        # OMN-19972: the run began here. Its steps are numbered once the chain
+        # answers, timed from this moment.
+        run_started_at = datetime.now(UTC)
+        run_started = time.monotonic()
         terminal_evidence_sink = self._terminal_evidence_sink
         if terminal_evidence_sink is None:
             _route, result = await broker.dispatch_request(command)
@@ -503,11 +517,383 @@ class RuntimeDelegationDispatchPort:
                 command,
                 terminal_observer=observe_terminal,
             )
-        return _normalize_result_payload(
+        normalized = _normalize_result_payload(
             status=result.status,
             payload=result.payload,
             error_message=result.error_message,
         )
+        if wait:
+            await self._publish_run_steps(
+                topic=_resolve_run_step_topic(routes, selected.route.package_name),
+                correlation_id=correlation_id,
+                task_type=task_type,
+                tenant_id=tenant_id,
+                started_at=run_started_at,
+                started=run_started,
+                status=result.status,
+                flat=normalized if isinstance(result.payload, dict) else None,
+            )
+        return normalized
+
+    async def _publish_run_steps(
+        self,
+        *,
+        topic: str | None,
+        correlation_id: UUID,
+        task_type: str,
+        tenant_id: str | None,
+        started_at: datetime,
+        started: float,
+        status: str,
+        flat: Mapping[str, object] | None,
+    ) -> None:
+        """Number a dispatched run's steps from its terminal and publish them.
+
+        OMN-19972: the deployed delegate-skill handler dispatches through this
+        port, so its runs reach the run-trace projection only if this port
+        publishes their steps, on the topic the delegate-skill contract declares.
+        Best-effort: a step that cannot be delivered is a gap in the trace, never
+        a failed delegation.
+        """
+        if topic is None:
+            logger.warning(
+                "run steps of correlation_id=%s not published: no installed "
+                "contract declares one runtime_dispatch.run_step_event",
+                correlation_id,
+            )
+            return
+        tenant = (None if flat is None else _text(flat.get("tenant_id"))) or _text(
+            tenant_id
+        )
+        if tenant is None:
+            logger.warning(
+                "run steps of correlation_id=%s not published: no tenant on the "
+                "request or the terminal",
+                correlation_id,
+            )
+            return
+        sequence = RunStepSequence(
+            tenant_id=tenant,
+            correlation_id=correlation_id,
+            started_at=started_at,
+            started=started,
+        )
+        try:
+            _record_bus_run(sequence, task_type=task_type, status=status, flat=flat)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            logger.warning(
+                "run steps of correlation_id=%s could not be derived",
+                correlation_id,
+                exc_info=True,
+            )
+        key = str(correlation_id).encode("utf-8")
+        for step in sequence.steps:
+            try:
+                envelope = ModelEventEnvelope[dict[str, object]](
+                    payload=step.model_dump(mode="json"),
+                    correlation_id=correlation_id,
+                    envelope_timestamp=datetime.now(UTC),
+                    event_type=_RUN_STEP_EVENT_TYPE,
+                    source_tool=_RUN_STEP_SOURCE_TOOL,
+                    tenant_id=step.tenant_id,
+                )
+                await self._event_bus.publish(
+                    topic,
+                    key,
+                    envelope.model_dump_json(exclude_none=True).encode("utf-8"),
+                    None,
+                )
+            except Exception:
+                # A trace gap, never a failed delegation.
+                logger.exception(
+                    "run step %d of correlation_id=%s was not published",
+                    step.step_sequence,
+                    correlation_id,
+                )
+
+
+def _resolve_run_step_topic(
+    routes: Mapping[str, ModelRuntimeLocalIngressRoute], package_name: str
+) -> str | None:
+    """The one run-step topic the delegation engine's package declares."""
+    declared = {
+        route.run_step_event
+        for route in routes.values()
+        if route.package_name == package_name and route.run_step_event
+    }
+    if len(declared) == 1:
+        return next(iter(declared))
+    if declared:
+        logger.warning(
+            "ambiguous runtime_dispatch.run_step_event declarations in %s: %s",
+            package_name,
+            sorted(declared),
+        )
+    return None
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+class RunStepSequence:
+    """The step counter of one run; its number is the run's only ordering."""
+
+    def __init__(
+        self,
+        *,
+        tenant_id: str,
+        correlation_id: UUID,
+        started_at: datetime,
+        started: float,
+    ) -> None:
+        self._tenant_id = tenant_id
+        self._correlation_id = correlation_id
+        self._started_at = started_at
+        self._started = started
+        self._next_sequence = 1
+        self._calls = 0
+        self._routed_backend_id: str | None = None
+        self._last_failed_sequence: int | None = None
+        self._last_failure_cause: str | None = None
+        self._terminated = False
+        self.steps: list[ModelDelegationRunStepEvent] = []
+
+    def request(self, *, task_type: str) -> None:
+        self._record("request", started_at=self._started_at, reason=task_type)
+
+    def routing(self, *, backend_id: str, model_id: str, tier: str) -> None:
+        """A backend was chosen. A retry on the backend already chosen is no decision."""
+        if backend_id == self._routed_backend_id:
+            return
+        previous = self._routed_backend_id
+        self._routed_backend_id = backend_id
+        if previous is None:
+            reason = f"first choice: tier {tier}"
+        else:
+            cause = self._last_failure_cause or "the previous attempt"
+            reason = f"tier {tier}, after {cause} on {previous}"
+        self._record(
+            "routing_decision",
+            started_at=datetime.now(UTC),
+            backend_id=backend_id,
+            model_id=model_id,
+            reason=reason,
+        )
+
+    def provider_call(
+        self,
+        *,
+        duration_ms: int | None,
+        backend_id: str,
+        model_id: str | None,
+        failure_cause: str | None,
+        reason: str | None,
+    ) -> None:
+        self._calls += 1
+        self._record(
+            "provider_call",
+            started_at=self._started_at,
+            duration_ms=duration_ms,
+            failure_cause=failure_cause,
+            backend_id=backend_id,
+            model_id=model_id,
+            attempt_number=self._calls,
+            reason=reason,
+        )
+
+    def quality_gate(
+        self, *, backend_id: str, failure_cause: str | None, reason: str | None
+    ) -> None:
+        self._record(
+            "quality_gate",
+            started_at=datetime.now(UTC),
+            duration_ms=0,
+            failure_cause=failure_cause,
+            backend_id=backend_id,
+            attempt_number=self._calls or None,
+            reason=reason,
+        )
+
+    def terminal(
+        self,
+        *,
+        succeeded: bool,
+        backend_id: str | None = None,
+        model_id: str | None = None,
+        failure_cause: str | None = None,
+    ) -> None:
+        """The run ended. A failed run names the earlier step that failed it."""
+        if self._terminated:
+            return
+        self._terminated = True
+        cause = None if succeeded else (failure_cause or self._last_failure_cause)
+        elapsed = timedelta(seconds=time.monotonic() - self._started)
+        self._record(
+            "terminal",
+            started_at=datetime.now(UTC),
+            duration_ms=max(0, int(elapsed / timedelta(milliseconds=1))),
+            failure_cause=cause or (None if succeeded else "failed"),
+            succeeded=succeeded,
+            backend_id=backend_id,
+            model_id=model_id,
+            failing_step_sequence=None if succeeded else self._last_failed_sequence,
+        )
+
+    def _record(
+        self,
+        kind: RunStepKind,
+        *,
+        started_at: datetime,
+        duration_ms: int | None = None,
+        failure_cause: str | None = None,
+        succeeded: bool | None = None,
+        backend_id: str | None = None,
+        model_id: str | None = None,
+        attempt_number: int | None = None,
+        reason: str | None = None,
+        failing_step_sequence: int | None = None,
+    ) -> None:
+        # The number is taken before anything can fail, so a step that cannot be
+        # built still holds its place in the run.
+        sequence = self._next_sequence
+        self._next_sequence += 1
+        if succeeded is None:
+            succeeded = failure_cause is None
+        if not succeeded and kind != "terminal":
+            self._last_failed_sequence = sequence
+            self._last_failure_cause = failure_cause
+        if reason is not None and len(reason) > _RUN_STEP_REASON_LIMIT:
+            reason = reason[: _RUN_STEP_REASON_LIMIT - 1] + "…"
+        try:
+            self.steps.append(
+                ModelDelegationRunStepEvent(
+                    tenant_id=self._tenant_id,
+                    correlation_id=self._correlation_id,
+                    step_sequence=sequence,
+                    step_kind=kind,
+                    started_at=started_at,
+                    duration_ms=duration_ms,
+                    outcome="succeeded" if succeeded else "failed",
+                    failure_cause=failure_cause,
+                    backend_id=backend_id,
+                    model_id=model_id,
+                    attempt_number=attempt_number,
+                    reason=reason or None,
+                    failing_step_sequence=failing_step_sequence,
+                )
+            )
+        except ValueError:
+            logger.warning(
+                "run step %d (%s) of correlation_id=%s could not be built",
+                sequence,
+                kind,
+                self._correlation_id,
+                exc_info=True,
+            )
+
+
+def _bus_attempts(
+    flat: Mapping[str, object], *, status: str
+) -> list[Mapping[str, object]]:
+    """The chain's attempts, from its escalation ladder or, failing that, the terminal."""
+    history = flat.get("escalation_history")
+    if isinstance(history, list | tuple):
+        ladder = [entry for entry in history if isinstance(entry, Mapping)]
+        if ladder:
+            return ladder
+    cause = flat.get("routed_failure_cause")
+    provider_failed = isinstance(cause, Mapping) and cause.get("kind") == "provider"
+    failure = _text(flat.get("terminal_failure_reason")) or _text(
+        flat.get("failure_reason")
+    )
+    attempt: dict[str, object] = {
+        "backend_ref": flat.get("backend_ref") or flat.get("route"),
+        "model_used": flat.get("model_used"),
+        "tier": flat.get("cost_tier_name"),
+        "latency_ms": flat.get("latency_ms"),
+    }
+    if status == "completed":
+        attempt["acceptance_decision"] = "accept"
+    elif provider_failed:
+        attempt["acceptance_decision"] = "terminate"
+        attempt["acceptance_reason"] = "provider_call_failed"
+        attempt["failure_reasons"] = [failure] if failure else []
+    else:
+        attempt["acceptance_decision"] = "terminate"
+        attempt["acceptance_reason"] = (
+            _text(cause.get("kind")) if isinstance(cause, Mapping) else None
+        ) or "quality_gate_rejection"
+        attempt["failure_reasons"] = [failure] if failure else []
+    return [attempt]
+
+
+def _record_bus_run(
+    sequence: RunStepSequence,
+    *,
+    task_type: str,
+    status: str,
+    flat: Mapping[str, object] | None,
+) -> None:
+    """Take a dispatched run's steps in the order the chain took them."""
+    sequence.request(task_type=task_type)
+    if flat is None:
+        sequence.terminal(succeeded=False, failure_cause=status)
+        return
+    model = _text(flat.get("model_used"))
+    backend = _text(flat.get("backend_ref")) or _text(flat.get("route"))
+    if backend is None and flat.get("routing_disposition") == "unrouted":
+        sequence.terminal(
+            succeeded=False,
+            model_id=model,
+            failure_cause=_text(flat.get("unrouted_reason")) or "unrouted",
+        )
+        return
+    tier = _text(flat.get("cost_tier_name")) or "unknown"
+    attempts = _bus_attempts(flat, status=status)
+    for index, attempt in enumerate(attempts):
+        attempt_backend = _text(attempt.get("backend_ref")) or backend or "unknown"
+        attempt_model = _text(attempt.get("model_used")) or model
+        sequence.routing(
+            backend_id=attempt_backend,
+            model_id=attempt_model or "",
+            tier=_text(attempt.get("tier")) or tier,
+        )
+        latency = attempt.get("latency_ms")
+        if index == len(attempts) - 1 and not isinstance(latency, int):
+            latency = flat.get("latency_ms")
+        reason_code = _text(attempt.get("acceptance_reason"))
+        reasons = attempt.get("failure_reasons")
+        detail = (
+            "; ".join(str(r) for r in reasons)
+            if isinstance(reasons, list | tuple) and reasons
+            else None
+        )
+        provider_failed = reason_code == "provider_call_failed"
+        sequence.provider_call(
+            duration_ms=(
+                latency
+                if isinstance(latency, int)
+                and not isinstance(latency, bool)
+                and latency >= 0
+                else None
+            ),
+            backend_id=attempt_backend,
+            model_id=attempt_model,
+            failure_cause=reason_code if provider_failed else None,
+            reason=detail if provider_failed else None,
+        )
+        if provider_failed:
+            continue
+        accepted = attempt.get("acceptance_decision") == "accept"
+        sequence.quality_gate(
+            backend_id=attempt_backend,
+            failure_cause=None if accepted else (reason_code or "rejected"),
+            reason=None if accepted else detail,
+        )
+    sequence.terminal(
+        succeeded=status == "completed", backend_id=backend, model_id=model
+    )
 
 
 def _named_tests_wire(named_tests: BaseModel) -> dict[str, object]:
