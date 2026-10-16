@@ -51,6 +51,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: an agent whose fence names dev and the stability lane runs one stability-lane rebuild requested by agent/stability-follow-tag when dev runs the newest tag and the stability lane does not, none while dev runs an older tag, none when the stability lane already runs it, none on a fence of dev alone or one naming prod, one attempt per tag; a stability-lane job takes no dev env fragment -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly fails against the merge-base deploy_agent'
+  - id: req-omn19998-ci-runner-uv-cache-hardlink
+    statement: The second lab host's CI runners must keep their uv cache inside the job-workspace mount, with uv's default link mode, so a warm uv sync hardlinks wheel contents instead of copying them across two bind mounts.
+    acceptance:
+      - id: AC10
+        statement: 'AC10: each of the sixteen services of the second-host CI runner pool sets UV_CACHE_DIR to a path under its _work mount, binds no separate uv cache mount and sets no UV_LINK_MODE -- falsifier: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache fails on the merge-base compose'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -76,6 +81,9 @@ evidence_requirements:
   - kind: tests
     description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+  - kind: tests
+    description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
+    command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -172,3 +180,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-omn19998-ac10-ci-runner-uv-cache-hardlink
+    description: AC10 test asserts the uv cache directory shares the work mount on all sixteen services of the second-host CI runner pool, with no separate uv mount and no UV_LINK_MODE.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10

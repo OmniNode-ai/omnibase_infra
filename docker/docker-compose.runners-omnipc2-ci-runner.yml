@@ -33,15 +33,29 @@
 #     apart by prefix.
 #   - its own compose project (`-p omnipc2-ci-runner`), so it shares no project
 #     with omnipc2-verify-runner, which lives in the same directory on this host.
-#   - the tool caches (uv, pip, pre-commit, pnpm, playwright, ci-envs, npm) are
+#   - the tool caches (pip, pre-commit, pnpm, playwright, ci-envs, npm) are
 #     per-runner bind mounts under /scratch/cache/runners/<N>/<tool>, at the
 #     tools' default in-container paths, so they stop growing each runner's
 #     writable layer on the host's root disk (10 to 17 GB per runner before this)
-#     and recreating a runner frees them. The image bakes a uv cache and the
-#     shared ci-env under two of those paths, and a bind mount hides baked
-#     content, so seed /scratch/cache/runners/<N>/uv and .../ci-envs from the
-#     image and chown them to uid 1001 before the first recreate (the runner
-#     user). UV_LINK_MODE=copy because a hardlink cannot cross the bind mount.
+#     and recreating a runner frees them. The image bakes the shared ci-env
+#     under one of those paths, and a bind mount hides baked content, so seed
+#     /scratch/cache/runners/<N>/ci-envs from the image and chown it to uid 1001
+#     before the first recreate (the runner user).
+#   - the uv cache is NOT one of those mounts (OMN-19998). It is
+#     UV_CACHE_DIR=/home/runner/actions-runner/_work/.uv-cache, a directory inside
+#     the job-workspace mount below, because uv installs a wheel by hardlinking
+#     its files out of the cache, and a hardlink cannot cross a mount: with the
+#     cache on its own bind mount every install fell back to copying each file,
+#     which on this host's single SATA SSD under full IO pressure (PSI full
+#     avg10 about 65) turned a warm `uv sync --locked` of a private repository
+#     into 262 s, against 32 s with the cache beside the venv (measured 2026-10-16
+#     on this host in a throwaway runner-image container, same ambient load, same
+#     lock, cache pre-warmed in both). UV_LINK_MODE is therefore left at uv's
+#     default. A venv built outside the work mount (the shared ci-env under
+#     ci-envs) still falls back to copying with a uv warning, which is correct.
+#     To keep a warm cache across the change, move the old directory in before
+#     the runner is recreated (same filesystem, so the rename is instant):
+#     mv /scratch/cache/runners/<N>/uv /scratch/runners/<N>/work/.uv-cache
 #   - each runner's job workspace (actions-runner/_work: checkouts, venvs,
 #     builds) and its TMPDIR (/home/runner/tmp, which pytest and uv builds use)
 #     are bind mounts under /scratch/runners/<N>/, so job IO stops landing on the
@@ -97,7 +111,9 @@ x-runner-base: &runner-base
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
     UV_HTTP_TIMEOUT: "600"
-    UV_LINK_MODE: copy
+    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (/scratch/runners/<N>/work),
+    # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
+    UV_CACHE_DIR: /home/runner/actions-runner/_work/.uv-cache
     TMPDIR: /home/runner/tmp
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
@@ -135,7 +151,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/1/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/1/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/1/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/1/pnpm:/home/runner/.cache/pnpm
@@ -159,7 +174,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/2/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/2/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/2/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/2/pnpm:/home/runner/.cache/pnpm
@@ -183,7 +197,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/3/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/3/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/3/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/3/pnpm:/home/runner/.cache/pnpm
@@ -207,7 +220,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/4/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/4/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/4/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/4/pnpm:/home/runner/.cache/pnpm
@@ -231,7 +243,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/5/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/5/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/5/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/5/pnpm:/home/runner/.cache/pnpm
@@ -255,7 +266,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/6/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/6/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/6/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/6/pnpm:/home/runner/.cache/pnpm
@@ -279,7 +289,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/7/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/7/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/7/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/7/pnpm:/home/runner/.cache/pnpm
@@ -303,7 +312,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/8/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/8/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/8/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/8/pnpm:/home/runner/.cache/pnpm
@@ -327,7 +335,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/9/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/9/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/9/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/9/pnpm:/home/runner/.cache/pnpm
@@ -351,7 +358,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/10/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/10/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/10/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/10/pnpm:/home/runner/.cache/pnpm
@@ -375,7 +381,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/11/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/11/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/11/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/11/pnpm:/home/runner/.cache/pnpm
@@ -399,7 +404,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/12/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/12/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/12/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/12/pnpm:/home/runner/.cache/pnpm
@@ -423,7 +427,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/13/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/13/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/13/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/13/pnpm:/home/runner/.cache/pnpm
@@ -447,7 +450,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/14/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/14/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/14/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/14/pnpm:/home/runner/.cache/pnpm
@@ -471,7 +473,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/15/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/15/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/15/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/15/pnpm:/home/runner/.cache/pnpm
@@ -495,7 +496,6 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - /scratch/cache/runners/16/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/16/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/16/pre-commit:/home/runner/.cache/pre-commit
       - /scratch/cache/runners/16/pnpm:/home/runner/.cache/pnpm
