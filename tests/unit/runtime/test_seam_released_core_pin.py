@@ -33,6 +33,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
+import tomllib
 import types
 import typing
 from pathlib import Path
@@ -94,13 +95,25 @@ def test_seam_released_core_pin_importable_and_typed() -> None:
 
     # --- 1. released core is importable and reports the pinned version -----
     core = _import_module("omnibase_core", findings)
-    expected_version = fixture["core_version"]
+    root = Path(__file__).resolve().parents[3]
+    locked = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
+    core_packages = [p for p in locked["package"] if p["name"] == "omnibase-core"]
+    assert len(core_packages) == 1
+    expected_version = core_packages[0]["version"]
+    manifest = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert (
+        f"omnibase-core=={expected_version}"
+        in manifest["tool"]["uv"]["override-dependencies"]
+    )
+    assert tuple(int(part) for part in expected_version.split(".")) >= tuple(
+        int(part) for part in fixture["core_version"].split(".")
+    )
     if core is not None:
         actual_version = getattr(core, "__version__", None)
         if actual_version is not None and actual_version != expected_version:
             findings.append(
                 f"[version] omnibase_core.__version__={actual_version!r} "
-                f"but fixture freezes {expected_version!r}"
+                f"but uv.lock pins {expected_version!r}"
             )
 
     # --- 2. every frozen symbol resolves off its module --------------------
