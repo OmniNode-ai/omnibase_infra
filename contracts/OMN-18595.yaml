@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the first CHANGELOG.md heading names the pyproject.toml version -- falsifier: the check below exits 1 at a release PR''s merge base'
+  - id: req-omn18595-cascade-core-pin-followers
+    statement: A dependency cascade that moves the exact omnibase-core pin moves every exact-version follower of that pin with it.
+    acceptance:
+      - id: AC2
+        statement: "AC2: at core 0.47.45 the exact-version pin tests, the seam fixture and the runner image identity agree with the pyproject override and uv.lock -- falsifier: the tests below fail at the merge base, whose followers still name 0.47.44"
 evidence_requirements:
   - kind: ci
     description: The top changelog heading names the pyproject version.
@@ -31,3 +36,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-18595-core-0-47-45-pin-followers
+    description: The core 0.47.45 cascade (omnibase_infra#5026) moves the exact-version pin tests, the seam fixture and the runner image lock with the override.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_validation_core_validator_omn20074.py tests/ci/test_runner_image_identity.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
