@@ -36,7 +36,7 @@ figure, that figure IS the referent, and ``parameter_count`` restating it
 differently is a contradiction inside a single row.
 
 Where the served id carries no figure the rule does not bind and the field stays
-a declaration — ``deepseek-v4-flash`` is the standing example, whose 284B comes
+a declaration — an opaque model id is one example, whose count comes
 from the OMN-12492 contract and not from its id. Skipping is deliberate: a test
 that demanded a figure there would push someone to encode a guess.
 """
@@ -116,7 +116,7 @@ def test_the_referent_helper_reads_a_moe_id_and_declines_an_opaque_one() -> None
     assert _expected_parameter_count("mistral-7B-instruct") == "7B"
     assert _expected_parameter_count("Qwen2.5-1.5B") == "1.5B"
     # No figure to read: the rule must decline rather than guess.
-    assert _expected_parameter_count("deepseek-v4-flash") is None
+    assert _expected_parameter_count("fixture-model") is None
     assert _expected_parameter_count("gpt-4o") is None
 
 

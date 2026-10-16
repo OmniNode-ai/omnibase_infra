@@ -29,8 +29,6 @@ from tests.helpers.lane_overlay_fixtures import (
 )
 
 _ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
-# OMN-16833: the second live local rung — DS-V4-Flash on .200:8101.
-_DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 # OMN-17099: the embedding rung the dev overlay now binds (live probe
 # 2026-09-27: .201:8002/v1/embeddings serves text-embedding-qwen3).
 _EMBEDDING_ENDPOINT = "http://192.168.86.201:8002/v1/embeddings"
@@ -102,12 +100,6 @@ def _write_base_contract(
                         "required": True,
                     },
                     {
-                        "backend_id": "local-ds-v4-flash",
-                        "model_name": "deepseek-v4-flash",
-                        "endpoint_url_env": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
-                        "required": True,
-                    },
-                    {
                         "backend_id": "local-reasoner",
                         "model_name": "retired",
                         "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
@@ -144,7 +136,6 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
             "LLM_CODER_MODEL_NAME": "poisoned",
             "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://192.168.86.201:8001/v1/chat/completions",
             "BIFROST_LOCAL_REASONER_ENDPOINT_URL": "http://cloud.invalid/v1/chat/completions",
-            "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://cloud.invalid/v1/chat/completions",
         },
     )
 
@@ -156,11 +147,6 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
         assert by_id[backend_id]["model_name"] == "Qwen3.8-27B"
         assert by_id[backend_id]["max_tokens"] == 65_536
         assert by_id[backend_id]["timeout_ms"] == 300_000
-    # OMN-19251: the .200:8101 ds4-flash host is gone and the lane overlays no
-    # longer declare this backend, so it now renders unbound exactly like
-    # local-reasoner below — declared by the base contract, no live rung.
-    assert by_id["local-ds-v4-flash"].get("endpoint_url") is None
-    assert by_id["local-ds-v4-flash"]["model_name"] == "deepseek-v4-flash"
     # local-reasoner (.201:8001, GPU1 removed for RMA) stays unbound by design —
     # the renderer strips its stale env hint so it fails closed rather than
     # resolving a dead endpoint.
@@ -448,7 +434,6 @@ def test_endpoint_probe_requires_advertised_served_id(
     ) -> ModelBifrostEndpointProbeFailure | None:
         assert (endpoint_url, model_name) in {
             (_ENDPOINT, "Qwen3.8-27B"),
-            (_DS_V4_ENDPOINT, "deepseek-v4-flash"),
         }
         assert timeout > 0
         return ModelBifrostEndpointProbeFailure(
@@ -519,13 +504,6 @@ def _write_mixed_base_contract(
                         "backend_id": "local-heavy-reasoning",
                         "model_name": "Qwen3.8-27B",
                         "endpoint_url_env": "BIFROST_LOCAL_CODER_ENDPOINT_URL",
-                        "endpoint_url": None,
-                        "tier": "local",
-                    },
-                    {
-                        "backend_id": "local-ds-v4-flash",
-                        "model_name": "deepseek-v4-flash",
-                        "endpoint_url_env": "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
                         "endpoint_url": None,
                         "tier": "local",
                     },
@@ -694,7 +672,6 @@ def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
         # not the env, is the authority (OMN-15807) and this overlay says none.
         environ={
             "BIFROST_LOCAL_CODER_ENDPOINT_URL": "http://192.168.86.201:8000/v1/chat/completions",
-            "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://192.168.86.200:8101/v1/chat/completions",
         },
     )
 
@@ -707,7 +684,6 @@ def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
     for local_id in (
         "local-coder",
         "local-heavy-reasoning",
-        "local-ds-v4-flash",
         "local-embedding",
     ):
         assert by_id[local_id]["endpoint_url"] is None, local_id

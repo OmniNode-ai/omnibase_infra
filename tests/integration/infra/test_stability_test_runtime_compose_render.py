@@ -218,7 +218,6 @@ COMPOSE_RENDER_ENV = {
     "BIFROST_LOCAL_CODER_ENDPOINT_URL": _chat_url("llm-coder.invalid"),
     "BIFROST_LOCAL_REASONER_ENDPOINT_URL": _chat_url("llm-coder-fast.invalid"),
     "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": _chat_url("llm-embedding.invalid"),
-    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": _chat_url("llm-deepseek.invalid"),
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_URL": _http_url("glm.invalid/v1"),
@@ -550,7 +549,6 @@ def test_stability_lane_render_contains_isolated_runtime_identity(
         assert "BIFROST_LOCAL_CODER_ENDPOINT_URL" not in environment
         assert "BIFROST_LOCAL_REASONER_ENDPOINT_URL" not in environment
         assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in environment
-        assert "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL" not in environment
         volumes = services[service_name]["volumes"]
         overlay_binds = [
             volume for volume in volumes if volume["target"] == _BIFROST_OVERLAY_TARGET

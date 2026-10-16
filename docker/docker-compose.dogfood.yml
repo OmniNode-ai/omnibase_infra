@@ -110,7 +110,6 @@ x-dogfood-runtime-env: &dogfood-runtime-env
   BIFROST_LOCAL_CODER_ENDPOINT_URL: ${BIFROST_LOCAL_CODER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_REASONER_ENDPOINT_URL: ${BIFROST_LOCAL_REASONER_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL: ${BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
-  BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL: ${BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL:-https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
   # OMN-6790: the z.ai GLM CODING PLAN surface. We hold a Coding Plan, not a
   # pay-as-you-go balance; the bare /api/paas/v4 surface answers a Coding-Plan
   # key with HTTP 429 code 1113, which is a WRONG-ENDPOINT signal and never a

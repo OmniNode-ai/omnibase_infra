@@ -15,6 +15,7 @@ from omnibase_infra.errors import (
     InfraRequestRejectedError,
     InfraUnavailableError,
 )
+from scripts.edge_delegation_worker.cli import build_arg_parser
 from scripts.edge_delegation_worker.local_model_bridge import run_chat_completion
 from scripts.edge_delegation_worker.models import ModelLocalInferenceRequest
 
@@ -33,6 +34,30 @@ def _request() -> ModelLocalInferenceRequest:
         model="qwen-local",
         messages=({"role": "user", "content": "hello"},),
     )
+
+
+def test_cli_requires_an_explicit_model_endpoint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        build_arg_parser().parse_args(
+            [
+                "--api-base",
+                "https://api.test",
+                "--model-name",
+                "fixture-model",
+                "--credential-file",
+                "fixture-credential",
+                "--edge-instance-id",
+                "fixture-worker",
+                "--local-bus-brokers",
+                "broker.test:9092",
+                "--consumer-group",
+                "fixture-group",
+            ]
+        )
+    assert exc_info.value.code == 2
+    assert "required: --model-base" in capsys.readouterr().err
 
 
 @pytest.mark.asyncio
