@@ -283,7 +283,6 @@ def test_judge_bifrost_defaults_are_chat_completion_urls() -> None:
         "BIFROST_LOCAL_CODER_ENDPOINT_URL",
         "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
         "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
-        "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
     ):
         assert "/chat/completions" in environment[key]
     assert (

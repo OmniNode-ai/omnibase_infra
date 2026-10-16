@@ -335,36 +335,6 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
-  deepseek-v4-flash:
-    input_cost_per_1k: 0.0
-    output_cost_per_1k: 0.0
-    effective_date: '2026-05-25'
-    note: Local model on .200:8101 (ds4.c, DeepSeek V4 Flash 284B, 131072 ctx) - zero API cost
-    confidence: LOW_CONFIDENCE
-    source: LOCAL_ZERO_API_COST_POLICY
-    sample_count: 0
-    evidence:
-      generated_at: '2026-05-25T00:00:00+00:00'
-      sample_window_days: 7
-      sample_count: 0
-      min_samples: 20
-      query: llm_call_metrics usage_source=API created_at>=now-7d
-      authoritative: false
-  deepseek-v4-pro:
-    input_cost_per_1k: 0.0
-    output_cost_per_1k: 0.0
-    effective_date: '2026-05-25'
-    note: Local model on .200:8101 (ds4.c, DeepSeek V4 Flash 284B alias with higher reasoning effort, 131072 ctx) - zero API cost
-    confidence: LOW_CONFIDENCE
-    source: LOCAL_ZERO_API_COST_POLICY
-    sample_count: 0
-    evidence:
-      generated_at: '2026-05-25T00:00:00+00:00'
-      sample_window_days: 7
-      sample_count: 0
-      min_samples: 20
-      query: llm_call_metrics usage_source=API created_at>=now-7d
-      authoritative: false
   claude-haiku-4-5:
     input_cost_per_1k: 0.001
     output_cost_per_1k: 0.005
