@@ -82,14 +82,13 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${OMNIPC2_VERIFY_RUNNER_TOKEN:-}
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       # Inside this container `localhost` is the container itself, not .202.
       LANE_PROBE_HOST: host.docker.internal
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       # OMN-19070: the disk-admission self-pause marker directory every runner
       # running the job-started hook mounts.
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
@@ -99,7 +98,7 @@ services:
     group_add:
       - "984" # .202's docker group GID (getent group docker, 2026-09-25)
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3

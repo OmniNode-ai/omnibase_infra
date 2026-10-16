@@ -36,11 +36,11 @@ def test_overlay_is_one_runner_and_inactive_by_default() -> None:
     assert "MODEL_REVIEW_RUNNER_LABELS" in env["RUNNER_LABELS"]
     assert "self-hosted,omnibase-ci,linux,x64" in env["RUNNER_LABELS"]
     volumes = " ".join(service["volumes"])
-    assert "model-review-healthcheck.sh" in volumes
+    assert "model-review-healthcheck.sh" not in volumes
     assert "model-review-observation.json" in volumes
     assert "model-review-observation}" not in volumes
     assert (
-        "healthcheck.sh && /usr/local/bin/model-review-healthcheck.sh"
+        "/opt/onex-runner-hooks/healthcheck.sh && /opt/onex-runner-hooks/model-review-healthcheck.sh"
         in service["healthcheck"]["test"][1]
     )
     assert "volumes" not in overlay

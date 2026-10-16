@@ -92,7 +92,7 @@ x-runner-base: &runner-base
     LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
-    ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
     UV_CONCURRENT_DOWNLOADS: "1"
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
@@ -101,16 +101,14 @@ x-runner-base: &runner-base
     TMPDIR: /home/runner/tmp
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
-    - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-    - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-    - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+    - ./runners:/opt/onex-runner-hooks:ro
     - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
     - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
     - *lab-host-table
   group_add:
     - "984" # .202 docker group GID (getent group docker, read 2026-09-28), the same value as the primary host
   healthcheck:
-    test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+    test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
     interval: 30s
     timeout: 12s
     retries: 3
@@ -127,11 +125,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-1
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -151,11 +148,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-2
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -175,11 +171,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-3
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -199,11 +194,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-4
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -223,11 +217,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-5
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -247,11 +240,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-6
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -271,11 +263,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-7
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -295,11 +286,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-8
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -319,11 +309,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-9
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -343,11 +332,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-10
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -367,11 +355,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-11
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -391,11 +378,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-12
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -415,11 +401,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-13
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -439,11 +424,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-14
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -463,11 +447,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-15
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -487,11 +470,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omnipc2-ci-runner-16
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
