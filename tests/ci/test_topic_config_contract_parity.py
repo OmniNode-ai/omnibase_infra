@@ -43,7 +43,6 @@ MIGRATED_TOPICS: frozenset[str] = frozenset(
         "onex.evt.omnibase-infra.row-count-diagnostic.v1",
         "onex.evt.omnibase-infra.llm-call-completed.v1",
         "onex.evt.omnibase-infra.agent-task-lifecycle.v1",
-        "onex.evt.omnibase-infra.inference-response.v1",
         "onex.evt.platform.topic-catalog-response.v1",
         "onex.evt.platform.topic-catalog-changed.v1",
         "onex.evt.omniintelligence.llm-call-completed.v1",

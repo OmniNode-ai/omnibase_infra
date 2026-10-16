@@ -4,8 +4,9 @@
 """Unit tests for scripts/check_lane_census_age.py (OMN-13034).
 
 Tests pin the staleness gate behavior: a census older than MAX_AGE_DAYS must
-fail with exit code 1; a fresh census must pass with exit code 0. These tests
-do NOT touch .201 — they drive the pure Python checker with fixture data.
+fail with exit code 1 unless age is advisory; a fresh census must pass with
+exit code 0. Invalid snapshots always fail. These tests do NOT touch the lab host —
+they drive the pure Python checker with fixture data.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.helpers.lane_census_fixtures import use_neutral_lane_census
 
@@ -110,51 +112,70 @@ def test_stale_snapshot_fails() -> None:
     path.unlink(missing_ok=True)
 
 
+def test_stale_snapshot_is_advisory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Advisory age warns about a stale snapshot without failing the PR."""
+    now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
+    path = tmp_path / "census-snapshot.json"
+    _write_snapshot(path, (now - timedelta(days=30)).isoformat())
+    assert MOD.check_census_age(path, 7, now=now, stale_is_advisory=True) == 0
+    stderr = capsys.readouterr().err
+    assert "::warning title=LANE-CENSUS-STALE" in stderr
+    assert "::error" not in stderr
+    assert "not a property of the pull request's diff" in stderr
+
+
 # ---------------------------------------------------------------------------
 # Missing / malformed snapshot tests
 # ---------------------------------------------------------------------------
 
 
-def test_missing_snapshot_fails() -> None:
+@pytest.mark.parametrize("stale_is_advisory", [False, True])
+def test_missing_snapshot_fails(stale_is_advisory: bool) -> None:
     """A missing snapshot file must fail immediately."""
     path = Path("/nonexistent/census-snapshot.json")
-    result = MOD.check_census_age(path, 7)
+    result = MOD.check_census_age(path, 7, stale_is_advisory=stale_is_advisory)
     assert result == 1
 
 
-def test_malformed_json_fails() -> None:
+@pytest.mark.parametrize("stale_is_advisory", [False, True])
+def test_malformed_json_fails(stale_is_advisory: bool) -> None:
     """A snapshot that is not valid JSON must fail."""
     with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         f.write("{not valid json")
         path = Path(f.name)
-    result = MOD.check_census_age(path, 7)
+    result = MOD.check_census_age(path, 7, stale_is_advisory=stale_is_advisory)
     assert result == 1
     path.unlink(missing_ok=True)
 
 
-def test_missing_emitted_at_fails() -> None:
+@pytest.mark.parametrize("stale_is_advisory", [False, True])
+def test_missing_emitted_at_fails(stale_is_advisory: bool) -> None:
     """A snapshot without 'emitted_at' must fail."""
     with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         json.dump({"schema_version": "1.0.0", "lanes_checked": []}, f)
         path = Path(f.name)
-    result = MOD.check_census_age(path, 7)
+    result = MOD.check_census_age(path, 7, stale_is_advisory=stale_is_advisory)
     assert result == 1
     path.unlink(missing_ok=True)
 
 
-def test_unsupported_schema_version_fails() -> None:
+@pytest.mark.parametrize("stale_is_advisory", [False, True])
+def test_unsupported_schema_version_fails(stale_is_advisory: bool) -> None:
     """A snapshot with an unsupported schema_version must fail."""
     now = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
     emitted = (now - timedelta(hours=1)).isoformat()
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         path = Path(f.name)
     _write_snapshot(path, emitted, schema_version="99.0.0")
-    result = MOD.check_census_age(path, 7, now=now)
+    result = MOD.check_census_age(path, 7, now=now, stale_is_advisory=stale_is_advisory)
     assert result == 1
     path.unlink(missing_ok=True)
 
 
-def test_invalid_timestamp_fails() -> None:
+@pytest.mark.parametrize("stale_is_advisory", [False, True])
+def test_invalid_timestamp_fails(stale_is_advisory: bool) -> None:
     """A snapshot with a non-ISO-8601 emitted_at must fail."""
     with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         json.dump(
@@ -166,7 +187,7 @@ def test_invalid_timestamp_fails() -> None:
             f,
         )
         path = Path(f.name)
-    result = MOD.check_census_age(path, 7)
+    result = MOD.check_census_age(path, 7, stale_is_advisory=stale_is_advisory)
     assert result == 1
     path.unlink(missing_ok=True)
 
@@ -188,6 +209,36 @@ def test_custom_max_age_days_respected() -> None:
     assert MOD.check_census_age(path, 1, now=now) == 1  # 2 days > 1 day limit
 
     path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Advisory CLI / workflow tests
+# ---------------------------------------------------------------------------
+
+
+def test_main_stale_advisory_flag(tmp_path: Path) -> None:
+    """The CLI only accepts a stale snapshot when explicitly advisory."""
+    path = tmp_path / "census-snapshot.json"
+    _write_snapshot(path, (datetime.now(UTC) - timedelta(days=30)).isoformat())
+    assert MOD.main(["--stale-advisory", "--snapshot", str(path)]) == 0
+    assert MOD.main(["--snapshot", str(path)]) == 1
+
+
+def test_workflow_stale_advisory_only_on_pull_requests() -> None:
+    """Push and manual runs enforce age; only PRs pass --stale-advisory."""
+    workflow = yaml.safe_load(
+        (_REPO / ".github/workflows/lane-census-staleness.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["lane-census-staleness"]["steps"]
+    step = next(s for s in steps if s["name"] == "Check census snapshot staleness")
+    assert step["env"]["STALE_ADVISORY"] == (
+        "${{ github.event_name == 'pull_request' }}"
+    )
+    assert 'if [[ "${STALE_ADVISORY}" == "true" ]]; then\n' in step["run"]
+    assert "args+=(--stale-advisory)\n" in step["run"]
+    assert '--max-age-days "${MAX_AGE_DAYS}" "${args[@]}"' in step["run"]
 
 
 # ---------------------------------------------------------------------------

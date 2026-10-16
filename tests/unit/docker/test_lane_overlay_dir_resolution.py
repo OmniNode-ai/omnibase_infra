@@ -39,14 +39,24 @@ _COMPOSE_PROJECT = f"omnibase-infra-{_JUDGE_COMPOSE.stem.partition('.')[2]}"
 _RUNTIME_SERVICES = {"omninode-runtime", "runtime-effects"}
 _WORKER_SERVICES = {"runtime-worker", "tenant-projection-writer"}
 
-#: Recipes declaring the shared bind; layered worker lanes carry four runtimes.
+
+def _lane_mount_services(lane: str) -> set[str]:
+    """The services a lane recipe lists the overlay bind on.
+
+    Layered worker lanes carry four runtimes. The prod recipe restates the
+    volumes of main, effects and worker only; its tenant projection writer
+    inherits the base file's bind (OMN-17101).
+    """
+    if lane in {"infra", "prepr"} or lane.startswith(("dev-", "stability")):
+        return _RUNTIME_SERVICES | _WORKER_SERVICES
+    if lane == "prod":
+        return _RUNTIME_SERVICES | {"runtime-worker"}
+    return set(_RUNTIME_SERVICES)
+
+
+#: Recipes declaring the shared bind, and the services each lists it on.
 _LANE_COMPOSE_MOUNTS = {
-    path.name: (
-        4
-        if path.stem.partition(".")[2] in {"infra", "prepr"}
-        or path.stem.partition(".")[2].startswith(("dev-", "stability"))
-        else 2
-    )
+    path.name: _lane_mount_services(path.stem.partition(".")[2])
     for path in sorted(DOCKER.glob("docker-compose*.yml"))
     if "x-lane-overlay-mount" in load_compose(path)
 }
@@ -75,20 +85,21 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 
 def test_all_lane_compose_recipes_are_covered() -> None:
-    assert sorted(_LANE_COMPOSE_MOUNTS.values()) == [2] * 4 + [4] * 6
+    assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
+        [2] * 4 + [3] + [4] * 6
+    )
+    assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 
 
 @pytest.mark.parametrize(
-    ("compose_name", "expected"),
+    ("compose_name", "services"),
     sorted(_LANE_COMPOSE_MOUNTS.items()),
     ids=sorted(_LANE_COMPOSE_MOUNTS),
 )
 def test_every_lane_compose_file_mounts_its_overlay_from_the_private_directory(
-    compose_name: str, expected: int
+    compose_name: str, services: set[str]
 ) -> None:
     path = DOCKER / compose_name
-    services = _RUNTIME_SERVICES | (_WORKER_SERVICES if expected == 4 else set())
-    assert len(services) == expected
     assert lane_overlay_mounts(path) == {
         service: [LANE_OVERLAY_MOUNT] for service in services
     }

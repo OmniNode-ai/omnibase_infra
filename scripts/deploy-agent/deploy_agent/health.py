@@ -31,6 +31,7 @@ def create_health_app(
     get_accept_backlog: Callable[[], ModelAcceptBacklogVerdict | None] | None = None,
     get_control_topic_lag: Callable[[], ModelControlTopicLag] | None = None,
     get_unit_drift: Callable[[], dict[str, object]] | None = None,
+    get_dev_lane_drift: Callable[[], dict[str, object]] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -48,9 +49,13 @@ def create_health_app(
     app["get_accept_backlog"] = get_accept_backlog
     app["get_control_topic_lag"] = get_control_topic_lag
     app["get_unit_drift"] = get_unit_drift
+    app["get_dev_lane_drift"] = get_dev_lane_drift
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/unit-drift", _unit_drift_handler)
+    # OMN-21146: the latest drift of this lane behind each followed
+    # repository's dev head, keyed by repository; {} when it lags none.
+    app.router.add_get("/dev-lane-drift", _dev_lane_drift_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
     # OMN-18144. What is ahead of a command, and how fast this agent has been
     # draining it. The post-merge lab-pass guard reads this to bound its wait
@@ -95,6 +100,14 @@ async def _unit_drift_handler(request: web.Request) -> web.Response:
         if getter is not None
         else {"drift": None, "reason": INDETERMINATE_REASON}
     )
+
+
+async def _dev_lane_drift_handler(request: web.Request) -> web.Response:
+    """The lane's latest drift per followed repository (OMN-21146)."""
+    getter = request.app["get_dev_lane_drift"]
+    if getter is None:
+        return web.json_response({"drift": None, "reason": INDETERMINATE_REASON})
+    return web.json_response({"drift": getter()})
 
 
 async def _health_handler(request: web.Request) -> web.Response:

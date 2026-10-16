@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -161,3 +162,67 @@ def test_script_that_ran_out_of_a_change_control_clone_is_gone(relative: str) ->
     assert not (ROOT / relative).exists()
     baseline = (ROOT / ".onex_ratchets/canonical_file_shape_baseline.txt").read_text()
     assert relative not in baseline.splitlines()
+
+
+def _load_pinned_wheels() -> ModuleType:
+    """Load ``scripts/check-pinned-wheels.py`` (its hyphenated name is not importable)."""
+    import importlib.util
+
+    path = ROOT / "scripts/check-pinned-wheels.py"
+    spec = importlib.util.spec_from_file_location("_check_pinned_wheels_omn20074", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # dataclasses resolves the module's string annotations through sys.modules.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_pinned_wheel_check_maps_no_onex_change_control_repo() -> None:
+    """No pyproject source or Dockerfile ARG pins onex_change_control any more.
+
+    The drift check maps a pinned package to its GitHub repository; an entry for
+    the change-control repository maps a pin that cannot exist here, and the
+    module's docstring claimed the pin was still checked.
+    """
+    module = _load_pinned_wheels()
+    assert not [
+        key
+        for key, slug in module._GITHUB_REPOS.items()
+        if OCC_READ.search(key) or OCC_READ.search(slug)
+    ]
+    assert not OCC_READ.search(module.__doc__ or "")
+
+
+@pytest.mark.parametrize(
+    ("relative", "stale"),
+    [
+        (".github/workflows/ci.yml", "conflicts against onex_change_control"),
+        ("scripts/check_dep_provenance.py", "must remain allowed"),
+        (
+            ".github/workflows/dep-provenance-gate.yml",
+            "onex-change-control is intentionally NOT checked",
+        ),
+        (".pre-commit-config.yaml", "local OCC contract"),
+        (".pre-commit-config.yaml", "onex_change_control repo block above"),
+    ],
+)
+def test_no_comment_claims_an_onex_change_control_pin_or_read(
+    relative: str, stale: str
+) -> None:
+    """Each sentence claimed a pin or a read of the change-control repository that no longer exists."""
+    assert stale not in (ROOT / relative).read_text(encoding="utf-8")
+
+
+def test_validator_requirements_name_no_onex_change_control_central_source() -> None:
+    """no-hardcoded-topics and no-untracked-todos run from omnibase_core now (OMN-20074 S8)."""
+    spec = yaml.safe_load(
+        (ROOT / "architecture-handshakes/validator-requirements.yaml").read_text()
+    )
+    sources = {
+        name: entry.get("central_source", "")
+        for name, entry in spec["required_validators"].items()
+    }
+    assert not [name for name, src in sources.items() if OCC_READ.search(src)]
+    assert sources["no-hardcoded-topics"].startswith("omnibase_core.")
+    assert sources["no-untracked-todos"].startswith("omnibase_core.")

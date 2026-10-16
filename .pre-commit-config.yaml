@@ -391,7 +391,7 @@ repos:
       # the property the gate was providing.
       #
       # The central validator requirement already classes YAML as an allowed
-      # exclude for this hook (onex_change_control
+      # exclude for this hook (this repository's
       # architecture-handshakes/validator-requirements.yaml, `no-hardcoded-topics`
       # -> excludes.allowed includes `\.yaml$`); this entry is narrower than that
       # allowance, naming one file rather than a suffix.
@@ -2082,8 +2082,8 @@ repos:
         stages: [pre-commit]
       # Require TODO/FIXME/HACK comments to carry a ticket reference (OMN-20068,
       # OCC retirement S8). Runs omnibase_core's own handler, which owns this
-      # behaviour; the hook of the same id used to be pulled from the
-      # onex_change_control repo block above.
+      # behaviour; the hook of the same id used to be pulled from an
+      # onex_change_control repo block, since removed.
       - id: no-untracked-todos
         name: No untracked TODO/FIXME/HACK comments
         language: system
@@ -2379,7 +2379,7 @@ repos:
   # canary). Shifts the hosted required `deploy-gate` check left: it runs the
   # deterministic, locally-decidable half of that gate at `git push` time so the
   # omnibase_infra#2319 gap (a deploy-scoped surface -- e.g. handler wiring --
-  # touched with NO deploy-scope DoD item in its OCC contract) is caught before
+  # touched with NO deploy-scope DoD item in its ticket contract) is caught before
   # the push, not only at CI. DRY, NOT a re-implementation (root CLAUDE.md Rule
   # #7a / OMN-14655 DRIFT-3): the script imports the SAME canonical validator CI
   # runs (omniclaude/.github/actions/deploy-gate/validate_pr_deploy_required.py,
@@ -2387,11 +2387,10 @@ repos:
   # has_deploy_evidence functions -- there is one rule set, no local copy of the
   # runtime patterns. Tri-state, NEVER a false-red: no deploy-scoped file -> pass
   # (parity with the hosted skip); deploy-scoped + no ticket cited -> FAIL;
-  # deploy-scoped + cited ticket whose local OCC contract has no deploy DoD ->
-  # FAIL (the #2319 gap); deploy-scoped + evidence present -> pass; deploy-scoped
-  # + companion OCC contract not merged locally -> loud NOTICE + pass (the full
-  # PR-body + Evidence-Source OCC-ref resolution stays a CI-only concern, so
-  # absence-locally is never treated as proof-of-absence). FAIL-LOUD (root
+  # deploy-scoped + no cited ticket with a contracts/<ticket>.yaml in this
+  # repository, or one whose contract has no deploy DoD -> FAIL (the #2319 gap);
+  # deploy-scoped + evidence present -> pass. The hosted gate reads the same
+  # contracts/ directory at the pull request head (OMN-20074). FAIL-LOUD (root
   # CLAUDE.md Rule #8 / OMN-14655 principle #4): hard-errors (exit 1) if the diff
   # base or the canonical validator cannot resolve; never a green skip.
   #

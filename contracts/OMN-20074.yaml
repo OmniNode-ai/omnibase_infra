@@ -54,7 +54,7 @@ requirements:
     statement: Dispatch parity must pin both the declared OCC development corpus and the retired OCC corpus without changing any executable selection oracle.
     acceptance:
       - id: AC11
-        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 149-contract retired inventory, both sharing all 1090 probes, 126 dispatchers and 110 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
+        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 152-contract retired inventory, both sharing all 1090 probes, 126 dispatchers and 110 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
   - id: req-occ-residual-s6-infra
     statement: omnibase_infra's branch-protection audit workflow and deploy-scope pre-push hook must read no onex_change_control, and the two scripts that ran out of a change-control clone with no caller must be gone.
     acceptance:
@@ -65,6 +65,11 @@ requirements:
     acceptance:
       - id: AC13
         statement: 'AC13: connect_with_retry retries ConnectionError and CannotConnectNowError up to its attempt limit, re-raises the last error, and does not retry an authentication failure -- falsifier: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry fails at the merge base'
+  - id: req-occ-dead-entries-infra
+    statement: omnibase_infra's pinned-wheel drift check must map no onex_change_control repository, its validator requirements must name no onex_change_control central source, and no comment may claim a pin or read of onex_change_control that omnibase_infra no longer has.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: check-pinned-wheels.py maps no onex_change_control repository and its docstring names none, validator-requirements.yaml names no onex_change_control central_source, and ci.yml, check_dep_provenance.py, dep-provenance-gate.yml and .pre-commit-config.yaml carry none of the five stale sentences claiming an onex_change_control pin, read or repo block -- falsifier: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -93,6 +98,9 @@ evidence_requirements:
   - kind: tests
     description: The branch-protection audit and the deploy-scope hook read no onex_change_control, and the two caller-less scripts are deleted.
     command: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q
+  - kind: tests
+    description: The pinned-wheel drift check maps no onex_change_control repository, no validator names it as central source, and the five stale sentences are gone.
+    command: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -189,14 +197,12 @@ dod_evidence:
     binds_ac:
       - AC10
   - id: dod-dispatch-parity-declared-closure-ac11
-    description: The focused parity guard tests refuse missing required packages and planted inventory, route and selection drift. The tracked-blob probe exercises the checked-out commit's dependency selection and both oracle inventories, independently of the verifier's test overlay at the merge base.
+    description: The focused parity guard tests refuse missing required packages and planted inventory, route and selection drift. The contract inventory regression executes the committed AC11 probe against the committed oracle blobs, so an overlaid contract cannot mask stale inventory assertions at the merge base. The tracked-blob probe also exercises dependency selection and both oracle inventories.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py tests/ci/test_dispatch_parity_live_contact_omn20074.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
         check_value: |
+          uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py tests/ci/test_dispatch_parity_live_contact_omn20074.py tests/unit/runtime/test_dispatch_parity_contract_inventory_omn20074.py -q &&
           uv run python - <<'PY'
           import ast
           import json
@@ -244,10 +250,10 @@ dod_evidence:
               legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
               retired = namespace['load_selection_oracle'](required)
               assert legacy['header']['corpus']['contracts_discovered'] == 153
-              assert retired['header']['corpus']['contracts_discovered'] == 149
+              assert retired['header']['corpus']['contracts_discovered'] == 152
               assert retired['header']['required_onex_nodes_packages'] == list(required)
               assert retired['header']['required_missing_packages'] == []
-              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 128}
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 131}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
               assert len(retired['dispatchers']) == 126
@@ -276,3 +282,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC13
+  - id: dod-occ-dead-entries-infra-ac14
+    description: The repository tests prove the pinned-wheel drift check maps no onex_change_control repository, no validator names it as central source, and the five stale sentences are gone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/scripts/test_check_pinned_wheels.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14

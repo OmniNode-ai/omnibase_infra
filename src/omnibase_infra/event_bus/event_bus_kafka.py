@@ -212,7 +212,6 @@ from aiokafka.errors import (
     KafkaError,
     MessageSizeTooLargeError,
     OutOfOrderSequenceNumber,
-    TopicAuthorizationFailedError,
     UnknownProducerId,
     UnknownTopicOrPartitionError,
 )
@@ -227,6 +226,9 @@ from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
     EnumDlqFailureClass,
     EnumInfraTransportType,
+)
+from omnibase_infra.enums.enum_kafka_permanent_failure import (
+    EnumKafkaPermanentFailure,
 )
 from omnibase_infra.errors import (
     DispatchDeadlineExceededError,
@@ -280,6 +282,10 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 )
 from omnibase_infra.event_bus.topic_constants import is_dlq_topic
 from omnibase_infra.event_bus.topic_violation_alerter import TopicViolationAlerter
+from omnibase_infra.handlers.kafka_permanent_failure import (
+    classify_permanent_kafka_failure,
+    kafka_failure_types,
+)
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.enum_consumer_health_event_type import (
@@ -1727,7 +1733,9 @@ class EventBusKafka(
                 )
                 break  # No retry benefit; fall through to error raise
 
-            except TopicAuthorizationFailedError as e:
+            except kafka_failure_types(
+                EnumKafkaPermanentFailure.TOPIC_AUTHORIZATION_REFUSED
+            ) as e:
                 # OMN-18627: the broker refused this send on the TOPIC'S ACLs.
                 # An ACL does not appear between two attempts milliseconds
                 # apart, so the three remaining attempts and their exponential
@@ -1867,7 +1875,11 @@ class EventBusKafka(
                 topic=topic,
                 retry_count=self._max_retry_attempts + 1,
             ) from last_exception
-        if isinstance(last_exception, TopicAuthorizationFailedError):
+        if (
+            last_exception is not None
+            and classify_permanent_kafka_failure(last_exception)
+            is EnumKafkaPermanentFailure.TOPIC_AUTHORIZATION_REFUSED
+        ):
             # OMN-18627: attributable and distinct. Without its own type the
             # caller could only see a timeout, and "this record can never be
             # published" is a different decision from "try again shortly" --

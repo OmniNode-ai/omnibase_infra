@@ -123,7 +123,7 @@ _SAMPLE_PYPROJECT = """
 [tool.uv.sources]
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "7631ef3321e1a6561f4b2c70019ee57d24160620" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
-onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", branch = "main" }
+omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", branch = "main" }
 
 [other.section]
 foo = "bar"
@@ -144,7 +144,7 @@ def test_parse_uv_sources_extracts_rev() -> None:
             result["omnibase-core"]["rev"] == "7631ef3321e1a6561f4b2c70019ee57d24160620"
         )
         assert result["omnibase-spi"]["tag"] == "v0.21.0"
-        assert result["onex-change-control"]["branch"] == "main"
+        assert result["omnibase-compat"]["branch"] == "main"
     finally:
         tmp_path.unlink()
 
@@ -225,9 +225,9 @@ def test_check_uv_sources_branch_is_always_drifted() -> None:
         with patch.object(_mod, "_gh_latest_release", return_value="v0.5.0"):
             results = _mod._check_uv_sources(sources, threshold=1)
 
-        occ = next(r for r in results if r.name == "onex-change-control")
-        assert occ.drifted is True
-        assert "branch" in occ.pinned
+        compat = next(r for r in results if r.name == "omnibase-compat")
+        assert compat.drifted is True
+        assert "branch" in compat.pinned
     finally:
         tmp_path.unlink()
 
@@ -360,7 +360,7 @@ _SAMPLE_PYPROJECT_NO_FLOATING = """
 [tool.uv.sources]
 omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", rev = "7631ef3321e1a6561f4b2c70019ee57d24160620" }
 omnibase-spi = { git = "https://github.com/OmniNode-ai/omnibase_spi.git", tag = "v0.21.0" }
-onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", tag = "v0.3.0" }
+omnibase-compat = { git = "https://github.com/OmniNode-ai/omnibase_compat.git", tag = "v0.3.0" }
 """
 
 

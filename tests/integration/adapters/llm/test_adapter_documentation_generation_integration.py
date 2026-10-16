@@ -4,9 +4,9 @@
 # Copyright (c) 2026 OmniNode Team
 """Integration tests for AdapterDocumentationGeneration against a live LLM.
 
-These tests call the real DeepSeek-R1 endpoint (LLM_DEEPSEEK_R1_URL,
-default http://192.168.86.200:8101) and are intentionally skipped when the
-endpoint is unreachable so they never block CI.
+These tests require a caller-configured reachable endpoint (LLM_DEEPSEEK_R1_URL).
+The PR test splits deselect their slow marker. Explicit selection without a
+reachable endpoint fails instead of silently skipping the suite.
 
 Run locally with:
     uv run pytest tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py -v -s
@@ -19,6 +19,7 @@ Mark:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from uuid import uuid4
 
 import httpx
@@ -38,11 +39,7 @@ from omnibase_spi.contracts.delegation.contract_delegated_response import (
 # Endpoint discovery
 # ---------------------------------------------------------------------------
 
-_ENDPOINT_HOST: str = (
-    os.environ.get(  # onex-allow-internal-ip: live-integration test endpoint host
-        "LLM_DEEPSEEK_R1_URL", "http://192.168.86.200:8101"
-    )
-)
+_ENDPOINT_HOST: str = os.environ.get("LLM_DEEPSEEK_R1_URL", "")
 # OMN-12815: the effect posts endpoint_url VERBATIM. Configure the adapter with
 # the COMPLETE chat endpoint so the live call hits the right path; health probes
 # still use the host root.
@@ -53,31 +50,37 @@ _ENDPOINT_URL: str = (
 )
 
 # ---------------------------------------------------------------------------
-# Session-scoped reachability check -- skip entire module if endpoint is down
+# Explicitly selected live tests require a configured, reachable endpoint.
 # ---------------------------------------------------------------------------
 
 
-def _endpoint_reachable(url: str) -> bool:
-    """Return True if the LLM endpoint responds to a health probe."""
+def _health_status(url: str) -> int | None:
+    """Return the health probe's HTTP status, or None when unconfigured or down."""
+    if not url:
+        return None
     try:
-        resp = httpx.get(f"{url}/health", timeout=5.0)
-        return resp.status_code < 500
-    except Exception:  # noqa: BLE001 — boundary: returns degraded response
-        return False
+        return httpx.get(f"{url}/health", timeout=5.0).status_code
+    except httpx.HTTPError:
+        return None
 
 
-# Evaluated once at collection time; tests are deselected if endpoint is down.
-# Health is probed on the host root, not the complete chat endpoint.
-_ENDPOINT_AVAILABLE: bool = _endpoint_reachable(_ENDPOINT_HOST)
-_SKIP_REASON: str = (
-    f"DeepSeek-R1 endpoint unreachable at {_ENDPOINT_HOST} "
-    "(set LLM_DEEPSEEK_R1_URL to override)"
+# Evaluated once at collection time; health is probed on the host root, not the
+# complete chat endpoint.
+_ENDPOINT_STATUS: int | None = _health_status(
+    _ENDPOINT_HOST.rstrip("/").removesuffix("/v1/chat/completions")
 )
 
-pytestmark = [
-    pytest.mark.slow,
-    pytest.mark.skipif(not _ENDPOINT_AVAILABLE, reason=_SKIP_REASON),
-]
+pytestmark = [pytest.mark.slow]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_endpoint() -> None:
+    """Fail closed when this live suite is selected without its dependency."""
+    assert _ENDPOINT_HOST, "Set LLM_DEEPSEEK_R1_URL to run the live adapter suite"
+    assert _ENDPOINT_STATUS is not None and _ENDPOINT_STATUS < 500, (
+        f"Configured LLM endpoint health probe failed (status {_ENDPOINT_STATUS})"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Source fixtures -- real snippets kept short to limit latency
@@ -120,11 +123,11 @@ _SECRET_INJECTED: bool = _SECRET_ENV not in os.environ
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _inject_hmac_secret() -> None:  # type: ignore[return]
+def _inject_hmac_secret() -> Iterator[None]:
     """Ensure LOCAL_LLM_SHARED_SECRET is set for the duration of the module."""
     if _SECRET_INJECTED:
         os.environ[_SECRET_ENV] = "test-integration-secret"
-    yield  # type: ignore[misc]
+    yield
     if _SECRET_INJECTED:
         os.environ.pop(_SECRET_ENV, None)
 

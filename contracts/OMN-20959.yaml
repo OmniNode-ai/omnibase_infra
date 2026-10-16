@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20959
 title: omnibase_infra release resolves release evidence without a change-control companion
-summary: After S6 (omnibase_infra#4792) no autobind writes a citation into a release PR body, so release.yml stopped every release before the PyPI publish (v0.38.70, release PR #4845). The resolver now reads the merged release PR's ticket from its title or head branch and takes evidence from contracts/<ticket>.yaml at the release commit (non-empty dod_evidence), else from a PASS change-control receipt on onex_change_control main bound to the release PR by number, ticket and head sha, and refuses before the build when neither exists. contracts/OMN-18595.yaml gives the release train's own ticket an in-repo contract, so later release cuts resolve from this repository. dependency-cascade.yml is unchanged and already accepts both source shapes; tests/ci/test_release_evidence_omn20959.py keeps a regression test for that, but it is not a DoD item, because it passes at the merge base by construction.
+summary: After S6 (omnibase_infra#4792) no autobind writes a citation into a release PR body, so release.yml stopped every release before the PyPI publish (v0.38.70, release PR #4845). The resolver now reads the merged release PR's ticket from its title or head branch and takes evidence from contracts/<ticket>.yaml at the release commit (non-empty dod_evidence) only, since OMN-20074 removed the change-control receipt branch (omnibase_infra#4940), and refuses before the build when that contract is absent. contracts/OMN-18595.yaml gives the release train's own ticket an in-repo contract, so later release cuts resolve from this repository. dependency-cascade.yml and dependency-cascade-dispatch.yml accept only the release commit sha as evidence source, name no change-control citation, and the bump PR body carries a Release evidence line naming that commit and no Evidence-Ticket or Evidence-Source stamp; the downstream repository's evidence gate judges the writer app's pin-only head from its diff and never reads the body.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,11 +11,21 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: a release PR with no body citation and an in-repo contract with dod_evidence resolves, and so does one with a PASS receipt bound to its head; red on the previous workflow -- falsifier: uv run pytest tests/ci -k release_evidence -q'
+  - id: req-omn20959-cascade-evidence
+    statement: The dependency cascade takes the release commit sha as its evidence source, names no change-control citation, and each bump PR body carries a Release evidence line and no stamp.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: dependency-cascade.yml accepts the release commit sha and refuses a change-control citation, and the bump PR body cites the release commit without an Evidence stamp -- falsifier: uv run pytest tests/ci -k dependency_cascade_evidence -q'
   - id: req-omn20959-refuses
     statement: The OMN-16286 refusal still fires before publish when neither evidence form exists or a receipt is not bound to the release PR.
     acceptance:
       - id: AC3
         statement: 'AC3: neither form, an empty contract, or a receipt that fails or names another PR, head or ticket exits 1 -- falsifier: uv run pytest tests/ci -k release_evidence_refuses -q'
+  - id: req-omn20959-cascade-branch-check
+    statement: The cascade branch regression check uses release commit evidence for its valid-input cases.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: branch rendering, ticket suffixes and deduplication remain covered with a release commit SHA sample, and the evidence positive control covers short, full and uppercase commit SHAs instead of a retired OCC citation.'
 evidence_requirements:
   - kind: tests
     description: The shipped resolver, run under bash with a stub gh, resolves both evidence forms and refuses every unbound or absent one.
@@ -34,6 +44,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-20959-ac2-cascade-evidence
+    description: The cascade accepts the release commit sha, refuses a change-control citation and a non-hex source, names no change control, and its bump PR body cites the release commit with no stamp.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_release_evidence_omn20959.py -q -k dependency_cascade_evidence
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn-20959-ac3-refuses
     description: The refusal fires for every absent or unbound form.
     source: manual
@@ -43,3 +62,16 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-20959-ac4-cascade-branch-check
+    description: The branch check uses a full release commit SHA as its default valid evidence input and runs its branch, deduplication and input-validation assertions.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          grep -Eq 'evidence_source: str = "[0-9a-f]{40}"' tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

@@ -1,0 +1,71 @@
+# OMN-19925 caller-owned evidence for judge compose profile compatibility.
+schema_version: "1.0.0"
+ticket_id: "OMN-19925"
+title: "fix(OMN-19925): judge compose infra services render under the deploy default profile"
+summary: >-
+  docker-compose.judge.yml re-profiled postgres, redpanda, redpanda-partition-cap, valkey, forward-migration, migration-gate and intelligence-migration to ["judge"] only, while onex-runtime-deploy renders a lane with the single profile "runtime". The filtered project kept omninode-runtime, runtime-effects and projection-api (profiles runtime/full from the base file) but dropped the services they depend on, so the Build Images phase failed with 'depends on undefined service "redpanda"'. The seven infra services now carry ["judge", "runtime", "full"]; "judge" stays so the standalone judge render is unchanged. AC2 actual deployment through Build Images remains unverified; the hosted checks prove the pre-build render only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "Judge compose profile unit tests pass, including the new check that every judge infra service is active under the deploy script's default profile."
+    command: "uv run pytest tests/unit/infra/test_judge_compose_profile.py -q -k judge_compose_profile"
+  - kind: "tests"
+    description: "Layered base+judge render under --profile runtime succeeds and holds the infra services."
+    command: "uv run pytest tests/integration/infra/test_judge_compose_render.py -q -m integration"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-ac1-infra-profiles"
+    description: "AC1: the judge infra services carry the runtime and full profiles; the layered render under --profile runtime exits 0 with redpanda, postgres and valkey present."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/infra/test_judge_compose_render.py::test_judge_layered_render_under_deploy_default_profile_has_its_infra -q -m integration"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-ac3-profile-drift-test"
+    description: "AC3: a focused pytest asserts every judge infra service profile set contains the deploy script's default COMPOSE_PROFILE; it fails against the unfixed compose file."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_judge_compose_profile.py::test_judge_compose_profile_infra_services_active_under_deploy_default -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-ac2-prebuild-render"
+    description: "AC2 prerequisite only: the layered project passes compose configuration validation before Build Images. Running deploy-runtime.sh --execute on the judge lane remains pending; this render does not certify that deployment and does not bind AC2."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/infra/test_judge_compose_render.py::test_judge_layered_render_under_deploy_default_profile_has_its_infra -q -m integration"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-deploy-hosted-compose-render"
+    description: "Hosted deploy preflight: execute Docker Compose against the layered infra and judge files with the deploy default runtime profile. Require all seven judge infrastructure services and the three applications, and reject keycloak and infisical. Interpolation-only inputs need no private overlay, secrets or running containers. This fails on the original judge-only infrastructure profiles; it does not claim a live rollout."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: |-
+          set -eu;
+          render_file=$(mktemp);
+          trap 'rm -f "$render_file"' EXIT;
+          export COMPOSE_PROJECT_NAME=landing-omn19925-render;
+          export ONEX_LANE_OVERLAY_DIR=/nonexistent/onex-lane-overlays;
+          export OMNINODE_RUNTIME_PASSWORD=0123456789abcdef0123456789abcdef;
+          export DEV_REDPANDA_ADVERTISE_HOST=localhost;
+          export GATEWAY_ATTACH_KEYCLOAK_INTROSPECTION_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/token/introspect;
+          export GATEWAY_ATTACH_KEYCLOAK_JWKS_URL=http://keycloak:8080/realms/omninode/protocol/openid-connect/certs;
+          export GITHUB_TOKEN=render-only DEPLOY_AGENT_HMAC_SECRET=render-only LINEAR_API_KEY=render-only;
+          export ONEX_REGISTRATION_AUTO_ACK=false ONEX_SERVICE_CLIENT_SECRET=render-only;
+          export LLM_CODER_URL=http://render-only LLM_CODER_FAST_URL=http://render-only;
+          export LLM_EMBEDDING_URL=http://render-only LLM_DEEPSEEK_R1_URL=http://render-only;
+          export LLM_GLM_URL=http://render-only LLM_GLM_MODEL_NAME=render-only LLM_GLM_API_KEY=render-only;
+          export LLM_ENDPOINT_CIDR_ALLOWLIST=127.0.0.1/32;
+          export INFISICAL_DB_CONNECTION_URI=render-only INFISICAL_REDIS_URL=render-only;
+          export INFISICAL_ENCRYPTION_KEY=render-only INFISICAL_AUTH_SECRET=render-only;
+          docker compose --env-file docker/runtime-policy.env --env-file docker/judge.env.example -f docker/docker-compose.infra.yml -f docker/docker-compose.judge.yml --profile runtime config --format json > "$render_file";
+          uv run --frozen python -c 'import json,sys; services=json.load(open(sys.argv[1]))["services"]; infra={"postgres", "redpanda", "redpanda-partition-cap", "valkey", "forward-migration", "migration-gate", "intelligence-migration"}; apps={"omninode-runtime", "runtime-effects", "projection-api"}; assert infra | apps <= services.keys(), sorted((infra | apps) - services.keys()); assert all("judge" in services[name]["container_name"] for name in infra); assert {"keycloak", "infisical"}.isdisjoint(services); print("OMN-19925 hosted compose deploy preflight passed")' "$render_file";
+        cwd: "${OMNI_HOME}/omnibase_infra"
