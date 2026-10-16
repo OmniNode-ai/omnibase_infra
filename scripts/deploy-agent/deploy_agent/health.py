@@ -32,6 +32,7 @@ def create_health_app(
     get_control_topic_lag: Callable[[], ModelControlTopicLag] | None = None,
     get_unit_drift: Callable[[], dict[str, object]] | None = None,
     get_dev_lane_drift: Callable[[], dict[str, object]] | None = None,
+    get_dev_tag_heartbeat: Callable[[], dict[str, object]] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -50,12 +51,16 @@ def create_health_app(
     app["get_control_topic_lag"] = get_control_topic_lag
     app["get_unit_drift"] = get_unit_drift
     app["get_dev_lane_drift"] = get_dev_lane_drift
+    app["get_dev_tag_heartbeat"] = get_dev_tag_heartbeat
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/unit-drift", _unit_drift_handler)
     # OMN-21146: the latest drift of this lane behind each followed
     # repository's dev head, keyed by repository; {} when it lags none.
     app.router.add_get("/dev-lane-drift", _dev_lane_drift_handler)
+    # OMN-19998: the latest heartbeat against each tag-followed repository's
+    # newest dev tag, keyed by repository.
+    app.router.add_get("/dev-tag-heartbeat", _dev_tag_heartbeat_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
     # OMN-18144. What is ahead of a command, and how fast this agent has been
     # draining it. The post-merge lab-pass guard reads this to bound its wait
@@ -108,6 +113,14 @@ async def _dev_lane_drift_handler(request: web.Request) -> web.Response:
     if getter is None:
         return web.json_response({"drift": None, "reason": INDETERMINATE_REASON})
     return web.json_response({"drift": getter()})
+
+
+async def _dev_tag_heartbeat_handler(request: web.Request) -> web.Response:
+    """The lane's latest heartbeat per tag-followed repository (OMN-19998)."""
+    getter = request.app["get_dev_tag_heartbeat"]
+    if getter is None:
+        return web.json_response({"heartbeat": None, "reason": INDETERMINATE_REASON})
+    return web.json_response({"heartbeat": getter()})
 
 
 async def _health_handler(request: web.Request) -> web.Response:

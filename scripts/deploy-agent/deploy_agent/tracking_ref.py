@@ -53,8 +53,19 @@ commit of the *agent* runs and which ref a ref-mode rebuild resets to.
 from __future__ import annotations
 
 import os
+from typing import Final
 
 ENV_TRACKING_REF = "DEPLOY_AGENT_TRACKING_REF"
+
+#: OMN-19998 (operator RULING 2026-10-16T09:35:49Z): the sibling repositories a
+#: lab build stages at their newest ``dev-*`` tag on origin instead of at the
+#: tracking branch, and whose newest tag an idle instance follows. omnimarket
+#: cuts ``dev-<UTC YYYYMMDDHHMMSS>-<sha12>`` on every push to dev, so the lab
+#: deploys what dev merged without waiting for a PyPI release. A lab-only
+#: setting: prod never rebuilds from a ref (it deploys a pinned digest).
+DEV_TAG_FOLLOWED_REPOSITORIES: Final = ("omnimarket",)
+#: The staging variable ``stage_workspace.sh`` reads the list from.
+ENV_FOLLOW_DEV_TAG_REPOS: Final = "DEPLOY_FOLLOW_DEV_TAG_REPOS"
 
 
 def load_tracking_ref_from_env() -> str:

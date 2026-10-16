@@ -119,6 +119,19 @@ class RepoRefResult:
     # showed the ref finally used could not distinguish "asked for its own dev
     # head" from "asked for a foreign repo's commit and quietly got something".
     fallback_from: str = ""
+    # OMN-19998: the branch ref this repo was asked for, when ``ref`` above is
+    # the newest ``dev-*`` tag that stood in for it (``--follow-dev-tag``).
+    # Empty when the repo does not follow its dev tags or has none on origin.
+    dev_tag_from: str = ""
+
+
+@dataclass(frozen=True)
+class DevTag:
+    """One ``dev-<UTC YYYYMMDDHHMMSS>-<sha12>`` tag on a repository's origin."""
+
+    name: str
+    sha: str
+    cut_at: datetime
 
 
 @dataclass(frozen=True)
@@ -320,6 +333,94 @@ def _is_ancestor(repo_path: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+# OMN-19998 (operator RULING 2026-10-16T09:35:49Z): in the lab, omnimarket
+# deploys from a tag cut on every push to its dev branch, not from a PyPI
+# release. The tag is lightweight and named for the moment it was cut and the
+# commit it names, so the newest is the lexically greatest and its name
+# carries the commit it must point at.
+DEV_TAG_PATTERN = re.compile(r"^dev-(?P<stamp>\d{14})-(?P<sha12>[0-9a-f]{12})$")
+DEV_TAG_REFSPEC = "refs/tags/dev-*"
+
+
+def parse_dev_tags(ls_remote_output: str) -> list[DevTag]:
+    """The well-formed ``dev-*`` tags in ``git ls-remote --tags`` output, oldest first.
+
+    A tag whose name does not match :data:`DEV_TAG_PATTERN`, or whose name's
+    sha12 is not the commit it points at, is skipped: a hand-made ``dev-foo``
+    must never become what the lab deploys. An annotated tag's peeled line
+    (``^{}``) names the commit and wins over the tag object.
+    """
+    objects: dict[str, str] = {}
+    for line in ls_remote_output.splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        sha, ref = parts
+        name = ref.removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            objects[name.removesuffix("^{}")] = sha
+        else:
+            objects.setdefault(name, sha)
+    tags: list[DevTag] = []
+    for name, sha in objects.items():
+        match = DEV_TAG_PATTERN.match(name)
+        if match is None or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            continue
+        if not sha.startswith(match["sha12"]):
+            continue
+        try:
+            cut_at = datetime.strptime(match["stamp"], "%Y%m%d%H%M%S").replace(
+                tzinfo=UTC
+            )
+        except ValueError:
+            continue
+        tags.append(DevTag(name=name, sha=sha, cut_at=cut_at))
+    return sorted(tags, key=lambda tag: (tag.cut_at, tag.name))
+
+
+def list_dev_tags(repo_path: Path) -> list[DevTag]:
+    """Every ``dev-*`` tag on ``repo_path``'s origin, read with ``git ls-remote``.
+
+    Read from the remote, never from the clone's local tags, so a clone that
+    has not fetched since the newest tag was cut still sees it. Raises
+    ``DeploySourceRefError`` when origin cannot be read.
+    """
+    return parse_dev_tags(
+        _git_raw(repo_path, "ls-remote", "--tags", "origin", DEV_TAG_REFSPEC)
+    )
+
+
+def _follow_dev_tag(repo_path: Path, branch_ref: str, branch_sha: str) -> DevTag | None:
+    """The newest ``dev-*`` tag to build in place of ``branch_ref``, or ``None``.
+
+    ``None`` when origin carries no ``dev-*`` tag yet, which is said on stderr:
+    the branch is then built, as before the tags existed. A newest tag whose
+    commit is not on ``branch_ref`` is refused, fetching once first in case the
+    tag was cut after this checkout's fetch.
+    """
+    tags = list_dev_tags(repo_path)
+    if not tags:
+        print(
+            f"RT-1: {repo_path.name} follows its dev tags but origin has no "
+            f"{DEV_TAG_REFSPEC} tag; building {branch_ref!r} -> {branch_sha[:12]} "
+            f"(OMN-19998)",
+            file=sys.stderr,
+        )
+        return None
+    newest = tags[-1]
+    if not _is_ancestor(repo_path, newest.sha, branch_sha):
+        _git(repo_path, "fetch", "--prune", "--tags", "origin")
+        branch_sha = _resolve_commit(repo_path, branch_ref)
+        if not _is_ancestor(repo_path, newest.sha, branch_sha):
+            raise DeploySourceRefError(
+                f"{repo_path.name}: the newest dev tag {newest.name} "
+                f"({newest.sha[:12]}) is not on {branch_ref!r} ({branch_sha[:12]}) "
+                f"-- refusing to build a tag cut off the dev branch (OMN-19998)",
+                CHECKOUT_FAILED,
+            )
+    return newest
+
+
 def _registry_roots() -> list[Path]:
     """Every directory whose direct children are canonical clones: ``OMNI_HOME``
     plus each ``ONEX_REGISTRY_ROOTS`` entry (the canonical-clone hook family's
@@ -440,6 +541,7 @@ def clean_checkout(
     fetch: bool = True,
     fallback_ref: str | None = None,
     worktree_root: Path | None = None,
+    follow_dev_tag: bool = False,
 ) -> RepoRefResult:
     """Bring a sibling clone to a clean checkout of ``ref`` (or snapshot it, when
     ``hotpatch``).
@@ -467,6 +569,12 @@ def clean_checkout(
     silent rescue: a substitution appears in the expected-refs manifest the
     end-of-staging assertion is resolved against, so what was vendored and what
     was asked for are both readable afterwards.
+
+    ``follow_dev_tag`` (OMN-19998) builds the newest ``dev-*`` tag on origin in
+    place of a remote-tracking branch ref (``origin/<branch>``), whether that
+    ref was asked for or is the fallback: in the lab, omnimarket deploys from
+    the tag its dev branch cut, not from a release. An explicit tag or SHA is
+    never replaced. The branch it stood in for is recorded in ``dev_tag_from``.
 
     ``worktree_root`` (OMN-20263) checks the ref out in a fresh detached
     clone-keyed worktree under ``worktree_root`` instead of in ``repo_path``, and the
@@ -535,6 +643,20 @@ def clean_checkout(
             file=sys.stderr,
         )
 
+    dev_tag_from = ""
+    if follow_dev_tag and effective_ref.startswith("origin/"):
+        tag = _follow_dev_tag(repo_path, effective_ref, sha)
+        if tag is not None:
+            print(
+                f"RT-1: {repo_path.name} follows its newest dev tag: "
+                f"{effective_ref!r} -> {tag.name} ({tag.sha[:12]}, cut "
+                f"{tag.cut_at:%Y-%m-%dT%H:%M:%SZ}) (OMN-19998)",
+                file=sys.stderr,
+            )
+            dev_tag_from = effective_ref
+            effective_ref = tag.name
+            sha = tag.sha
+
     ref = effective_ref
     tree = (
         repo_path
@@ -570,6 +692,7 @@ def clean_checkout(
         hotpatch=False,
         before_sha=before_sha,
         fallback_from=fallback_from,
+        dev_tag_from=dev_tag_from,
     )
 
 
@@ -1006,6 +1129,7 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
             fetch=not args.no_fetch,
             fallback_ref=args.fallback_ref,
             worktree_root=worktree_root,
+            follow_dev_tag=name in args.follow_dev_tag,
         )
         print(
             f"RT-1 checkout: {name} -> {result.ref} @ {result.expected_sha[:12]}"
@@ -1014,6 +1138,7 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
                 if result.fallback_from
                 else ""
             )
+            + (f" [dev tag for {result.dev_tag_from}]" if result.dev_tag_from else "")
             + (" [HOTPATCH/dirty]" if result.hotpatch and result.dirty else ""),
             file=sys.stderr,
         )
@@ -1113,6 +1238,15 @@ def build_parser() -> argparse.ArgumentParser:
         "one repository is not a ref of another; each sibling resolves its own "
         "tracking head instead. Recorded as 'fallback_from' in the manifest. "
         "A fallback that does not resolve either still fails closed.",
+    )
+    p_checkout.add_argument(
+        "--follow-dev-tag",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a repo that builds its newest dev-* tag on origin in place of a "
+        "remote-tracking branch ref (repeatable; OMN-19998). Recorded as "
+        "'dev_tag_from' in the manifest. Explicit tags and SHAs are kept.",
     )
     p_checkout.add_argument(
         "--require-immutable-refs",

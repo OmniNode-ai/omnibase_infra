@@ -102,6 +102,8 @@ from deploy_agent.ref_fence import (
 )
 from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
 from deploy_agent.tracking_ref import (
+    DEV_TAG_FOLLOWED_REPOSITORIES,
+    ENV_FOLLOW_DEV_TAG_REPOS,
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
 )
@@ -4563,6 +4565,10 @@ class DeployExecutor:
                 "(the accepted command's git_ref)",
                 deploy_ref,
             )
+        # OMN-19998: every lab build stages the tag-followed siblings at their
+        # newest dev-* tag; this is the deploy agent's own setting, so no
+        # operator has to remember it.
+        staging_env[ENV_FOLLOW_DEV_TAG_REPOS] = " ".join(DEV_TAG_FOLLOWED_REPOSITORIES)
         if sibling_fallback_ref:
             staging_env["DEPLOY_SIBLING_FALLBACK_REF"] = sibling_fallback_ref
             logger.info(

@@ -105,6 +105,24 @@ lane's freshness wins. Every other bound holds: no job in flight, the FROZEN
 flag, the load gate, and one converge per head. And the lag is loud:
 :func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
 serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
+
+THE LAB FOLLOWS omnimarket's DEV TAGS, NOT ITS RELEASES (OMN-19998)
+------------------------------------------------------------------
+Operator RULING 2026-10-16T09:35:49Z: in the lab, omnimarket deploys from a
+tag cut on each dev merge, not from a PyPI release, and that is part of the
+process rather than something somebody remembers. omnimarket cuts a
+lightweight ``dev-<UTC YYYYMMDDHHMMSS>-<sha12>`` on every push to dev. For
+each repository in ``tracking_ref.DEV_TAG_FOLLOWED_REPOSITORIES`` the head
+this module follows is the newest such tag, read with ``git ls-remote``
+against the canonical clone's origin (:func:`read_dev_tags`), and a lab build
+stages that tag (``deploy_source_ref.py --follow-dev-tag``). Until origin
+carries a first tag the dev branch head is followed, as before.
+
+Every instance also beats against that tag, whatever the routing table says:
+:func:`dev_tag_heartbeat` is the ``ModelDevTagHeartbeat`` the agent publishes
+every :data:`DEV_TAG_HEARTBEAT_INTERVAL`, and its ``alarm`` is raised once the
+lane has run behind the newest tag for :data:`DEV_TAG_ALARM_AFTER`
+(:func:`dev_tag_behind_since`).
 """
 
 from __future__ import annotations
@@ -128,6 +146,7 @@ from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
     ModelDevLaneDrift,
+    ModelDevTagHeartbeat,
     ModelRebuildRequested,
     Scope,
 )
@@ -180,6 +199,13 @@ CHECK_INTERVAL_SECONDS: Final = 60
 PROBE_WINDOWS_RELPATH: Final = "config/lab_probe_windows.yaml"
 PROBE_WINDOWS_PARSER_RELPATH: Final = "scripts/ci/check_lab_probe_windows.py"
 BUILD_PROVENANCE_PATH: Final = "/app/build-provenance.json"
+#: OMN-19998: how long a lab lane may run behind a tag-followed repository's
+#: newest dev tag before the heartbeat raises its alarm.
+DEV_TAG_ALARM_AFTER: Final = timedelta(hours=2)
+#: OMN-19998: how often the heartbeat is published while its alarm holds still.
+DEV_TAG_HEARTBEAT_INTERVAL: Final = timedelta(minutes=15)
+#: The one parser of ``dev-*`` tag names, shared with the build's checkout.
+DEPLOY_SOURCE_REF_RELPATH: Final = "scripts/runtime_build/deploy_source_ref.py"
 READ_TIMEOUT_SECONDS: Final = 30
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
@@ -670,3 +696,158 @@ def read_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:
         return None
     first = (result.stdout.split() or [""])[0]
     return first if _is_sha(first) else None
+
+
+class ModelDevTag(BaseModel):
+    """One ``dev-<UTC YYYYMMDDHHMMSS>-<sha12>`` tag on a repository's origin."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    sha: str
+    cut_at: datetime
+
+
+def _deploy_source_ref_module(clone_root: Path) -> ModuleType:
+    path = clone_root / DEPLOY_SOURCE_REF_RELPATH
+    spec = importlib.util.spec_from_file_location("_deploy_source_ref", path)
+    if spec is None or spec.loader is None:
+        raise OSError(f"cannot load the dev-tag parser at {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
+    return module
+
+
+def parse_dev_tags(ls_remote_output: str, clone_root: Path) -> list[ModelDevTag]:
+    """The well-formed dev tags in ``git ls-remote --tags`` output, oldest first.
+
+    Parsed by ``deploy_source_ref.parse_dev_tags`` from ``clone_root``, the
+    same function the build's checkout uses, so what the agent follows and what
+    a build stages can never read the tags differently.
+    """
+    module = _deploy_source_ref_module(clone_root)
+    return [
+        ModelDevTag(name=tag.name, sha=tag.sha, cut_at=tag.cut_at)
+        for tag in module.parse_dev_tags(ls_remote_output)
+    ]
+
+
+def read_dev_tags(
+    clone: Path, clone_root: Path, *, run: Runner = _default_run
+) -> list[ModelDevTag] | None:
+    """Every dev tag on ``clone``'s origin, oldest first, or ``None`` unread."""
+    try:
+        result = run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "ls-remote",
+                "--tags",
+                "origin",
+                "refs/tags/dev-*",
+            ],
+            timeout=READ_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return parse_dev_tags(result.stdout, clone_root)
+    except (OSError, ImportError, AttributeError):
+        return None
+
+
+def dev_tag_behind_since(
+    tags: list[ModelDevTag],
+    running_ref: str | None,
+    previous: datetime | None,
+    now: datetime,
+    *,
+    running_contains_newest: bool = False,
+) -> datetime | None:
+    """When the lane started running behind the newest dev tag, or ``None``.
+
+    ``None`` when it runs the newest tag, or a commit that contains it
+    (``running_contains_newest``: a build of the branch ahead of its newest
+    tag is not behind). When it runs an older tag, the cut time of the next
+    tag: the first one it missed. When its commit is no tag (a build from
+    before the tags, or a hand build), the first read that saw it off the
+    newest tag, kept across reads. An unread running ref, or no tag at all,
+    changes nothing.
+    """
+    if running_ref is None or not tags:
+        return previous
+    if running_ref == tags[-1].sha or running_contains_newest:
+        return None
+    for index, tag in enumerate(tags[:-1]):
+        if tag.sha == running_ref:
+            return tags[index + 1].cut_at
+    return previous if previous is not None else now
+
+
+def contains_commit(
+    clone: Path, ancestor: str, descendant: str, *, run: Runner = _default_run
+) -> bool:
+    """Whether ``descendant`` contains ``ancestor`` in ``clone``; False unread."""
+    try:
+        result = run(
+            [
+                "git",
+                "-C",
+                str(clone),
+                "merge-base",
+                "--is-ancestor",
+                ancestor,
+                descendant,
+            ],
+            timeout=READ_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def dev_tag_heartbeat(
+    *,
+    instance: str,
+    repository: str,
+    runtime_container: str,
+    running_ref: str | None,
+    tags: list[ModelDevTag] | None,
+    behind_since: datetime | None,
+    now: datetime,
+    alarm_after: timedelta = DEV_TAG_ALARM_AFTER,
+) -> ModelDevTagHeartbeat:
+    """The lane's reading against ``repository``'s newest dev tag."""
+    newest = tags[-1] if tags else None
+    lag = (
+        max(timedelta(0), now - behind_since)
+        if behind_since is not None
+        else timedelta(0)
+    )
+    return ModelDevTagHeartbeat(
+        instance=instance,
+        repository=repository,
+        runtime_container=runtime_container,
+        running_ref=running_ref,
+        newest_tag=newest.name if newest else None,
+        newest_tag_sha=newest.sha if newest else None,
+        newest_tag_cut_at=newest.cut_at if newest else None,
+        behind_since=behind_since,
+        observed_at=now,
+        lag_seconds=int(lag.total_seconds()),
+        alarm_after_seconds=int(alarm_after.total_seconds()),
+        alarm=(
+            running_ref is not None
+            and newest is not None
+            and running_ref != newest.sha
+            and lag > alarm_after
+        ),
+    )
