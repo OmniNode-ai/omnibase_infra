@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: the Mac Studio host declares pool omninode-studio-ci-runner (4 runners, class action-multiarch); its compose services carry omnibase-ci-multiarch and arch-arm64, never omnibase-ci, x64, arch-amd64 or a host label, mount no docker socket or credential, and are capped at 1.5 CPU and 3g; both amd64 action pools carry omnibase-ci-multiarch; declared_total(action) stays 26 -- falsifier: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0 fails on the merge-base tree'
+  - id: req-omn19998-dev-maintenance-check-fences
+    statement: Dev maintenance checks must assert that fences naming prod or excluding dev suppress migration convergence and lane mirroring, and that lane mirroring never targets a governed lane even on a mixed lab fence.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: migration and mirror checks cover prod, dev plus prod, all lanes, and the stability lane alone as excluded fences; mirror checks reject every non-dev target with a dev or mixed lab fence.'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -121,3 +126,12 @@ dod_evidence:
       - check_type: command
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-omninode-studio-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys, yaml; data = yaml.safe_load(sys.stdin); services = data[\"services\"]; assert set(services) == {f\"omninode-studio-ci-runner-{n}\" for n in range(1, 5)}; expected = {\"self-hosted\", \"omnibase-ci-multiarch\", \"linux\", \"arm64\", \"arch-arm64\"}; assert all(set(s[\"environment\"][\"RUNNER_LABELS\"].split(\",\")) == expected and s[\"cpus\"] == \"1.5\" and s[\"mem_limit\"] == s[\"memswap_limit\"] == \"3g\" and not any(term in str(s) for term in (\"docker.sock\", \"lab-credentials\", \"operator.env\", \"KUBECONFIG\", \"LOCAL_LLM_SHARED_SECRET\")) for s in services.values())'"
         cwd: .
+  - id: dod-omn19998-ac6-dev-maintenance-check-fences
+    description: AC7 tests exercise excluded process fences and non-dev mirror targets through the real agent and executor entry points with isolated subprocess seams.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py::test_governed_or_non_dev_agents_never_converge_migrations scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_lane_mirror_never_targets_a_governed_lane -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
