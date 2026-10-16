@@ -275,7 +275,7 @@ override-dependencies = [
     # omnibase_core#1786's runtime lane declaration types this draft needs; the
     # temporary git-rev override below is removed in the same change.
     # OMN-21146: 0.47.39 -> 0.47.44, the floor omnimarket dev declares since omnimarket#3974.
-    "omnibase-core==0.47.44",
+    "omnibase-core==0.47.45",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
