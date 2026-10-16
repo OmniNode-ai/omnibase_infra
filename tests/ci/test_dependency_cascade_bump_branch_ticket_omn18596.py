@@ -71,7 +71,7 @@ def _run_builder(
     package: str,
     version: str,
     ticket: str = "OMN-15449",
-    evidence_source: str = "OCC#6695",
+    evidence_source: str = "a40877eae47d46684458ded78483ee29b644f3ad",
 ) -> tuple[int, str, dict[str, str]]:
     """Run the shipped builder; return (exit code, stdout, parsed outputs)."""
     import os
@@ -235,9 +235,21 @@ class TestEveryInterpolatedFieldIsValidatedFirst:
         assert code == 1
         assert "inputs.evidence_source" in stdout
 
-    def test_the_documented_evidence_source_shapes_are_accepted(self) -> None:
-        """Positive control: the refusals above are not refusing everything."""
-        for ok in ("OCC#6695", "a40877eae47d46684458ded78483ee29b644f3ad"):
+    def test_a_change_control_citation_refuses(self) -> None:
+        """OMN-20959: the cascade takes the release commit, never OCC#<n>."""
+        code, stdout, _ = _run_builder(
+            "omnibase_infra", "0.38.31", evidence_source="OCC#6695"
+        )
+        assert code == 1
+        assert "inputs.evidence_source" in stdout
+
+    def test_release_commit_evidence_source_shapes_are_accepted(self) -> None:
+        """Release commit SHAs remain valid after the OCC citation retirement."""
+        for ok in (
+            "a40877e",
+            "a40877eae47d46684458ded78483ee29b644f3ad",
+            "A40877EAE47D46684458DED78483EE29B644F3AD",
+        ):
             code, stdout, parsed = _run_builder(
                 "omnibase_infra", "0.38.31", evidence_source=ok
             )

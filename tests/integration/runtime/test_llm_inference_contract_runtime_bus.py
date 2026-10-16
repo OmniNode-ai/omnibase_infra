@@ -38,7 +38,7 @@ from tests.helpers.util_kafka import KafkaTopicManager, wait_for_consumer_ready
 pytestmark = pytest.mark.integration
 
 COMMAND_TOPIC = "onex.cmd.omnibase-infra.llm-inference-request.v1"
-RESPONSE_TOPIC = "onex.evt.omnibase-infra.inference-response.v1"
+RESPONSE_TOPIC = "onex.evt.omnibase-infra.llm-inference-response.v1"
 INTELLIGENCE_TOPIC = "onex.evt.omniintelligence.llm-call-completed.v1"
 INFRA_TOPIC = "onex.evt.omnibase-infra.llm-call-completed.v1"
 GEMINI_ENDPOINT = (

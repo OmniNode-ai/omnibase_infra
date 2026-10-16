@@ -7,6 +7,17 @@
 #
 # Requires Docker Compose v2.24.4 or later for !override merge semantics.
 name: omnibase-infra-prod
+# OMN-17101: the base file mounts the lane's Bifrost overlay on every runtime
+# service and the entrypoint's render step fails the container start when the
+# file is missing. The `volumes: !override` lists below replace the base list,
+# so each one restates this bind; dropping it exits the container on boot.
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   postgres:
     container_name: omnibase-infra-prod-postgres
@@ -151,6 +162,7 @@ services:
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=prod"
@@ -188,6 +200,7 @@ services:
     volumes: !override
       - effects_logs:/app/logs
       - effects_data:/app/data
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=prod"
@@ -233,6 +246,7 @@ services:
     volumes: !override
       - worker_logs:/app/logs
       - prod_worker_data:/app/data
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels:
       - "com.omninode.lane=prod"

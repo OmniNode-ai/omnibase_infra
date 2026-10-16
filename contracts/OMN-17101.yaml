@@ -1,0 +1,69 @@
+schema_version: 1.0.0
+ticket_id: OMN-17101
+title: the prod compose lane keeps the Bifrost lane-overlay bind on every runtime service its volume overrides restate
+summary: 'docker-compose.prod.yml replaced the volumes list of omninode-runtime, runtime-effects and runtime-worker with !override and dropped the lane-overlay bind the base file mounts, while the entrypoint render still reads BIFROST_LANE_OVERLAY_PATH and fails the container start when the file is missing. The prod recipe now declares x-lane-overlay-mount and lists it in each of the three restated volume lists, so the rendered prod config binds an overlay file at the path the renderer reads.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The DoD this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: docker-compose.prod.yml supplies its own prod-appropriate lane-overlay mount instead of an !override dropping it entirely -- falsifier: uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q'
+      - id: AC2
+        statement: 'AC2: a compose-config readback for the prod lane shows a resolvable BIFROST_LANE_OVERLAY_PATH bound by a volume with no !override volume-list collision -- falsifier: uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The lane-overlay mount recipe suite passes with the prod recipe in the covered set.
+    command: uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q
+  - kind: tests
+    description: The prod compose render suite passes with the overlay bind on all three restated runtime services.
+    command: uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17101-ac1-recipe-mounts
+    description: 'AC1, red-first. tests/unit/docker/test_lane_overlay_dir_resolution.py now requires docker-compose.prod.yml among the recipes that declare x-lane-overlay-mount and lists the bind on omninode-runtime, runtime-effects and runtime-worker. At the merge base test_all_lane_compose_recipes_are_covered fails because the prod recipe declares no x-lane-overlay-mount.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q
+    binds_ac:
+      - "AC1"
+  - id: dod-omn-17101-ac2-prod-render-readback
+    description: 'AC2, red-first. tests/integration/infra/test_prod_runtime_compose_render.py renders the layered infra and prod files with docker compose config and asserts each of the three runtime services has exactly one read-only bind at its BIFROST_LANE_OVERLAY_PATH. At the merge base the test fails for omninode-runtime with no volume mounted at that path.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_prod_runtime_compose_render.py -q
+    binds_ac:
+      - "AC2"
+  - id: dod-deploy
+    description: The prod compose recipe at the evaluated checkout revision lists the shared lane-overlay bind in three volume lists; the merge base lists it in none.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: test "$(git show HEAD:docker/docker-compose.prod.yml | grep -cF -- '- *lane-overlay-mount')" = 3
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-deploy-overlay-bind-readback
+    description: 'Run three isolated, network-disabled Python containers with the overlay binds taken from the layered infra and prod compose render. Each reads the neutral overlay bytes at BIFROST_LANE_OVERLAY_PATH and refuses a writable bind. No production service is started; this checks the live mount, not full runtime boot.'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |
+          set -eu
+          probe_dir=$(mktemp -d)
+          probe_prefix="${COMPOSE_PROJECT_NAME:-prod-overlay-probe}-${probe_dir##*/}"
+          trap 'timeout 15 docker rm -f "$probe_prefix-omninode-runtime" "$probe_prefix-runtime-effects" "$probe_prefix-runtime-worker" >&2 || true; rm -rf "$probe_dir"' EXIT
+          uv run python tests/integration/infra/test_prod_lane_overlay_deploy.py --output "$probe_dir/compose.json"
+          for service in omninode-runtime runtime-effects runtime-worker; do
+            docker compose --project-name "${COMPOSE_PROJECT_NAME:-prod-overlay-probe}" --file "$probe_dir/compose.json" run --name "$probe_prefix-$service" --no-deps "$service"
+          done
+    binds_ac:
+      - AC1
+      - AC2

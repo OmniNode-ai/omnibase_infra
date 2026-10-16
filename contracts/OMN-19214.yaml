@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19214
+title: The lane overlay is resolvable from the config store, with explicit precedence against the mounted file
+summary: The Bifrost renderer resolves a lane's bifrost_lane_overlay.v3 document from the lane's row in the config store, ahead of the mounted file, validates it exactly as it validates the file, records which source it used, and fails loudly naming the store key for a row it cannot use. AC2 and AC3 are covered by the unit tests below. The ticket's other two criteria (the lab readback on the dev lane, which needs the entrypoint wired to a real store, and the integration test through omnimarket's customer-key terminus) are not met by this change, so this contract declares and binds only AC2 and AC3.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19214-store-backed-lane-overlay
+    statement: A lab rung is registered by a store write, with no PR, and the store row is validated, preceded and recorded explicitly.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: Removing the store row restores the file-based overlay -- falsifier: a render readback after the row is deleted, compared by sha256 to a render of the committed file'
+      - id: AC3
+        statement: 'AC3: An invalid store row fails the render loudly, naming the store key, and is never dropped -- falsifier: a unit test feeding a row missing its credential declaration and asserting ProtocolConfigurationError naming the key'
+evidence_requirements:
+  - kind: tests
+    description: AC2 - a render after the store row is deleted has the same sha256 as the render of the committed file.
+    command: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly -n 0 --no-cov -k removing_the_row
+  - kind: tests
+    description: AC3 - a row missing its credential declaration fails the render with ProtocolConfigurationError naming the store key, and nothing is rendered.
+    command: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly -n 0 --no-cov -k missing_its_credential
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19214-ac2
+    description: A render with the store row present differs from the committed-file render; after the row is deleted the render has the same sha256 as the committed-file render.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly -n 0 --no-cov -k removing_the_row
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn19214-ac3
+    description: A store row whose added backend declares provider and tier but no credential fails the render with ProtocolConfigurationError naming the store key; malformed, wrong-lane and unreadable rows fail the same way, and none falls back to the file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly -n 0 --no-cov -k "missing_its_credential or malformed or another_lane or read_failure"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn19214-deploy-scope
+    description: The renderer source published at the checked-out commit carries the store-backed resolver. At that same commit, an integration test reads the real environment-backed secret-store adapter, records store precedence, restores the file render byte for byte when the row is removed, and refuses invalid rows without replacing the existing render. Both checks run on a hosted runner without access to a deployed lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/render_bifrost_delegation_contract.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def render_bifrost_delegation_contract_with_source'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC3]

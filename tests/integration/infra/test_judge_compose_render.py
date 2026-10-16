@@ -185,7 +185,7 @@ def _compose_config_json() -> dict[str, Any]:
     return cast("dict[str, Any]", rendered_config)
 
 
-def _layered_compose_config_json() -> dict[str, Any]:
+def _layered_compose_config_json(profile: str = "judge") -> dict[str, Any]:
     """Render the DEPLOYED shape: base infra compose + judge overlay.
 
     onex-runtime-deploy (resolve_compose_file_args, OMN-13581) layers
@@ -207,7 +207,7 @@ def _layered_compose_config_json() -> dict[str, Any]:
             "-f",
             COMPOSE_FILE,
             "--profile",
-            "judge",
+            profile,
             "config",
             "--format",
             "json",
@@ -360,6 +360,32 @@ def test_layered_render_isolates_every_judge_service_to_judge_network() -> None:
             f"(missing !override, OMN-13772)"
         )
         assert published_ports.isdisjoint(DEV_OR_PROD_PUBLISHED_PORTS)
+
+
+@pytest.mark.integration
+def test_judge_layered_render_under_deploy_default_profile_has_its_infra() -> None:
+    """OMN-19925: the layered render under the deploy script's `runtime` profile.
+
+    onex-runtime-deploy passes only ``--profile runtime``. Compose rejects the
+    project ('depends on undefined service "redpanda"') when a service the app
+    services depend_on is filtered out by profile; the render raising is the
+    failure, so reaching the assertions is itself the proof.
+    """
+    services = _layered_compose_config_json(profile="runtime")["services"]
+
+    for infra in (
+        "postgres",
+        "redpanda",
+        "redpanda-partition-cap",
+        "valkey",
+        "forward-migration",
+        "migration-gate",
+        "intelligence-migration",
+    ):
+        assert infra in services, infra
+        assert "judge" in services[infra]["container_name"]
+    for app in ("omninode-runtime", "runtime-effects", "projection-api"):
+        assert app in services, app
 
 
 @pytest.mark.integration

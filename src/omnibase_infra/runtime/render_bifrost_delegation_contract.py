@@ -18,12 +18,14 @@ disabled (OMN-17502).
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 import json
 import os
 import re
 import sys
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit, urlunsplit
@@ -32,7 +34,13 @@ from urllib.request import Request, urlopen
 import yaml
 from pydantic import ValidationError
 
+from omnibase_infra.enums.enum_bifrost_lane_overlay_source import (
+    EnumBifrostLaneOverlaySource,
+)
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.delegation.model_bifrost_render_outcome import (
+    ModelBifrostRenderOutcome,
+)
 from omnibase_infra.runtime.config_provenance import (
     build_config_provenance,
     write_provenance_sidecar,
@@ -57,9 +65,14 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
+from omnibase_spi.protocols.services import ProtocolSecretStore
 
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
+_LANE_ENV = "ONEX_ENVIRONMENT"
+#: OMN-19214: a lane's overlay row in the config store is the same
+#: ``bifrost_lane_overlay.v3`` document the mounted file holds, keyed per lane.
+LANE_OVERLAY_STORE_KEY_PREFIX = "delegation.bifrost.lane_overlay."
 _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 #: OMN-17099: the embedding backend's real endpoint is OpenAI-embeddings-shaped,
 #: not chat-completions-shaped (live probe 2026-09-27: .201:8002/v1/chat/completions
@@ -126,6 +139,93 @@ def _load_lane_overlay(path: Path) -> ModelBifrostLaneOverlay:
         raise ProtocolConfigurationError(
             f"Bifrost lane overlay is invalid: {path}: {exc}"
         ) from exc
+
+
+def lane_overlay_store_key(lane: str) -> str:
+    """The config-store key holding ``lane``'s overlay document (OMN-19214)."""
+    stripped = lane.strip()
+    if not stripped:
+        raise ProtocolConfigurationError(
+            "a lane overlay store key needs a non-empty lane name"
+        )
+    return f"{LANE_OVERLAY_STORE_KEY_PREFIX}{stripped}"
+
+
+def _read_store_row(store: ProtocolSecretStore, key: str) -> str | None:
+    """Read one store row from the synchronous render, whatever loop is running.
+
+    The read runs on a worker thread with its own event loop, so a render
+    started inside a running loop does not nest one. A store that cannot be
+    read fails the render naming the key; it never reads as "row absent".
+    """
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(store.get_secret(key))).result()
+    except Exception as exc:
+        raise ProtocolConfigurationError(
+            f"Bifrost lane overlay store key {key!r} could not be read: {exc}"
+        ) from exc
+
+
+def _parse_store_overlay(raw: str, *, key: str, lane: str) -> ModelBifrostLaneOverlay:
+    """Validate a store row exactly as the mounted file is validated."""
+    try:
+        document = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ProtocolConfigurationError(
+            f"Bifrost lane overlay store key {key!r} is malformed: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise ProtocolConfigurationError(
+            f"Bifrost lane overlay store key {key!r} must hold a mapping document"
+        )
+    try:
+        overlay = ModelBifrostLaneOverlay.model_validate(document)
+    except ValidationError as exc:
+        raise ProtocolConfigurationError(
+            f"Bifrost lane overlay store key {key!r} is invalid: {exc}"
+        ) from exc
+    if overlay.lane != lane:
+        raise ProtocolConfigurationError(
+            f"Bifrost lane overlay store key {key!r} declares lane "
+            f"{overlay.lane!r}, not {lane!r}: a row may never bind another "
+            "lane's routing."
+        )
+    return overlay
+
+
+def _resolve_lane_overlay(
+    *,
+    overlay_path: Path | None,
+    env: Mapping[str, str],
+    store: ProtocolSecretStore | None,
+    lane: str | None,
+) -> tuple[ModelBifrostLaneOverlay, EnumBifrostLaneOverlaySource, str]:
+    """Resolve the lane overlay: the store row when present, else the file.
+
+    Precedence is explicit (OMN-19214): a store row for the lane wins over the
+    mounted file. An ABSENT row (``None``) falls back to the file, and the
+    caller records which source it got. A row that is present is never dropped:
+    a blank, malformed, invalid or wrong-lane row fails the render naming the
+    store key instead of falling back to the file.
+    """
+    if store is not None:
+        resolved_lane = (lane or env.get(_LANE_ENV, "")).strip()
+        if not resolved_lane:
+            raise ProtocolConfigurationError(
+                "a lane overlay store needs the lane name: pass lane= or bind "
+                f"{_LANE_ENV}."
+            )
+        key = lane_overlay_store_key(resolved_lane)
+        raw = _read_store_row(store, key)
+        if raw is not None:
+            return (
+                _parse_store_overlay(raw, key=key, lane=resolved_lane),
+                EnumBifrostLaneOverlaySource.STORE,
+                key,
+            )
+    path = _resolve_overlay_path(overlay_path=overlay_path, env=env)
+    return _load_lane_overlay(path), EnumBifrostLaneOverlaySource.FILE, str(path)
 
 
 def _resolve_overlay_path(*, overlay_path: Path | None, env: Mapping[str, str]) -> Path:
@@ -556,7 +656,7 @@ def _validate_rendered_contract(
         )
 
 
-def render_bifrost_delegation_contract(
+def render_bifrost_delegation_contract_with_source(
     *,
     source_path: Path | None = None,
     overlay_path: Path | None = None,
@@ -564,8 +664,15 @@ def render_bifrost_delegation_contract(
     environ: Mapping[str, str] | None = None,
     verify_endpoints: bool | None = None,
     endpoint_probe: EndpointProbe | None = None,
-) -> Path | None:
+    overlay_store: ProtocolSecretStore | None = None,
+    lane: str | None = None,
+) -> ModelBifrostRenderOutcome:
     """Render the base contract merged with the required typed lane overlay.
+
+    The overlay comes from the lane's row in ``overlay_store`` when one is given
+    and the row exists, otherwise from the mounted file (OMN-19214). The outcome
+    records which source supplied it. ``lane`` names the store row and defaults
+    to ``ONEX_ENVIRONMENT``; it is read only when a store is given.
 
     ``environ`` is used only for the target path, the lane's overlay path pin
     (``BIFROST_LANE_OVERLAY_PATH``), and the endpoint-verification flag;
@@ -582,10 +689,12 @@ def render_bifrost_delegation_contract(
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, env=env)
     if target is None:
-        return None
+        return ModelBifrostRenderOutcome(
+            path=None, overlay_source=None, overlay_source_ref=None
+        )
     source = source_path or _resolve_canonical_source_path()
-    overlay = _load_lane_overlay(
-        _resolve_overlay_path(overlay_path=overlay_path, env=env)
+    overlay, overlay_source, overlay_source_ref = _resolve_lane_overlay(
+        overlay_path=overlay_path, env=env, store=overlay_store, lane=lane
     )
     should_verify = (
         env.get("BIFROST_VERIFY_ENDPOINTS", "").strip().lower()
@@ -604,7 +713,36 @@ def render_bifrost_delegation_contract(
     staged_target = target.with_suffix(f"{target.suffix}.tmp")
     staged_target.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     staged_target.replace(target)
-    return target
+    return ModelBifrostRenderOutcome(
+        path=target,
+        overlay_source=overlay_source,
+        overlay_source_ref=overlay_source_ref,
+    )
+
+
+def render_bifrost_delegation_contract(
+    *,
+    source_path: Path | None = None,
+    overlay_path: Path | None = None,
+    target_path: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    verify_endpoints: bool | None = None,
+    endpoint_probe: EndpointProbe | None = None,
+) -> Path | None:
+    """Render from the mounted lane overlay file alone; returns the target path.
+
+    The file-only form: it never consults the config store. Use
+    :func:`render_bifrost_delegation_contract_with_source` to resolve the overlay
+    from the store and to learn which source was used.
+    """
+    return render_bifrost_delegation_contract_with_source(
+        source_path=source_path,
+        overlay_path=overlay_path,
+        target_path=target_path,
+        environ=environ,
+        verify_endpoints=verify_endpoints,
+        endpoint_probe=endpoint_probe,
+    ).path
 
 
 def _emit_config_provenance(*, rendered: Path, source_path: Path) -> None:
@@ -619,10 +757,16 @@ def _emit_config_provenance(*, rendered: Path, source_path: Path) -> None:
 
 def main() -> int:
     source_path = _resolve_canonical_source_path()
-    rendered = render_bifrost_delegation_contract(source_path=source_path)
+    outcome = render_bifrost_delegation_contract_with_source(source_path=source_path)
+    rendered = outcome.path
     if rendered is None:
         return 0
     sys.stdout.write(f"[entrypoint] Bifrost delegation contract ready: {rendered}\n")
+    if outcome.overlay_source is not None:
+        sys.stdout.write(
+            "[entrypoint] Bifrost lane overlay source: "
+            f"{outcome.overlay_source.value} ({outcome.overlay_source_ref})\n"
+        )
     _emit_config_provenance(rendered=rendered, source_path=source_path)
     return 0
 

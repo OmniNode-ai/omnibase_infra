@@ -30,18 +30,17 @@ on:
       ticket:
         description: >-
           OMN ticket that closed the release being cascaded (OMN-16286), e.g.
-          OMN-15449. Carried into the branch name and the PR title so
-          Receipt-Gate's identity binding (title <-> branch <-> Evidence-Ticket)
-          resolves honestly, and so OCC autobind fires at all -- its condition
-          is a ticket token in the title or the head ref, and a bump PR that
-          carries neither is never minted a companion.
+          OMN-15449. Carried into the branch name and the PR title so the
+          ticket the bump PR cites is the release's own, and the same
+          ticket token sits in the title and the head ref.
         required: true
         type: string
       evidence_source:
         description: >-
-          Evidence-Source that already proved the release (OMN-16286), e.g.
-          OCC#6695 or a merged OCC commit SHA. Reproduced verbatim as this PR's
-          own Evidence-Source line.
+          Commit SHA (7 to 40 hex characters) of the release commit whose
+          in-repo contracts/<ticket>.yaml proved the release (OMN-16286,
+          OMN-20959). Reproduced verbatim as the bump PR's "Release evidence"
+          line.
         required: true
         type: string
     secrets:
@@ -212,8 +211,7 @@ jobs:
           #
           # This is omnibase_core's OMN-16286 convention, ported rather than
           # re-invented. An earlier revision of this file used a fixed
-          # `omn-18596` PREFIX: it satisfied OCC autobind, whose condition is a
-          # ticket token in the title or head ref, but it was a SECOND
+          # `omn-18596` PREFIX: it put a ticket token in the head ref, but it was a SECOND
           # convention for one problem, and it named the ticket that built the
           # mechanism rather than the release being cascaded. One convention
           # fleet-wide is the standing rule.
@@ -234,8 +232,8 @@ jobs:
             echo "::error::OMN-16286: inputs.ticket '${TICKET}' does not match the required ^OMN-[0-9]+\$ pattern."
             exit 1
           fi
-          if ! [[ "${EVIDENCE_SOURCE}" =~ ^(OCC#[0-9]+|[0-9a-fA-F]{7,40})$ ]]; then
-            echo "::error::OMN-16286: inputs.evidence_source '${EVIDENCE_SOURCE}' does not match the required OCC#<n> or <hex-sha> pattern."
+          if ! [[ "${EVIDENCE_SOURCE}" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+            echo "::error::OMN-16286: inputs.evidence_source '${EVIDENCE_SOURCE}' does not match the required <hex-sha> pattern (the release commit whose in-repo contract proved the release)."
             exit 1
           fi
 
@@ -445,22 +443,22 @@ jobs:
           #
           # It used to re-cite the RELEASING PR's own companion verbatim. That
           # citation is honest about where the release's own evidence lives,
-          # but it does not bind to THIS PR -- occ-preflight resolves the
-          # stamped commit and finds zero receipts for this PR's own number or
-          # head sha, failing permanently with reason=pr_ticket_mismatch (no
+          # but it does not bind to THIS PR: the downstream gate resolved the
+          # stamped commit, found zero receipts for this PR's own number or
+          # head sha, and failed permanently with reason=pr_ticket_mismatch (no
           # rerun clears it, because the stamped tree never changes). Hit on
           # the v0.47.10 wave (OMN-18202), the 0.47.17/18 wave (OMN-18853),
           # omnibase_infra#3970, and three legs each on 2026-09-22 and
           # 2026-09-23 (OMN-17427) -- past the second-occurrence bar.
           #
-          # Every downstream repo's occ-autobind fires on `opened` (the ticket
-          # token lives in the branch name below the resolver, not in this
-          # body) and mints a companion carrying receipts bound to THIS PR's
-          # own commit shas, then PATCHes this body with its own
-          # Evidence-Source line once minted. Two writers of one field disagree
-          # when the generator writes one first; omitting it here leaves
-          # exactly one writer. The verification step immediately below this
-          # one asserts that invariant holds for the PR just opened.
+          # OMN-20959: nothing downstream writes a stamp into this body any
+          # more. The bump PR is pushed by the writer app and changes only
+          # dependency pins; the downstream repo's own evidence gate derives
+          # that verdict from the head's diff and never reads this body. What
+          # the body does carry is a plain "Release evidence:" line naming the
+          # release commit whose in-repo contract proved the release, a line
+          # no gate parses as a stamp. The verification step immediately below
+          # this one asserts that the PR just opened carries no stamp.
           gh pr create \
             --repo "OmniNode-ai/${{ matrix.repo }}" \
             --title "chore(deps): bump ${{ steps.vars.outputs.pkg_hyphen }} to ${{ steps.vars.outputs.version }} (${{ steps.vars.outputs.ticket }})" \
@@ -476,14 +474,14 @@ jobs:
 
           This PR carries no dedicated testing of its own beyond this repo's own
           CI running against the new lockfile. It deliberately carries NO
-          Evidence-Ticket / Evidence-Source stamp: this repo's own OCC autobind
-          mints a companion bound to THIS PR's own commit and PATCHes the stamp
-          in once that companion exists (OMN-18202 AC1). The upstream release
-          that triggered this bump already proved the released package version
-          independently:
+          Evidence-Ticket / Evidence-Source stamp (OMN-18202 AC1): this repo's
+          own evidence gate judges the pin-only diff of this head. The upstream
+          release that triggered this bump already proved the released package
+          version independently:
 
           - Source repo: `OmniNode-ai/${{ steps.vars.outputs.package }}`
           - Released version: `${{ steps.vars.outputs.version }}`
+          - Release evidence: `${{ steps.vars.outputs.evidence_source }}` (the release commit whose in-repo `contracts/${{ steps.vars.outputs.ticket }}.yaml` proved the release)
 
           ## Triggered by
 
@@ -514,17 +512,17 @@ jobs:
           # back the PR this run just opened and fail the cascade run outright
           # if its body carries an Evidence-Ticket or Evidence-Source line.
           # Post-fix the generator never writes one, so any occurrence here is
-          # necessarily a companion bound to a DIFFERENT PR (the upstream
+          # necessarily a citation bound to a DIFFERENT PR (the upstream
           # release's, or a stale re-citation from a future regression) rather
           # than this PR's own -- exactly the `pr_ticket_mismatch` shape this
           # fix removes. This is a structural regression guard on the
-          # generator's output, not a re-implementation of occ-preflight's own
-          # eligibility check.
+          # generator's output, not a re-implementation of the downstream
+          # gate's own eligibility check.
           BODY=$(gh pr view "${{ steps.vars.outputs.branch }}" \
             --repo "OmniNode-ai/${{ matrix.repo }}" \
             --json body --jq '.body')
           if printf '%s\n' "$BODY" | grep -qE '^Evidence-(Ticket|Source):'; then
-            echo "::error::OMN-18202: the cascade just opened OmniNode-ai/${{ matrix.repo }}#${{ steps.vars.outputs.branch }} with an Evidence-Ticket or Evidence-Source line already in its body. The generator must never emit one; the downstream repo's own occ-autobind is the only writer of that field. This is the pr_ticket_mismatch regression OMN-18202/OMN-18853/OMN-17427 fixed -- do not reintroduce the stamp in the body template above."
+            echo "::error::OMN-18202: the cascade just opened OmniNode-ai/${{ matrix.repo }}#${{ steps.vars.outputs.branch }} with an Evidence-Ticket or Evidence-Source line already in its body. The generator must never emit one. This is the pr_ticket_mismatch regression OMN-18202/OMN-18853/OMN-17427 fixed -- do not reintroduce the stamp in the body template above."
             exit 1
           fi
           echo "OK: no foreign Evidence-Ticket/Evidence-Source stamp on the PR this run opened."
