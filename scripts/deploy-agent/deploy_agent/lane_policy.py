@@ -78,6 +78,32 @@ def load_allowed_lanes_from_env() -> frozenset[EnumRuntimeLane]:
     return parse_allowed_lanes(raw)
 
 
+#: OMN-19998: the lanes a lab deploy agent may hold together. A dev agent whose
+#: fence also names the stability lane keeps it on dev's newest omnimarket tag
+#: without an operator shell (refresh_stability_lane.sh is refused from every
+#: remote lane by the landing-compose guard). prod is never one of them: a
+#: fence naming prod is a prod agent.
+LAB_LANES = frozenset({EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST})
+
+
+def is_lab_dev_fence(allowed: frozenset[EnumRuntimeLane]) -> bool:
+    """Whether ``allowed`` is a lab dev agent's fence (OMN-19998).
+
+    The dev lane, alone or with the stability lane. The dev-only behaviour
+    (the lane env fragment, the lane mirror, the startup and forward-migration
+    converges) keys on this, never on the fence being exactly ``{dev}``, so
+    admitting the stability lane does not switch the dev lane's own behaviour
+    off.
+    Each of those still acts on the dev lane only.
+    """
+    return EnumRuntimeLane.DEV in allowed and allowed <= LAB_LANES
+
+
+def follows_stability(allowed: frozenset[EnumRuntimeLane]) -> bool:
+    """Whether a lab dev agent also keeps the stability lane on dev's tag."""
+    return is_lab_dev_fence(allowed) and EnumRuntimeLane.STABILITY_TEST in allowed
+
+
 def assert_lane_allowed(
     lane: EnumRuntimeLane, allowed: frozenset[EnumRuntimeLane]
 ) -> None:

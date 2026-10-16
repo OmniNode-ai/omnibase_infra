@@ -1,3 +1,27 @@
+## v0.38.74 (2026-10-16)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.74 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.73.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.73
+- feat: vendor the expand-only usage tier-share migration 0003 (#5018)
+- feat: transactional derived write for the run-savings figure (#5016)
+- feat: vendor the tier-mix node migration 0060 (#5004)
+- fix: remove every retired lab value from omnibase_infra (#5001)
+- feat: vendor delegation 0061/0062 and savings 096, unpriced cost is null (#5009)
+- feat: one shared answer to "is this Kafka failure permanent" (#5005)
+- fix: move LLM inference response off the delegation topic (#5006)
+- feat: resolve lane overlay from secret store in delegation contract renderer (#5003)
+- fix: pin omnibase-core 0.47.44 so the dispatch venv can carry omnimarket dev (#5011)
+- fix: carry command_topic and absent consumer in refusals (#4996)
+- fix: resolve offer companion without GitHub search (#4997)
+- feat: onex delegate mints a trace id and a span id and stamps them on the request (#4998)
+- feat: declared-state diff, apply and the reconcile orchestrator (#4989)
+- feat: post-merge lab-pass receipts carry deployment identity, generation and per-check evidence (#4987)
+- feat: vendor savings 095 house-tenant-uuid re-backfill (#4983)
+
 ## v0.38.73 (2026-10-15)
 
 ### Release

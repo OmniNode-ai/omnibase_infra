@@ -297,6 +297,29 @@ def test_compose_env_of_a_non_dev_agent_reads_no_fragment(
 
 
 @pytest.mark.unit
+def test_compose_env_of_a_lab_agent_that_also_deploys_stability(
+    dev_agent: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19998: a lab dev agent's fence may admit the stability lane beside dev.
+
+    Its dev jobs, and its dev-lane work between jobs, keep the dev fragment; a
+    stability-lane job of the same agent never takes it.
+    """
+    monkeypatch.setenv(
+        "DEPLOY_AGENT_ALLOWED_LANES", f"dev,{EnumRuntimeLane.STABILITY_TEST.value}"
+    )
+    between_jobs = executor_mod._compose_env()
+    assert {k: between_jobs[k] for k in NON_ACTING} == NON_ACTING
+    with executor_mod.active_deploy_lane(EnumRuntimeLane.DEV):
+        dev_job = executor_mod._compose_env()
+    assert {k: dev_job[k] for k in NON_ACTING} == NON_ACTING
+    with executor_mod.active_deploy_lane(EnumRuntimeLane.STABILITY_TEST):
+        stability_job = executor_mod._compose_env()
+    assert not set(NON_ACTING) & set(stability_job)
+    assert executor_mod._ActiveDeployLane.lane is None
+
+
+@pytest.mark.unit
 def test_compose_env_refuses_a_fragment_outside_the_allowlist(
     dev_agent: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
