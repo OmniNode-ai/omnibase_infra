@@ -937,7 +937,7 @@ done
 if [[ "${WITH_GATEWAY}" == "1" ]]; then
     # Probe the gateway's own transform, using the same environment it serves
     # requests with. An old image must fail before bootstrap emits any event.
-    docker exec -i "onex-api-prepr-${SLOT}" python3 - <<'PYNAMESPACE' \
+    docker exec -i "onex-api-prepr-${SLOT}-gateway" python3 - <<'PYNAMESPACE' \
         || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image does not implement this slot's topic namespace."
 import os
 from topic_namespace import apply_topic_namespace, strip_topic_namespace

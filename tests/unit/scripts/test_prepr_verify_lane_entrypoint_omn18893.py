@@ -491,6 +491,30 @@ def test_the_overlay_container_names_match_the_manifest_services(slot: int) -> N
     )
 
 
+@pytest.mark.parametrize("slot", sorted(policy.SLOTS))
+def test_every_overlay_container_carries_the_slot_marker(slot: int) -> None:
+    """The render check refuses a container name without ``-prepr-<slot>-``.
+
+    The gateway was named ``onex-api-prepr-<slot>``, which ends at the slot
+    number: the marker's trailing dash was missing, so
+    ``prepr_verify_rendered_slot.py`` refused the whole slot before anything
+    booted (OMN-19972). This reads the same marker the check reads.
+    """
+    overlay = _overlay_for_slot(slot)
+    named = {
+        name: svc["container_name"]
+        for name, svc in overlay["services"].items()
+        if isinstance(svc, dict) and "container_name" in svc
+    }
+    assert "onex-api" in named, "positive control: the gateway must be checked."
+    marker = verifier._container_prefixes(policy.resolve_slot(slot))
+    bare = {n: c for n, c in named.items() if marker not in c}
+    assert not bare, (
+        f"services whose container_name lacks {marker!r}: {bare}. "
+        f"prepr_verify_rendered_slot.py refuses the slot on any of them."
+    )
+
+
 def test_every_shared_dependency_is_fenced_behind_an_unreachable_profile() -> None:
     """The fence, not the caller, is what stops a bare ``up``.
 

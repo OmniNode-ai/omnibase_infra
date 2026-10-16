@@ -521,7 +521,7 @@ services:
   # -------------------------------------------------------------------------
   onex-api:
     profiles: !override ["prepr-gateway"]
-    container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
+    container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-gateway"
     depends_on: !override []
     ports: !override
       - "${PREPR_GATEWAY_PORT:?PREPR_GATEWAY_PORT must be set}:8000"
@@ -533,7 +533,7 @@ services:
       # it as long as the policy table starts at 1 -- which it does, and a test
       # asserts it.
       WORKFLOW_RATE_LIMIT_VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}@valkey:6379/${PREPR_VALKEY_DB_INDEX:?PREPR_VALKEY_DB_INDEX must be set}"
-      ONEX_API_BASE_URL: "http://onex-api-prepr-${ONEX_PREPR_SLOT}:8000"
+      ONEX_API_BASE_URL: "http://onex-api-prepr-${ONEX_PREPR_SLOT}-gateway:8000"
     volumes: !override
       - ${ONEX_PREPR_TENANT_STATE_DIR:?ONEX_PREPR_TENANT_STATE_DIR must name a per-slot host directory this slot may write its own tenant credential into - prepr_verify_lane.sh creates it; it is NOT the dev lane's ONEX_LAB_TENANT_STATE_DIR, because two lanes writing one credential file is two lanes sharing a tenant}:/var/lib/onex-lab-tenant
     labels: !override
