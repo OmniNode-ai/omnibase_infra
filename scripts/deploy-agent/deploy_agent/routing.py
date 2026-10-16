@@ -50,7 +50,7 @@ import re
 import socket
 import subprocess
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final
 
@@ -464,6 +464,13 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
 # as any other job. The freeze expires by itself at ``until``: no flag outlives
 # its declared window, so a forgotten freeze cannot silently pin a lane forever.
 #
+# THE SECOND FLAG: ``max_dev_lag_minutes`` (OMN-21146)
+# ----------------------------------------------------
+# The freshness bound of the lane. Past it, a lane behind a followed
+# repository's dev head converges without waiting out the idle period or the
+# probe windows, and the agent publishes a dev-lane drift event naming the
+# running image, the head and the lag (deploy_agent.idle_converge).
+#
 # An unknown key or a naive ``until`` refuses the table, and the agent reading
 # its own table then refuses to start, as it does for a malformed load gate.
 
@@ -494,6 +501,17 @@ class ModelLaneFlags(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     freeze: ModelLaneFreeze | None = None
+    #: OMN-21146. How long the lane may run behind a followed repository's dev
+    #: head before its idle converge stops waiting out the idle period and the
+    #: probe windows, and the agent publishes a dev-lane drift event. ``None``:
+    #: no bound, the converge waits as before (deploy_agent.idle_converge).
+    max_dev_lag_minutes: int | None = Field(default=None, gt=0)
+
+    def max_dev_lag(self) -> timedelta | None:
+        """The declared lag bound, or ``None`` when the instance declares none."""
+        if self.max_dev_lag_minutes is None:
+            return None
+        return timedelta(minutes=self.max_dev_lag_minutes)
 
     def frozen_reason(self, now: datetime) -> str | None:
         """The FROZEN reason in force at ``now``, or ``None``."""
