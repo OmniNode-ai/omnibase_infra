@@ -30,6 +30,9 @@ WHAT THE CI JOBS ARE FOR
     ran inside ``[window_start, window_end]``, read from the runner's own
     per-job worker log (``_diag/Worker_<UTC start>-utc.log``). A lane peak can
     then be set beside the CI burst that ran on the same host at the same time.
+    An unfinished job is treated as ending when its runner's next job starts.
+    A window longer than two hours attributes only its last two hours, and
+    the builder prints a ``CI_RUNS_TRUNCATED`` notice that the census logs.
 
 OOM KILLS ACROSS A RESTART
     A lane container with a restart policy that is OOM-killed comes back with a
@@ -64,13 +67,18 @@ import json
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 TOPIC = "onex.evt.omnibase-infra.lane-container-memory.v1"
 SCHEMA_VERSION = "1.0.0"
 EVENT_TYPE = "lane-container-memory-observation"
+
+# The census timer is hourly (OnCalendar=hourly, RandomizedDelaySec=2min,
+# Persistent=true), so a published window is about one hour; a longer window
+# is a gap or the first pass after a boot.
+CI_RUNS_MAX_SPAN = timedelta(hours=2)
 
 #: Envelope keys and the JSON type of each value. Task 5b's wire model reads
 #: exactly this set; a change here is a schema version bump.
@@ -279,10 +287,19 @@ def select_ci_runs(
 ) -> list[dict[str, str | None]]:
     """Keep the runs that overlap ``[window_start, window_end]``, in a stable order."""
     kept: list[dict[str, str | None]] = []
-    for run in runs:
+    next_started: dict[str, datetime] = {}
+    for run in sorted(
+        runs, key=lambda r: parse_ts(str(r["job_started_at"])), reverse=True
+    ):
         started = parse_ts(str(run["job_started_at"]))
+        runner = str(run["runner_name"])
         completed_raw = run.get("job_completed_at")
-        completed = parse_ts(str(completed_raw)) if completed_raw else None
+        # A runner runs one job at a time; its next start bounds an abandoned
+        # job's overlap without inventing a completion timestamp in the output.
+        completed = (
+            parse_ts(str(completed_raw)) if completed_raw else next_started.get(runner)
+        )
+        next_started[runner] = started
         if started > window_end:
             continue
         if completed is not None and completed < window_start:
@@ -296,6 +313,23 @@ def select_ci_runs(
             str(r["repo"]),
             str(r["run_id"]),
         ),
+    )
+
+
+def ci_runs_truncation_notice(event: Mapping[str, Any]) -> str | None:
+    """The notice line for an event whose window is longer than CI_RUNS_MAX_SPAN.
+
+    A truncated attribution is reported, not alerted: it follows every boot and
+    every gap, and the records' counters still cover the whole window.
+    """
+    window_start_dt = parse_ts(str(event["window_start"]))
+    window_end_dt = parse_ts(str(event["window_end"]))
+    if window_end_dt - window_start_dt <= CI_RUNS_MAX_SPAN:
+        return None
+    return (
+        f"CI_RUNS_TRUNCATED host={event['host']} window_start={event['window_start']} "
+        f"ci_runs_from={format_ts(window_end_dt - CI_RUNS_MAX_SPAN)} "
+        "(window longer than 2h; earlier jobs not attributed)"
     )
 
 
@@ -510,6 +544,8 @@ def build_event(
         _check_fields(run, CI_RUN_FIELDS, f"worker_runs[{index}]")
         runs.append(dict(run))
 
+    ci_runs_from = max(window_start_dt, window_end_dt - CI_RUNS_MAX_SPAN)
+
     event: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "event_type": EVENT_TYPE,
@@ -518,7 +554,7 @@ def build_event(
         "window_start": window_start,
         "window_end": window_end,
         "ci_runs": select_ci_runs(
-            runs, window_start=window_start_dt, window_end=window_end_dt
+            runs, window_start=ci_runs_from, window_end=window_end_dt
         ),
         "records": sorted(records, key=lambda r: (r["lane"], r["container_name"])),
     }
@@ -602,6 +638,10 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"lane container memory event: {exc}", file=sys.stderr)
         return 2
+
+    notice = ci_runs_truncation_notice(event)
+    if notice is not None:
+        print(notice, file=sys.stderr)
 
     args.event_out.parent.mkdir(parents=True, exist_ok=True)
     # One line: rpk produce reads newline-delimited records off stdin.

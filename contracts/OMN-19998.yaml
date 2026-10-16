@@ -41,6 +41,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: 'AC7: migration and mirror checks cover prod, dev plus prod, all lanes, and the stability lane alone as excluded fences; mirror checks reject every non-dev target with a dev or mixed lab fence.'
+  - id: req-omn19998-memory-event-ci-runs-bound
+    statement: The lane container memory event must stay publishable after a gap or a boot. An unfinished runner worker log that is not its runner's newest log must be bounded by that runner's next job start instead of overlapping every window, and a window longer than two hours must attribute only its last two hours of CI jobs and log a CI_RUNS_TRUNCATED notice, with the event schema unchanged.
+    acceptance:
+      - id: AC8
+        statement: 'AC8: an abandoned unfinished run is not listed in a later window, the newest unfinished run of a runner is still listed, a window longer than two hours lists only its last two hours and yields the CI_RUNS_TRUNCATED notice while a one-hour window yields none, and a clean census pass still exits 0 and logs the notice -- falsifier: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass" fails on the merge-base builder'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -60,6 +65,9 @@ evidence_requirements:
   - kind: tests
     description: The structural tests read config/runner_fleet.yaml through the fleet model, the three runner compose files and the fleet panel's label classifier.
     command: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
+  - kind: tests
+    description: The builder tests drive select_ci_runs and build_event over fixture worker runs; the census pass tests run lane-census-check.sh against a stubbed docker and broker.
+    command: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -135,3 +143,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC7
+  - id: dod-omn19998-ac7-memory-event-ci-runs-bound
+    description: AC8 tests assert the abandoned-run bound, the newest unfinished run, the two-hour attribution horizon with its notice, and an unchanged exit 0 for a clean census pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8
