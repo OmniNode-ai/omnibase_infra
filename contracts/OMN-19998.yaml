@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: 'AC2: a seventeen-repository batch answered HTTP 504 is read in smaller batches and returns every repository; one repository still answered HTTP 504 after its retry raises; a non-gateway failure raises after one read -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "gateway"'
+  - id: req-omn19998-pr-title-install-budget
+    statement: The PR title node test module's published-release install fixture must have a time budget longer than the CI test splits' command-line --timeout, and must bound a stalled package-index read so uv retries it, so one slow PyPI read no longer fails dev's CI Summary.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: every test that takes the installed_node fixture carries a timeout marker above the install subprocess timeout, which is above the --timeout of the full-suite pytest step in ci.yml, and the fixture sets UV_HTTP_TIMEOUT below the install timeout -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60 fails test_install_budget_outlasts_the_ci_test_timeout on the merge-base test module'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -23,6 +28,9 @@ evidence_requirements:
   - kind: tests
     description: The gateway-split tests drive the batch reader with a fake gh that answers HTTP 504 and count the reads.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "gateway"
+  - kind: tests
+    description: The structural budget test reads the full-suite step's --timeout from ci.yml and the three installed-node tests' timeout markers; the whole module passes under --timeout=60.
+    command: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60
 emergency_bypass:
   enabled: false
   justification: ''
@@ -46,3 +54,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn19998-ac3-pr-title-install-budget
+    description: AC3 test asserts the install budget outlasts the CI test timeout and every installed-node test carries the timeout marker; the module passes under --timeout=60.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

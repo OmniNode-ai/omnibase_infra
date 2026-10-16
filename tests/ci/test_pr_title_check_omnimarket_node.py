@@ -28,6 +28,13 @@ WORKFLOW = ROOT / ".github/workflows/pr-title-check.yml"
 MANIFEST = ROOT / ".github/required-checks.yaml"
 CONTEXT = "pr-title / check-title"
 NODE_MODULE = "omnimarket.nodes.node_pr_title_check_compute"
+# OMN-19998: install fixture setup is charged to the first test using it.
+# UV_HTTP_TIMEOUT_S bounds stalled index reads so uv's own retries run.
+# The subprocess timeout fires before pytest's timeout; both exceed CI's
+# command-line --timeout=60.
+INSTALL_TIMEOUT_S = 180
+TEST_TIMEOUT_S = 240
+UV_HTTP_TIMEOUT_S = "30"
 RUNS_ON = """${{
   (github.event_name == 'pull_request' &&
    github.event.pull_request.head.repo.full_name != github.repository)
@@ -156,6 +163,27 @@ def test_manifest_row_names_the_local_producer() -> None:
     assert "onex_change_control" not in row["rationale"]
 
 
+def test_install_budget_outlasts_the_ci_test_timeout() -> None:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    step = next(
+        step
+        for step in ci["jobs"]["test-parallel"]["steps"]
+        if step.get("name") == "Run pytest (full suite)"
+    )
+    match = re.search(r"--timeout=(\d+)", step["run"])
+    assert match is not None
+    ci_timeout = int(match.group(1))
+    assert ci_timeout < INSTALL_TIMEOUT_S < TEST_TIMEOUT_S
+    assert int(UV_HTTP_TIMEOUT_S) < INSTALL_TIMEOUT_S
+    for test in (
+        test_installed_release_verdict_equals_pinned_bash,
+        test_installed_release_refuses_malformed_requests,
+        test_installed_release_replays_recorded_lab_responses,
+    ):
+        marks = [m for m in getattr(test, "pytestmark", []) if m.name == "timeout"]
+        assert [m.args for m in marks] == [(TEST_TIMEOUT_S,)], test.__name__
+
+
 @pytest.fixture(scope="module")
 def installed_node(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Install using precisely the workflow script, without project imports."""
@@ -163,6 +191,7 @@ def installed_node(tmp_path_factory: pytest.TempPathFactory) -> Path:
     runner_temp = tmp_path_factory.mktemp("pr-title-runner")
     env = {
         **os.environ,
+        "UV_HTTP_TIMEOUT": UV_HTTP_TIMEOUT_S,
         "RUNNER_TEMP": str(runner_temp),
         "OMNIMARKET_VERSION": step["env"]["OMNIMARKET_VERSION"],
         "PR_TITLE": "ci(OMN-21009): port title check",
@@ -174,7 +203,7 @@ def installed_node(tmp_path_factory: pytest.TempPathFactory) -> Path:
         env=env,
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=INSTALL_TIMEOUT_S,
         check=False,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -231,6 +260,7 @@ def installed_node(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ('fix(OMN-21009): literal $(exit 17) `exit 19` "quote"', "contributor", 0),
     ],
 )
+@pytest.mark.timeout(TEST_TIMEOUT_S)
 def test_installed_release_verdict_equals_pinned_bash(
     installed_node: Path,
     title: str,
@@ -261,6 +291,7 @@ def test_installed_release_verdict_equals_pinned_bash(
 @pytest.mark.parametrize(
     "payload", ["not json", "{}", '{"title": 7, "author": "contributor"}']
 )
+@pytest.mark.timeout(TEST_TIMEOUT_S)
 def test_installed_release_refuses_malformed_requests(
     installed_node: Path, payload: str
 ) -> None:
@@ -277,6 +308,7 @@ def test_installed_release_refuses_malformed_requests(
 
 
 @pytest.mark.live_contact("tests/ci/fixtures/omn21009_pr_title_node_responses.json")
+@pytest.mark.timeout(TEST_TIMEOUT_S)
 def test_installed_release_replays_recorded_lab_responses(
     installed_node: Path, recorded_response: dict[str, Any]
 ) -> None:
