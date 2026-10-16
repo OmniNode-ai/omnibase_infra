@@ -67,7 +67,6 @@ def test_rejects_disabled_embedding_endpoint(tmp_path: Path) -> None:
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
                 "LLM_EMBEDDING_URL=http://192.168.86.200:8100",
-                "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
             ]
         )
     )
@@ -87,7 +86,6 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
                 "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
-                "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
             ]
         )
     )
@@ -102,9 +100,9 @@ def test_accepts_running_embedding_endpoint(tmp_path: Path) -> None:
 def test_accepts_host_shaped_env_with_released_variable_set(tmp_path: Path) -> None:
     """A host that still seeds a RELEASED variable must pass.
 
-    This fixture is shaped like the real ``.201`` operator env file: the three
+    This fixture is shaped like the real lab operator env file: the two
     variables the contract still assigns, at their canonical running URLs, PLUS
-    the two variables OMN-16442 released from now-disabled slots but which the
+    the variables released from now-disabled slots but which the
     host must keep seeded because compose declares them fail-closed. Values are
     dummies -- no real endpoint value is asserted for the released names, and
     none is read.
@@ -119,7 +117,7 @@ def test_accepts_host_shaped_env_with_released_variable_set(tmp_path: Path) -> N
             [
                 "LLM_CODER_URL=http://192.168.86.201:8000",
                 "LLM_EMBEDDING_URL=http://192.168.86.201:8002",
-                "LLM_DEEPSEEK_R1_URL=http://192.168.86.200:8101",
+                "LLM_DEEPSEEK_R1_URL=http://llm.test:8000",
                 # Released by OMN-16442 (slot coder-fast-4090, hardware removed);
                 # kept seeded per config/shared_key_registry.yaml because
                 # docker/docker-compose.infra.yml requires it fail-closed.
@@ -148,10 +146,10 @@ def test_derived_env_var_set_excludes_released_variables() -> None:
     assert derived == (
         "LLM_CODER_URL",
         "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
     )
     assert "LLM_CODER_FAST_URL" not in derived
     assert "LLM_QWEN3_NEXT_URL" not in derived
+    assert "LLM_DEEPSEEK_R1_URL" not in derived
 
 
 @pytest.mark.unit
