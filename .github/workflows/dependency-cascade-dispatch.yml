@@ -64,8 +64,8 @@ on:
         type: string
       evidence_source:
         description: >-
-          Evidence-Source that already proved that release, e.g. OCC#6695 or a
-          merged OCC commit SHA.
+          Commit SHA (7 to 40 hex characters) of the release commit whose
+          in-repo contracts/<ticket>.yaml proved that release.
         required: true
         type: string
 
