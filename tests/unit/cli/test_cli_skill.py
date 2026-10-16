@@ -1823,8 +1823,7 @@ def test_claude_code_binding_install_entry_resolves() -> None:
     )
     assert entry.node_name == "node_claude_code_binding_install_effect"
     assert entry.result_model == (
-        "omnimarket.nodes.node_claude_code_binding_install_effect.models"
-        ".ModelBindingInstallResult"
+        "omnibase_core.models.claude_code_binding.ModelBindingInstallResult"
     )
 
     omnimarket_root = _resolve_omnimarket_src()

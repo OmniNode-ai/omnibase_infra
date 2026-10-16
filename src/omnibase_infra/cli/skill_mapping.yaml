@@ -899,13 +899,16 @@ skills:
   # OMN-21093: the Claude Code adapter nodes moved into omnimarket
   # (omnimarket#3946); the install effect writes the rendered binding module
   # to the Claude Code mods location and registers commands in the user
-  # settings. The request's `bindings` (ModelClientBinding objects) is
-  # constructed by the capability/render pipeline rather than the CLI, so the
-  # surfaced args are the host paths and knobs the caller resolves; every arg
-  # maps onto a ModelBindingInstallRequest field (extra="forbid").
+  # settings. The wire models live in omnibase_core (moved there by this
+  # ticket so this mapping names a shared model, not a node-package reach-in
+  # the node-boundary gate refuses). The request's `bindings`
+  # (ModelClientBinding objects) is constructed by the capability/render
+  # pipeline rather than the CLI, so the surfaced args are the host paths and
+  # knobs the caller resolves; every arg maps onto a ModelBindingInstallRequest
+  # field (extra="forbid").
   - skill_name: claude_code_binding_install
     node_name: node_claude_code_binding_install_effect
-    result_model: omnimarket.nodes.node_claude_code_binding_install_effect.models.ModelBindingInstallResult
+    result_model: omnibase_core.models.claude_code_binding.ModelBindingInstallResult
     args:
       - {name: mods-dir, payload_field: mods_dir, arg_type: string, required: true}
       - {name: settings-path, payload_field: settings_path, arg_type: string, required: true}
