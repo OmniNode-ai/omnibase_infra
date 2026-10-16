@@ -51,6 +51,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: an agent whose fence names dev and the stability lane runs one stability-lane rebuild requested by agent/stability-follow-tag when dev runs the newest tag and the stability lane does not, none while dev runs an older tag, none when the stability lane already runs it, none on a fence of dev alone or one naming prod, one attempt per tag; a stability-lane job takes no dev env fragment -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly fails against the merge-base deploy_agent'
+  - id: req-omn19998-bump-regenerates-runner-lock
+    statement: The release workflow's post-release dev version bump must regenerate docker/runners/runner-image.lock.json after it re-locks uv.lock and stage it in the bump commit, because uv.lock bytes feed the runner image identity and a bump PR with a stale lock fails tests/ci/test_runner_image_identity.py and runner-image-build-smoke.
+    acceptance:
+      - id: AC10
+        statement: 'AC10: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -76,6 +81,9 @@ evidence_requirements:
   - kind: tests
     description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+  - kind: tests
+    description: The workflow wiring tests read the post-release-dev-bump job's own YAML slice from release.yml.
+    command: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -172,3 +180,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-omn19998-ac10-bump-regenerates-runner-lock
+    description: AC10 tests assert the post-release-dev-bump job regenerates the runner image lock after uv lock and stages it in the bump commit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10
