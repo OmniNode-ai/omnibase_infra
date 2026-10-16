@@ -40,6 +40,7 @@ from deploy_agent.events import (
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
     ModelDevLaneDrift,
+    ModelDevTagHeartbeat,
     ModelLaneMirrorReceipt,
     ModelOnexApiDelivery,
     ModelRebuildRejected,
@@ -81,26 +82,32 @@ from deploy_agent.idle_converge import (
     CHECK_INTERVAL_SECONDS as IDLE_CONVERGE_CHECK_INTERVAL_SECONDS,
 )
 from deploy_agent.idle_converge import (
-    FOLLOWED_REPOSITORIES as IDLE_CONVERGE_REPOSITORIES,
-)
-from deploy_agent.idle_converge import (
+    DEV_TAG_HEARTBEAT_INTERVAL,
     EnumIdleConvergeVerdict,
     EnumIdleRestoreVerdict,
     EnumRuntimePresence,
+    ModelDevTag,
     ModelIdleConvergeDecision,
     ModelIdleConvergeInputs,
     ModelIdleRestoreInputs,
+    contains_commit,
     converge_command,
     decide_restore,
     dev_lane_drift,
+    dev_tag_behind_since,
+    dev_tag_heartbeat,
     load_probe_windows,
     next_behind_since,
     probe_blocking,
     read_dev_head,
+    read_dev_tags,
     read_running_image,
     read_running_ref,
     read_runtime_presence,
     restore_command,
+)
+from deploy_agent.idle_converge import (
+    FOLLOWED_REPOSITORIES as IDLE_CONVERGE_REPOSITORIES,
 )
 from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
@@ -132,6 +139,7 @@ from deploy_agent.publisher import (
     PublishCircuitBreaker,
     build_completion_payload,
     publish_dev_lane_drift,
+    publish_dev_tag_heartbeat,
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
@@ -142,7 +150,10 @@ from deploy_agent.routing import (
     build_router_from_env,
     lane_flags_for_instance,
 )
-from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+from deploy_agent.tracking_ref import (
+    DEV_TAG_FOLLOWED_REPOSITORIES,
+    load_tracking_remote_ref_from_env,
+)
 from deploy_agent.unit_drift import check_units, load_manifest, report
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
@@ -174,20 +185,55 @@ def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
     return lane_config_for(lane).main_runtime_container
 
 
+def _sibling_clone(repository: str) -> Path | None:
+    """The clone a workspace build stages ``repository`` from, under ``OMNI_HOME``.
+
+    ``OMNI_HOME`` has no default here, as in the executor's workspace build:
+    unset, there is no clone and every read of it is unread.
+    """
+    registry_root = os.environ.get("OMNI_HOME", "").strip()
+    if not registry_root:
+        return None
+    return Path(registry_root) / repository
+
+
+def _read_dev_tags(repository: str) -> list[ModelDevTag] | None:
+    """Every dev tag on ``repository``'s origin, oldest first (OMN-19998)."""
+    clone = _sibling_clone(repository)
+    if clone is None:
+        return None
+    return read_dev_tags(clone, AGENT_CLONE_ROOT)
+
+
+def _running_contains(repository: str, ancestor: str, running_ref: str) -> bool:
+    """Whether the lane's running ``repository`` commit contains ``ancestor``."""
+    clone = _sibling_clone(repository)
+    if clone is None:
+        return False
+    return contains_commit(clone, ancestor, running_ref)
+
+
 def _read_dev_head(repository: str) -> str | None:
     """A followed repository's dev head, read in the clone its build uses.
 
     OMN-19509. omnimarket's is the clone a workspace build stages from, under
-    ``OMNI_HOME``, which has no default here, as in the executor's workspace
-    build: unset, the head is unread and the converge refuses. OMN-20867:
-    omnibase_infra's is the deploy-source clone the git phase pulls.
+    ``OMNI_HOME``. OMN-20867: omnibase_infra's is the deploy-source clone the
+    git phase pulls. OMN-19998: for a tag-followed repository the head is its
+    newest ``dev-*`` tag on origin, the commit a lab build stages, and its dev
+    branch head only while origin carries no such tag.
     """
     if repository == "omnibase_infra":
         return read_dev_head(Path(REPO_DIR))
-    registry_root = os.environ.get("OMNI_HOME", "").strip()
-    if not registry_root:
+    clone = _sibling_clone(repository)
+    if clone is None:
         return None
-    return read_dev_head(Path(registry_root) / repository)
+    if repository in DEV_TAG_FOLLOWED_REPOSITORIES:
+        tags = read_dev_tags(clone, AGENT_CLONE_ROOT)
+        if tags is None:
+            return None
+        if tags:
+            return tags[-1].sha
+    return read_dev_head(clone)
 
 
 STATE_DIR = Path(
@@ -450,6 +496,15 @@ class DeployAgent:
         self._dev_lag_behind_since: dict[str, datetime] = {}
         self._dev_lane_drift: dict[str, ModelDevLaneDrift] = {}
         self._dev_lane_drift_published_at: dict[str, datetime] = {}
+        # OMN-19998: the heartbeat against each tag-followed repository's
+        # newest dev tag, and its seams.
+        self._idle_read_dev_tags: Callable[[str], list[ModelDevTag] | None] = (
+            _read_dev_tags
+        )
+        self._idle_running_contains: Callable[[str, str, str], bool] = _running_contains
+        self._dev_tag_behind_since: dict[str, datetime] = {}
+        self._dev_tag_heartbeat: dict[str, ModelDevTagHeartbeat] = {}
+        self._dev_tag_heartbeat_published_at: dict[str, datetime] = {}
         self._idle_read_running_image: Callable[[], str] = lambda: (
             read_running_image(_runtime_container_for_lane(EnumRuntimeLane.DEV))
         )
@@ -709,6 +764,7 @@ class DeployAgent:
             get_control_topic_lag=self._lag_sampler.latest,
             get_unit_drift=_unit_drift_report,
             get_dev_lane_drift=self._latest_dev_lane_drift,
+            get_dev_tag_heartbeat=self._latest_dev_tag_heartbeat,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -1090,7 +1146,12 @@ class DeployAgent:
         # OMN-20864: a lane with no running runtime is restored, not followed.
         # Evaluated first: the converge below reads the running revision out
         # of that container and can only refuse while it is down.
-        if self._maybe_idle_restore(now):
+        lane_down = self._maybe_idle_restore(now)
+        # OMN-19998: the heartbeat beats whatever the lane does next; a lane
+        # that is down runs no revision, so it beats unread.
+        for repository in DEV_TAG_FOLLOWED_REPOSITORIES:
+            self._record_dev_tag_heartbeat(repository, now, lane_down=lane_down)
+        if lane_down:
             return
         decision: ModelIdleConvergeDecision | None = None
         for repository in IDLE_CONVERGE_REPOSITORIES:
@@ -1312,6 +1373,78 @@ class DeployAgent:
         )
         publish_dev_lane_drift(drift.model_dump(mode="json"), self._kafka_config)
         self._dev_lane_drift_published_at[repository] = now
+
+    def _record_dev_tag_heartbeat(
+        self, repository: str, now: datetime, *, lane_down: bool = False
+    ) -> None:
+        """Beat against ``repository``'s newest dev tag, and alarm (OMN-19998).
+
+        Every instance beats, whatever the routing table sends it: a lab lane
+        that runs an old omnimarket is the defect whichever instance it is.
+        Published every :data:`DEV_TAG_HEARTBEAT_INTERVAL` and at once when
+        the alarm changes; a raised alarm logs an ERROR carrying
+        ``friction_type=dev_tag_lag``.
+        """
+        assert self._router is not None
+        running_ref = None if lane_down else self._idle_read_running_ref(repository)
+        tags = self._idle_read_dev_tags(repository)
+        newest = tags[-1] if tags else None
+        behind_since = dev_tag_behind_since(
+            tags or [],
+            running_ref,
+            self._dev_tag_behind_since.get(repository),
+            now,
+            running_contains_newest=(
+                newest is not None
+                and running_ref is not None
+                and running_ref != newest.sha
+                and self._idle_running_contains(repository, newest.sha, running_ref)
+            ),
+        )
+        if behind_since is None:
+            self._dev_tag_behind_since.pop(repository, None)
+        else:
+            self._dev_tag_behind_since[repository] = behind_since
+        beat = dev_tag_heartbeat(
+            instance=self._router.instance.name,
+            repository=repository,
+            runtime_container=_runtime_container_for_lane(EnumRuntimeLane.DEV),
+            running_ref=running_ref,
+            tags=tags,
+            behind_since=behind_since,
+            now=now,
+        )
+        previous = self._dev_tag_heartbeat.get(repository)
+        self._dev_tag_heartbeat[repository] = beat
+        if beat.alarm:
+            logger.error(
+                "dev tag lag: %s on %s runs %s %s, behind its newest dev tag %s "
+                "for %ds, past the %ds bound friction_type=dev_tag_lag",
+                beat.instance,
+                beat.runtime_container,
+                repository,
+                (beat.running_ref or "unread")[:12],
+                beat.newest_tag,
+                beat.lag_seconds,
+                beat.alarm_after_seconds,
+            )
+        last = self._dev_tag_heartbeat_published_at.get(repository)
+        alarm_changed = previous is None or previous.alarm != beat.alarm
+        if (
+            not alarm_changed
+            and last is not None
+            and now - last < DEV_TAG_HEARTBEAT_INTERVAL
+        ):
+            return
+        publish_dev_tag_heartbeat(beat.model_dump(mode="json"), self._kafka_config)
+        self._dev_tag_heartbeat_published_at[repository] = now
+
+    def _latest_dev_tag_heartbeat(self) -> dict[str, object]:
+        """``GET /dev-tag-heartbeat``: the latest beat per tag-followed repository."""
+        return {
+            repository: beat.model_dump(mode="json")
+            for repository, beat in dict(self._dev_tag_heartbeat).items()
+        }
 
     def _latest_dev_lane_drift(self) -> dict[str, object]:
         """``GET /dev-lane-drift``: the latest drift per followed repository."""

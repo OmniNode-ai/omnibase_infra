@@ -15,6 +15,7 @@ from kafka import KafkaProducer
 
 from deploy_agent.events import (
     TOPIC_DEV_LANE_DRIFT,
+    TOPIC_DEV_TAG_HEARTBEAT,
     TOPIC_REBUILD_COMPLETED,
     ModelComposeInvocation,
     ModelContainerResidue,
@@ -250,6 +251,20 @@ def publish_dev_lane_drift(
         f"dev-lane-drift/{payload.get('instance', '')}/{payload.get('repository', '')}"
     )
     return _produce(TOPIC_DEV_LANE_DRIFT, key, payload, kafka_config)
+
+
+def publish_dev_tag_heartbeat(
+    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+) -> bool:
+    """Publish a dev-tag heartbeat (OMN-19998), keyed by instance and repository.
+
+    One attempt, no retry: the next heartbeat replaces a lost one.
+    """
+    key = (
+        f"dev-tag-heartbeat/{payload.get('instance', '')}/"
+        f"{payload.get('repository', '')}"
+    )
+    return _produce(TOPIC_DEV_TAG_HEARTBEAT, key, payload, kafka_config)
 
 
 def publish_with_retry(

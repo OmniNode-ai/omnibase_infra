@@ -680,6 +680,9 @@ DEPLOY_EXIT=0
     export OMNIBASE_INFRA_COMPOSE_PROJECT="${COMPOSE_PROJECT}"
     export BUILD_SOURCE="workspace"
     export DEPLOY_REF="${REF}"
+    # OMN-19998: omnimarket has no ref named REF, so it falls back to its dev
+    # branch; this stages its newest dev-* tag instead (lab only, never prod).
+    export DEPLOY_FOLLOW_DEV_TAG_REPOS="omnimarket"
     export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
     "${DEPLOY_RUNTIME}" --repository-root "${REPO_ROOT}" --execute --force --restart
 ) || DEPLOY_EXIT=$?

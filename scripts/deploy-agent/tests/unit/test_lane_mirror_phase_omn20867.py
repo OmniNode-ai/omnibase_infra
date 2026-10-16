@@ -535,6 +535,11 @@ def _agent_as(
         "omninode-runtime is running",
     )
     agent._idle_read_head_ref = lambda repo: heads[repo]
+    # OMN-19998: the dev-tag heartbeat reads no remote and publishes nothing here.
+    agent._idle_read_dev_tags = lambda repo: None
+    monkeypatch.setattr(
+        agent_mod, "publish_dev_tag_heartbeat", lambda payload, config: True
+    )
     agent._idle_probe_blocker = lambda now: None
     agent._lane_flags = ModelLaneFlags()
     return agent
