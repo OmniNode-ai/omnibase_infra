@@ -330,6 +330,12 @@ def _harvest_refresh(cache_path: Path, min_runs_for_critical: int) -> str | None
                 tail = log_path.read_text(encoding="utf-8").strip()[-300:]
             except OSError:
                 tail = "(no refresh log)"
+            if not tail:
+                # A sweep that fails prints a traceback or an annotation. Nothing
+                # at all means it was killed before it printed: the reporter's
+                # service stopping with KillMode=control-group does exactly that
+                # to a detached child (OMN-17427).
+                tail = "(the refresh log is empty: the sweep was killed before it printed anything)"
             marker.unlink(missing_ok=True)
             return f"the background refresh produced no report in {int(age // 60)}m: {tail}"
         return None
