@@ -70,6 +70,10 @@ class ModelRuntimeLocalIngressRoute(BaseModel):
     terminal_events: tuple[str, ...] = ()
     input_model_module: str | None = None
     input_model_name: str | None = None
+    # OMN-19972: the topic a node declares for the numbered steps of the runs it
+    # takes (``runtime_dispatch.run_step_event``), read so the runtime dispatch
+    # port publishes them where the contract says and names no topic itself.
+    run_step_event: str | None = None
 
 
 def parse_active_runtime_packages(
@@ -154,6 +158,7 @@ def discover_runtime_local_ingress_routes(
                 package_name=package_name,
                 input_model_module=input_model_module,
                 input_model_name=input_model_name,
+                run_step_event=_extract_run_step_event(raw),
             )
 
             for alias in _package_scoped_route_aliases(route):
@@ -1022,6 +1027,13 @@ def _unlink_existing_socket(
     if raise_on_refusal:
         raise FileExistsError(message)
     logger.warning(message)
+
+
+def _extract_run_step_event(raw: dict[object, object]) -> str | None:
+    runtime_dispatch = raw.get("runtime_dispatch")
+    if not isinstance(runtime_dispatch, dict):
+        return None
+    return _safe_optional_string(runtime_dispatch.get("run_step_event"))
 
 
 def _safe_optional_string(value: object) -> str | None:

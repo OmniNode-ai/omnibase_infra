@@ -11,7 +11,15 @@ requirements:
     acceptance:
       - id: AC10
         statement: 'AC10: the local bundle runs the T3.6 usage-by-model writer through tenant-projection-writer, and the render test, the CI health step and the stopped-service control cover it -- falsifier: remove tenant-projection-writer from the local bundle and the render and boot-step tests fail'
+  - id: req-omn19972-ac11
+    statement: A run dispatched through omnibase_infra's RuntimeDelegationDispatchPort, the port the deployed delegate-skill handler uses, publishes its numbered run steps on the topic the delegate-skill contract declares as runtime_dispatch.run_step_event, without importing the consumer's package.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: a dispatched run publishes request, routing, provider call, quality gate and terminal steps numbered 1..n in the order the chain took them, on the contract-declared run-step topic -- falsifier: revert service_delegation_dispatch_port.py and tests/unit/runtime/test_delegation_dispatch_run_steps_omn19972.py fails'
 evidence_requirements:
+  - kind: tests
+    description: A dispatched run publishes its steps in order on the declared topic; a failed run's terminal names the failing step; no tenant or no declared topic publishes nothing; a publish failure never fails the delegation.
+    command: uv run pytest tests/unit/runtime/test_delegation_dispatch_run_steps_omn19972.py -q
   - kind: tests
     description: The local render carries the carrier under its own profile, group id and capabilities with the tenant principal; the CLI render writes it; the boot job's health step and stopped-service control include it, and the control holds on a recorded real engine answer for the stopped carrier.
     command: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/ci/test_runtime_boot_catalog_local_health_omn19972.py tests/integration/test_catalog_local_render_page_services_omn19972.py -q
@@ -32,3 +40,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC10
+  - id: dod-omn-19972-ac11-dispatch-port-run-steps
+    description: The run-step tests pass at this head and fail with the dispatch port reverted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_delegation_dispatch_run_steps_omn19972.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11
