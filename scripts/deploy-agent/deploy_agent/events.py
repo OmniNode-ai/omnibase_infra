@@ -20,6 +20,9 @@ TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
 # OMN-21146: a dev lane running behind a followed repository's dev head, past
 # the instance's declared bound (deploy_agent.idle_converge, dev_lane_drift).
 TOPIC_DEV_LANE_DRIFT = "onex.evt.deploy.dev-lane-drift.v1"
+# OMN-19998: a lab instance's heartbeat against the newest dev-* tag of each
+# tag-followed repository, and its alarm when it runs behind that tag too long.
+TOPIC_DEV_TAG_HEARTBEAT = "onex.evt.deploy.dev-tag-heartbeat.v1"
 # Dead-letter target for a command record the agent cannot decode or validate
 # (OMN-16442). Shape follows the org convention onex.dlq.<producer>.<category>.<version>.
 # A record that lands here is one the agent has committed past: it can never be
@@ -849,6 +852,34 @@ class ModelDevLaneDrift(BaseModel):
     lag_seconds: int = Field(ge=0)
     max_lag_seconds: int = Field(gt=0)
     overdue: bool
+
+
+class ModelDevTagHeartbeat(BaseModel):
+    """A lab instance's reading against a repository's newest ``dev-*`` tag (OMN-19998).
+
+    Published to :data:`TOPIC_DEV_TAG_HEARTBEAT` on every
+    ``DEV_TAG_HEARTBEAT_INTERVAL`` and at once when ``alarm`` changes. The lane
+    is behind from ``behind_since``: the cut time of the first tag after the
+    one it runs, or, when the running commit is no dev tag, the first read
+    that saw it off the newest tag. ``alarm`` is set once that is
+    ``alarm_after_seconds`` old. A ref this read could not take is ``None``,
+    and an unread reading never raises the alarm.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    instance: str
+    repository: str
+    runtime_container: str
+    running_ref: str | None
+    newest_tag: str | None
+    newest_tag_sha: str | None
+    newest_tag_cut_at: datetime | None
+    behind_since: datetime | None
+    observed_at: datetime
+    lag_seconds: int = Field(ge=0)
+    alarm_after_seconds: int = Field(gt=0)
+    alarm: bool
 
 
 class ModelRebuildRequested(BaseModel):

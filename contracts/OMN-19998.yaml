@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: every test that takes the installed_node fixture carries a timeout marker above the install subprocess timeout, which is above the --timeout of the full-suite pytest step in ci.yml, and the fixture sets UV_HTTP_TIMEOUT below the install timeout -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60 fails test_install_budget_outlasts_the_ci_test_timeout on the merge-base test module'
+  - id: req-omn19998-lab-follows-dev-tag
+    statement: A workspace build that stages omnimarket from its dev branch must stage the newest dev-* tag on its origin instead, the deploy agent must follow that tag as omnimarket's head, and every deploy-agent instance must publish a heartbeat against it that raises an alarm once its runtime runs behind the tag for more than two hours.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -31,6 +36,9 @@ evidence_requirements:
   - kind: tests
     description: The structural budget test reads the full-suite step's --timeout from ci.yml and the three installed-node tests' timeout markers; the whole module passes under --timeout=60.
     command: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60
+  - kind: tests
+    description: The checkout tests build tags against a local origin; the agent tests drive the heartbeat, the alarm and the followed head through the agent's seams.
+    command: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -63,3 +71,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn19998-ac4-lab-follows-dev-tag
+    description: AC4 tests build the newest dev tag through RT-1 checkout against a local origin with tagged commits, and assert the lab callers name omnimarket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
