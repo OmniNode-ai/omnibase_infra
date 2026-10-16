@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19655
+title: omnibase-core published as a compatible range, pinned exactly only in the uv override
+summary: A core patch bump moves only the uv override. The version-sensitive checks compare the manifest override, uv.lock and the installed core with each other, keep the proven compatibility floor and the frozen symbol and type surface, and no longer freeze one patch version.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19655-cascade-check-binding
+    statement: A published core patch bump is checked against the runtime manifest and lock while retaining the proven compatibility floor and frozen symbol and type surface.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the contract-validation, release-backmerge and released-core seam checks admit matching manifest, lock and installed published core versions at or above the proven floor, and refuse mismatches or typed surface drift; the pre-fix checks refuse core 0.47.45 solely because they freeze 0.47.44.'
+evidence_requirements:
+  - kind: tests
+    description: The three version-sensitive checks compare manifest, lock and installed core and keep the floor and frozen surface checks.
+    command: uv run --frozen pytest tests/ci/test_contract_validation_core_validator_omn20074.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19655-core-patch-check-binding
+    description: The three version-sensitive checks compare manifest, lock and installed core while retaining the compatibility floor and frozen symbol and type checks.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_validation_core_validator_omn20074.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
