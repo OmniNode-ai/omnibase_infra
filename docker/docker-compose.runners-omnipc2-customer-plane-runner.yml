@@ -38,19 +38,18 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-ci
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       UV_CONCURRENT_DOWNLOADS: "1"
       UV_CONCURRENT_BUILDS: "1"
       UV_CONCURRENT_INSTALLS: "1"
       UV_HTTP_TIMEOUT: "600"
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - omnipc2-customer-plane-runner-1-creds:/home/runner/.runner-creds
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3

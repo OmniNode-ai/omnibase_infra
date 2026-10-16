@@ -64,8 +64,13 @@ requirements:
   - id: req-omn19998-ci-runner-uv-cache-hardlink
     statement: The second lab host's CI runners must keep their uv cache inside the job-workspace mount, with uv's default link mode, so a warm uv sync hardlinks wheel contents instead of copying them across two bind mounts.
     acceptance:
+      - id: AC13
+        statement: 'AC13: each of the sixteen services of the second-host CI runner pool sets UV_CACHE_DIR to a path under its _work mount, binds no separate uv cache mount and sets no UV_LINK_MODE -- falsifier: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache fails on the merge-base compose'
+  - id: req-omn19998-runner-hook-dir-mount
+    statement: A runner container must see a hook file that a deploy replaced, and a runner whose job-started hook is missing, empty or not a script must stop taking jobs instead of staying unhealthy while it runs them.
+    acceptance:
       - id: AC12
-        statement: 'AC12: each of the sixteen services of the second-host CI runner pool sets UV_CACHE_DIR to a path under its _work mount, binds no separate uv cache mount and sets no UV_LINK_MODE -- falsifier: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache fails on the merge-base compose'
+        statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -94,6 +99,7 @@ evidence_requirements:
   - kind: tests
     description: The pr_merged_events 0003 deployment digest and source provenance, catalog qualification, ledger checksum and forward-only class are checked.
     command: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q -n 0
+  - kind: tests
     description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
     command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
 emergency_bypass:
@@ -228,11 +234,38 @@ dod_evidence:
     binds_ac:
       - AC11
   - id: dod-omn19998-ac12-ci-runner-uv-cache-hardlink
-    description: AC12 test asserts the uv cache directory shares the work mount on all sixteen services of the second-host CI runner pool, with no separate uv mount and no UV_LINK_MODE.
+    description: AC13 test asserts the uv cache directory shares the work mount on all sixteen services of the second-host CI runner pool, with no separate uv mount and no UV_LINK_MODE.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
+      - AC13
+  - id: dod-omn19998-ac10-runner-hook-dir-mount
+    description: AC12 tests parse every runner compose service for the directory mount and the paths inside it, and run healthcheck.sh against a missing, empty, truncated and intact hook with a stub docker that records the stop.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
       - AC12
+  - id: dod-omn19998-runner-hook-deploy-artifact-probe
+    description: Hosted-runner deployment artifact check for AC12. Parses all runner compose services to reject individual hook mounts and require the read-only hook directory, job hook path, entrypoint and healthcheck paths in that directory. This checks deployment configuration and does not claim live runner activation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 -k "population or bind_mounts or mounts_the_hook_directory or point_inside_the_hook_directory"
+        cwd: .
+    binds_ac:
+      - AC12
+  - id: dod-omn19998-uv-cache-deploy-artifact-probe
+    description: Hosted-runner deployment configuration check for AC13. Parses all sixteen second-host CI runner services and requires each uv cache to share its work mount, with no separate cache mount and no explicit link mode.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache
+        cwd: .
+    binds_ac:
+      - AC13

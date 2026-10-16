@@ -49,8 +49,26 @@
 #     and the grace always elapsed. Two fixes, see layer 3b: the markers 2.336.0
 #     really writes on a live session count as connected, and a log whose retry
 #     traffic has stopped counts as recovered.
+#   - OMN-19998 adds a HOOK FILE layer (layer 0). The job-started hook is
+#     bind-mounted from the host and replaced by rsync on every deploy. A
+#     container that mounted the file alone kept the deleted inode, and on
+#     Docker Desktop the path then read "No such file or directory":
+#     omninode-studio-runner-1 failed 9 jobs at "Set up runner" while Docker
+#     marked it unhealthy and the listener kept taking jobs, because unhealthy
+#     alone stops nothing. Layer 0 reports unhealthy AND, once the defect has
+#     lasted RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS, stops the container
+#     (docker stop, as the disk-admission self-pause does) so the listener
+#     stops polling GitHub. `docker stop` is honored by `restart:
+#     unless-stopped`; the next deploy-runners.sh run starts it again.
 #
 # Tunables (env, defaults chosen for the 64-runner .201 fleet):
+#   RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS  how long the hook file may be
+#                                           missing, empty or not a script before
+#                                           the container is stopped (60). Covers
+#                                           a deploy that is mid-sync. 0 stops on
+#                                           first sight.
+#   RUNNER_HEALTH_HOOK_STAND_DOWN           set to 0 to report only and never
+#                                           stop the container.
 #   RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS      heartbeat staleness threshold (4500)
 #   RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR   listener starts/hour before the
 #                                           crash-loop layer fails (6). A RATE,
@@ -113,6 +131,49 @@ RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS="${RUNNER_HEALTH_MAX_SESSION_BROKEN_SEC
 RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS="${RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS:-600}"
 RUNNER_HEALTH_SESSION_STATE_CHECK="${RUNNER_HEALTH_SESSION_STATE_CHECK:-1}"
 RUNNER_HEALTH_EGRESS_CHECK="${RUNNER_HEALTH_EGRESS_CHECK:-1}"
+RUNNER_HEALTH_HOOK_STAND_DOWN="${RUNNER_HEALTH_HOOK_STAND_DOWN:-1}"
+RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS="${RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS:-60}"
+RUNNER_HEALTH_HOOK_STAMP="${RUNNER_HEALTH_HOOK_STAMP:-/tmp/.runner_hook_defect_since}"
+
+# Layer 0 (OMN-19998): the job-started hook must be a readable, non-empty script.
+# A runner whose hook is unreadable fails every job it accepts at "Set up
+# runner", so it must leave the pool, not just read unhealthy.
+hook_path="${ACTIONS_RUNNER_HOOK_JOB_STARTED:-}"
+if [[ -n "${hook_path}" ]]; then
+  hook_defect=""
+  if [[ ! -e "${hook_path}" ]]; then
+    hook_defect="${hook_path} does not exist"
+  elif [[ ! -r "${hook_path}" ]]; then
+    hook_defect="${hook_path} is not readable"
+  elif [[ ! -s "${hook_path}" ]]; then
+    hook_defect="${hook_path} is empty"
+  elif [[ "$(head -c 2 "${hook_path}" 2>/dev/null)" != "#!" ]]; then
+    hook_defect="${hook_path} does not start with a shebang (truncated or replaced mid-write)"
+  fi
+  if [[ -n "${hook_defect}" ]]; then
+    now=$(date +%s)
+    if [[ ! -e "${RUNNER_HEALTH_HOOK_STAMP}" ]]; then
+      : >"${RUNNER_HEALTH_HOOK_STAMP}" 2>/dev/null || true
+    fi
+    since=$(stat -c %Y "${RUNNER_HEALTH_HOOK_STAMP}" 2>/dev/null || echo "${now}")
+    age=$((now - since))
+    if [[ "${RUNNER_HEALTH_HOOK_STAND_DOWN}" == "0" ]]; then
+      echo "unhealthy: ${hook_defect} for ${age}s — every job would fail at Set up runner (OMN-19998 hook layer; stand-down disabled)"
+    elif ! [[ "${RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS}" =~ ^[0-9]+$ ]]; then
+      echo "unhealthy: ${hook_defect}; RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS='${RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS}' is not a non-negative integer — refusing to guess a grace, not standing down (fail closed)"
+    elif [[ "${age}" -lt "${RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS}" ]]; then
+      echo "unhealthy: ${hook_defect} for ${age}s (stand-down after ${RUNNER_HEALTH_HOOK_STAND_DOWN_GRACE_SECONDS}s — OMN-19998 hook layer)"
+    elif [[ -z "${RUNNER_NAME:-}" ]] || ! command -v docker >/dev/null 2>&1; then
+      echo "unhealthy: ${hook_defect} for ${age}s — cannot stand down: RUNNER_NAME unset or docker CLI unavailable, so the listener keeps taking jobs (OMN-19998 hook layer)"
+    else
+      echo "unhealthy: ${hook_defect} for ${age}s — standing down: stopping ${RUNNER_NAME} so its listener stops taking jobs (OMN-19998 hook layer)"
+      nohup sh -c "sleep 2; docker stop '${RUNNER_NAME}' >/dev/null 2>&1" >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi
+    exit 1
+  fi
+  rm -f "${RUNNER_HEALTH_HOOK_STAMP}" 2>/dev/null || true
+fi
 
 # 1. Listener process must be alive. Match THIS runner home's listener BINARY
 #    path (${RUNNER_HOME}/bin/Runner.Listener), not a loose substring: wrapper
