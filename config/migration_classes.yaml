@@ -263,6 +263,8 @@ migrations:
   forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP POLICY
   forward/nodes/node_projection_delegation/0058_delegation_events_requested_model_and_timing.sql: expand-only
   forward/nodes/node_projection_delegation/0059_delegation_events_modelled_run_savings.sql: expand-only
+  forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT; UPDATE (backfill) under a transaction-scoped helper policy, dropped in the block
+  forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only # DROP VIEW; CREATE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -392,6 +394,7 @@ migrations:
   forward/nodes/node_projection_savings/094_savings_overview_local_token_pct.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/094_savings_overview_measured_provenance.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
+  forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only

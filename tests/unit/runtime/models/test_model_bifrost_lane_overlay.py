@@ -15,7 +15,6 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 )
 
 _QWEN_ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
-_DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 
 # Per-backend shape, mirroring the committed dev lane overlay. OMN-17099: these
 # are fixture values, no longer an authorization table the model checks against
@@ -39,17 +38,6 @@ _SHAPES: dict[str, dict[str, object]] = {
         "max_tokens": 65_536,
         "timeout_ms": 300_000,
         "serving": True,
-    },
-    "local-ds-v4-flash": {
-        "endpoint_url": _DS_V4_ENDPOINT,
-        "served_model_id": "deepseek-v4-flash",
-        "parameter_count": "284B",
-        "context_window": 131_072,
-        "max_tokens": 65_536,
-        "timeout_ms": 300_000,
-        # OMN-16999: declared but not serving — .200:8101 answered http=000 on
-        # the 2026-09-05 probe.
-        "serving": False,
     },
 }
 
@@ -78,11 +66,9 @@ def test_valid_lab_overlay_round_trips_its_bindings() -> None:
     assert [binding.backend_key for binding in overlay.backends] == [
         "local-coder",
         "local-heavy-reasoning",
-        "local-ds-v4-flash",
     ]
     assert {binding.advertised_model for binding in overlay.backends} == {
         "Qwen3.8-27B",
-        "deepseek-v4-flash",
     }
     dumped = overlay.model_dump(by_alias=True)["backends"][0]
     assert {key: dumped[key] for key in _binding()} == _binding()
@@ -228,12 +214,6 @@ def test_the_endpoint_host_is_the_lane_overlays_declaration() -> None:
         ("local-coder", "endpoint_url_env", "BIFROST_LOCAL_CODER_ENDPOINT_URL"),
         # A credential is a declared ``credential``, never a bare secret_ref.
         ("local-coder", "secret_ref", "infisical://local-coder"),
-        ("local-ds-v4-flash", "max_tokens", 131_073),
-        (
-            "local-ds-v4-flash",
-            "endpoint_url_env",
-            "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL",
-        ),
     ],
 )
 def test_model_metadata_and_env_transport_are_rejected(

@@ -36,19 +36,6 @@
       "revalidation_note": "OMN-18626. THE THIRD FLIP, and the second one to leave the local tier dark. The operator swapped the served model on 2026-09-17 at about 15:24Z, roughly four hours after OMN-18570 recorded the readback this entry replaces. /v1/models now returns exactly one id, Qwen3.8-27B, rooted at the NVFP4 weight set that OMN-18570 found staged on disk and loaded by nothing. The flip was found by a real delegation, not by this file: run 95df150b-21cc-4b0e-afc6-9e25fbeb3735 at 19:52Z had its local rung refused with HTTP 404 'The model `Qwen3.6-35B-A3B` does not exist.' and climbed to a metered cheap_cloud rung. That is the cost of this record going stale — a recorded readback cannot notice that the thing it recorded has moved, so the binding table it pins stays confidently wrong until something calls the endpoint for real."
     },
     {
-      "endpoint": "http://192.168.86.200:8101/v1/models",
-      "probed_at": "2026-09-05T23:12:00Z",
-      "command": "curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.200:8101/v1/models",
-      "http_status": 0,
-      "reachable": false,
-      "served_model_ids": [],
-      "curl_exit": 7,
-      "curl_error": "Failed to connect to 192.168.86.200 port 8101 after 11 ms: Couldn't connect to server",
-      "control": "http=000 is indistinguishable from a probe that never ran, so it carries its own controls (CLAUDE.md rule 16): ping 192.168.86.200 = 2/2 packets received, 0.0% loss, 0.189ms avg; TCP 22 OPEN while TCP 8101 and 8000 are CLOSED; `ssh jonah@192.168.86.200 hostname` returns Stickybeatz-Studio.local, i.e. .200 is the workstation itself, and `ps aux | grep -i 'ds4|llama|vllm|sglang'` returns no rows there. The host is healthy; the model server is not running. Nothing was restarted (read-only scope).",
-      "declared_served_model_id": "deepseek-v4-flash",
-      "declared_note": "Recorded from the OMN-16833 2026-08-28 readback. Retained so the rung is restored by flipping `serving`, not by reconstructing the binding. It is NOT treated as a live readback by the paired test."
-    },
-    {
       "endpoint": "http://192.168.86.202:8000/v1/models",
       "probed_at": "2026-10-01T04:20:12Z",
       "command": "docker exec omninode-runtime-effects python -c \"urllib.request.urlopen('http://192.168.86.202:8000/v1/models', timeout=5)\" (run on 192.168.86.201, dev lane compose project omnibase-infra, so the reachability recorded is the runtime's own)",

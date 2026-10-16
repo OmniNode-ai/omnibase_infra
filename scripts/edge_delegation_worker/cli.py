@@ -52,8 +52,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model-base",
         required=True,
         help=(
-            "Base URL of the local OpenAI-compatible model server "
-            "(e.g. http://127.0.0.1:8099). Required -- never defaulted."
+            "Base URL of the local OpenAI-compatible model server. "
+            "Required -- never defaulted."
         ),
     )
     parser.add_argument(

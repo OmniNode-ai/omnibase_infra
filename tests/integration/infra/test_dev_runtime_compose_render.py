@@ -132,7 +132,6 @@ BASE_REQUIRED_ENV: dict[str, str] = {
     "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL": (
         "http://llm-embed.test:8100/v1/chat/completions"
     ),
-    "BIFROST_LOCAL_DS_V4_FLASH_ENDPOINT_URL": "http://llm-r1.test:8101/v1/chat/completions",
     "LLM_GLM_URL": "http://llm-glm.test:8102",
     "LLM_GLM_MODEL_NAME": "glm-4.5",
     "LLM_GLM_API_KEY": "render-only-glm-api-key",
