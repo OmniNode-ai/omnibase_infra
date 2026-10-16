@@ -15,7 +15,7 @@ services:
       RUNNER_GROUP: "${MODEL_REVIEW_RUNNER_GROUP:-omnibase-ci}"
       # The operator supplies the capability label only during the authorized
       # canary. The default preserves the generic runner labels.
-      RUNNER_LABELS: "${MODEL_REVIEW_RUNNER_LABELS:-self-hosted,omnibase-ci,linux,x64}"
+      RUNNER_LABELS: "${MODEL_REVIEW_RUNNER_LABELS:-self-hosted,omnibase-ci,omnibase-ci-multiarch,linux,x64}"
     volumes:
       - ./runners/model-review-healthcheck.sh:/usr/local/bin/model-review-healthcheck.sh:ro
       - ${MODEL_REVIEW_OBSERVATION_HOST_PATH:-./runners/model-review-observation.json}:/etc/omnibase/model-review-observation.json:ro
