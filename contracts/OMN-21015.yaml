@@ -25,12 +25,58 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn21015-ac3-infra-transactional-derived-write
-    description: Infra half only. Generic real-Postgres two-writer, visibility, rollback and access/column controls; no monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+  - id: dod-omn21015-ac3-infra-two-writers-sparse
+    description: >-
+      Infra half only. Real Postgres: two writers of one row, a sparse input; the figure is derived from the merged row the upsert returns, not from the incoming dict. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest 'tests/integration/runtime/test_projection_derived_write_omn21015.py::test_two_connections_derive_from_the_actual_merged_row[sparse]' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-two-writers-terminal
+    description: >-
+      Infra half only. Real Postgres: two writers of one row, a terminal input; the figure is derived from the merged row the upsert returns. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest 'tests/integration/runtime/test_projection_derived_write_omn21015.py::test_two_connections_derive_from_the_actual_merged_row[terminal]' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-no-intermediate-commit
+    description: >-
+      Infra half only. Real Postgres: no intermediate upsert is visible to a second connection while the derivation runs. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_no_intermediate_upsert_is_committed_while_derivation_is_running -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-derivation-error-rollback
+    description: >-
+      Infra half only. Real Postgres: a derivation error rolls back the input write with it. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_a_derivation_error_rolls_back_the_input_write -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-unscoped-write
+    description: >-
+      Infra half only. Real Postgres: an unscoped derived write commits without the read-only seam. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_unscoped_derived_write_commits_without_a_read_only_seam -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-guards
+    description: >-
+      Infra half only. Access and column controls: a read-only declaration cannot derive a write, and the derived columns are checked. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
   - id: dod-omn21015-ac3-infra-vendor-0059
