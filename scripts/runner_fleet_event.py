@@ -63,6 +63,9 @@ EVENT_TYPE = "runner-fleet-observation"
 # chosen as the class: they are on every runner and classify nothing.
 KNOWN_LABEL_CLASSES: tuple[str, ...] = (
     "omnibase-ci",
+    # OMN-19998: after `omnibase-ci`, so an amd64 runner carrying both reads as
+    # the action fleet and only the Mac Studio's arm64 pool reads as this class.
+    "omnibase-ci-multiarch",
     "omnibase-verify",
     "omnibase-deploy",
     "omnibase-prod-deploy",

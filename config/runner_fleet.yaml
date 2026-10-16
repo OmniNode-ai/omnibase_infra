@@ -87,12 +87,25 @@ burst_count: 10
 # job rather than a re-architecture. Until then `.101` declares `verify` only,
 # which shares no label with the action fleet and therefore cannot be handed an
 # action job.
+#
+# OMN-19998 -- THE OPT-IN ROUTE FOR ARM64. Rather than retrofit `arch-amd64`
+# onto every `omnibase-ci` job in every repository before an arm64 runner may
+# join, the fleet carries a second, opt-in label, `omnibase-ci-multiarch`,
+# declared as the class `action-multiarch`. The amd64 action pools carry it
+# beside `omnibase-ci`; the Mac Studio's `omninode-studio-ci-runner` pool carries it
+# WITHOUT `omnibase-ci`. A job moves to `[self-hosted, omnibase-ci-multiarch]`
+# only when it is arch-neutral (pure-Python pytest, lint, mypy, node scripts)
+# and needs no docker daemon and no lab credential; it then runs on either
+# architecture. Every job left on `[self-hosted, omnibase-ci]` can still never
+# land on arm64, so `action` stays amd64-only and the canary's action total
+# (classes carrying exactly `action`) does not move.
 hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
     expected_count: 10
-    classes: [action]
+    # OMN-19998: `omnibase-ci-multiarch` is in this pool's RUNNER_LABELS too.
+    classes: [action, action-multiarch]
     # OMN-19895 -- the primary host's other runner families, declared so the
     # fleet probe (runner-pool-spread.yml) counts them toward this host instead
     # of reporting them undeclared. Their services live in the primary compose
@@ -140,7 +153,8 @@ hosts:
     pools:
       - runner_name_prefix: omnipc2-ci-runner
         expected_count: 16
-        classes: [action]
+        # OMN-19998: `omnibase-ci-multiarch` is in this pool's RUNNER_LABELS too.
+        classes: [action, action-multiarch]
       - runner_name_prefix: omnipc2-customer-plane-runner
         expected_count: 1
         classes: [customer-plane]
@@ -159,6 +173,18 @@ hosts:
     runner_name_prefix: omninode-studio-runner
     expected_count: 1
     classes: [verify]
+    # OMN-19998 -- this host's share of arch-neutral private-repo CI. Measured
+    # 2026-10-16T11:46Z before sizing: load 15.9 on 24 cores, the Docker
+    # Desktop VM at 24 CPUs / 31 GiB with about 6 GiB in use (this host's
+    # compose lane and the verify runner). Four runners at 1.5 CPU and 3 GiB
+    # each, no swap, take at most 6 cores and 12 GiB, leaving the planner and
+    # the compose lane their headroom. Labelled `omnibase-ci-multiarch` and never
+    # `omnibase-ci`, so only a job that opted in can land here; no docker
+    # socket and no credential mount (see the pool's compose file).
+    pools:
+      - runner_name_prefix: omninode-studio-ci-runner
+        expected_count: 4
+        classes: [action-multiarch]
 # Docker subnet-pool alerting (OMN-12566). The runner host's default address
 # pool can subnet a bounded number of networks before `docker network create`
 # fails with "all predefined address pools have been fully subnetted". Alert at
