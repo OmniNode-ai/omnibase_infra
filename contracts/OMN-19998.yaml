@@ -219,6 +219,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_entrypoint_preflight_no_omnimarket_omn19998.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: 'gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=eeba91e21e702d29c420e5fe8ceaf4a43e334572 --jq .content | base64 -d | python3 -c "import sys; s = sys.stdin.read(); sys.exit(len(s) < 100 or ''omnimarket'' in s)"'
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC7
 >>>>>>> 440aaaee8 (feat(OMN-19998): add no-omnimarket-dependency guard for omnibase_infra)
