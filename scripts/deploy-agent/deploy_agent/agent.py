@@ -59,6 +59,7 @@ from deploy_agent.executor import (
     DevLaneMigrationPreflightError,
     EnumInstancePhase,
     VerificationFailedError,
+    active_deploy_lane,
     active_dev_instance,
     assert_prod_request_has_stability_digest,
     capture_rollback_point,
@@ -86,13 +87,17 @@ from deploy_agent.idle_converge import (
     EnumIdleConvergeVerdict,
     EnumIdleRestoreVerdict,
     EnumRuntimePresence,
+    EnumStabilityFollowVerdict,
     ModelDevTag,
     ModelIdleConvergeDecision,
     ModelIdleConvergeInputs,
     ModelIdleRestoreInputs,
+    ModelStabilityFollowDecision,
+    ModelStabilityFollowInputs,
     contains_commit,
     converge_command,
     decide_restore,
+    decide_stability_follow,
     dev_lane_drift,
     dev_tag_behind_since,
     dev_tag_heartbeat,
@@ -105,6 +110,7 @@ from deploy_agent.idle_converge import (
     read_running_ref,
     read_runtime_presence,
     restore_command,
+    stability_follow_command,
 )
 from deploy_agent.idle_converge import (
     FOLLOWED_REPOSITORIES as IDLE_CONVERGE_REPOSITORIES,
@@ -126,7 +132,11 @@ from deploy_agent.lane_lock_client import (
     LaneLockContendedError,
     lane_lock,
 )
-from deploy_agent.lane_policy import load_allowed_lanes_from_env
+from deploy_agent.lane_policy import (
+    follows_stability,
+    is_lab_dev_fence,
+    load_allowed_lanes_from_env,
+)
 from deploy_agent.lineage_fence import DockerProvenanceReader, GitRefResolver
 from deploy_agent.load_gate import (
     EnumLoadGateVerdict,
@@ -480,6 +490,15 @@ class DeployAgent:
             read_running_ref(_runtime_container_for_lane(EnumRuntimeLane.DEV), repo)
         )
         self._idle_read_head_ref: Callable[[str], str | None] = _read_dev_head
+        # OMN-19998: the stability lane follows the omnimarket tag dev runs, on
+        # a lab dev agent whose fence admits it; its seams and its last verdict.
+        self._stability_follow_attempted: set[str] = set()
+        self._stability_follow_last_verdict: EnumStabilityFollowVerdict | None = None
+        self._stability_read_running_ref: Callable[[str], str | None] = lambda repo: (
+            read_running_ref(
+                _runtime_container_for_lane(EnumRuntimeLane.STABILITY_TEST), repo
+            )
+        )
         # OMN-20864: the restore of a lane with no running runtime, and its seams.
         self._idle_restore_last_attempt: datetime | None = None
         self._idle_restore_last_verdict: EnumIdleRestoreVerdict | None = None
@@ -964,11 +983,12 @@ class DeployAgent:
         refused to start because its lane was broken is an agent that cannot
         report that its lane is broken.
         """
-        if self._allowed_lanes != {EnumRuntimeLane.DEV}:
+        if not is_lab_dev_fence(self._allowed_lanes):
             logger.info(
                 "Skipping the startup deps convergence: this agent's declared "
                 "lanes are %s, and convergence runs only for an agent fenced to "
-                "the dev lane alone -- an un-commanded container start on a "
+                "the dev lane (alone or with the stability lane) -- an "
+                "un-commanded container start on a "
                 "governed lane is an unattributed lane mutation",
                 ",".join(sorted(lane.value for lane in self._allowed_lanes)),
             )
@@ -1171,6 +1191,9 @@ class DeployAgent:
         assert decision is not None  # FOLLOWED_REPOSITORIES is never empty
         self._idle_converge_last_verdict = decision.verdict
         if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
+            # OMN-19998: the dev lane needs nothing, so the stability lane may
+            # take the tag dev runs.
+            self._maybe_stability_follow(now)
             return
         assert decision.head_ref is not None  # CONVERGE always names the head
         # OMN-19507: a converge is a deploy like any other, so it waits for the
@@ -1188,6 +1211,83 @@ class DeployAgent:
         )
         self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
         self._execute_command(cmd)
+
+    def _maybe_stability_follow(
+        self, now: datetime
+    ) -> ModelStabilityFollowDecision | None:
+        """Rebuild the stability lane onto the tag dev runs (OMN-19998).
+
+        Only on a lab dev agent whose fence admits the stability lane
+        (``lane_policy.follows_stability``); see
+        ``idle_converge.decide_stability_follow`` for the rule. The rebuild is
+        an ordinary job through ``_execute_command``, under the same
+        single-flight, lane lock and load gate, with its own job record and
+        terminal event named ``agent/stability-follow-tag``: the stability
+        lane's own receipt.
+        """
+        if not follows_stability(self._allowed_lanes):
+            return None
+        decisions: list[ModelStabilityFollowDecision] = []
+        for repository in DEV_TAG_FOLLOWED_REPOSITORIES:
+            tags = self._idle_read_dev_tags(repository)
+            newest = tags[-1] if tags else None
+            dev_ref = self._idle_read_running_ref(repository)
+            stability_ref = self._stability_read_running_ref(repository)
+            decision = decide_stability_follow(
+                ModelStabilityFollowInputs(
+                    tags=tuple(tags) if tags is not None else None,
+                    dev_running_ref=dev_ref,
+                    dev_contains_newest=self._contains_newest(
+                        repository, newest, dev_ref
+                    ),
+                    stability_running_ref=stability_ref,
+                    stability_contains_newest=self._contains_newest(
+                        repository, newest, stability_ref
+                    ),
+                    job_active=self.job_store.has_active_job(),
+                    frozen_reason=getattr(
+                        self, "_lane_flags", ModelLaneFlags()
+                    ).frozen_reason(now),
+                    attempted=frozenset(self._stability_follow_attempted),
+                )
+            )
+            decisions.append(decision)
+            if decision.verdict is EnumStabilityFollowVerdict.FOLLOW:
+                break
+        decision = decisions[-1]
+        if decision.verdict is not self._stability_follow_last_verdict:
+            if decision.verdict is not EnumStabilityFollowVerdict.FOLLOW:
+                logger.info(
+                    "stability follow: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._stability_follow_last_verdict = decision.verdict
+        if decision.verdict is not EnumStabilityFollowVerdict.FOLLOW:
+            return decision
+        if not self._idle_converge_gate_open():
+            return decision
+        assert decision.newest_tag_sha is not None  # FOLLOW names the tag
+        self._stability_follow_attempted.add(decision.newest_tag_sha)
+        cmd = stability_follow_command()
+        logger.info(
+            "stability follow: running %s as %s: %s",
+            cmd.correlation_id,
+            cmd.requested_by,
+            decision.detail,
+        )
+        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._execute_command(cmd)
+        return decision
+
+    def _contains_newest(
+        self, repository: str, newest: ModelDevTag | None, running_ref: str | None
+    ) -> bool:
+        """Whether ``running_ref`` is a commit past ``newest`` that contains it."""
+        return (
+            newest is not None
+            and running_ref is not None
+            and running_ref != newest.sha
+            and self._idle_running_contains(repository, newest.sha, running_ref)
+        )
 
     def _maybe_idle_restore(self, now: datetime) -> bool:
         """Restore the lane when its main runtime is not running (OMN-20864).
@@ -1455,7 +1555,7 @@ class DeployAgent:
 
     def _maybe_converge_forward_migration(self) -> None:
         """Apply changed checkout migrations once per fingerprint on an idle dev lane."""
-        if self._allowed_lanes != {EnumRuntimeLane.DEV}:
+        if not is_lab_dev_fence(self._allowed_lanes):
             return
         tick = time.monotonic()
         if (
@@ -1628,6 +1728,9 @@ class DeployAgent:
                     ref=cmd.git_ref,
                     timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
                 ),
+                # OMN-19998: a lab dev agent may also deploy the stability
+                # lane; the dev lane's env fragment applies to a dev job only.
+                active_deploy_lane(cmd.runtime_lane),
             ):
                 # OMN-15181: boundary-level guard — a prod request may only
                 # deploy a digest already proven in stability-test. Must run
