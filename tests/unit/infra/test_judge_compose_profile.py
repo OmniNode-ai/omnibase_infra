@@ -12,6 +12,9 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+RUNTIME_DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 JUDGE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.judge.yml"
 JUDGE_ENV_EXAMPLE = REPO_ROOT / "docker" / "judge.env.example"
 RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
@@ -35,6 +38,19 @@ RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects")
 DISABLED_STUB_SERVICES = {
     "keycloak",
     "infisical",
+}
+# OMN-19925: the infra services the judge overlay re-profiles. onex-runtime-deploy
+# renders the lane with ONE profile (its COMPOSE_PROFILE default), so each of
+# these must be active under that profile or the app services that depend_on
+# them are rendered against an undefined service.
+JUDGE_INFRA_SERVICES = {
+    "postgres",
+    "redpanda",
+    "redpanda-partition-cap",
+    "valkey",
+    "forward-migration",
+    "migration-gate",
+    "intelligence-migration",
 }
 OUT_OF_SCOPE_SERVICES = {
     "keycloak",
@@ -114,7 +130,40 @@ def test_judge_compose_is_standalone_minimal_stack() -> None:
         if name in DISABLED_STUB_SERVICES:
             assert service["profiles"] == ["judge-disabled"], name
         else:
-            assert service["profiles"] == ["judge"], name
+            assert "judge" in service["profiles"], name
+
+
+def _deploy_script_default_profile() -> str:
+    match = re.search(
+        r'^COMPOSE_PROFILE="(?P<profile>[A-Za-z0-9_-]+)"$',
+        RUNTIME_DEPLOY_SCRIPT.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    assert match is not None, "handler_runtime_deploy.sh no longer pins COMPOSE_PROFILE"
+    return match.group("profile")
+
+
+@pytest.mark.unit
+def test_judge_compose_profile_infra_services_active_under_deploy_default() -> None:
+    """OMN-19925: judge infra services must be rendered by the deploy script's profile.
+
+    handler_runtime_deploy.sh passes only ``--profile ${COMPOSE_PROFILE}``
+    (default ``runtime``). An infra service whose profile set excludes it drops
+    out of the filtered project while projection-api et al. still depend_on it:
+    ``service "projection-api" depends on undefined service "redpanda"``.
+    """
+    default_profile = _deploy_script_default_profile()
+    services = _load_compose()["services"]
+
+    assert set(services) >= JUDGE_INFRA_SERVICES
+    inactive = {
+        name: services[name]["profiles"]
+        for name in sorted(JUDGE_INFRA_SERVICES)
+        if default_profile not in services[name]["profiles"]
+    }
+    assert not inactive, (
+        f"judge infra services not active under --profile {default_profile}: {inactive}"
+    )
 
 
 @pytest.mark.unit

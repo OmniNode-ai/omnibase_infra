@@ -22,10 +22,8 @@ import httpx
 import yaml
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import (
-    ClusterAuthorizationFailedError,
     KafkaError,
     TopicAlreadyExistsError,
-    TopicAuthorizationFailedError,
 )
 
 from omnibase_core.container import ModelONEXContainer
@@ -37,12 +35,16 @@ from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
+from omnibase_infra.enums.enum_kafka_permanent_failure import (
+    EnumKafkaPermanentFailure,
+)
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+from omnibase_infra.handlers.kafka_permanent_failure import kafka_failure_types
 from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -1788,9 +1790,15 @@ async def _publish_gateway_status(
 # and are frequently transient -- a credential refresh or an IAM Roles
 # Anywhere session rotation clears them -- so they must keep retrying rather
 # than quarantining every record that arrives during the gap.
-_EGRESS_AUTHORIZATION_DENIED_ERRORS: tuple[type[KafkaError], ...] = (
-    TopicAuthorizationFailedError,
-    ClusterAuthorizationFailedError,
+#
+# The two authorization kinds come from the one shared declaration of what is
+# permanent (OMN-19092); the authentication kind is the one this gateway
+# deliberately does not act on.
+_EGRESS_AUTHORIZATION_DENIED_ERRORS: tuple[type[BaseException], ...] = (
+    kafka_failure_types(
+        EnumKafkaPermanentFailure.TOPIC_AUTHORIZATION_REFUSED,
+        EnumKafkaPermanentFailure.CLUSTER_AUTHORIZATION_REFUSED,
+    )
 )
 
 

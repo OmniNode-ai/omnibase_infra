@@ -1,0 +1,70 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17105
+title: The generic LLM inference response has its own topic, so the delegation inference-response topic carries one schema from one owner
+summary: >-
+  node_llm_inference_effect published ModelLlmInferenceResponse on onex.evt.omnibase-infra.inference-response.v1, the topic omnimarket's node_llm_delegation_call_effect publishes ModelInferenceResponseData on and the delegation orchestrator subscribes to. The infra contract now publishes the generic response on onex.evt.omnibase-infra.llm-inference-response.v1, no omnibase_infra contract publishes the delegation topic, and a cross-contract audit reports a topic published by two contracts under different event types.
+is_seam_ticket: true
+interface_change: true
+interfaces_touched:
+  - events
+  - topics
+requirements:
+  - id: req-omn17105
+    statement: The delegation inference-response topic carries exactly one schema, owned by exactly one producer, and the generic inference effect publishes its response on a distinct topic.
+    acceptance:
+      - id: AC1
+        statement: "AC1: node_llm_inference_effect publishes LlmInferenceResponse on onex.evt.omnibase-infra.llm-inference-response.v1 and does not publish onex.evt.omnibase-infra.inference-response.v1 in publish_topics, published_events or golden_path -- falsifier: uv run pytest tests/unit/nodes/node_llm_inference_effect/test_contract_response_topic_omn17105.py -q fails on the pre-change contract"
+      - id: AC2
+        statement: "AC2: no omnibase_infra contract publishes onex.evt.omnibase-infra.inference-response.v1 and no topic is published by two contracts under different event types, and the audit reports the pre-change collision when fed it -- falsifier: the audit test passes on the pre-change contract, or its positive control passes without reporting the collision"
+      - id: AC3
+        statement: "AC3: the subscribe wiring health gate, the topic parity gate and the topic config parity test pass with the delegation topic cross-repo owned -- falsifier: uv run python scripts/check_subscribe_wiring_health.py reports a DEAD_LETTER for the delegation topic, or uv run pytest tests/ci/test_topic_config_contract_parity.py -q fails"
+evidence_requirements:
+  - kind: tests
+    description: The generic response topic, the single-owner audit with its positive control, and the topic parity checks.
+    command: "uv run pytest tests/unit/nodes/node_llm_inference_effect tests/ci/test_topic_config_contract_parity.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn17105-ac1-generic-response-topic
+    description: The infra contract publishes the generic response on its own topic and names the delegation topic nowhere it publishes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_llm_inference_effect/test_contract_response_topic_omn17105.py -k "TestGenericResponseTopic" -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn17105-ac2-single-owner-audit
+    description: No omnibase_infra contract publishes the delegation topic, no topic has two publishing contracts with different event types, and the audit reports the pre-change collision when fed it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_llm_inference_effect/test_contract_response_topic_omn17105.py -k "TestOneSchemaPerPublishedTopic" -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn17105-ac3-topic-gates
+    description: The subscribe wiring health allowlist names omnimarket node_llm_delegation_call_effect as the delegation topic's owner and the gate reports no DEAD_LETTER for it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_llm_inference_effect/test_contract_response_topic_omn17105.py -k "TestDelegationTopicIsCrossRepoOwned" -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn17105-deploy-contract-at-merged-head
+    description: The infra contract at the merged head publishes the generic response on the new topic and names the delegation topic nowhere; the deployed surface is the source at the merged head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'onex.evt.omnibase-infra.llm-inference-response.v1'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        # grep -c exits 1 on a zero count, which pipefail reports as a failure;
+        # awk reads the whole file and fails on an empty read or any match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_inference_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk -v t='"onex.evt.omnibase-infra.inference-response.v1"' 'index($0, t) {n++} END {exit (NR == 0 || n > 0)}'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

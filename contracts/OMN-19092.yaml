@@ -1,0 +1,101 @@
+schema_version: 1.0.0
+ticket_id: OMN-19092
+title: One shared answer to "is this Kafka failure permanent"
+summary: omnibase_infra gains kafka_permanent_failure, one declaration of the Kafka failures retrying cannot fix, keyed on exception type and cause chain. The connect retry, the EventBusKafka publish path and the gateway forwarder read it instead of keeping their own lists; each keeps its own handling of a verdict.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: req-one-permanent-verdict
+    statement: One declaration answers whether a Kafka failure is permanent, for both connect-time and publish-time questions, and the callers consume it.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: One declaration answers "is this Kafka failure permanent", and it can express BOTH a connect-time authentication rejection and a publish-time topic authorization refusal without either caller having to widen it locally. Falsifier: a caller still keeps a private list beside the shared one.'
+      - id: AC2
+        statement: 'AC2: The shared answer keys on exception type and walks the cause chain, never on message text. Falsifier: any string match on an exception message; the transport sanitizes its messages before they escape, so a text match is a second definition that diverges the first time a broker rewords a response.'
+      - id: AC3
+        statement: 'AC3: Each caller keeps its own decision about WHAT TO DO with a permanent verdict. Connect raises at once; publish fails that attempt and reports a typed error. Falsifier: the consolidation also unifies the handling and changes one caller''s behaviour as a side effect.'
+      - id: AC4
+        statement: 'AC4: A positive control proves the transient cases still retry after the consolidation. Falsifier: only the permanent cases are covered, which is how a shared predicate quietly grows until it swallows the retry feature entirely.'
+      - id: AC5
+        statement: 'AC5: The layering is resolved explicitly rather than by where the code happened to be written. The predicate today lives in omnimarket while two of its three consumers are in omnibase_infra, which is backwards under the repo layering rule. Falsifier: the shared definition lands in a layer above one of its consumers.'
+evidence_requirements:
+  - kind: tests
+    description: Shared declaration, consumer wiring and the existing caller behaviour tests.
+    command: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/event_bus/test_event_bus_kafka_error_paths.py tests/unit/runtime/test_gateway_forwarder_runtime.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-ac1-one-declaration
+    description: The shared module declares connect-time authentication rejection and publish-time topic and cluster authorization refusal in one table, and the connect retry, EventBusKafka publish path and gateway forwarder name no permanent class themselves. The omnimarket predicate consumes it in a follow-up PR once an omnibase_infra release carries the module; until then that predicate is the one remaining second definition.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py -k 'OneDeclaration or ConsumersRead' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-ac2-type-and-chain
+    description: Classification keys on exception type, walks __cause__ and __context__ with a visited set, terminates on a cycle, and the module reads no exception message.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py -k 'KeyedOnTypeAndChain' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-ac3-callers-keep-handling
+    description: Connect still raises at once on an authentication rejection, publish still fails the attempt and raises EventTopicAuthorizationError without retry, the gateway still maps authorization refusals to GatewayEgressDeniedError; none of the three changed what it does with a verdict.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/event_bus/test_event_bus_kafka_error_paths.py tests/unit/runtime/test_gateway_forwarder_runtime.py -k 'Caller or Permanent or authorization or Authorization or egress or Egress' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-ac4-transient-still-retries
+    description: Connection refused, timeout, node-not-ready, reset and unknown failures classify as not permanent, and a refused connect still spends all of its attempts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py tests/unit/event_bus/test_kafka_connect_retry_omn18925.py -k 'Transient or transient or Retried' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-ac5-layering
+    description: The shared declaration lives in omnibase_infra, which omnimarket depends on, and imports nothing from an upper layer; its consumers in omnibase_infra read it in place.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_permanent_failure_omn19092.py -k 'ConsumersRead' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-integration-caller-boundaries
+    description: Public EventBusKafka startup preserves wrapped authentication refusals through cleanup and typed translation while transient failures spend every configured attempt. Publish and the gateway preserve their own refusal types, accept a subsequent publish, and retain gateway delivery coordinates. Only the aiokafka clients are replaced.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/gateway/test_shared_kafka_permanent_verdict_omn19092.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3
+      - AC4
+  - id: dod-deploy-shared-declaration
+    description: Deploy probe. The shared module at the checked-out commit defines the classifier this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the runtime importing omnibase_infra.handlers.kafka_permanent_failure.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/kafka_permanent_failure.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def classify_permanent_kafka_failure'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-deploy-forwarder-reads-declaration
+    description: Deploy probe. The gateway forwarder at the checked-out commit reads its authorization kinds from the shared module; the probe reads it from GitHub at that commit and exits nonzero on a tree whose forwarder still keeps its own tuple of aiokafka classes, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/gateway_forwarder.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'EnumKafkaPermanentFailure.CLUSTER_AUTHORIZATION_REFUSED'
+        cwd: ${OMNI_HOME}/omnibase_infra

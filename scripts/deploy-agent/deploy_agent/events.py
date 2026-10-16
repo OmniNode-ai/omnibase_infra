@@ -17,6 +17,9 @@ from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 TOPIC_REBUILD_REQUESTED = "onex.cmd.deploy.rebuild-requested.v1"
 TOPIC_REBUILD_COMPLETED = "onex.evt.deploy.rebuild-completed.v1"
 TOPIC_REBUILD_REJECTED = "onex.evt.deploy.rebuild-rejected.v1"
+# OMN-21146: a dev lane running behind a followed repository's dev head, past
+# the instance's declared bound (deploy_agent.idle_converge, dev_lane_drift).
+TOPIC_DEV_LANE_DRIFT = "onex.evt.deploy.dev-lane-drift.v1"
 # Dead-letter target for a command record the agent cannot decode or validate
 # (OMN-16442). Shape follows the org convention onex.dlq.<producer>.<category>.<version>.
 # A record that lands here is one the agent has committed past: it can never be
@@ -819,6 +822,33 @@ class ModelRollbackDeclaration(BaseModel):
                 msg = f"rollback {name} is blank; a rollback must name its {name}"
                 raise ValueError(msg)
         return self
+
+
+class ModelDevLaneDrift(BaseModel):
+    """A dev lane behind a followed repository's dev head (OMN-21146).
+
+    Published to :data:`TOPIC_DEV_LANE_DRIFT` when the lane has lagged the head
+    for the instance's declared ``max_dev_lag_minutes`` (``overdue``), again
+    while it stays overdue, and once with ``overdue`` false and ``lag_seconds``
+    0 when the lane runs the head again. ``behind_since`` is when this agent
+    first saw the lane behind; an agent restart starts it again, so the lag is
+    never overstated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    instance: str
+    repository: str
+    runtime_container: str
+    #: The running container's image, ``<name>@<image id>``, or ``""`` unread.
+    running_image: str
+    running_ref: str
+    head_ref: str
+    behind_since: datetime | None
+    observed_at: datetime
+    lag_seconds: int = Field(ge=0)
+    max_lag_seconds: int = Field(gt=0)
+    overdue: bool
 
 
 class ModelRebuildRequested(BaseModel):

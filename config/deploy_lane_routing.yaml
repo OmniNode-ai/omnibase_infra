@@ -85,6 +85,17 @@
 # (it expires by itself); a command with requested_by `promotion/<who>` is the
 # one way through (python -m deploy_agent.trigger --requested-by promotion/...).
 #
+# LAG BOUND (OMN-21146). `flags.max_dev_lag_minutes` is how long an instance's
+# lane may run behind the dev head of a repository it follows (one whose
+# rebuilds route to another instance: omnimarket on the default instance,
+# omnibase_infra on the omnimarket-only ones) before its idle converge stops waiting out the 16-minute idle period
+# and the C15/C16 probe windows, and the agent publishes
+# onex.evt.deploy.dev-lane-drift.v1 and serves GET /dev-lane-drift naming the
+# running image, the head and the lag. Measured 2026-10-15: C15's windows
+# exclude 105 of every 120 minutes, and omnimarket#3964 (merged 17:07Z) waited
+# until 18:46:52Z for the default instance's converge. The bound is when the converge starts;
+# the build after it took 41 minutes that day (18:46:52Z to 19:27:58Z).
+#
 # EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
 # one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
 # is the lowercased first hostname label, the same one the router compares.
@@ -101,6 +112,8 @@ instances:
   dev-201:
     hostnames: [omninode-pc]
     consumer_group: onex-deploy-agent
+    flags:
+      max_dev_lag_minutes: 20
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]
@@ -116,6 +129,8 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
+    flags:
+      max_dev_lag_minutes: 20
     lane:
       compose_overlay: docker/docker-compose.dev-202.yml
       compose_project: omnibase-infra-dev-202

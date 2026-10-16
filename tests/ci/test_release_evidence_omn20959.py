@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -413,8 +414,28 @@ class TestReleaseEvidenceRefuses:
         assert "names no OMN ticket" in output
 
 
+_CASCADE_DISPATCH = (
+    _REPO_ROOT / ".github" / "workflows" / "dependency-cascade-dispatch.yml"
+)
+
+# What a cascade workflow may not name in a line that is not a YAML comment: a
+# change-control citation shape, or the autobind and preflight checks that read it.
+_OCC_CASCADE_READ = re.compile(
+    r"OCC#|occ-autobind|occ-preflight|onex[_-]change[_-]control|change[- ]control",
+    re.IGNORECASE,
+)
+
+
+def _code_lines(path: Path) -> list[str]:
+    return [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+
+
 class TestDependencyCascadeEvidence:
-    """AC2 (first half): the cascade accepts the 40-hex source the release emits."""
+    """AC2: the cascade takes the 40-hex source the release emits and names no OCC."""
 
     @staticmethod
     def _cascade_vars(evidence_source: str, tmp_path: Path) -> int:
@@ -442,3 +463,41 @@ class TestDependencyCascadeEvidence:
         self, tmp_path: Path
     ) -> None:
         assert self._cascade_vars("1" * 40, tmp_path) == 0
+
+    def test_dependency_cascade_evidence_refuses_a_change_control_citation(
+        self, tmp_path: Path
+    ) -> None:
+        """OCC#<n> named a change-control PR; the only callers now pass the commit."""
+        assert self._cascade_vars("OCC#6695", tmp_path) != 0
+
+    def test_dependency_cascade_evidence_refuses_a_non_hex_source(
+        self, tmp_path: Path
+    ) -> None:
+        assert self._cascade_vars("not-a-sha", tmp_path) != 0
+
+    @pytest.mark.parametrize(
+        "path", [_CASCADE, _CASCADE_DISPATCH], ids=lambda p: p.name
+    )
+    def test_dependency_cascade_evidence_names_no_change_control(
+        self, path: Path
+    ) -> None:
+        offenders = [
+            line.strip() for line in _code_lines(path) if _OCC_CASCADE_READ.search(line)
+        ]
+        assert not offenders, f"{path.name} still names change control: {offenders}"
+
+    def test_dependency_cascade_evidence_body_cites_the_release_commit(self) -> None:
+        """The bump PR body names the commit whose in-repo contract proved the release."""
+        body = _CASCADE.read_text(encoding="utf-8")
+        start = body.index("# >>> OMN-18202 no-self-stamp body >>>")
+        end = body.index("# <<< OMN-18202 no-self-stamp body <<<", start)
+        template = body[start:end]
+        assert "Release evidence:" in template
+        assert "steps.vars.outputs.evidence_source" in template
+        # The body still carries no Evidence-Ticket / Evidence-Source stamp.
+        assert not re.search(r"^\s*Evidence-(Ticket|Source):", template, re.MULTILINE)
+
+    def test_dependency_cascade_evidence_stamp_guard_stays(self) -> None:
+        """Dropping the change-control wording keeps the read-back guard on the body."""
+        text = _CASCADE.read_text(encoding="utf-8")
+        assert "grep -qE '^Evidence-(Ticket|Source):'" in text

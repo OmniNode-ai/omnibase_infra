@@ -175,9 +175,14 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # parent, so node_ledger_projection_compute now projects it and
     # node_delegation_chain_ledger_effect declares it as `reroute_parents`.
     # Same cross-repo shape as the OMN-18398 entries above. The other re-route
-    # parent, inference-response.v1, has an in-repo publisher
-    # (node_llm_inference_effect) and needs no entry.
+    # parent, inference-response.v1, is also cross-repo since OMN-17105 moved
+    # node_llm_inference_effect onto llm-inference-response.v1; its entry is below.
     "onex.evt.omnibase-infra.quality-gate-result.v1": "Published by omnimarket node_delegation_quality_gate_reducer as its success terminal (contract.yaml:51), cross-repo; consumed by the OMN-18964 ledger projection | owner: jonah | expiry: 2026-12-01",
+    # OMN-17105: the delegation inference response has ONE owner, omnimarket
+    # node_llm_delegation_call_effect (publish_topics, contract.yaml:178). The
+    # generic node_llm_inference_effect publishes its own response on
+    # llm-inference-response.v1, so no contract in this repo publishes this one.
+    "onex.evt.omnibase-infra.inference-response.v1": "Published by omnimarket node_llm_delegation_call_effect (publish_topics, contract.yaml:178), cross-repo; consumed by the ledger projection and the chain ledger re-route parent | owner: jonah | expiry: 2026-12-01",
     # OMN-17427: seven command topics whose only publisher is the runtime's own
     # Pattern B broker. RuntimePatternBBroker publishes `route.command_topic`
     # (service_pattern_b_broker.py, `_publish_worker_command`) for every node

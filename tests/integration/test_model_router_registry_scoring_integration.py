@@ -55,7 +55,13 @@ def test_registry_loads_without_seed_fields_and_routes_by_live_metrics(
         assert not hasattr(entry, "seed_cost_per_1k_tokens")
         assert not hasattr(entry, "seed_tokens_per_sec")
 
-    measured_model = "deepseek-r1-32b"
+    local_coders = [
+        entry.model_key
+        for entry in registry
+        if entry.tier == "local" and "code_generation" in entry.capabilities
+    ]
+    assert local_coders, "The catalog must contain a local code-generation model"
+    measured_model = local_coders[0]
     scoring_input = ModelScoringInput(
         correlation_id=uuid4(),
         task_type=EnumTaskType.CODE_REVIEW,

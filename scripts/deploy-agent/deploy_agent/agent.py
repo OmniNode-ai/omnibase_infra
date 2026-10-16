@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -39,6 +39,7 @@ from deploy_agent.events import (
     EnumRejectionReason,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    ModelDevLaneDrift,
     ModelLaneMirrorReceipt,
     ModelOnexApiDelivery,
     ModelRebuildRejected,
@@ -91,9 +92,12 @@ from deploy_agent.idle_converge import (
     ModelIdleRestoreInputs,
     converge_command,
     decide_restore,
+    dev_lane_drift,
     load_probe_windows,
+    next_behind_since,
     probe_blocking,
     read_dev_head,
+    read_running_image,
     read_running_ref,
     read_runtime_presence,
     restore_command,
@@ -127,6 +131,7 @@ from deploy_agent.lock import single_flight_lock
 from deploy_agent.publisher import (
     PublishCircuitBreaker,
     build_completion_payload,
+    publish_dev_lane_drift,
     publish_result,
 )
 from deploy_agent.queue_depth import LagSampler
@@ -363,6 +368,9 @@ REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
 #: the coordinator drop the member, which is reported rather than discovered.
 SETTLE_WAIT_EVICTION_WARN_SECONDS = 300.0
 MIGRATION_CONVERGE_CHECK_INTERVAL_SECONDS = 60
+#: OMN-21146: how often an overdue lane's drift event is published again while
+#: it stays overdue. Each check (once a minute) refreshes ``GET /dev-lane-drift``.
+DEV_LANE_DRIFT_REPUBLISH_AFTER = timedelta(minutes=15)
 
 
 class DeployAgent:
@@ -436,6 +444,14 @@ class DeployAgent:
         )
         self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
             probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
+        )
+        # OMN-21146: how long the lane has run behind each followed repository's
+        # dev head, its latest drift, and when that was last published.
+        self._dev_lag_behind_since: dict[str, datetime] = {}
+        self._dev_lane_drift: dict[str, ModelDevLaneDrift] = {}
+        self._dev_lane_drift_published_at: dict[str, datetime] = {}
+        self._idle_read_running_image: Callable[[], str] = lambda: (
+            read_running_image(_runtime_container_for_lane(EnumRuntimeLane.DEV))
         )
         # OMN-19544 AC1. On a lab host this instance shares with a prover (the
         # .105 laptop's VM holds the lane or a proof stack, not both), both
@@ -692,6 +708,7 @@ class DeployAgent:
             get_accept_backlog=self._accept_backlog.latest,
             get_control_topic_lag=self._lag_sampler.latest,
             get_unit_drift=_unit_drift_report,
+            get_dev_lane_drift=self._latest_dev_lane_drift,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -1179,6 +1196,17 @@ class DeployAgent:
                 )
             running_ref = self._idle_read_running_ref(repository)
             head_ref = self._idle_read_head_ref(repository)
+        lane_flags = getattr(self, "_lane_flags", ModelLaneFlags())
+        behind_since = next_behind_since(
+            self._dev_lag_behind_since.get(repository), running_ref, head_ref, now
+        )
+        if behind_since is None:
+            self._dev_lag_behind_since.pop(repository, None)
+        else:
+            self._dev_lag_behind_since[repository] = behind_since
+        self._record_dev_lane_drift(
+            repository, running_ref, head_ref, behind_since, lane_flags, now
+        )
         return decide_idle_converge(
             ModelIdleConvergeInputs(
                 now=now,
@@ -1195,11 +1223,102 @@ class DeployAgent:
                 probe_blocker=probe_blocker,
                 windows_error=windows_error,
                 attempted_heads=frozenset(self._idle_converge_attempted),
-                frozen_reason=getattr(
-                    self, "_lane_flags", ModelLaneFlags()
-                ).frozen_reason(now),
+                frozen_reason=lane_flags.frozen_reason(now),
+                behind_since=behind_since,
+                max_lag=lane_flags.max_dev_lag(),
             )
         )
+
+    def _record_dev_lane_drift(
+        self,
+        repository: str,
+        running_ref: str | None,
+        head_ref: str | None,
+        behind_since: datetime | None,
+        lane_flags: ModelLaneFlags,
+        now: datetime,
+    ) -> None:
+        """Keep the lane's drift behind ``repository``'s head, and say it (OMN-21146).
+
+        An overdue lane is published, then again every
+        :data:`DEV_LANE_DRIFT_REPUBLISH_AFTER` while it stays overdue, with a
+        WARNING carrying ``friction_type=dev_lane_drift``. A lane that was
+        published overdue and now runs the head is published once more, cleared.
+        """
+        max_lag = lane_flags.max_dev_lag()
+        if max_lag is None:
+            return
+        on_head = running_ref is not None and running_ref == head_ref
+        if behind_since is None:
+            if not on_head:
+                return  # an unread ref proves nothing; keep what was known
+            previous = self._dev_lane_drift.pop(repository, None)
+            published = self._dev_lane_drift_published_at.pop(repository, None)
+            if previous is None or published is None:
+                return
+            assert running_ref is not None and head_ref is not None
+            cleared = previous.model_copy(
+                update={
+                    "running_image": self._idle_read_running_image(),
+                    "running_ref": running_ref,
+                    "head_ref": head_ref,
+                    "behind_since": None,
+                    "observed_at": now,
+                    "lag_seconds": 0,
+                    "overdue": False,
+                }
+            )
+            logger.info(
+                "dev lane drift cleared: %s runs %s %s, the dev head",
+                cleared.runtime_container,
+                repository,
+                head_ref[:12],
+            )
+            self._dev_lane_drift[repository] = cleared
+            publish_dev_lane_drift(cleared.model_dump(mode="json"), self._kafka_config)
+            return
+        assert self._router is not None
+        container = _runtime_container_for_lane(EnumRuntimeLane.DEV)
+        drift = dev_lane_drift(
+            instance=self._router.instance.name,
+            repository=repository,
+            runtime_container=container,
+            running_image=self._idle_read_running_image(),
+            running_ref=running_ref,
+            head_ref=head_ref,
+            behind_since=behind_since,
+            max_lag=max_lag,
+            now=now,
+        )
+        if drift is None:
+            return
+        self._dev_lane_drift[repository] = drift
+        if not drift.overdue:
+            return
+        last = self._dev_lane_drift_published_at.get(repository)
+        if last is not None and now - last < DEV_LANE_DRIFT_REPUBLISH_AFTER:
+            return
+        logger.warning(
+            "dev lane drift: %s on %s runs %s %s (image %s), behind dev head %s "
+            "for %ds, past its %ds bound friction_type=dev_lane_drift",
+            drift.instance,
+            drift.runtime_container,
+            repository,
+            drift.running_ref[:12],
+            drift.running_image or "unread",
+            drift.head_ref[:12],
+            drift.lag_seconds,
+            drift.max_lag_seconds,
+        )
+        publish_dev_lane_drift(drift.model_dump(mode="json"), self._kafka_config)
+        self._dev_lane_drift_published_at[repository] = now
+
+    def _latest_dev_lane_drift(self) -> dict[str, object]:
+        """``GET /dev-lane-drift``: the latest drift per followed repository."""
+        return {
+            repository: drift.model_dump(mode="json")
+            for repository, drift in dict(self._dev_lane_drift).items()
+        }
 
     def _maybe_converge_forward_migration(self) -> None:
         """Apply changed checkout migrations once per fingerprint on an idle dev lane."""
