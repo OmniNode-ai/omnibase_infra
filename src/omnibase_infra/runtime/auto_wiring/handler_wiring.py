@@ -120,6 +120,12 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
+from omnibase_infra.handlers.handler_projection_derived_write import (
+    HandlerProjectionDerivedWrite,
+)
+from omnibase_infra.handlers.handler_projection_write_cursor import (
+    HandlerProjectionWriteCursor,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -130,6 +136,9 @@ from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
 )
 from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.protocols.protocol_projection_write_connection import (
+    ProtocolProjectionWriteConnection,
+)
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
@@ -3287,6 +3296,34 @@ class ProjectionTableOperation:
             returning=returning,
         )
 
+    def upsert_derived_returning(
+        self,
+        conflict_key: str,
+        row: dict[str, object],
+        *,
+        derive: Callable[[Mapping[str, object]], Mapping[str, object]],
+        input_columns: Sequence[str],
+        derived_columns: Sequence[str],
+        insert_only_columns: frozenset[str] = frozenset(),
+        sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
+        returning: Sequence[str] = (),
+    ) -> list[dict[str, object]]:
+        """Derive from the actual merged row under the existing write guards."""
+        prepared, context, scope = self._prepare_write(conflict_key, row)
+        return self._adapter._execute_upsert_returning(
+            self._target,
+            conflict_key,
+            prepared,
+            tenant_context=context,
+            recorded_scope=scope,
+            insert_only_columns=insert_only_columns,
+            sql_expression_columns=sql_expression_columns,
+            returning=returning,
+            derive=derive,
+            input_columns=input_columns,
+            derived_columns=derived_columns,
+        )
+
     def query(
         self,
         filters: dict[str, object] | None = None,
@@ -3591,8 +3628,13 @@ class ProjectionBindingConnections:
             raise RuntimeError("Projection database adapter is closed")
 
     @contextlib.contextmanager
-    def read_transaction(self, conn: object) -> Iterator[None]:
-        """Open an explicit transaction block for one unscoped read.
+    def unscoped_transaction(self, conn: object) -> Iterator[None]:
+        """Open an explicit transaction for unscoped reads or derived writes.
+
+        This is deliberately not a read-only transaction. Derived writes keep
+        their UPSERT and conditional UPDATE in this same block, and may return
+        their final row only after it commits. Read-only hardening belongs in
+        a separate read capability, never in this neutral transaction helper.
 
         OMN-17888. The read seam DECLAREs a server-side cursor, and PostgreSQL
         refuses ``DECLARE CURSOR`` outside a transaction block. The one form
@@ -3765,6 +3807,9 @@ class ProjectionDatabaseOperations:
         insert_only_columns: frozenset[str] = frozenset(),
         sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
         returning: Sequence[str] = (),
+        derive: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
+        input_columns: Sequence[str] = (),
+        derived_columns: Sequence[str] = (),
     ) -> list[dict[str, object]]:
         """OMN-18159. The one composed UPSERT, with the attested-write features.
 
@@ -3796,6 +3841,24 @@ class ProjectionDatabaseOperations:
             sql_expression_columns=sql_expression_columns,
             returning=returning,
         )
+        if derive is not None:
+            internal_returning = HandlerProjectionDerivedWrite.returning_columns(
+                row=row,
+                conflict_columns=plan.conflict_keys,
+                input_columns=input_columns,
+                derived_columns=derived_columns,
+                insert_only_columns=insert_only_columns,
+                expression_columns=sql_expression_columns,
+                returning=returning,
+            )
+            plan = build_upsert_plan(
+                table=target.table.name,
+                conflict_key=conflict_key,
+                row=row,
+                insert_only_columns=insert_only_columns,
+                sql_expression_columns=sql_expression_columns,
+                returning=internal_returning,
+            )
         # The plan validated every identifier against its own rule; this
         # adapter's rule is narrower and is applied on top rather than
         # replaced, so relaxing one never silently relaxes the other.
@@ -3836,6 +3899,32 @@ class ProjectionDatabaseOperations:
         conn = self._binding_connections.get(target.write_binding)
         adapted_row = self._adapt_row({c: row[c] for c in plan.bound_columns})
         scope = _statement_tenant_scope(tenant_context, recorded_scope)
+        if derive is not None:
+            transaction = (
+                self._binding_connections.unscoped_transaction(conn)
+                if scope is None
+                else self._binding_connections.tenant_transaction(conn, scope)
+            )
+            with transaction:
+                with cast("ProtocolProjectionWriteConnection", conn).cursor() as cursor:
+                    write_cursor = HandlerProjectionWriteCursor(cursor)
+                    stored_rows = write_cursor.run_projection_upsert(
+                        insert_sql, adapted_row, returning=plan.returning
+                    )
+                    final_rows = HandlerProjectionDerivedWrite.handle(
+                        write_cursor,
+                        schema=target.physical_schema,
+                        table=target.table.name,
+                        stored_rows=stored_rows,
+                        conflict_columns=plan.conflict_keys,
+                        input_columns=input_columns,
+                        derived_columns=derived_columns,
+                        returning=returning,
+                        derive=derive,
+                        adapt=self._adapt_row,
+                    )
+            # The transaction has committed before any caller can publish.
+            return final_rows
         if scope is None:
             with conn.cursor() as cursor:  # type: ignore[attr-defined]
                 cursor.execute(insert_sql, adapted_row)
@@ -3948,7 +4037,7 @@ class ProjectionDatabaseOperations:
             # the connections here sit in autocommit, so the unscoped read opens
             # (and always ends) its own. The scoped path below is already inside
             # one.
-            with self._binding_connections.read_transaction(conn):
+            with self._binding_connections.unscoped_transaction(conn):
                 return _query()
         with self._binding_connections.tenant_transaction(conn, scope):
             return _query()
@@ -3966,6 +4055,9 @@ class ProjectionDatabaseOperations:
         insert_only_columns: frozenset[str] = frozenset(),
         sql_expression_columns: Mapping[str, str] = MappingProxyType({}),
         returning: Sequence[str] = (),
+        derive: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
+        input_columns: Sequence[str] = (),
+        derived_columns: Sequence[str] = (),
     ) -> list[dict[str, object]]:
         """OMN-18159. UPSERT and return the rows the database actually stored.
 
@@ -3993,6 +4085,21 @@ class ProjectionDatabaseOperations:
                 "authority, or from the row's own recorded attribution when "
                 "none is bound. Supplying it here would let a caller assert "
                 "an attribution the runtime never verified."
+            )
+        if derive is None and (input_columns or derived_columns):
+            raise ValueError(
+                "derive is required when derived-write columns are declared"
+            )
+        if derive is not None:
+            return self._operation(table).upsert_derived_returning(
+                conflict_key,
+                row,
+                derive=derive,
+                input_columns=input_columns,
+                derived_columns=derived_columns,
+                insert_only_columns=insert_only_columns,
+                sql_expression_columns=sql_expression_columns,
+                returning=returning,
             )
         return self._operation(table).upsert_returning(
             conflict_key,
