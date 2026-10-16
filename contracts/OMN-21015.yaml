@@ -1,12 +1,18 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21015
-title: Infra vendoring of the tier-mix node migration
+title: Infra support for transactional per-run savings storage and the tier-mix node migration
 summary: >-
-  Infra half only: vendors omnimarket node migration 0060 (model-routing tier models, AC2) byte for byte, with its ledger row and class. The view and the Tier mix page are the omnimarket and omnidash halves. This check proves deployment identity, not page acceptance of the criterion.
+  Infra half only: vendors delegation migrations 0059 (AC3) and 0060 (model-routing tier models, AC2) and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn21015-ac3-infra-storage
+    statement: >-
+      The four nullable columns are deployed byte-identical to the omnimarket source, and the topology adapter derives from the actual merged row, conditionally updates only its declared derived fields in the same transaction, and returns the final row after commit.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: The Runs list shows savings per run against the named baseline (requirement RU-1), and a typed not-measured state for an unmeasured run -- falsifier: a measured fixture row with no savings cell, or an unmeasured row that shows 0'
   - id: req-omn21015-ac2-infra-vendor
     statement: >-
       Migration 0060 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound ledger row and the class the migration class checker reads from its statements.
@@ -15,6 +21,12 @@ requirements:
         statement: "AC2: Overview's Tier mix lists each model under its tier with its share of runs and its cost -- falsifier: a fixture with two models in one tier renders one row, or model shares that do not sum to the tier's share"
 evidence_requirements:
   - kind: tests
+    description: Infra storage half only; real owned Postgres proves the generic atomic write and refusal controls. It does not calculate a saving or render the page.
+    command: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
+  - kind: tests
+    description: Infra deployment half only; the vendored 0059 bytes, ledger checksum and expand-only class match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn21015_run_savings_vendor.py -q
+  - kind: tests
     description: Infra deployment half only; the vendored 0060 bytes, ledger checksum and forward-only class match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn21015_tier_models_vendor.py -q
 emergency_bypass:
@@ -22,6 +34,75 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21015-ac3-infra-two-writers-sparse
+    description: >-
+      Infra half only. Real Postgres: two writers of one row, a sparse input; the figure is derived from the merged row the upsert returns, not from the incoming dict. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest 'tests/integration/runtime/test_projection_derived_write_omn21015.py::test_two_connections_derive_from_the_actual_merged_row[sparse]' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-two-writers-terminal
+    description: >-
+      Infra half only. Real Postgres: two writers of one row, a terminal input; the figure is derived from the merged row the upsert returns. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest 'tests/integration/runtime/test_projection_derived_write_omn21015.py::test_two_connections_derive_from_the_actual_merged_row[terminal]' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-no-intermediate-commit
+    description: >-
+      Infra half only. Real Postgres: no intermediate upsert is visible to a second connection while the derivation runs. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_no_intermediate_upsert_is_committed_while_derivation_is_running -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-derivation-error-rollback
+    description: >-
+      Infra half only. Real Postgres: a derivation error rolls back the input write with it. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_a_derivation_error_rolls_back_the_input_write -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-unscoped-write
+    description: >-
+      Infra half only. Real Postgres: an unscoped derived write commits without the read-only seam. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py::test_unscoped_derived_write_commits_without_a_read_only_seam -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-guards
+    description: >-
+      Infra half only. Access and column controls: a read-only declaration cannot derive a write, and the derived columns are checked. No monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-vendor-0059
+    description: Infra half only. Pins source bytes, exact ledger checksum, expand-only classification and four nullable columns. It does not prove how the caller computes or serves the figure.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21015_run_savings_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-deploy-probe
+    description: >-
+      Deploy probe. GitHub serves the checked-out commit with the generic transactional derived-write handler. The source read or symbol match fails on a tree without the capability, including origin/dev. This proves source identity only, not a running deployment or AC3 acceptance.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_projection_derived_write.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c "^class HandlerProjectionDerivedWrite:"'
   - id: dod-omn21015-ac2-infra-vendor-0060
     description: Infra half only. Pins 0060's source bytes, exact ledger checksum and forward-only class. It does not prove the view's figures or the Tier mix page.
     source: manual
