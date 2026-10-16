@@ -2241,17 +2241,28 @@ relabel_rendered_labels() {
         awk -F': ' '/^[[:space:]]*RUNNER_LABELS:/ { gsub(/["[:space:]]/, "", $2); print tolower($2); exit }'
 }
 
+# The runner listener's own record of its last job: "Running job:" with no later
+# "completed with result" means a job is in hand, even in the moment before its
+# Runner.Worker process appears. Prints "busy" or "free"; shell text, so it can
+# run on the host both as a probe and inside the stop sequence.
+relabel_job_log_probe() {
+    printf '%s' "case \"\$(docker logs --tail 200 ${1} 2>&1 | grep -E 'Running job:|completed with result' | tail -1 || true)\" in *'Running job:'*) echo busy ;; *) echo free ;; esac"
+}
+
 # Idle on the container's own evidence. 0 = idle; anything unreadable is NOT
 # idle. A container that is not running cannot be mid-job.
 relabel_container_idle() {
-    local name="${1}" running workers
+    local name="${1}" running workers joblog
     running=$(relabel_remote "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null") || running=""
     running="${running//[$'\r\n ']/}"
     [[ "${running}" == "false" ]] && return 0
     [[ "${running}" == "true" ]] || return 1
     workers=$(relabel_remote "if t=\$(docker top ${name} 2>/dev/null); then printf '%s\n' \"\$t\" | grep -c 'Runner.Worker' || true; else echo TOPFAIL; fi") || return 1
     workers="${workers//[$'\r\n ']/}"
-    [[ "${workers}" == "0" ]]
+    [[ "${workers}" == "0" ]] || return 1
+    joblog=$(relabel_remote "$(relabel_job_log_probe "${name}")") || return 1
+    joblog="${joblog//[$'\r\n ']/}"
+    [[ "${joblog}" == "free" ]]
 }
 
 relabel_wait_healthy() {
@@ -2270,8 +2281,10 @@ relabel_wait_healthy() {
 }
 
 # Stop ${name}, then recreate it so it re-registers under the rendered labels.
-# The idle check runs HERE, on the host, immediately before the stop, so no ssh
-# round trip sits between "no job" and SIGTERM. Exit 42: a job worker is running;
+# The idle check runs HERE, on the host, immediately before the stop, and the
+# stop is a bare `docker stop` (a compose CLI start-up is seconds of window in
+# which a saturated pool hands the runner a job), so almost nothing sits between
+# "no job" and SIGTERM. Exit 42: a job worker is running;
 # 43: idleness could not be read. Either leaves the runner untouched. The token
 # arrives on stdin and is exported only inside the remote shell.
 relabel_recreate() {
@@ -2292,10 +2305,26 @@ relabel_recreate() {
         if [ \"\$(docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null)\" = true ]; then
             top=\$(docker top ${name} 2>/dev/null) || exit 43
             if printf '%s\\n' \"\${top}\" | grep -q 'Runner.Worker'; then exit 42; fi
+            if [ \"\$($(relabel_job_log_probe "${name}"))\" = busy ]; then exit 42; fi
         fi
-        ${compose_cmd} stop -t 30 ${name}
-        ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
+        docker stop -t 30 ${name}
+        ${compose_cmd} up -d --force-recreate --no-deps --no-build --pull never ${name}
     "
+}
+
+# The image a recreate would start, as the host's compose renders it for ${1}.
+# A relabel never builds or pulls: if the tag is not on the host, the stop would
+# succeed and the start would not, so this is checked before any runner is touched.
+relabel_require_image() {
+    local name="${1}" image v exports=""
+    for v in $(relabel_token_vars); do
+        exports="${exports} export ${v}=preflight;"
+    done
+    image=$(relabel_remote "${exports} $(relabel_compose_cmd) config ${name} 2>/dev/null" |
+        awk '/^[[:space:]]*image:/ { print $2; exit }') || image=""
+    [[ -n "${image}" ]] || err "could not read the image ${name} would start from the host's compose."
+    relabel_remote "docker image inspect ${image} >/dev/null 2>&1" ||
+        err "image ${image} is not present on ${RUNNER_HOST}: a recreate would stop ${name} and then fail to start it. A relabel never builds or pulls; restore the tag first (build via the stand-up path, or re-tag the image the live runners already run)."
 }
 
 # Everything that can be decided before a runner is touched. Returns 0 eligible
@@ -2438,6 +2467,8 @@ relabel_roll() {
             *) refused+=("${name}") ;;
         esac
     done
+
+    [[ "${#pending[@]}" -eq 0 ]] || relabel_require_image "${pending[0]}"
 
     local deadline=$(( $(date +%s) + RELABEL_DRAIN_TIMEOUT_SECONDS ))
     local done_count=0 failed="" next progressed

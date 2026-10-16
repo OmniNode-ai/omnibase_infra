@@ -84,6 +84,18 @@ FAKE_DOCKER = textwrap.dedent(
         print("1 1 0 Runner.Listener run")
         if c["busy"]:
             print("1 2 1 Runner.Worker spawnclient 1 2")
+    elif args[:2] == ["image", "inspect"]:
+        sys.exit(1 if state.get("image_missing") else 0)
+    elif args[0] == "logs":
+        c = state["containers"][args[-1]]
+        print("2026-10-16 10:00:00Z: Job earlier completed with result: Succeeded")
+        if c.get("log_busy") or c["busy"]:
+            print("2026-10-16 10:05:00Z: Running job: pytest (shard 7/16)")
+    elif args[0] == "stop":
+        name = args[-1]
+        log.write("STOP %s project=-\\n" % name)
+        state["containers"][name]["running"] = False
+        save()
     elif args[0] == "compose":
         verb_at = next(i for i, a in enumerate(args) if a in ("config", "stop", "up"))
         verb, rest = args[verb_at], args[verb_at + 1 :]
@@ -91,11 +103,9 @@ FAKE_DOCKER = textwrap.dedent(
         name = rest[-1]
         c = state["containers"][name]
         if verb == "config":
-            print("services:\\n  %s:\\n    environment:\\n      RUNNER_LABELS: %s" % (name, c["rendered"]))
+            print("services:\\n  %s:\\n    image: omninode-runner:latest\\n    environment:\\n      RUNNER_LABELS: %s" % (name, c["rendered"]))
         elif verb == "stop":
-            log.write("STOP %s project=%s\\n" % (name, project))
-            c["running"] = False
-            save()
+            sys.exit("the relabel roll must stop with a bare docker stop")
         else:
             token = os.environ.get("RUNNER_TOKEN") or os.environ.get("FAKE_OTHER_TOKEN_VAR", "")
             log.write(
@@ -177,6 +187,11 @@ class World:
     def registry(self) -> dict[str, dict]:
         data = json.loads(self.state.read_text(encoding="utf-8"))
         return {r["name"]: r for r in data["registry"]}
+
+    def set_state(self, **fields: object) -> None:
+        data = json.loads(self.state.read_text(encoding="utf-8"))
+        data.update(fields)
+        self.state.write_text(json.dumps(data), encoding="utf-8")
 
     def mutate(self, name: str, **fields: object) -> None:
         data = json.loads(self.state.read_text(encoding="utf-8"))
@@ -289,6 +304,7 @@ def test_a_real_roll_relabels_the_idle_runners_one_at_a_time_and_keeps_the_count
     ], "the busy runner must be left alone and the rest taken in order"
     for line in ups:
         assert "--force-recreate" in line and "--no-deps" in line
+        assert "--pull never" in line
         assert "--remove-orphans" not in line
         assert "token_present=True" in line and "token_in_argv=False" in line
     # strictly serial: every stop is immediately followed by its own up
@@ -357,6 +373,34 @@ def test_a_minted_token_never_reaches_output(primary: World) -> None:
     assert primary.lines("GH_POST") == ["GH_POST"]
     assert primary.lines("TOKEN_SEEN") == [f"TOKEN_SEEN {MINTED}"]
     assert MINTED not in result.stdout and MINTED not in result.stderr
+
+
+def test_a_runner_whose_listener_log_shows_a_job_in_hand_is_left_alone(
+    primary: World,
+) -> None:
+    """The moment between a job being handed over and its Runner.Worker process
+    appearing reads idle on the process list; the listener's own log does not.
+    """
+    primary.mutate("omninode-runner-3", log_busy=True)
+    result = primary.run("--relabel", "--drain-timeout=1")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "omninode-runner-3" not in " ".join(primary.lines("STOP"))
+    assert "omninode-runner-3" not in " ".join(primary.lines("UP"))
+    assert "still busy: omninode-runner-3" in result.stderr
+
+
+def test_a_missing_image_tag_refuses_the_roll_before_any_runner_is_stopped(
+    primary: World,
+) -> None:
+    """A recreate that cannot find its image would stop the runner and then fail
+    to start it; the roll must notice before the first stop.
+    """
+    primary.set_state(image_missing=True)
+    result = primary.run("--relabel", "--drain-timeout=1")
+    assert result.returncode != 0
+    assert "is not present on" in result.stderr
+    assert primary.lines("STOP") == [] and primary.lines("UP") == []
+    assert primary.lines("GH_POST") == []
 
 
 def test_a_job_that_lands_between_the_idle_read_and_the_stop_wins(
