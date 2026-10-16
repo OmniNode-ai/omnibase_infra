@@ -21,6 +21,26 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: every test that takes the installed_node fixture carries a timeout marker above the install subprocess timeout, which is above the --timeout of the full-suite pytest step in ci.yml, and the fixture sets UV_HTTP_TIMEOUT below the install timeout -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60 fails test_install_budget_outlasts_the_ci_test_timeout on the merge-base test module'
+  - id: req-omn19998-lab-follows-dev-tag
+    statement: A workspace build that stages omnimarket from its dev branch must stage the newest dev-* tag on its origin instead, the deploy agent must follow that tag as omnimarket's head, and every deploy-agent instance must publish a heartbeat against it that raises an alarm once its runtime runs behind the tag for more than two hours.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
+  - id: req-omn19998-prepr-isolated-docker-auths
+    statement: The pre-PR pool prover's isolated docker config must hold no credential store, no credential helper and no credential, and must keep a non-empty auths map so the docker CLI stays on the plain file store instead of detecting the macOS keychain again.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the config snippet in prepr_pool_prove.sh, run against a keychain-backed config, writes one with no credsStore or credHelpers, a non-empty auths map and no auths entry holding a credential -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential fails on the merge-base prepr_pool_prove.sh'
+  - id: req-omn19998-studio-multiarch-ci-pool
+    statement: The runner fleet must declare an opt-in label omnibase-ci-multiarch carried by both amd64 action pools and by a capped, credential-free, socket-free arm64 pool on the Mac Studio host that never carries omnibase-ci, so arch-neutral private-repo jobs can run on that host and no existing omnibase-ci job can land on arm64.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the Mac Studio host declares pool omninode-studio-ci-runner (4 runners, class action-multiarch); its compose services carry omnibase-ci-multiarch and arch-arm64, never omnibase-ci, x64, arch-amd64 or a host label, mount no docker socket or credential, and are capped at 1.5 CPU and 3g; both amd64 action pools carry omnibase-ci-multiarch; declared_total(action) stays 26 -- falsifier: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0 fails on the merge-base tree'
+  - id: req-omn19998-dev-maintenance-check-fences
+    statement: Dev maintenance checks must assert that fences naming prod or excluding dev suppress migration convergence and lane mirroring, and that lane mirroring never targets a governed lane even on a mixed lab fence.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: migration and mirror checks cover prod, dev plus prod, all lanes, and the stability lane alone as excluded fences; mirror checks reject every non-dev target with a dev or mixed lab fence.'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -31,6 +51,15 @@ evidence_requirements:
   - kind: tests
     description: The structural budget test reads the full-suite step's --timeout from ci.yml and the three installed-node tests' timeout markers; the whole module passes under --timeout=60.
     command: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 --timeout=60
+  - kind: tests
+    description: The checkout tests build tags against a local origin; the agent tests drive the heartbeat, the alarm and the followed head through the agent's seams.
+    command: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+  - kind: tests
+    description: The isolated-config test runs the prover's own config snippet against a fake keychain-backed docker config and reads the written file.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
+  - kind: tests
+    description: The structural tests read config/runner_fleet.yaml through the fleet model, the three runner compose files and the fleet panel's label classifier.
+    command: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -63,3 +92,46 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn19998-ac4-lab-follows-dev-tag
+    description: AC4 tests build the newest dev tag through RT-1 checkout against a local origin with tagged commits, and assert the lab callers name omnimarket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn19998-ac4-prepr-isolated-docker-auths
+    description: AC5 test runs the prover's isolated-config snippet and checks the written config names no credential store and keeps an empty-entry auths map.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn19998-ac5-studio-multiarch-ci-pool
+    description: AC6 tests assert the Mac Studio multiarch pool declaration, its compose labels, caps and absent mounts, the amd64 pools' opt-in label and the unchanged action total.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn19998-studio-multiarch-deploy-config-probe
+    description: Deploy configuration probe for AC6. Read the runner compose from GitHub at the checked-out commit and require exactly four opt-in arm64 runners with the declared CPU and memory caps and without a docker socket or lab credentials. The content endpoint is reachable from hosted CI and is absent at the merge base. This checks the published deployment configuration only; registering and activating the runners still requires an operator-minted registration token.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-omninode-studio-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys, yaml; data = yaml.safe_load(sys.stdin); services = data[\"services\"]; assert set(services) == {f\"omninode-studio-ci-runner-{n}\" for n in range(1, 5)}; expected = {\"self-hosted\", \"omnibase-ci-multiarch\", \"linux\", \"arm64\", \"arch-arm64\"}; assert all(set(s[\"environment\"][\"RUNNER_LABELS\"].split(\",\")) == expected and s[\"cpus\"] == \"1.5\" and s[\"mem_limit\"] == s[\"memswap_limit\"] == \"3g\" and not any(term in str(s) for term in (\"docker.sock\", \"lab-credentials\", \"operator.env\", \"KUBECONFIG\", \"LOCAL_LLM_SHARED_SECRET\")) for s in services.values())'"
+        cwd: .
+  - id: dod-omn19998-ac6-dev-maintenance-check-fences
+    description: AC7 tests exercise excluded process fences and non-dev mirror targets through the real agent and executor entry points with isolated subprocess seams.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py::test_governed_or_non_dev_agents_never_converge_migrations scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py::test_lane_mirror_never_targets_a_governed_lane -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7

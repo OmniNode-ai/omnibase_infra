@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -181,7 +182,10 @@ def test_workflow_validates_at_the_locked_core_with_the_binds_ac_rules() -> None
     )[1]
     version = tuple(int(part) for part in block.split('"', 1)[0].split("."))
     assert version >= CORE_WITH_BINDS_AC_RULES, version
-    assert '"omnibase-core==0.47.45"' in PYPROJECT.read_text(encoding="utf-8")
+    manifest = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    overrides = manifest["tool"]["uv"]["override-dependencies"]
+    locked_version = block.split('"', 1)[0]
+    assert f"omnibase-core=={locked_version}" in overrides
 
 
 # --- this repository's contract -------------------------------------------------

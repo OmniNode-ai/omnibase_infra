@@ -259,6 +259,13 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
         # engages where the primary names no commit, so a DEPLOY_REF that
         # resolves everywhere (origin/dev) behaves exactly as before.
         checkout_args+=(--fallback-ref "${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}")
+        # OMN-19998: a lab caller names the siblings that build their newest
+        # dev-* tag in place of the branch (the deploy agent and the stability
+        # refresh name omnimarket). Unset, every sibling builds its branch.
+        read -r -a follow_dev_tag_repos <<< "${DEPLOY_FOLLOW_DEV_TAG_REPOS:-}"
+        for repo in ${follow_dev_tag_repos[@]+"${follow_dev_tag_repos[@]}"}; do
+            checkout_args+=(--follow-dev-tag "${repo}")
+        done
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)

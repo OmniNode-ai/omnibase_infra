@@ -1,8 +1,8 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21015
-title: Infra support for transactional per-run savings storage and the tier-mix node migration
+title: Infra support for transactional per-run savings storage, the tier-mix and the usage tier-share node migrations
 summary: >-
-  Infra half only: vendors delegation migrations 0059 (AC3) and 0060 (model-routing tier models, AC2) and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
+  Infra half only: vendors delegation migrations 0059 (AC3) and 0060 (model-routing tier models, AC2) and usage migration 0003 (usage tier share, AC4, expand-only by Jonah's ruling of 2026-10-15: it keeps the three-column key and adds a four-column unique index, which a later contract migration makes the key) and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -19,6 +19,12 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: Overview's Tier mix lists each model under its tier with its share of runs and its cost -- falsifier: a fixture with two models in one tier renders one row, or model shares that do not sum to the tier's share"
+  - id: req-omn21015-ac4-infra-vendor
+    statement: >-
+      Migration 0003 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound ledger row and the class the migration class checker reads from its statements.
+    acceptance:
+      - id: AC4
+        statement: "AC4: Usage shows tokens in and tokens out per day as a stacked series split by model (requirement US-1), and its by-model table shows each model's share of calls and its tier beside the calls column it already has -- falsifier: the window sums differ from `onex metering --json`, or the shares do not sum to 100"
 evidence_requirements:
   - kind: tests
     description: Infra storage half only; real owned Postgres proves the generic atomic write and refusal controls. It does not calculate a saving or render the page.
@@ -29,6 +35,9 @@ evidence_requirements:
   - kind: tests
     description: Infra deployment half only; the vendored 0060 bytes, ledger checksum and forward-only class match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn21015_tier_models_vendor.py -q
+  - kind: tests
+    description: Infra deployment half only; the vendored 0003 bytes, its kept three-column key, ledger checksum and forward-only class match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -111,3 +120,11 @@ dod_evidence:
         check_value: uv run pytest tests/unit/migrations/test_omn21015_tier_models_vendor.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn21015-ac4-infra-vendor-0003
+    description: Infra half only. Pins 0003's source bytes, that it keeps the three-column key, its exact ledger checksum and forward-only class. It does not prove the writer's shares or the Usage page.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

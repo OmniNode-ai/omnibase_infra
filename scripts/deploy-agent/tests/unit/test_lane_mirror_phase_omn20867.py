@@ -377,8 +377,17 @@ def test_a_failed_mirror_never_changes_the_deploy_verdict(tmp_path: Path) -> Non
 # -- the executor's fence and the agent's wiring ----------------------------------
 
 
+@pytest.mark.parametrize(
+    "excluded_fence",
+    [
+        EnumRuntimeLane.PROD.value,
+        f"{EnumRuntimeLane.DEV.value},{EnumRuntimeLane.PROD.value}",
+        f"{EnumRuntimeLane.DEV.value},{EnumRuntimeLane.STABILITY_TEST.value},{EnumRuntimeLane.PROD.value}",
+        EnumRuntimeLane.STABILITY_TEST.value,
+    ],
+)
 def test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, excluded_fence: str
 ) -> None:
     executor = executor_mod.DeployExecutor()
     monkeypatch.setattr(executor_mod._LaneOverlayClone, "path", None)
@@ -395,10 +404,7 @@ def test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone(
         )
         is None
     )
-    monkeypatch.setenv(
-        "DEPLOY_AGENT_ALLOWED_LANES",
-        f"{EnumRuntimeLane.DEV.value},{EnumRuntimeLane.STABILITY_TEST.value}",
-    )
+    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", excluded_fence)
     assert (
         executor.run_lane_mirror(lane=EnumRuntimeLane.DEV, materialize_root=tmp_path)
         is None
@@ -411,6 +417,27 @@ def test_executor_runs_the_step_only_on_a_dev_fenced_agent_with_a_clone(
     )
     assert receipt is not None
     assert receipt.outcome is EnumLaneMirrorOutcome.NO_OVERLAY
+
+
+@pytest.mark.parametrize(
+    "fence",
+    [
+        EnumRuntimeLane.DEV.value,
+        f"{EnumRuntimeLane.DEV.value},{EnumRuntimeLane.STABILITY_TEST.value}",
+    ],
+)
+@pytest.mark.parametrize("lane", [EnumRuntimeLane.STABILITY_TEST, EnumRuntimeLane.PROD])
+def test_lane_mirror_never_targets_a_governed_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fence: str, lane: EnumRuntimeLane
+) -> None:
+    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", fence)
+    monkeypatch.setattr(executor_mod._LaneOverlayClone, "path", tmp_path / "absent")
+    assert (
+        executor_mod.DeployExecutor().run_lane_mirror(
+            lane=lane, materialize_root=tmp_path
+        )
+        is None
+    )
 
 
 def test_the_agent_runs_the_step_after_verification_and_before_the_verdict() -> None:
@@ -535,6 +562,11 @@ def _agent_as(
         "omninode-runtime is running",
     )
     agent._idle_read_head_ref = lambda repo: heads[repo]
+    # OMN-19998: the dev-tag heartbeat reads no remote and publishes nothing here.
+    agent._idle_read_dev_tags = lambda repo: None
+    monkeypatch.setattr(
+        agent_mod, "publish_dev_tag_heartbeat", lambda payload, config: True
+    )
     agent._idle_probe_blocker = lambda now: None
     agent._lane_flags = ModelLaneFlags()
     return agent

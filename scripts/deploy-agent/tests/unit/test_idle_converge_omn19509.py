@@ -323,6 +323,11 @@ def _agent(
         "omninode-runtime is running",
     )
     agent._idle_read_head_ref = lambda repo: HEAD
+    # OMN-19998: the dev-tag heartbeat reads no remote and publishes nothing here.
+    agent._idle_read_dev_tags = lambda repo: None
+    monkeypatch.setattr(
+        agent_mod, "publish_dev_tag_heartbeat", lambda payload, config: True
+    )
     agent._idle_probe_blocker = lambda now: None
     # The committed table freezes dev-201 until 2026-10-19 (lane flags), which
     # covers QUIET; these tests are about the converge rule, so the lane is
