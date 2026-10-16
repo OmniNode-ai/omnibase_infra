@@ -413,9 +413,14 @@ def test_idle_migration_checks_are_throttled(
 
 @pytest.mark.parametrize(
     "lanes",
-    [{EnumRuntimeLane.PROD}, {EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST}],
+    [
+        {EnumRuntimeLane.PROD},
+        {EnumRuntimeLane.DEV, EnumRuntimeLane.PROD},
+        {EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST, EnumRuntimeLane.PROD},
+        {EnumRuntimeLane.STABILITY_TEST},
+    ],
 )
-def test_only_dev_only_agents_converge_migrations(
+def test_governed_or_non_dev_agents_never_converge_migrations(
     idle_agent: _IdleHarness, lanes: set[EnumRuntimeLane]
 ) -> None:
     idle_agent.agent._allowed_lanes = lanes
