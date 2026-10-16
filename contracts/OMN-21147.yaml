@@ -81,7 +81,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py -q --no-cov
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py::TestLlmEndpointsContract::test_retired_reasoning_slot_releases_all_deployment_fields -q --no-cov
+        check_value: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py -k test_retired_reasoning_slot_releases_all_deployment_fields -q --no-cov
     binds_ac:
       - AC5
   - id: dod-omn21147-hosted-routing-readback
