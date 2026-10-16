@@ -262,6 +262,7 @@ migrations:
   forward/nodes/node_projection_delegation/0056_delegation_budget_applied_events.sql: forward-only # EXECUTE; ADD CONSTRAINT (OMN-15376 shape reconciliation of a guarded CREATE TABLE)
   forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP POLICY
   forward/nodes/node_projection_delegation/0058_delegation_events_requested_model_and_timing.sql: expand-only
+  forward/nodes/node_projection_delegation/0060_model_routing_tier_models.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT; UPDATE (backfill) under a transaction-scoped helper policy, dropped in the block
   forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only # DROP VIEW; CREATE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
