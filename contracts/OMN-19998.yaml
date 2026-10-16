@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: 'AC5: the config snippet in prepr_pool_prove.sh, run against a keychain-backed config, writes one with no credsStore or credHelpers, a non-empty auths map and no auths entry holding a credential -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential fails on the merge-base prepr_pool_prove.sh'
+  - id: req-omn19998-studio-multiarch-ci-pool
+    statement: The runner fleet must declare an opt-in label omnibase-ci-multiarch carried by both amd64 action pools and by a capped, credential-free, socket-free arm64 pool on the Mac Studio host that never carries omnibase-ci, so arch-neutral private-repo jobs can run on that host and no existing omnibase-ci job can land on arm64.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the Mac Studio host declares pool omninode-studio-ci-runner (4 runners, class action-multiarch); its compose services carry omnibase-ci-multiarch and arch-arm64, never omnibase-ci, x64, arch-amd64 or a host label, mount no docker socket or credential, and are capped at 1.5 CPU and 3g; both amd64 action pools carry omnibase-ci-multiarch; declared_total(action) stays 26 -- falsifier: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0 fails on the merge-base tree'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -47,6 +52,9 @@ evidence_requirements:
   - kind: tests
     description: The isolated-config test runs the prover's own config snippet against a fake keychain-backed docker config and reads the written file.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
+  - kind: tests
+    description: The structural tests read config/runner_fleet.yaml through the fleet model, the three runner compose files and the fleet panel's label classifier.
+    command: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -97,3 +105,19 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn19998-ac5-studio-multiarch-ci-pool
+    description: AC6 tests assert the Mac Studio multiarch pool declaration, its compose labels, caps and absent mounts, the amd64 pools' opt-in label and the unchanged action total.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_studio_ci_runner_multiarch_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn19998-studio-multiarch-deploy-config-probe
+    description: Deploy configuration probe for AC6. Read the runner compose from GitHub at the checked-out commit and require exactly four opt-in arm64 runners with the declared CPU and memory caps and without a docker socket or lab credentials. The content endpoint is reachable from hosted CI and is absent at the merge base. This checks the published deployment configuration only; registering and activating the runners still requires an operator-minted registration token.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-omninode-studio-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys, yaml; data = yaml.safe_load(sys.stdin); services = data[\"services\"]; assert set(services) == {f\"omninode-studio-ci-runner-{n}\" for n in range(1, 5)}; expected = {\"self-hosted\", \"omnibase-ci-multiarch\", \"linux\", \"arm64\", \"arch-arm64\"}; assert all(set(s[\"environment\"][\"RUNNER_LABELS\"].split(\",\")) == expected and s[\"cpus\"] == \"1.5\" and s[\"mem_limit\"] == s[\"memswap_limit\"] == \"3g\" and not any(term in str(s) for term in (\"docker.sock\", \"lab-credentials\", \"operator.env\", \"KUBECONFIG\", \"LOCAL_LLM_SHARED_SECRET\")) for s in services.values())'"
+        cwd: .

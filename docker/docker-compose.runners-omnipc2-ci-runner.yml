@@ -13,7 +13,8 @@
 #
 # SAME RUNNER, OTHER HOST. The anchor below is the primary pool's anchor with its
 # comments removed and nothing else changed: the same image, labels
-# (self-hosted,omnibase-ci,linux,x64,arch-amd64), runner group, per-runner limits,
+# (self-hosted,omnibase-ci,omnibase-ci-multiarch,linux,x64,arch-amd64 -- the
+# multiarch label is OMN-19998's opt-in route), runner group, per-runner limits,
 # environment (lab-ci-reader kubeconfig, the local-LLM signing key and CIDR
 # allowlist from this host's docker/.env, the uv stampede caps) and mounts. So
 # any job a .201 runner can take, one of these can take, and no workflow changes.
@@ -84,7 +85,7 @@ x-runner-base: &runner-base
     # OMN-18829: the host row, not the container install identity, owns lab delegations.
     ONEX_LANE_HOST: h202
     ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
-    RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64,arch-amd64
+    RUNNER_LABELS: self-hosted,omnibase-ci,omnibase-ci-multiarch,linux,x64,arch-amd64
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
     LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}

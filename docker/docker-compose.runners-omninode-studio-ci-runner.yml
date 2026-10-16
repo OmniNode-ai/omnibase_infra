@@ -1,0 +1,127 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19998 -- the Mac Studio's share of arch-neutral private-repo CI.
+#
+# WHY IT EXISTS. Private-repository CI queued for hours on the amd64 fleet
+# (the primary host at load 48 on 32 cores, the second amd64 host IO-bound)
+# while the Mac Studio had headroom. It is arm64, and every job on
+# `[self-hosted, omnibase-ci]` was written assuming amd64, so these runners do
+# NOT join `omnibase-ci`. They carry the opt-in label `omnibase-ci-multiarch`
+# (config/runner_fleet.yaml, class `action-multiarch`), which the amd64 action
+# pools carry too. Only a job that moved to
+# `[self-hosted, omnibase-ci-multiarch]` -- arch-neutral, no docker daemon, no
+# lab credential -- can land here. The verify runner's rule in
+# docker-compose.runners-omninode-studio-runner.yml (no `omnibase-ci` job on
+# this host) is unchanged.
+#
+# SIZED FROM A MEASUREMENT, 2026-10-16T11:46Z: load 15.9 on 24 cores; the
+# Docker Desktop VM at 24 CPUs / 31 GiB with about 6 GiB in use by this host's
+# compose lane and the verify runner. Four runners at 1.5 CPU and 3 GiB each,
+# with no swap allowance, take at most 6 cores and 12 GiB, so the always-on
+# planner and the compose lane keep theirs. Raise the count only from a new
+# reading.
+#
+# WHAT NO JOB HERE CAN SEE, each deliberate:
+#   - no docker socket. A job here cannot reach the compose lane's daemon or
+#     start containers; docker-building jobs stay on `omnibase-ci`/`arch-amd64`.
+#   - no lab credentials, no operator env, no LLM signing key, no kubeconfig:
+#     nothing is copied to this host for this pool. A job that needs one stays
+#     on `omnibase-ci`.
+#   - no host label: that label names this host's verify runner alone.
+#   - no `group_add` (Docker Desktop; see the verify runner's file).
+#
+# DEPLOYING. Registration needs an org registration token minted by an
+# operator (credential lifecycle, rule 22); this file does not mint one. From a
+# machine with ssh to this host and org-admin gh, run scripts/deploy-runners.sh
+# with --host set to this host's inventory address in config/runner_fleet.yaml
+# and --pool=omninode-studio-ci-runner (add --limit=1 for the canary step). It
+# runs under its own compose project (`-p omninode-studio-ci-runner`).
+# Readback: the runner registry lists omninode-studio-ci-runner-1..4 online
+# with labels self-hosted, omnibase-ci-multiarch, linux, arm64, arch-arm64.
+x-runner-base: &runner-base
+  image: omninode-runner:latest
+  restart: unless-stopped
+  mem_limit: 3g
+  memswap_limit: 3g
+  cpus: "1.5"
+  pids_limit: 4096
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  healthcheck:
+    test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+    interval: 30s
+    timeout: 12s
+    retries: 3
+    start_period: 120s
+  environment: &runner-env
+    RUNNER_LABELS: self-hosted,omnibase-ci-multiarch,linux,arm64,arch-arm64
+    GITHUB_ORG_URL: https://github.com/OmniNode-ai
+    RUNNER_TOKEN: ${STUDIO_CI_RUNNER_TOKEN:-}
+    RUNNER_GROUP: omnibase-ci
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: "600"
+services:
+  omninode-studio-ci-runner-1:
+    !!merge <<: *runner-base
+    container_name: omninode-studio-ci-runner-1
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-studio-ci-runner-1
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omninode-studio-ci-runner-1-creds:/home/runner/.runner-creds
+  omninode-studio-ci-runner-2:
+    !!merge <<: *runner-base
+    container_name: omninode-studio-ci-runner-2
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-studio-ci-runner-2
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omninode-studio-ci-runner-2-creds:/home/runner/.runner-creds
+  omninode-studio-ci-runner-3:
+    !!merge <<: *runner-base
+    container_name: omninode-studio-ci-runner-3
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-studio-ci-runner-3
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omninode-studio-ci-runner-3-creds:/home/runner/.runner-creds
+  omninode-studio-ci-runner-4:
+    !!merge <<: *runner-base
+    container_name: omninode-studio-ci-runner-4
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omninode-studio-ci-runner-4
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omninode-studio-ci-runner-4-creds:/home/runner/.runner-creds
+volumes:
+  omninode-studio-ci-runner-1-creds:
+    name: omninode-studio-ci-runner-1-creds
+  omninode-studio-ci-runner-2-creds:
+    name: omninode-studio-ci-runner-2-creds
+  omninode-studio-ci-runner-3-creds:
+    name: omninode-studio-ci-runner-3-creds
+  omninode-studio-ci-runner-4-creds:
+    name: omninode-studio-ci-runner-4-creds

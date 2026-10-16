@@ -98,7 +98,15 @@ x-runner-base: &runner-base
     # SHA256(RUNNER_LABELS + org url), so a recreated runner re-registers. Until
     # the serial busy-checked roll has passed over all 60, some runners carry
     # the label and some do not -- so nothing may `runs-on` it yet.
-    RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64,arch-amd64
+    #
+    # OMN-19998 -- `omnibase-ci-multiarch` is the opt-in label for
+    # arch-neutral jobs (config/runner_fleet.yaml, class `action-multiarch`).
+    # The Mac Studio's arm64 pool carries it without `omnibase-ci`; this pool
+    # carries both, so a job that opts in keeps this fleet and gains that host.
+    # Same rule
+    # as above: it takes effect on recreate, and a job moves onto it only
+    # after the roll has passed over every runner of both amd64 pools.
+    RUNNER_LABELS: self-hosted,omnibase-ci,omnibase-ci-multiarch,linux,x64,arch-amd64
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     # OMN-18188 — lab k3s reachability for every runner in the fleet.
     # Points kubectl at the read-only kubeconfig bind-mounted below. All 88
