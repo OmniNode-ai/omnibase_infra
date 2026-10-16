@@ -114,3 +114,10 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn19998-studio-multiarch-deploy-config-probe
+    description: Deploy configuration probe for AC6. Read the runner compose from GitHub at the checked-out commit and require exactly four opt-in arm64 runners with the declared CPU and memory caps and without a docker socket or lab credentials. The content endpoint is reachable from hosted CI and is absent at the merge base. This checks the published deployment configuration only; registering and activating the runners still requires an operator-minted registration token.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners-omninode-studio-ci-runner.yml?ref=$(git rev-parse HEAD)\" --jq '.content' | base64 -d | python3 -c 'import sys, yaml; data = yaml.safe_load(sys.stdin); services = data[\"services\"]; assert set(services) == {f\"omninode-studio-ci-runner-{n}\" for n in range(1, 5)}; expected = {\"self-hosted\", \"omnibase-ci-multiarch\", \"linux\", \"arm64\", \"arch-arm64\"}; assert all(set(s[\"environment\"][\"RUNNER_LABELS\"].split(\",\")) == expected and s[\"cpus\"] == \"1.5\" and s[\"mem_limit\"] == s[\"memswap_limit\"] == \"3g\" and not any(term in str(s) for term in (\"docker.sock\", \"lab-credentials\", \"operator.env\", \"KUBECONFIG\", \"LOCAL_LLM_SHARED_SECRET\")) for s in services.values())'"
+        cwd: .
