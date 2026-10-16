@@ -51,31 +51,37 @@ dod_evidence:
       - check_type: command
         check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import importlib.resources as r; t=r.files('omnibase_infra.configs').joinpath('pricing_manifest.yaml').read_text(); raise SystemExit('deepseek-v4' in t)"
   - id: dod-omn21147-current-inference-health
-    description: Every current inference row must declare the health path, with a nonempty candidate assertion.
+    description: Every current inference row must declare the health path, the primary model remains required, and the retired reasoning route must be absent from the catalog.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/docker/test_model_registry_health_paths.py -q --no-cov -k local_inference_models_have_health_paths
+        check_value: uv run pytest tests/unit/docker/test_model_registry_health_paths.py -q --no-cov
+      - check_type: command
+        check_value: uv run python -c "from pathlib import Path; import yaml; models=yaml.safe_load(Path('docker/catalog/model_registry.yaml').read_text())['models']; assert models; assert all(m['model_key'] != 'deepseek-r1-32b' for m in models)"
     binds_ac:
       - AC3
   - id: dod-omn21147-registry-scoring-check
-    description: Scoring reads a local candidate from the loaded registry and retains its measured-metric assertions.
+    description: Scoring reads a local candidate from the loaded registry and retains its measured-metric assertions; the production loader must no longer expose the retired reasoning route.
     source: manual
     checks:
       - check_type: command
         check_value: grep -q 'measured_model = local_coders\[0\]' tests/integration/test_model_router_registry_scoring_integration.py
       - check_type: test_passes
         check_value: uv run pytest tests/integration/test_model_router_registry_scoring_integration.py -q --no-cov
+      - check_type: command
+        check_value: uv run python -c "from omnibase_infra.services.routing_api import routes; entries=routes._load_registry(); assert entries; assert all(e.model_key != 'deepseek-r1-32b' for e in entries)"
     binds_ac:
       - AC4
   - id: dod-omn21147-live-adapter-fail-closed
-    description: The live suite requires a configured endpoint and carries no environment-gated skip.
+    description: The live suite requires a configured endpoint and carries no environment-gated skip; the retired reasoning slot releases every deployment field so the topology cannot supply its former endpoint implicitly.
     source: manual
     checks:
       - check_type: command
         check_value: python3 -c "from pathlib import Path; s=Path('tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py').read_text(); assert 'assert _ENDPOINT_HOST' in s; assert 'pytest.mark.skipif' not in s; assert 'pytest.mark.slow' in s"
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_env_gated_skip_registry_omn18781.py -q --no-cov
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/contracts/test_llm_endpoints_contract.py::TestLlmEndpointsContract::test_retired_reasoning_slot_releases_all_deployment_fields -q --no-cov
     binds_ac:
       - AC5
   - id: dod-omn21147-hosted-routing-readback
