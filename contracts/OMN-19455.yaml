@@ -61,3 +61,45 @@ dod_evidence:
     binds_ac:
       - AC1
       - AC2
+  - id: dod-omn-19455-ac1-served-model-mismatch-accepted
+    description: 'AC1 as written on the ticket. test_boot_refuses_a_backend_whose_served_model_differs renders the delegation contract with endpoint verification on (the boot path, BIFROST_VERIFY_ENDPOINTS=1 in docker/runtime-policy.env) against a real local /v1/models stub serving a different id, and asserts the refusal names the backend and its declared id. The refusal by backend name predates omnibase_infra#4277: the test also passes at its parent.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_refuses_a_backend_whose_served_model_differs -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+    ac_bindings:
+      - label: AC1
+        criterion_hash: 88db183b0efb97f3a5a624138fee3e57c1f510293ebc5318c163a5b6748de76b
+        proposed_by: lane=dod-closeout-bind-2026-10-16T2245Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-16T2245Z-c2
+  - id: dod-omn-19455-ac2-unreachable-backend-dark-accepted
+    description: 'AC2 as written on the ticket. With one backend on a closed port and a live sibling, the render completes, the closed-port backend reads dark (endpoint_url is None) and the sibling keeps its endpoint. Fails at the parent of omnibase_infra#4277, where the closed port raises ProtocolConfigurationError.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_marks_an_unreachable_backend_dark_and_continues -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+    ac_bindings:
+      - label: AC2
+        criterion_hash: 57d84610edf277c7ee9cc64782391926945483137146f810e2eea1a5462094fa
+        proposed_by: lane=dod-closeout-bind-2026-10-16T2245Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-16T2245Z-c2
+  - id: dod-omn-19455-ac3-backend-id-model-family-accepted
+    description: 'AC3 as written on the ticket. No backend id in the committed omnimarket bifrost_delegation.yaml names a model-family token, or the pro variant, that its declared model_name lacks. The as-merged test fails at the parent of omnimarket#3231 (cloud-gemini-pro declares gemini-2.5-flash). It compares with the declared model_name, not the live served id; local backends with a null model_name are not measured.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/test_backend_id_model_family_omn19455.py::test_committed_contract_has_no_misdescribing_backend_id -q --no-cov
+        cwd: ${OMNI_HOME}/omnimarket
+    binds_ac:
+      - AC3
+    ac_bindings:
+      - label: AC3
+        criterion_hash: 36d78a0d17e25718020c8578d1c4278487fbe51ded71142eb92c4d85c5a4d1be
+        proposed_by: lane=dod-closeout-bind-2026-10-16T2245Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-16T2245Z-c2
