@@ -205,7 +205,7 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
     ssh = bindir / "ssh"
     ssh.write_text('#!/usr/bin/env bash\nset -euo pipefail\nshift\nexec bash -c "$1"\n')
     rsync = bindir / "rsync"
-    rsync.write_text("#!/usr/bin/env bash\nexit 0\n")
+    rsync.write_text('#!/usr/bin/env bash\necho "RSYNC $*" >> "$FAKE_CALLS"\nexit 0\n')
     (bindir / "docker").write_text(FAKE_DOCKER)
     (bindir / "gh").write_text(FAKE_GH)
     for f in bindir.iterdir():
@@ -310,6 +310,23 @@ def test_a_real_roll_relabels_the_idle_runners_one_at_a_time_and_keeps_the_count
     assert len(registry) == 12, "no runner registered or removed"
     assert "still busy: omninode-runner-2" in result.stderr
     assert "count_before=11 count_after=11" in result.stdout
+
+
+def test_only_the_compose_declarations_are_synced(primary: World) -> None:
+    """The containers bind-mount the entrypoint and healthcheck; a relabel must
+    not replace those on a host whose image is older than the repo's copy.
+    """
+    result = primary.run("--relabel", "--only=omninode-runner-3")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    synced = " ".join(primary.lines("RSYNC"))
+    assert "docker-compose.runners.yml" in synced
+    for artifact in (
+        "entrypoint.sh",
+        "healthcheck.sh",
+        "runner-monitor.sh",
+        "Dockerfile",
+    ):
+        assert artifact not in synced
 
 
 def test_a_busy_runner_is_never_stopped(primary: World) -> None:

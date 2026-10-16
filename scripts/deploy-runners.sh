@@ -143,7 +143,9 @@
 #   UNCHANGED runner count. Works on the primary host's general pool and, with
 #   --host (and --pool), on a secondary host, where the default stand-up path
 #   deliberately never touches an online runner and --rolling is refused.
-#   1. Rsync runner artifacts (a secondary host also gets its compose file)
+#   1. Rsync the compose declarations only (never the entrypoint, healthcheck or
+#      monitor the containers bind-mount: a relabel changes the registration and
+#      nothing else)
 #   2. One uncached registry read: each runner's status and custom labels
 #   3. Per runner, one at a time, so the pool never drops by more than 1:
 #      - render its compose config; refuse unless RUNNER_LABELS carries <label>
@@ -2362,6 +2364,29 @@ relabel_one_runner() {
     return 0
 }
 
+# Sync ONLY the compose declarations that carry the label set. The full artifact
+# sync (rsync_artifacts) would also replace the entrypoint, healthcheck and
+# monitor that the runner containers bind-mount, and a host whose image is older
+# than those scripts would then recreate runners onto a newer entrypoint than
+# the image they run. A relabel changes the registration and nothing else.
+relabel_sync_compose() {
+    local files=() dir="${RUNNER_HOST_DIR}/docker"
+    if "${SECONDARY_HOST}"; then
+        files=("${REPO_ROOT}/${COMPOSE_FILE}")
+    else
+        files=("${REPO_ROOT}/docker/docker-compose.runners.yml"
+               "${REPO_ROOT}/docker/docker-compose.model-review-canary.yml"
+               "${REPO_ROOT}/docker/compose-overrides.list")
+    fi
+    log "Syncing the compose declarations only (${#files[@]} file(s)) -> ${RUNNER_HOST}:${dir}/"
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] rsync skipped; the host's rendered labels below are its pre-sync copy."
+        return 0
+    fi
+    relabel_remote "mkdir -p ${dir}"
+    rsync -av --checksum "${files[@]}" "${RUNNER_HOST}:${dir}/"
+}
+
 relabel_roll() {
     log "=== Drain-then-relabel roll: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST}, adding ${RELABEL_LABEL} ==="
     [[ "${RELABEL_LABEL}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || err "--relabel label '${RELABEL_LABEL}' is not a plain label name."
@@ -2392,7 +2417,7 @@ relabel_roll() {
     local total="${#targets[@]}"
     log "Targets (${total}): ${targets[*]}"
 
-    rsync_artifacts
+    relabel_sync_compose
 
     RELABEL_SNAPSHOT_FILE=$(mktemp)
     RELABEL_PLAN_FILE=$(mktemp)
