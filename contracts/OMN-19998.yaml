@@ -46,11 +46,21 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: an abandoned unfinished run is not listed in a later window, the newest unfinished run of a runner is still listed, a window longer than two hours lists only its last two hours and yields the CI_RUNS_TRUNCATED notice while a one-hour window yields none, and a clean census pass still exits 0 and logs the notice -- falsifier: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0 -k "abandoned or newest_unfinished or long_window or hourly_window or first_pass_after_a_boot or clean_pass" fails on the merge-base builder'
+  - id: req-omn19998-stability-follows-dev-tag
+    statement: A lab dev deploy agent whose fence admits the stability lane beside dev must keep the dev lane's own behaviour, and on its idle tick it must rebuild the stability lane, as its own job named agent/stability-follow-tag, onto the newest omnimarket dev tag once the dev lane runs that tag, so the stability lane never trails dev by more than one tag; the dev lane's env fragment must never reach a stability-lane job.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: an agent whose fence names dev and the stability lane runs one stability-lane rebuild requested by agent/stability-follow-tag when dev runs the newest tag and the stability lane does not, none while dev runs an older tag, none when the stability lane already runs it, none on a fence of dev alone or one naming prod, one attempt per tag; a stability-lane job takes no dev env fragment -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly fails against the merge-base deploy_agent'
+  - id: req-omn19998-infra-dev-merge-tag
+    statement: 'Operator RULING 2026-10-16T09:35:49Z: in the lab, tags replace releases, made automatic. omnibase_infra, a sibling omnimarket pins, tags every push to dev with a lightweight dev-<UTC YYYYMMDDHHMMSS>-<sha12> tag on the pushed commit, idempotent per commit, with no tag on any other ref, so omnimarket can pin it.'
+    acceptance:
+      - id: AC10
+        statement: 'AC10: .github/workflows/dev-merge-tag.yml triggers only on push to dev, and its tag step, run against a throwaway repository with a +05:30 committer date, pushes one lightweight tag named dev-<committer time in UTC>-<sha12> at the commit, pushes nothing on a second run or when a dev tag for that sha already exists, pushes nothing in a dry run, and refuses a value that is not a full sha -- falsifier: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py -q -n 0 fails at the merge base, where the workflow does not exist'
   - id: req-omn19998-drain-then-relabel-roll
     statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
     acceptance:
-      - id: AC9
-        statement: 'AC9: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+      - id: AC11
+        statement: 'AC11: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -74,6 +84,8 @@ evidence_requirements:
     description: The builder tests drive select_ci_runs and build_event over fixture worker runs; the census pass tests run lane-census-check.sh against a stubbed docker and broker.
     command: uv run pytest tests/unit/scripts/test_lane_container_memory_event.py -q -n 0
   - kind: tests
+    description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
     description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
     command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
 emergency_bypass:
@@ -160,12 +172,41 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
-  - id: dod-omn19998-ac9-drain-then-relabel-roll
-    description: AC9 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real.
+  - id: dod-omn19998-ac5-stability-follows-dev-tag
+    description: AC9 tests run the agent's idle tick with a dev and stability-lane fence and assert one stability-lane job named agent/stability-follow-tag per tag dev runs, and no dev fragment inside a stability-lane job.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_converge_when_checkout_moves.py scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
+  - id: dod-omn19998-infra-dev-merge-tag
+    description: The dev merge tag tests pass at the head; at the merge base the workflow file does not exist and every test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py tests/ci/test_automated_pusher_identity_omn18273.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10
+  - id: dod-omn19998-infra-dev-merge-tag-deploy-probe
+    description: Hosted-runner probe reads the dev merge tag workflow at this commit and requires its push-to-dev trigger and its tag push; the base has no such file and the probe fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/dev-merge-tag.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/branches: \[dev\]/{a=1} /git push origin "refs\/tags\//{b=1} END{exit !(a&&b)}'
+        cwd: .
+  - id: dod-omn19998-ac11-drain-then-relabel-roll
+    description: AC11 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC9
+      - AC11

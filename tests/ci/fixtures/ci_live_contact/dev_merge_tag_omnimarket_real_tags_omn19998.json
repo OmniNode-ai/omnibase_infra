@@ -1,0 +1,34 @@
+{
+  "_provenance": {
+    "source": "omnimarket dev tags created by .github/workflows/dev-merge-tag.yml (omnimarket#4013) on real dev pushes, read from the canonical omnimarket clone's refs/tags/dev-* (git tag --list, rev-parse, log --format=%cI)",
+    "captured_utc": "2026-10-16T16:26:05Z",
+    "command": "git -C <omnimarket clone> tag --list 'dev-*' --sort=-v:refname | head -5; git rev-parse refs/tags/<tag>^{commit}; git log -1 --format=%cI <commit>"
+  },
+  "tags": [
+    {
+      "tag": "dev-20261016152842-749f480bb02f",
+      "commit": "749f480bb02f5ce216ae161c4d7c99dd05738979",
+      "committer_date_iso": "2026-10-16T15:28:42+00:00"
+    },
+    {
+      "tag": "dev-20261016151117-05533eefd3fc",
+      "commit": "05533eefd3fc274a6e1d8089b23e8eff6d94c931",
+      "committer_date_iso": "2026-10-16T15:11:17+00:00"
+    },
+    {
+      "tag": "dev-20261016150643-e9ba00940ca7",
+      "commit": "e9ba00940ca7201a7a550053b31a228d396bb244",
+      "committer_date_iso": "2026-10-16T15:06:43+00:00"
+    },
+    {
+      "tag": "dev-20261016131511-c691c7523b6c",
+      "commit": "c691c7523b6ceeace95c6f410ebc34802f245898",
+      "committer_date_iso": "2026-10-16T13:15:11+00:00"
+    },
+    {
+      "tag": "dev-20261016131006-6b7db956bf39",
+      "commit": "6b7db956bf3953c83f122a76844929d5c8fcaca4",
+      "committer_date_iso": "2026-10-16T13:10:06+00:00"
+    }
+  ]
+}

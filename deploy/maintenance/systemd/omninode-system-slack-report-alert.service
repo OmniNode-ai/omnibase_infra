@@ -11,6 +11,13 @@ Documentation=https://github.com/OmniNode-ai/omnibase_infra
 
 [Service]
 Type=oneshot
+# OMN-17427: the fleet failure probe starts its scheduled-workflow sweep as a detached child
+# (start_new_session) and the next tick folds the finished report into its cache. A oneshot
+# service stops with the default KillMode=control-group, which kills every process left in the
+# cgroup the moment the main process exits, so each sweep died with an empty log from the cron
+# cutover on 2026-10-10 (OMN-20805) and every fleet finding was served "cached 9000+m ago".
+# KillMode=process signals only the main process and leaves the detached sweep to finish.
+KillMode=process
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # cron gave root jobs HOME=/root; a system service has no HOME unless it sets one, and
 # the maintenance scripts run under `set -u` (the first timer run of the alert report

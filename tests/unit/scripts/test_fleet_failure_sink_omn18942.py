@@ -832,3 +832,53 @@ echo '{"workflows": []}'
     payload = json.loads(report.read_text())
     assert "error" in payload["repos"]["OmniNode-ai/omni_home"]
     assert "error" not in payload["repos"]["OmniNode-ai/omnibase_infra"]
+
+
+# ---------------------------------------------------------------------------
+# The detached refresh must outlive a systemd oneshot service (OMN-17427)
+# ---------------------------------------------------------------------------
+#
+# OMN-20805 moved the reporter from /etc/cron.d to a oneshot service on
+# 2026-10-10. A oneshot service stops with KillMode=control-group, so
+# `start_new_session=True` no longer keeps the detached sweep alive: the whole
+# cgroup is killed when the tick's main process exits. The cache was last
+# written 2026-10-10T05:31Z and every refresh since died with an empty log,
+# which the reporter printed as "[cached 9314m ago]" on every finding.
+
+_SYSTEMD_DIR = REPO_ROOT / "deploy" / "maintenance" / "systemd"
+
+
+@pytest.mark.parametrize("mode", ["alert", "digest"])
+def test_every_unit_that_runs_the_reporter_leaves_a_detached_sweep_alive(
+    mode: str,
+) -> None:
+    unit = _SYSTEMD_DIR / f"omninode-system-slack-report-{mode}.service"
+    lines = unit.read_text().splitlines()
+    assert any(
+        line.startswith("ExecStart=") and "omninode-system-slack-report.sh" in line
+        for line in lines
+    ), f"{unit.name} no longer runs the reporter; update this test"
+    directives = [
+        line.strip()
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "KillMode=process" in directives, (
+        f"{unit.name} stops with the default KillMode=control-group, which kills "
+        "the fleet probe's detached sweep when the tick exits"
+    )
+
+
+def test_an_empty_refresh_log_names_the_likely_cause(tmp_path: Path) -> None:
+    import os
+
+    cache = tmp_path / "fleet-scheduled-sweep.json"
+    marker = cache.with_suffix(".refreshing")
+    marker.write_text("{}")
+    cache.with_suffix(".refresh.log").write_text("")
+    old = marker.stat().st_mtime - (probe_module.SWEEP_TIMEOUT_SECONDS + 60)
+    os.utime(marker, (old, old))
+    error = probe_module._harvest_refresh(cache, 5)
+    assert error is not None
+    assert "empty" in error, error
+    assert "killed" in error, error

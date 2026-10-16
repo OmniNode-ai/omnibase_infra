@@ -177,16 +177,21 @@ async def test_a_converged_lane_still_gets_read_and_still_starts(
 async def test_the_convergence_is_fenced_to_a_dev_only_agent(
     startup_seams: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An agent that also carries a governed lane starts NOTHING on its own.
+    """An agent that also carries prod starts NOTHING on its own.
 
     ``deploy-agent.service`` -- the prod-pinned sibling unit -- and any agent
-    whose fence admits ``stability-test`` must not bring containers up without
-    an accepted command. That would be a lane mutation with no attribution
-    record, which is the shape the OMN-15218 interlock exists to refuse, and a
-    recovery that had to break a deploy gate to run would be a worse defect
-    than the one it repairs.
+    whose fence admits prod must not bring containers up without an accepted
+    command. That would be a lane mutation with no attribution record, which is
+    the shape the OMN-15218 interlock exists to refuse, and a recovery that had
+    to break a deploy gate to run would be a worse defect than the one it
+    repairs. OMN-19998: a lab dev agent whose fence also admits the stability
+    lane still converges the dev lane's deps, and only the dev lane's
+    (test_a_lab_fence_converges_only_the_dev_lane).
     """
-    monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev,stability-test")
+    monkeypatch.setenv(
+        "DEPLOY_AGENT_ALLOWED_LANES",
+        f"dev,{EnumRuntimeLane.STABILITY_TEST.value},prod",
+    )
     agent = DeployAgent(skip_self_update=True)
     executor = _RecordingExecutor(startup_seams, was_down=["redpanda"])
     agent.executor = executor  # type: ignore[assignment]
@@ -196,6 +201,27 @@ async def test_the_convergence_is_fenced_to_a_dev_only_agent(
     assert executor.converge_calls == []
     assert "converge_deps" not in startup_seams
     assert "consumer_constructed" in startup_seams
+
+
+@pytest.mark.asyncio
+async def test_a_lab_fence_converges_only_the_dev_lane(
+    startup_seams: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19998: admitting the stability lane keeps the dev lane's own repair.
+
+    The startup convergence acts on the dev lane alone, so a fence that also
+    names the stability lane converges dev and never the stability lane.
+    """
+    monkeypatch.setenv(
+        "DEPLOY_AGENT_ALLOWED_LANES", f"dev,{EnumRuntimeLane.STABILITY_TEST.value}"
+    )
+    agent = DeployAgent(skip_self_update=True)
+    executor = _RecordingExecutor(startup_seams, was_down=["redpanda"])
+    vars(agent)["executor"] = executor
+
+    await _run_briefly(agent)
+
+    assert executor.converge_calls == [EnumRuntimeLane.DEV]
 
 
 @pytest.mark.asyncio
