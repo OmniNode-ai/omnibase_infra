@@ -104,6 +104,16 @@ EXEMPT: dict[str, str] = {
     "release-train-lab.yml": (
         "pushes a tag only; a tag carries no commit, so no trailer can attach to it"
     ),
+    "dev-merge-tag.yml": (
+        "Pushes a lightweight dev-<UTC>-<sha12> tag on every push to dev "
+        "(OMN-19998). It uses the workflow token on purpose: a tag pushed with "
+        "that token starts no workflow, and nothing should start from a dev-* "
+        "tag. Consumers find the tags by polling `git ls-remote`, and "
+        "`release.yml` only listens for v* tags, so the App token would add "
+        "nothing but the chance of a dev merge fanning out extra runs. "
+        "tests/ci/test_dev_merge_tag_workflow_omn19998.py pins its trigger, "
+        "name and idempotency."
+    ),
 }
 
 TRAILER_WORKFLOW = "Onex-Workflow:"
