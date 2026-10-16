@@ -88,6 +88,11 @@ requirements:
         statement: 'AC19: --test-file, --named-test and --answer-path write named_tests, named_tests_answer_path and named_tests_files into the request payload the run is handed, and a partial or unsafe naming is a usage error -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"'
       - id: AC20
         statement: 'AC20: a run that resolves to the deployed lane is handed its named tests like an in-process run, and the deployed dispatch port publishes them inline on the bus command and refuses, before publication, a spec that points at a caller workspace or carries no test sources -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"'
+  - id: req-omn17427-fleet-sweep-survives-oneshot
+    statement: The fleet probe's detached scheduled-workflow sweep outlives the systemd oneshot tick of every unit that runs the Slack reporter, and an empty refresh log names the likely cause.
+    acceptance:
+      - id: AC21
+        statement: 'AC21: the alert and digest units that run omninode-system-slack-report.sh declare KillMode=process, and the probe no-report message says the refresh log is empty and the sweep was killed -- falsifier: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -149,6 +154,9 @@ evidence_requirements:
   - kind: tests
     description: A named-test run that reaches the deployed lane carries its tests inline on the bus command, and a spec the lane cannot run is refused before publication.
     command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"
+  - kind: tests
+    description: The reporter's units keep the detached sweep alive and an empty refresh log names the kill.
+    command: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -377,3 +385,12 @@ dod_evidence:
       - check_type: command
         check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac21
+    description: The alert and digest reporter units declare KillMode=process, and an empty refresh log is reported as a killed sweep.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC21
