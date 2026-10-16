@@ -75,9 +75,14 @@ FAKE_DOCKER = textwrap.dedent(
             print("health:" + c["health"])
     elif args[0] == "top":
         name = args[1]
+        c = state["containers"][name]
+        c["top_calls"] = c.get("top_calls", 0) + 1
+        if c.get("busy_on_top_call") == c["top_calls"]:
+            c["busy"] = True
+        save()
         print("UID PID PPID CMD")
         print("1 1 0 Runner.Listener run")
-        if state["containers"][name]["busy"]:
+        if c["busy"]:
             print("1 2 1 Runner.Worker spawnclient 1 2")
     elif args[0] == "compose":
         verb_at = next(i for i, a in enumerate(args) if a in ("config", "stop", "up"))
@@ -335,6 +340,21 @@ def test_a_minted_token_never_reaches_output(primary: World) -> None:
     assert primary.lines("GH_POST") == ["GH_POST"]
     assert primary.lines("TOKEN_SEEN") == [f"TOKEN_SEEN {MINTED}"]
     assert MINTED not in result.stdout and MINTED not in result.stderr
+
+
+def test_a_job_that_lands_between_the_idle_read_and_the_stop_wins(
+    primary: World,
+) -> None:
+    """The idle check is repeated on the host immediately before the stop. A
+    runner that takes a job in that window must be left running.
+    """
+    primary.mutate("omninode-runner-3", busy_on_top_call=2)
+    result = primary.run("--relabel", "--drain-timeout=1")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "omninode-runner-3" not in " ".join(primary.lines("STOP"))
+    assert "omninode-runner-3" not in " ".join(primary.lines("UP"))
+    assert "still busy: omninode-runner-3" in result.stderr
+    assert len(primary.lines("UP")) == 9
 
 
 def test_a_runner_that_does_not_return_halts_the_roll(primary: World) -> None:
