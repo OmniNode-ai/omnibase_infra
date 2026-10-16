@@ -24,13 +24,13 @@ WHERE newer.repo = older.repo
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint c
+        SELECT 1 FROM pg_catalog.pg_constraint c
         WHERE c.conrelid = 'pr_merged_events'::regclass
           AND c.contype IN ('p', 'u')
           AND (
               SELECT array_agg(a.attname::text ORDER BY a.attname)
               FROM unnest(c.conkey) AS k(attnum)
-              JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
           ) = ARRAY['pr_number', 'repo']::text[]
     ) THEN
         ALTER TABLE pr_merged_events
