@@ -328,7 +328,9 @@ seed_workspace_from_mirror() {
 # path it uses today. The check is deliberately conservative: it matches
 # advertised refs only, so a pinned commit that is real but not a ref tip is
 # treated as a miss and simply forgoes the speedup.
-_C2B_REWRITE_REPOS="${OMNI_GIT_MIRROR_REWRITE_REPOS:-onex_change_control}"
+# The default is empty because the change-control repository is retired.
+# Operators opt a repo in through OMNI_GIT_MIRROR_REWRITE_REPOS.
+_C2B_REWRITE_REPOS="${OMNI_GIT_MIRROR_REWRITE_REPOS:-}"
 
 # ---------------------------------------------------------------------------
 # Shared job git-config accumulator (C2b + C2c + OMN-20598 stall bound)

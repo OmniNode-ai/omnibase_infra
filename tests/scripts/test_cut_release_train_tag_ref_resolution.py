@@ -61,7 +61,7 @@ def _manifest_array(name: str) -> tuple[str, ...]:
 
 # OMN-19072: the release-train tag covers the same set as cut-lab-ref.sh -- every
 # clone the pin preflight reads plus the declared tag-only extras -- resolved
-# from the manifest. All six are provisioned below, so the execute-mode
+# from the manifest. All are provisioned below, so the execute-mode
 # ensure_runner_clones.sh call finds every manifest clone and never reaches the
 # network for a missing one.
 TAG_REPOS = (
