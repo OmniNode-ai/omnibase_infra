@@ -180,7 +180,10 @@ def _read_bash_array(
         raise UsageError(f"array {name} not found in {path}")
     body = "\n".join(line.split("#", 1)[0] for line in match.group(1).splitlines())
     words = [w.strip("\"'") for w in body.split()]
-    if not words:
+    # Only the array asked for directly must be non-empty: an empty one there is
+    # a parse that found nothing. One reached through ``${OTHER[@]}`` may be
+    # empty (SIBLING_EXTRA_TRACKED_REPOS, OMN-17427) and adds no repository.
+    if not words and not _seen:
         raise UsageError(f"array {name} in {path} is empty")
     if name in _seen:
         raise UsageError(f"array {name} in {path} references itself")

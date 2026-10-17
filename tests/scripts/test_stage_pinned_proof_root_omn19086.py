@@ -154,10 +154,10 @@ def test_the_script_parses_as_python_3_9() -> None:
 
 
 def test_required_set_is_read_from_the_owning_scripts() -> None:
-    # spi is the repo that goes missing (OMN-15137) and the change-control repo is
-    # the one only the hot-patch entrypoint names; both must be required.
+    # spi is the repo that goes missing (OMN-15137); the change-control repo left
+    # the lab tag set with its retirement (OMN-17427).
     assert "omnibase_spi" in REPOS
-    assert "onex_change_control" in REPOS
+    assert "onex_change_control" not in REPOS
     assert "omnibase_infra" in REPOS
     assert len(REPOS) == len(set(REPOS))
 
@@ -459,3 +459,21 @@ def test_cut_lab_ref_refuses_a_ref_build_from_a_proof_root(tmp_path: Path) -> No
         assert result.returncode == 1, (lane, result.stderr)
         assert "builds with --hotpatch only" in result.stderr
         assert "deploy command" not in result.stderr
+
+
+def test_a_referenced_empty_array_resolves_and_a_top_level_empty_one_refuses(
+    tmp_path: Path,
+) -> None:
+    """OMN-17427: SIBLING_EXTRA_TRACKED_REPOS is empty once onex_change_control
+    left the lab tag set. An empty array reached through ``${OTHER[@]}`` adds no
+    repository; an empty array read directly still refuses, because that is
+    what a parse that found nothing looks like."""
+    manifest = tmp_path / "manifest.sh"
+    manifest.write_text(
+        'EXTRA=()\nBASE=(\n    "omnibase_core"\n)\n'
+        'TAGS=(\n    "${BASE[@]}"\n    "${EXTRA[@]}"\n)\n',
+        encoding="utf-8",
+    )
+    assert MOD._read_bash_array(manifest, "TAGS") == ["omnibase_core"]
+    with pytest.raises(MOD.UsageError, match=r"EXTRA .* is empty"):
+        MOD._read_bash_array(manifest, "EXTRA")

@@ -98,6 +98,11 @@ requirements:
     acceptance:
       - id: AC22
         statement: 'AC22: LIVE_WINDOW_SQL walks the distinct groups with a recursive loose index scan and bounds each group on window_end and window_start, the node and script carry the same SQL, and live_groups runs it in omnibase-infra-postgres -- falsifier: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q'
+  - id: req-omn17427-fleet-lists-off-occ
+    statement: omnibase_infra's fleet tooling repo lists and defaults (pull-all, merge sweep, merge-method and merge-queue audits, runner git mirror and uv rewrite default, lab tracked extras, enforcement parity manifest, version matrix) no longer name onex_change_control.
+    acceptance:
+      - id: AC23
+        statement: 'AC23: none of the nine fleet repo lists or defaults names onex_change_control, and the runner uv mirror rewrite default (OMNI_GIT_MIRROR_REWRITE_REPOS unset) is empty -- falsifier: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -165,6 +170,9 @@ evidence_requirements:
   - kind: tests
     description: The C28 live-groups read uses the index-backed SQL in the node and the script.
     command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
+  - kind: tests
+    description: The fleet tooling repo lists and defaults omit onex_change_control.
+    command: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -423,3 +431,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC22
+  - id: dod-omn-17427-ac23
+    description: The fleet tooling repo lists and defaults no longer name onex_change_control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC23
