@@ -118,7 +118,19 @@ requirements:
     acceptance:
       - id: AC26
         statement: 'AC26: dev-tag-heartbeat, dev-lane-drift and the deploy-command DLQ are declared in src/omnibase_infra/services/topics.yaml and every TOPIC_* constant in deploy_agent.events is declared for provisioning -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q'
+  - id: req-omn17427-core-pin-compat
+    statement: The recorded downstream omnibase-core floor is checked against both the repository override and its resolved lock version, with the incident pair and a compatible pair as controls.
+    acceptance:
+      - id: AC27
+        statement: 'AC27: the recorded omnimarket v0.4.316 floor of 0.47.46 is refused against the recorded 44542e2a0 pin of 0.47.44, and the recorded lock agrees with that pin -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k recorded_incident'
+      - id: AC28
+        statement: 'AC28: downstream floors equal to or older than the pin are accepted -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k equal_or_older'
+      - id: AC29
+        statement: 'AC29: the current override and resolved lock meet every recorded downstream floor and agree with each other -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"'
 evidence_requirements:
+  - kind: tests
+    description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
     command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q -k seam_dlq
@@ -199,6 +211,40 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-core-pin-incident
+    description: The recorded incident pair is refused and its recorded lock agrees with its pin.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k recorded_incident
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC27
+  - id: dod-omn-17427-core-pin-compatible-control
+    description: Equal and older downstream floors are accepted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k equal_or_older
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC28
+  - id: dod-omn-17427-core-pin-current
+    description: The current override and resolved lock meet every recorded downstream floor and agree with each other.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC29
+  - id: dod-omn-17427-core-pin-deploy-artifact
+    description: Hosted-runner deploy artifact check -- the override and lock used to build the runtime agree and satisfy the recorded downstream floor. Reads repository build inputs without containers or credentials; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac1
     description: The node collector counts the marker on the seam DLQ when the generic DLQ also advances.
     source: manual
