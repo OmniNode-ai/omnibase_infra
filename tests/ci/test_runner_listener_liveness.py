@@ -1602,8 +1602,8 @@ class TestComposeHealthcheckWiring:
 
     def test_compose_healthcheck_invokes_script(self) -> None:
         content = COMPOSE.read_text(encoding="utf-8")
-        assert "/usr/local/bin/healthcheck.sh" in content
-        assert "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro" in content
+        assert "/opt/onex-runner-hooks/healthcheck.sh" in content
+        assert "./runners:/opt/onex-runner-hooks:ro" in content
 
     def test_compose_documents_recreate_requirement(self) -> None:
         """Root cause: healthcheck DEFINITION is frozen at container creation.
