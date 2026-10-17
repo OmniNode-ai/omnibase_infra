@@ -15,7 +15,6 @@ REPOS=(
   omniintelligence
   omnimemory
   omnimarket
-  onex_change_control
 )
 
 ORG="OmniNode-ai"

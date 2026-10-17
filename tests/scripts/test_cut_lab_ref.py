@@ -220,12 +220,12 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     # redeploy overwrites rather than tripping the version-directory guard.
     assert "--force" in result.stderr
 
-    # OMN-19072 AC-2: the tag set is the manifest's clones plus the change-control
-    # repo. Before the fix cut-lab-ref.sh kept its own list and left
+    # OMN-19072 AC-2: the tag set covers the manifest's clones.
+    # Before the fix cut-lab-ref.sh kept its own list and left
     # omnibase_spi, a repo the pin preflight reads, untagged.
     assert "omnibase_spi" in LAB_REF_REPOS
-    assert "onex_change_control" in LAB_REF_REPOS
-    assert len(LAB_REF_REPOS) == 6
+    assert "onex_change_control" not in LAB_REF_REPOS
+    assert len(LAB_REF_REPOS) == 5
     # A lab tag lab/dev/<utc>-<shortsha> was cut in every sibling clone at its dev SHA.
     tag_re = re.compile(r"^lab/dev/\d{8}T\d{6}Z-[0-9a-f]{12}$")
     for repo in LAB_REF_REPOS:

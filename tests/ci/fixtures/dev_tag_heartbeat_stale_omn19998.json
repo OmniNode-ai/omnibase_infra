@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "synthetic fixture shaped like GET /dev-tag-heartbeat (scripts/deploy-agent/deploy_agent/health.py, ModelDevTagHeartbeat); omnimarket is the one repository in tracking_ref.DEV_TAG_FOLLOWED_REPOSITORIES; observed_at is read against the fixed now of the test, 2026-10-17T02:00:00Z"
+  },
+  "heartbeat": {
+    "omnimarket": {
+      "instance": "dev",
+      "repository": "omnimarket",
+      "runtime_container": "omninode-runtime",
+      "running_ref": "0123456789abcdef0123456789abcdef01234567",
+      "newest_tag": "dev-20261017014500-0123456789ab",
+      "newest_tag_sha": "0123456789abcdef0123456789abcdef01234567",
+      "newest_tag_cut_at": "2026-10-17T01:45:00Z",
+      "behind_since": null,
+      "observed_at": "2026-10-16T22:10:00Z",
+      "lag_seconds": 0,
+      "alarm_after_seconds": 7200,
+      "alarm": false
+    }
+  }
+}

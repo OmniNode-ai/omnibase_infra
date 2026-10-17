@@ -113,8 +113,21 @@ _DSN = re.compile(
 )
 
 
-def _container_prefixes(policy: SlotPolicy) -> str:
-    return f"-prepr-{policy.slot}-"
+def _container_marker(policy: SlotPolicy) -> str:
+    return f"-prepr-{policy.slot}"
+
+
+def carries_slot_marker(container: str, policy: SlotPolicy) -> bool:
+    """Whether ``container`` names this slot, as ``<name>-prepr-<slot>[-<suffix>]``.
+
+    The slot number must be followed by a dash or the end of the name. A bare
+    plain substring test would also pass a higher slot's containers, and
+    requiring a trailing dash would refuse the gateway, whose name
+    (``onex-api-prepr-<slot>``) ends at the slot number and is the name every
+    other reader of the slot already uses (OMN-19972).
+    """
+    marker = _container_marker(policy)
+    return container.endswith(marker) or f"{marker}-" in container
 
 
 def check(
@@ -147,10 +160,11 @@ def check(
         where = f"service '{name}'"
 
         container = svc.get("container_name") or ""
-        if _container_prefixes(policy) not in container:
+        if not carries_slot_marker(container, policy):
             problems.append(
                 f"{where}: container_name '{container}' does not carry "
-                f"'{_container_prefixes(policy)}'. An unslotted container name "
+                f"'{_container_marker(policy)}' as a whole dash-delimited "
+                f"segment. An unslotted container name "
                 f"collides with the dev lane's own container."
             )
 

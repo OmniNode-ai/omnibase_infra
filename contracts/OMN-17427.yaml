@@ -93,6 +93,26 @@ requirements:
     acceptance:
       - id: AC21
         statement: 'AC21: the alert and digest units that run omninode-system-slack-report.sh declare KillMode=process, and the probe no-report message says the refresh log is empty and the sweep was killed -- falsifier: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"'
+  - id: req-omn17427-c28-live-groups-index
+    statement: The C28 live-groups read stays on the (consumer_group, window_end) index of omninode_internal.consumer_flow_windows instead of a whole-table scan, in the node and the script collector alike.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: LIVE_WINDOW_SQL walks the distinct groups with a recursive loose index scan and bounds each group on window_end and window_start, the node and script carry the same SQL, and live_groups runs it in omnibase-infra-postgres -- falsifier: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q'
+  - id: req-omn17427-fleet-lists-off-occ
+    statement: omnibase_infra's fleet tooling repo lists and defaults (pull-all, merge sweep, merge-method and merge-queue audits, runner git mirror and uv rewrite default, lab tracked extras, enforcement parity manifest, version matrix) no longer name onex_change_control.
+    acceptance:
+      - id: AC23
+        statement: 'AC23: none of the nine fleet repo lists or defaults names onex_change_control, and the runner uv mirror rewrite default (OMNI_GIT_MIRROR_REWRITE_REPOS unset) is empty -- falsifier: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q'
+  - id: req-omn17427-rerun-scans-off-occ
+    statement: The broker-wedge rerun scan (script default and workflow list) and the infra-signature rerun default scan (now the merge-sweep registry) no longer name onex_change_control.
+    acceptance:
+      - id: AC24
+        statement: 'AC24: the wedge rerun script default and workflow REPOS_CSV are equal and omit onex_change_control, and the infra-signature default scan is the merge-sweep registry, which omits it -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"'
+  - id: req-omn17427-probe-hygiene-off-occ
+    statement: The scheduled in-progress probe hygiene sweep reads each fleet repository's own contracts/ directory instead of an onex_change_control checkout.
+    acceptance:
+      - id: AC25
+        statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -157,6 +177,18 @@ evidence_requirements:
   - kind: tests
     description: The reporter's units keep the detached sweep alive and an empty refresh log names the kill.
     command: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"
+  - kind: tests
+    description: The C28 live-groups read uses the index-backed SQL in the node and the script.
+    command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
+  - kind: tests
+    description: The fleet tooling repo lists and defaults omit onex_change_control.
+    command: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q
+  - kind: tests
+    description: The rerun scans' default repo lists omit onex_change_control.
+    command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"
+  - kind: tests
+    description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
+    command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -394,3 +426,69 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC21
+  - id: dod-omn-17427-ac22
+    description: The C28 live-groups read walks the (consumer_group, window_end) index instead of scanning consumer_flow_windows, with one SQL shared by the node and the script collector.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn-17427-ac22-deploy-collectors
+    description: Hosted-runner collector smoke -- both C28 collectors send the recorded index-backed SQL to psql and return the same 533 groups as the recorded whole-table read. Replays real PostgreSQL stdout without a deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn-17427-ac23
+    description: The fleet tooling repo lists and defaults no longer name onex_change_control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC23
+  - id: dod-omn-17427-ac24
+    description: The rerun scans' default repo lists no longer name onex_change_control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC24
+  - id: dod-omn-17427-ac24-deploy-scans
+    description: Hosted-runner scan smoke -- the infra-signature script runs in dry-run mode with a stand-in gh and scans the canonical registry, while the wedge script and workflow defaults match and omit the retired repository. No deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC24
+  - id: dod-omn-17427-ac25
+    description: The probe hygiene sweep reads per-repository contract roots and no workflow, mapping or node contract names a change-control checkout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC25
+  - id: dod-omn-17427-ac25-deploy-probe-hygiene
+    description: Hosted-runner smoke -- the contract-root reader finds a contract in a later root, sums checks across roots and reports an unreadable root as unknown, with no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC25

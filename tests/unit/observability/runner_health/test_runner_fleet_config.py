@@ -250,7 +250,7 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
     assert config.git_mirror.port == 9418
     assert config.git_mirror.serialized is True
     assert config.git_mirror.refresh_interval_seconds == 120
-    assert "onex_change_control" in config.git_mirror.repos
+    assert "onex_change_control" not in config.git_mirror.repos
     assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
 
 
@@ -272,7 +272,6 @@ def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
 
     assert config.git_mirror is not None
     assert set(config.git_mirror.repos) == {
-        "onex_change_control",
         "omnibase_infra",
         "omninode_infra",
         "omnibase_core",
@@ -518,9 +517,9 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
     )
 
     base_test = compose["x-runner-base"]["healthcheck"]["test"]
-    assert base_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+    assert base_test == ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
 
-    hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
+    hc_mount = "./runners:/opt/onex-runner-hooks:ro"
     for name, definition in compose["services"].items():
         if not re.fullmatch(r"omninode-runner-\d+", name):
             continue
@@ -529,7 +528,7 @@ def test_runner_compose_healthcheck_uses_egress_script() -> None:
         assert hc_mount in definition["volumes"], f"{name} missing healthcheck mount"
         # No runner may regress to the bare pgrep-only healthcheck.
         resolved_test = definition.get("healthcheck", {}).get("test", base_test)
-        assert resolved_test == ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+        assert resolved_test == ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
 
 
 def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
@@ -550,7 +549,7 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
     registered runner count is what sets the worst-case concurrent-job
     ceiling on a fixed-core box.
     """
-    hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
+    hc_mount = "./runners:/opt/onex-runner-hooks:ro"
     total = 0
     for filename, prefix, volume_prefix, count in (
         ("docker-compose.runners.yml", "omninode-runner", "runner", 10),

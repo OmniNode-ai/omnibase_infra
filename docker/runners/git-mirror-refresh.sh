@@ -35,7 +35,6 @@ FETCH_TIMEOUT_SECONDS="${OMNI_GIT_MIRROR_FETCH_TIMEOUT:-600}"
 # is the only change needed to mirror it -- the runner-side pre-seed keys off
 # GITHUB_REPOSITORY and silently no-ops for repos that have no mirror.
 MIRROR_REPOS=(
-    onex_change_control
     omnibase_infra
     # OMN-19895: .201 had carried this entry as an undeclared hand edit since
     # 2026-09-19; declared here so a fleet rsync keeps the mirror refreshed.

@@ -10,6 +10,8 @@
 #   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N] [--only=NAME]]
 #   ./scripts/deploy-runners.sh --add=<service>[,<service>...] [--dry-run] [--skip-build]
 #   ./scripts/deploy-runners.sh --retire-surplus [--dry-run]
+#   ./scripts/deploy-runners.sh --relabel[=<label>] [--host=<declared host> [--pool=<pool prefix>]]
+#                               [--limit=N] [--only=NAME] [--drain-timeout=SECONDS] [--dry-run]
 #   ./scripts/deploy-runners.sh --host=<declared host> [--pool=<pool prefix>] [--limit=N] [--dry-run] [--skip-build]
 #
 # --host=<non-primary host> mode (OMN-19895, secondary-host stand-up):
@@ -134,6 +136,36 @@
 #   Refuses: running when the compose file and config disagree (fleet_services
 #   fails closed), and combining with --soft, --rolling or --add.
 #   A runner busy through every retry pass is reported and left running; rerun.
+#
+# --relabel[=<label>] mode (OMN-19998, drain-then-relabel roll, any declared host):
+#   Re-registers an ALREADY ONLINE pool with the label set its compose file now
+#   renders, which carries <label> (default omnibase-ci-multiarch), at an
+#   UNCHANGED runner count. Works on the primary host's general pool and, with
+#   --host (and --pool), on a secondary host, where the default stand-up path
+#   deliberately never touches an online runner and --rolling is refused.
+#   1. Rsync the compose declarations only (never the entrypoint, healthcheck or
+#      monitor the containers bind-mount: a relabel changes the registration and
+#      nothing else)
+#   2. One uncached registry read: each runner's status and custom labels
+#   3. Per runner, one at a time, so the pool never drops by more than 1:
+#      - render its compose config; refuse unless RUNNER_LABELS carries <label>
+#        and keeps every custom label the registry shows today (additive only)
+#      - skip it when it is already online with <label>
+#      - DRAIN: wait until it is idle, judged from the container itself
+#        (running, and `docker top` shows no Runner.Worker). No per-runner
+#        registry read, so the poll costs no API quota; a runner busy this pass
+#        is revisited, and the others are not held up behind it
+#      - re-check idle, stop it, mint (or take the supplied) registration token,
+#        recreate it so it re-registers under the new label set, wait until the
+#        container is healthy
+#   4. Readback: the pool's registered count equals the count before, every
+#      target is online and carries <label>
+#   A runner that does not come back healthy HALTS the roll. Registry reads are
+#   capped by RELABEL_API_READ_BUDGET per invocation (default 10). A token comes
+#   from DEPLOY_RUNNER_TOKEN or --token-file when given, else one is minted per
+#   runner just before its recreate; it reaches the host on stdin, never argv,
+#   and is never logged. --dry-run runs every read-only probe and the registry
+#   read, mints nothing and changes nothing.
 #
 # Requirements:
 #   - gh CLI authenticated with org admin scope
@@ -428,6 +460,12 @@ TARGET_POOL=""
 SECONDARY_HOST=false
 # OMN-19895: the slice unit a pool declares, when it has one.
 POOL_SLICE_SOURCE=""
+# OMN-19998: drain-then-relabel roll. Empty RELABEL_LABEL means the mode is off.
+RELABEL_ROLL=false
+RELABEL_LABEL=""
+RELABEL_DEFAULT_LABEL="omnibase-ci-multiarch"
+# Total time the roll waits for busy runners to go idle before it reports them.
+RELABEL_DRAIN_TIMEOUT_SECONDS="${RELABEL_DRAIN_TIMEOUT_SECONDS:-1800}"
 # An operator-supplied file is an alternative to DEPLOY_RUNNER_TOKEN.
 # This script only reads it; it never obtains or persists a registration token.
 TOKEN_FILE=""
@@ -439,6 +477,9 @@ for arg in "$@"; do
         --soft)       SOFT_DEPLOY=true ;;
         --rolling)    ROLLING_DEPLOY=true ;;
         --retire-surplus) RETIRE_SURPLUS=true ;;
+        --relabel)    RELABEL_ROLL=true; RELABEL_LABEL="${RELABEL_DEFAULT_LABEL}" ;;
+        --relabel=*)  RELABEL_ROLL=true; RELABEL_LABEL="${arg#*=}" ;;
+        --drain-timeout=*) RELABEL_DRAIN_TIMEOUT_SECONDS="${arg#*=}" ;;
         --limit=*)    ROLL_LIMIT="${arg#*=}" ;;
         --only=*)     ROLL_ONLY="${arg#*=}" ;;
         --token-file=*) TOKEN_FILE="${arg#*=}" ;;
@@ -475,6 +516,13 @@ for arg in "$@"; do
             echo "                idle-checked, stopped and removed one at a time (its"
             echo "                creds volume is kept), then its GitHub registration"
             echo "                is deleted once it reads offline."
+            echo "  --relabel[=LABEL]  Drain-then-relabel roll: re-register the ONLINE"
+            echo "                pool with the label set its compose file renders (which"
+            echo "                must carry LABEL, default ${RELABEL_DEFAULT_LABEL}), one"
+            echo "                runner at a time, each only once idle, count unchanged."
+            echo "                Works on the primary host and with --host/--pool."
+            echo "  --drain-timeout=SECONDS  With --relabel: how long to wait for busy"
+            echo "                runners to go idle (default 1800)."
             echo "  --host=NAME   Target one declared host from config/runner_fleet.yaml's"
             echo "                hosts: inventory. Default: the primary host, which is"
             echo "                what every invocation meant before the fleet had more"
@@ -538,7 +586,8 @@ if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "${RUNNER_HOST}" ]]; then
     # the same path on a Linux host and a macOS host. Resolve it rather than
     # assuming, and fail if it cannot be resolved -- a wrong path here rsyncs
     # the fleet's artifacts into a directory nothing reads.
-    if ! "${DRY_RUN}"; then
+    # --relabel probes the host even under --dry-run, so it needs the real path.
+    if ! "${DRY_RUN}" || "${RELABEL_ROLL}"; then
         remote_home="$(ssh "${RUNNER_HOST}" 'printf %s "$HOME"')" || {
             echo "[deploy-runners] ERROR: cannot resolve \$HOME on ${RUNNER_HOST}" >&2
             exit 1
@@ -2069,6 +2118,426 @@ secondary_deploy() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Drain-then-relabel roll (OMN-19998)
+# ---------------------------------------------------------------------------
+# WHY A FIFTH MODE. The opt-in label omnibase-ci-multiarch is rendered into the
+# amd64 pools' compose files, but a label reaches a LIVE runner only through a
+# re-registration, and no existing path does that for an online runner:
+# --rolling is written against the primary compose file and reads busy through
+# the org registry (a cached registry read made every runner read "busy or
+# unknown", so a roll touched 0 of 10), and the secondary stand-up path never
+# touches an online runner at all, by design. This mode drains each runner on
+# the container's own signal, re-registers it, and reads the pool back, on the
+# primary host and on any --host/--pool.
+#
+# ONE RUNNER AT A TIME: the pool never drops by more than one. A runner busy on
+# this pass is revisited, not waited on, so one long job does not hold up the
+# rest; the roll ends when every target is done or RELABEL_DRAIN_TIMEOUT_SECONDS
+# have passed. A runner that does not come back healthy HALTS the roll.
+#
+# REGISTRY READS ARE SCARCE. Idleness is judged from the container
+# (docker inspect + docker top), never from the registry, so a drain poll costs
+# no API quota. The registry is read uncached once before the roll and a few
+# times after it; every read is counted against RELABEL_API_READ_BUDGET.
+#
+# THE TOKEN never touches argv, a file or a log: a supplied token is read from
+# DEPLOY_RUNNER_TOKEN / --token-file, otherwise one is minted just before each
+# runner's recreate, and either way it reaches the host on ssh stdin.
+RELABEL_API_READ_BUDGET="${RELABEL_API_READ_BUDGET:-10}"
+RELABEL_API_READS=0
+RELABEL_DRAIN_INTERVAL_SECONDS="${RELABEL_DRAIN_INTERVAL_SECONDS:-5}"
+RELABEL_READBACK_POLLS="${RELABEL_READBACK_POLLS:-4}"
+RELABEL_READBACK_INTERVAL_SECONDS="${RELABEL_READBACK_INTERVAL_SECONDS:-20}"
+RELABEL_SNAPSHOT_FILE=""
+RELABEL_PLAN_FILE=""
+
+# Read-only remote probe. Runs for real under --dry-run, as --rolling's busy
+# probes do: a dry run is how an operator sees which runners are executing jobs.
+relabel_remote() {
+    local preamble=""
+    if "${SECONDARY_HOST}"; then
+        preamble="${SECONDARY_PATH_PREAMBLE} "
+    fi
+    ssh "${RUNNER_HOST}" "${preamble}$1" </dev/null
+}
+
+relabel_compose_cmd() {
+    if "${SECONDARY_HOST}"; then
+        echo "docker compose -p ${RUNNER_NAME_PREFIX} -f ${RUNNER_HOST_DIR}/${COMPOSE_FILE}"
+    else
+        # The primary file plus every override docker/compose-overrides.list
+        # names (read on the host, the way runner-monitor.sh layers them), so a
+        # recreate keeps a deliberate canary wiring instead of stripping it.
+        local dir="${RUNNER_HOST_DIR}/docker"
+        echo "docker compose -f ${dir}/docker-compose.runners.yml \$(grep -vE '^[[:space:]]*(#|\$)' ${dir}/compose-overrides.list 2>/dev/null | while read -r f; do case \"\$f\" in /*) p=\"\$f\" ;; *) p=\"${dir}/\$f\" ;; esac; [ -f \"\$p\" ] && printf -- '-f %s ' \"\$p\"; done)"
+    fi
+}
+
+# The compose variables the file reads a registration token from.
+relabel_token_vars() {
+    if "${SECONDARY_HOST}"; then
+        secondary_token_vars
+    else
+        echo "RUNNER_TOKEN"
+    fi
+}
+
+# The pool's runners in order, one per line. Never truncated by --limit: here
+# --limit counts runners relabelled, not runners considered.
+relabel_targets() {
+    local i
+    if "${SECONDARY_HOST}"; then
+        for i in $(seq 1 "${RUNNER_COUNT}"); do
+            echo "${RUNNER_NAME_PREFIX}-${i}"
+        done
+    else
+        fleet_services
+    fi
+}
+
+# One uncached, counted registry read into ${RELABEL_SNAPSHOT_FILE}:
+#   <name> TAB <status> TAB <busy> TAB <custom labels, lowercase, comma-joined>
+# Callers must not run this in a command substitution: the read counter lives
+# in this shell.
+relabel_registry_snapshot() {
+    local page=1 body rows
+    : > "${RELABEL_SNAPSHOT_FILE}"
+    while true; do
+        RELABEL_API_READS=$((RELABEL_API_READS + 1))
+        if [[ "${RELABEL_API_READS}" -gt "${RELABEL_API_READ_BUDGET}" ]]; then
+            warn "registry read budget (${RELABEL_API_READ_BUDGET}) exhausted; refusing another read."
+            return 1
+        fi
+        body=$(gh api -H 'Cache-Control: no-cache' \
+            "/orgs/${RUNNER_ORG}/actions/runners?per_page=100&page=${page}&nocache=$(date +%s)") || return 1
+        rows=$(printf '%s' "${body}" | jq -r '
+            .runners[] | [.name, .status, (.busy | tostring),
+              ([.labels[] | select(.type == "custom") | .name | ascii_downcase] | join(","))] | @tsv') || return 1
+        [[ -z "${rows}" ]] || printf '%s\n' "${rows}" >> "${RELABEL_SNAPSHOT_FILE}"
+        [[ "$(printf '%s' "${body}" | jq '.runners | length')" -ge 100 ]] || break
+        page=$((page + 1))
+    done
+}
+
+# "<status> <labels>" for one runner from the last snapshot, or "absent -".
+relabel_snapshot_row() {
+    awk -F'\t' -v n="${1}" '$1 == n { print $2, ($4 == "" ? "-" : $4); found = 1; exit } END { if (!found) print "absent -" }' \
+        "${RELABEL_SNAPSHOT_FILE}"
+}
+
+# Registered runners of this pool, by exact `<prefix>-<N>` name.
+relabel_pool_count() {
+    awk -F'\t' -v p="^${RUNNER_NAME_PREFIX}-[0-9]+$" '$1 ~ p { c++ } END { print c + 0 }' "${RELABEL_SNAPSHOT_FILE}"
+}
+
+# The RUNNER_LABELS the host's compose renders for one service, or nothing.
+relabel_rendered_labels() {
+    local name="${1}" v exports=""
+    for v in $(relabel_token_vars); do
+        exports="${exports} export ${v}=preflight;"
+    done
+    relabel_remote "${exports} $(relabel_compose_cmd) config ${name} 2>/dev/null" |
+        awk -F': ' '/^[[:space:]]*RUNNER_LABELS:/ { gsub(/["[:space:]]/, "", $2); print tolower($2); exit }'
+}
+
+# The runner listener's own record of its last job: "Running job:" with no later
+# "completed with result" means a job is in hand, even in the moment before its
+# Runner.Worker process appears. Prints "busy" or "free"; shell text, so it can
+# run on the host both as a probe and inside the stop sequence.
+relabel_job_log_probe() {
+    printf '%s' "case \"\$(docker logs --tail 200 ${1} 2>&1 | grep -E 'Running job:|completed with result' | tail -1 || true)\" in *'Running job:'*) echo busy ;; *) echo free ;; esac"
+}
+
+# Idle on the container's own evidence. 0 = idle; anything unreadable is NOT
+# idle. A container that is not running cannot be mid-job.
+relabel_container_idle() {
+    local name="${1}" running workers joblog
+    running=$(relabel_remote "docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null") || running=""
+    running="${running//[$'\r\n ']/}"
+    [[ "${running}" == "false" ]] && return 0
+    [[ "${running}" == "true" ]] || return 1
+    workers=$(relabel_remote "if t=\$(docker top ${name} 2>/dev/null); then printf '%s\n' \"\$t\" | grep -c 'Runner.Worker' || true; else echo TOPFAIL; fi") || return 1
+    workers="${workers//[$'\r\n ']/}"
+    [[ "${workers}" == "0" ]] || return 1
+    joblog=$(relabel_remote "$(relabel_job_log_probe "${name}")") || return 1
+    joblog="${joblog//[$'\r\n ']/}"
+    [[ "${joblog}" == "free" ]]
+}
+
+relabel_wait_healthy() {
+    local name="${1}" elapsed=0 state
+    # Read before the first sleep, so a runner that is already healthy costs
+    # no wait; the loop still gives up after ROLL_ONLINE_MAX_SECONDS.
+    while true; do
+        state=$(relabel_remote "docker inspect --format '{{if .State.Health}}health:{{.State.Health.Status}}{{else}}state:{{.State.Status}}{{end}}' ${name} 2>/dev/null") || state=""
+        state="${state//[$'\r\n ']/}"
+        if [[ "${state}" == "health:healthy" || "${state}" == "state:running" ]]; then
+            log "  ${name} is ${state#*:} again after ~${elapsed}s."
+            return 0
+        fi
+        [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]] || break
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+    done
+    return 1
+}
+
+# Stop ${name}, then recreate it so it re-registers under the rendered labels.
+# The idle check runs HERE, on the host, immediately before the stop, and the
+# stop is a bare `docker stop` (a compose CLI start-up is seconds of window in
+# which a saturated pool hands the runner a job), so almost nothing sits between
+# "no job" and SIGTERM. Exit 42: a job worker is running;
+# 43: idleness could not be read. Either leaves the runner untouched. The token
+# arrives on stdin and is exported only inside the remote shell.
+relabel_recreate() {
+    local name="${1}" token="${2}" v exports=""
+    for v in $(relabel_token_vars); do
+        exports="${exports} ${v}=\"\${handle}\"; export ${v};"
+    done
+    local preamble=""
+    if "${SECONDARY_HOST}"; then
+        preamble="${SECONDARY_PATH_PREAMBLE} "
+    fi
+    local compose_cmd
+    compose_cmd=$(relabel_compose_cmd)
+    printf '%s' "${token}" | ssh "${RUNNER_HOST}" "${preamble}
+        set -euo pipefail
+        handle=\$(cat)
+        ${exports}
+        if [ \"\$(docker inspect --format '{{.State.Running}}' ${name} 2>/dev/null)\" = true ]; then
+            top=\$(docker top ${name} 2>/dev/null) || exit 43
+            if printf '%s\\n' \"\${top}\" | grep -q 'Runner.Worker'; then exit 42; fi
+            if [ \"\$($(relabel_job_log_probe "${name}"))\" = busy ]; then exit 42; fi
+        fi
+        docker stop -t 30 ${name}
+        ${compose_cmd} up -d --force-recreate --no-deps --no-build --pull never ${name}
+    "
+}
+
+# The image a recreate would start, as the host's compose renders it for ${1}.
+# A relabel never builds or pulls: if the tag is not on the host, the stop would
+# succeed and the start would not, so this is checked before any runner is touched.
+relabel_require_image() {
+    local name="${1}" image v exports=""
+    for v in $(relabel_token_vars); do
+        exports="${exports} export ${v}=preflight;"
+    done
+    image=$(relabel_remote "${exports} $(relabel_compose_cmd) config ${name} 2>/dev/null" |
+        awk '/^[[:space:]]*image:/ { print $2; exit }') || image=""
+    [[ -n "${image}" ]] || err "could not read the image ${name} would start from the host's compose."
+    relabel_remote "docker image inspect ${image} >/dev/null 2>&1" ||
+        err "image ${image} is not present on ${RUNNER_HOST}: a recreate would stop ${name} and then fail to start it. A relabel never builds or pulls; restore the tag first (build via the stand-up path, or re-tag the image the live runners already run)."
+}
+
+# Everything that can be decided before a runner is touched. Returns 0 eligible
+# (its rendered labels are kept for the roll), 3 refused, 4 already online with
+# the label.
+relabel_preflight() {
+    local name="${1}" rendered row status labels want
+    rendered=$(relabel_rendered_labels "${name}") || rendered=""
+    row=$(relabel_snapshot_row "${name}")
+    status="${row%% *}"
+    labels="${row#* }"
+
+    if [[ -z "${rendered}" ]]; then
+        warn "  ${name}: could not render its compose config -- left untouched."
+        return 3
+    fi
+    if [[ ",${rendered}," != *",${RELABEL_LABEL},"* ]]; then
+        if "${DRY_RUN}"; then
+            warn "  ${name}: the host's compose renders [${rendered}] without ${RELABEL_LABEL}; a real run syncs the compose file first."
+            rendered="${rendered},${RELABEL_LABEL}"
+        else
+            warn "  ${name}: its compose renders [${rendered}], which lacks ${RELABEL_LABEL} -- left untouched (fix the compose file, e.g. an overlay pinning RUNNER_LABELS)."
+            return 3
+        fi
+    fi
+    if [[ "${status}" == "online" && ",${labels}," == *",${RELABEL_LABEL},"* ]]; then
+        log "  ${name} is online and already carries ${RELABEL_LABEL}."
+        return 4
+    fi
+    # Additive only: a re-registration must not drop a label a job may select on.
+    if [[ "${labels}" != "-" ]]; then
+        for want in ${labels//,/ }; do
+            if [[ ",${rendered}," != *",${want},"* ]]; then
+                warn "  ${name}: registered with ${want}, which its compose labels [${rendered}] would drop -- left untouched."
+                return 3
+            fi
+        done
+    fi
+    printf '%s\t%s\t%s\n' "${name}" "${status}" "${rendered}" >> "${RELABEL_PLAN_FILE}"
+    return 0
+}
+
+# Returns 0 relabelled (or, under --dry-run, would be), 2 busy this pass, 1 failed (HALT).
+relabel_one_runner() {
+    local name="${1}" supplied_token="${2}" status rendered rc=0
+    IFS=$'\t' read -r _ status rendered < <(awk -F'\t' -v n="${name}" '$1 == n' "${RELABEL_PLAN_FILE}")
+
+    relabel_container_idle "${name}" || return 2
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] ${name} (${status}) is idle: would stop it and recreate it with labels [${rendered}] and a registration token."
+        return 0
+    fi
+
+    local token="${supplied_token}"
+    if [[ -z "${token}" ]]; then
+        token=$(fetch_registration_token) || return 1
+    fi
+    log "  Relabelling ${name} (${status}) -> [${rendered}] ..."
+    relabel_recreate "${name}" "${token}" || rc=$?
+    case "${rc}" in
+        0) ;;
+        42|43) log "  ${name} took a job (or its state is unreadable) -- left running, revisited later."; return 2 ;;
+        *) return 1 ;;
+    esac
+    relabel_wait_healthy "${name}" || return 1
+    return 0
+}
+
+# Sync ONLY the compose declarations that carry the label set. The full artifact
+# sync (rsync_artifacts) would also replace the entrypoint, healthcheck and
+# monitor that the runner containers bind-mount, and a host whose image is older
+# than those scripts would then recreate runners onto a newer entrypoint than
+# the image they run. A relabel changes the registration and nothing else.
+relabel_sync_compose() {
+    local files=() dir="${RUNNER_HOST_DIR}/docker"
+    if "${SECONDARY_HOST}"; then
+        files=("${REPO_ROOT}/${COMPOSE_FILE}")
+    else
+        files=("${REPO_ROOT}/docker/docker-compose.runners.yml"
+               "${REPO_ROOT}/docker/docker-compose.model-review-canary.yml"
+               "${REPO_ROOT}/docker/compose-overrides.list")
+    fi
+    log "Syncing the compose declarations only (${#files[@]} file(s)) -> ${RUNNER_HOST}:${dir}/"
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] rsync skipped; the host's rendered labels below are its pre-sync copy."
+        return 0
+    fi
+    relabel_remote "mkdir -p ${dir}"
+    rsync -av --checksum "${files[@]}" "${RUNNER_HOST}:${dir}/"
+}
+
+relabel_roll() {
+    log "=== Drain-then-relabel roll: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST}, adding ${RELABEL_LABEL} ==="
+    [[ "${RELABEL_LABEL}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || err "--relabel label '${RELABEL_LABEL}' is not a plain label name."
+    [[ "${RELABEL_DRAIN_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || err "--drain-timeout must be a whole number of seconds."
+    [[ "${ROLL_LIMIT}" =~ ^[0-9]+$ ]] || err "--limit must be a whole number."
+    [[ -f "${REPO_ROOT}/${COMPOSE_FILE}" ]] || err "missing ${COMPOSE_FILE}"
+
+    local supplied_token="${DEPLOY_RUNNER_TOKEN:-}"
+    if [[ -n "${TOKEN_FILE}" ]]; then
+        supplied_token=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}."
+    fi
+    supplied_token="${supplied_token//[[:space:]]/}"
+
+    local targets=() name listed
+    listed=$(relabel_targets)
+    while IFS= read -r name; do
+        [[ -n "${name}" ]] || continue
+        targets+=("${name}")
+    done <<< "${listed}"
+    if [[ -n "${ROLL_ONLY}" ]]; then
+        local found=false
+        for name in "${targets[@]}"; do
+            [[ "${name}" == "${ROLL_ONLY}" ]] && found=true
+        done
+        "${found}" || err "--only=${ROLL_ONLY} is not a runner of ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST}."
+        targets=("${ROLL_ONLY}")
+    fi
+    local total="${#targets[@]}"
+    log "Targets (${total}): ${targets[*]}"
+
+    relabel_sync_compose
+
+    RELABEL_SNAPSHOT_FILE=$(mktemp)
+    RELABEL_PLAN_FILE=$(mktemp)
+    trap 'rm -f "${RELABEL_SNAPSHOT_FILE}" "${RELABEL_PLAN_FILE}"' EXIT
+    relabel_registry_snapshot || err "could not read the org runner registry."
+    local count_before
+    count_before=$(relabel_pool_count)
+    log "Registry before: ${count_before} ${RUNNER_NAME_PREFIX}-N runner(s) registered, ${total} targeted."
+    [[ "${count_before}" -ge 1 ]] || err "no ${RUNNER_NAME_PREFIX}-N runner is registered; this mode re-registers online runners and never stands one up."
+
+    local pending=() refused=() verify=() converged=0 rc
+    for name in "${targets[@]}"; do
+        rc=0
+        relabel_preflight "${name}" || rc=$?
+        case "${rc}" in
+            0) pending+=("${name}") ;;
+            4) converged=$((converged + 1)); verify+=("${name}") ;;
+            *) refused+=("${name}") ;;
+        esac
+    done
+
+    [[ "${#pending[@]}" -eq 0 ]] || relabel_require_image "${pending[0]}"
+
+    local deadline=$(( $(date +%s) + RELABEL_DRAIN_TIMEOUT_SECONDS ))
+    local done_count=0 failed="" next progressed
+    while [[ "${#pending[@]}" -gt 0 ]]; do
+        next=()
+        progressed=false
+        for name in "${pending[@]}"; do
+            rc=0
+            relabel_one_runner "${name}" "${supplied_token}" || rc=$?
+            case "${rc}" in
+                0) done_count=$((done_count + 1)); progressed=true; verify+=("${name}")
+                   log "  [${done_count}/${total}] ${name} done."
+                   if [[ "${ROLL_LIMIT}" -gt 0 && "${done_count}" -ge "${ROLL_LIMIT}" ]]; then
+                       log "Reached --limit=${ROLL_LIMIT}; stopping. The rest keep their current registration."
+                       next=(); break
+                   fi ;;
+                2) next+=("${name}") ;;
+                *) failed="${name}"; break ;;
+            esac
+        done
+        [[ -z "${failed}" ]] || break
+        pending=(${next[@]+"${next[@]}"})
+        [[ "${#pending[@]}" -gt 0 ]] || break
+        # A dry run reports who is busy now; it does not wait for them.
+        "${DRY_RUN}" && break
+        if [[ "$(date +%s)" -ge "${deadline}" ]]; then
+            warn "Drain timeout (${RELABEL_DRAIN_TIMEOUT_SECONDS}s) reached; still busy: ${pending[*]}"
+            break
+        fi
+        "${progressed}" || sleep "${RELABEL_DRAIN_INTERVAL_SECONDS}"
+    done
+
+    if [[ -n "${failed}" ]]; then
+        err "HALTED at ${failed}: it did not come back healthy within ${ROLL_ONLINE_MAX_SECONDS}s (or its recreate failed). ${done_count}/${total} relabelled; the rest are untouched. Investigate that container before resuming -- do NOT retry blindly."
+    fi
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] ${done_count} runner(s) idle and relabellable now, ${converged} already labelled, ${#refused[@]} refused, ${#pending[@]} busy; registry reads used: ${RELABEL_API_READS}/${RELABEL_API_READ_BUDGET}."
+        return 0
+    fi
+
+    # Readback: the registry is the judge, polled a bounded number of times.
+    local poll=0 ok=false count_after="" bad row
+    while [[ "${poll}" -lt "${RELABEL_READBACK_POLLS}" ]]; do
+        poll=$((poll + 1))
+        sleep "${RELABEL_READBACK_INTERVAL_SECONDS}"
+        relabel_registry_snapshot || break
+        count_after=$(relabel_pool_count)
+        bad=""
+        for name in ${verify[@]+"${verify[@]}"}; do
+            row=$(relabel_snapshot_row "${name}")
+            if [[ "${row%% *}" != "online" || ",${row#* }," != *",${RELABEL_LABEL},"* ]]; then
+                bad="${bad} ${name}"
+            fi
+        done
+        if [[ -z "${bad}" && "${count_after}" -eq "${count_before}" ]]; then
+            ok=true
+            break
+        fi
+        log "  readback ${poll}/${RELABEL_READBACK_POLLS}: count ${count_before}->${count_after}, not yet online with the label:${bad:- none}"
+    done
+    log "RELABEL-READBACK pool=${RUNNER_NAME_PREFIX} host=${RUNNER_HOST} label=${RELABEL_LABEL} count_before=${count_before} count_after=${count_after:-unread} relabelled=${done_count} already=${converged} refused=${#refused[@]} busy=${#pending[@]} reads=${RELABEL_API_READS}/${RELABEL_API_READ_BUDGET}"
+    "${ok}" || err "readback did not confirm the pool: every touched runner must read online with ${RELABEL_LABEL} and the registered count must equal ${count_before}."
+    [[ "${#refused[@]}" -eq 0 && "${#pending[@]}" -eq 0 ]] || warn "Not relabelled -- refused: ${refused[*]-none}; still busy: ${pending[*]-none}. Re-run with --relabel to converge them."
+}
+
 main() {
     log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, retire_surplus=${RETIRE_SURPLUS}, add=${ADD_SERVICES:-<none>})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
@@ -2076,6 +2545,15 @@ main() {
 
     if "${DRY_RUN}"; then
         log "[DRY RUN MODE] No remote commands will be executed."
+    fi
+
+    if "${RELABEL_ROLL}"; then
+        if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}" || "${RETIRE_SURPLUS}" || [[ -n "${ADD_SERVICES}" ]]; then
+            err "--relabel is mutually exclusive with --soft, --rolling, --retire-surplus and --add: it re-registers the pool's ONLINE runners one at a time and never creates, retires or rewrites one."
+        fi
+        relabel_roll
+        log "=== deploy-runners.sh complete (relabel ${RELABEL_LABEL}: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST}) ==="
+        return 0
     fi
 
     if "${SECONDARY_HOST}"; then

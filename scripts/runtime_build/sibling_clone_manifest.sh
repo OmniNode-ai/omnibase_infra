@@ -89,15 +89,10 @@ SIBLING_VENDORED_REPOS=(
     "omnimarket"
 )
 
-# Repos the lab lane scripts TRACK although they are not build siblings: the
-# lab tag cutters tag them and the lane refresh scripts move them to the
-# deployed ref, but nothing vendors them and no pin preflight reads them.
-# onex_change_control left the runtime image in OMN-16296, but both tag cutters
-# have always tagged it and both refresh scripts refresh it.
+# The lab scripts track no extra repository now that onex_change_control is
+# retired. This array stays as the place to add an extra tracked repository.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_EXTRA_TRACKED_REPOS=(
-    "onex_change_control"
-)
+SIBLING_EXTRA_TRACKED_REPOS=()
 
 # The lab tag set (cut-lab-ref.sh --cut-tag, cut_release_train_tag.sh): every
 # clone the pin preflight reads, plus the extras above. Derived, never spelled,
