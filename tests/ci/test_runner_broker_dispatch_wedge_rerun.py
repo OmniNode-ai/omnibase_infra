@@ -39,6 +39,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -576,3 +577,28 @@ def test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge(
         thread.join(timeout=5)
     assert result.returncode == 0, result.stderr
     assert sorted(reads) == expected
+
+
+WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "runner-broker-dispatch-wedge-rerun.yml"
+)
+RETIRED_REPO = "onex_change_control"
+
+
+def test_default_scan_list_omits_retired_repo() -> None:
+    """OMN-17427: the script's default repo list and the workflow's REPOS_CSV
+    name the same repositories, and neither names the retired change-control repo."""
+    script_default = re.search(
+        r'^REPOS_CSV="\$\{REPOS_CSV:-([^}]*)\}"$',
+        SCRIPT.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    workflow_list = re.search(
+        r'^\s+REPOS_CSV: "([^"]*)"$',
+        WORKFLOW.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert script_default is not None
+    assert workflow_list is not None
+    assert RETIRED_REPO not in script_default.group(1).split(",")
+    assert script_default.group(1) == workflow_list.group(1)
