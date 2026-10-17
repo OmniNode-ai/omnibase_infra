@@ -239,6 +239,12 @@ skills:
       # predicate accepts; `--exclude` still wins over an offer, before any
       # GitHub or Linear I/O about it.
       - {name: offer, payload_field: offer_tickets, arg_type: string_list}
+      # OMN-16106. Product repositories whose own merged PRs the forward
+      # window also reads, `--product-repos OmniNode-ai/omnimarket,...`. A
+      # repository cut over from change control mints no companion, so its
+      # tickets bind through the PR's contracts/<ticket>.yaml. Omitted, the
+      # forward window reads change control only.
+      - {name: product-repos, payload_field: product_repos, arg_type: string_list}
       # OMN-17342. The BACKFILL arm. `--backfill-lookback-hours 0` (the default,
       # and what every scheduled tick gets) leaves the sweep single-armed. A
       # non-zero value adds a second enumeration over a wider window and offers

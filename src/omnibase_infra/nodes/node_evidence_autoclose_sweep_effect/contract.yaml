@@ -750,6 +750,11 @@ io_operations:
       # per-ticket pipeline. It selects who is asked; it can never widen what
       # the flip predicate accepts, and `exclude_tickets` wins over it.
       - offer_tickets
+      # OMN-16106. Product repositories whose own merged PRs the forward
+      # window also reads: a repository cut over from change control mints no
+      # companion, so its tickets are bound by the PR's contracts/<ticket>.yaml.
+      # Empty reads change control only.
+      - product_repos
     output_fields:
       - mode
       - disarm_triggered_by
