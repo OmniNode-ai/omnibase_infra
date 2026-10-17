@@ -83,12 +83,12 @@ def _pr_summary(
     return code, capsys.readouterr().out
 
 
-def test_dod_verify_is_an_expected_external_context() -> None:
+def test_ci_summary_registration_dod_verify_is_an_expected_external_context() -> None:
     assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
     assert "repo-evidence / verify" not in EXPECTED_EXTERNAL_CONTEXTS
 
 
-def test_absent_dod_verify_blocks_pull_request_ci_summary(
+def test_ci_summary_registration_absent_dod_verify_blocks_pull_request(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     rows = _other_expected_rows()
@@ -102,7 +102,7 @@ def test_absent_dod_verify_blocks_pull_request_ci_summary(
     assert _DOD_VERIFY in report
 
 
-def test_green_pull_request_target_dod_verify_satisfies_ci_summary(
+def test_ci_summary_registration_green_pull_request_target_dod_verify_satisfies(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     rows = [*_other_expected_rows(), _row(_DOD_VERIFY)]
@@ -122,7 +122,7 @@ def test_green_pull_request_target_dod_verify_satisfies_ci_summary(
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "skipped"])
-def test_refused_dod_verify_fails_ci_summary(
+def test_ci_summary_registration_refused_dod_verify_fails(
     conclusion: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     rows = [*_other_expected_rows(), _row(_DOD_VERIFY, conclusion)]
