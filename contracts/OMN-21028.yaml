@@ -46,4 +46,5 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/timeouts/test_liveness_expiry_applied_integration.py tests/unit/projectors/test_projection_reader_registration.py -k "stamped_before or carrying_a_marker" -q -n 0
-    binds_ac: []
+    binds_ac:
+      - AC1
