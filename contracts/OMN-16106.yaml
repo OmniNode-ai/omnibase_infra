@@ -29,6 +29,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_product_repo_forward_arm.py -q --no-cov -k "reaches_the_verifier or change_control_only"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_omn16106_product_repo_cli_sweep.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-omn16106-ac2-product-repo-refusals
@@ -40,7 +43,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
-  - id: dod-omn16106-deploy-product-repo-forward-window-shipped
+  - id: dod-omn16106-deploy-product-repo-forward-window
     description: The handler at the merged head reads each named product repository's changed files from that repository through the evidence-repo tag; the deployed surface is the source at the merged head.
     source: manual
     checks:
