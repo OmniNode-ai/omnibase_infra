@@ -15,15 +15,18 @@ class ModelProbeHygieneRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     correlation_id: UUID = Field(..., description="Run correlation id.")
-    occ_repo_dir: str = Field(
-        default="",
+    contract_roots: tuple[str, ...] = Field(
+        default=(),
         description=(
-            "Filesystem path to an onex_change_control clone whose "
-            "contracts/ directory the sweep reads. Empty means the sweep "
-            "cannot resolve contracts and every ticket terminates "
-            "ERROR_CONTRACT_UNREADABLE — a broken runner is reported as one, "
-            "never as 'no ticket has a probe', which is the same number and "
-            "the opposite meaning."
+            "Filesystem paths to checkouts whose contracts/ directory the "
+            "sweep reads, one per product repository: a ticket's contract "
+            "lives in the repository that carries its work. A ticket's checks "
+            "are summed across the roots. No roots, or a root without a "
+            "contracts/ directory, means the sweep cannot tell 'declares no "
+            "check' from 'could not look', so a ticket with no check found "
+            "terminates ERROR_CONTRACT_UNREADABLE — a broken runner is "
+            "reported as one, never as 'no ticket has a probe', which is the "
+            "same number and the opposite meaning."
         ),
     )
     project: str = Field(

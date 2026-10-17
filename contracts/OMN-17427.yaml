@@ -108,6 +108,11 @@ requirements:
     acceptance:
       - id: AC24
         statement: 'AC24: the wedge rerun script default and workflow REPOS_CSV are equal and omit onex_change_control, and the infra-signature default scan is the merge-sweep registry, which omits it -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"'
+  - id: req-omn17427-probe-hygiene-off-occ
+    statement: The scheduled in-progress probe hygiene sweep reads each fleet repository's own contracts/ directory instead of an onex_change_control checkout.
+    acceptance:
+      - id: AC25
+        statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -181,6 +186,9 @@ evidence_requirements:
   - kind: tests
     description: The rerun scans' default repo lists omit onex_change_control.
     command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"
+  - kind: tests
+    description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
+    command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -466,3 +474,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC24
+  - id: dod-omn-17427-ac25
+    description: The probe hygiene sweep reads per-repository contract roots and no workflow, mapping or node contract names a change-control checkout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC25
+  - id: dod-omn-17427-ac25-deploy-probe-hygiene
+    description: Hosted-runner smoke -- the contract-root reader finds a contract in a later root, sums checks across roots and reports an unreadable root as unknown, with no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC25
