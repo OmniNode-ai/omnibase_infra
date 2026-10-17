@@ -27,7 +27,6 @@ REPOS=(
   omnimemory
   omninode_infra
   omniweb
-  onex_change_control
 )
 
 # The full registry, captured BEFORE any caller override. The bare-clone scan

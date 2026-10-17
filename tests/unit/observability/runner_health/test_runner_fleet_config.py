@@ -250,7 +250,7 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
     assert config.git_mirror.port == 9418
     assert config.git_mirror.serialized is True
     assert config.git_mirror.refresh_interval_seconds == 120
-    assert "onex_change_control" in config.git_mirror.repos
+    assert "onex_change_control" not in config.git_mirror.repos
     assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
 
 
@@ -272,7 +272,6 @@ def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
 
     assert config.git_mirror is not None
     assert set(config.git_mirror.repos) == {
-        "onex_change_control",
         "omnibase_infra",
         "omninode_infra",
         "omnibase_core",
