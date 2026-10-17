@@ -67,6 +67,7 @@ case "$1 $2" in
           segment_fallocation_step) echo 1048576 ;;
           log_segment_ms) echo 86400000 ;;
           retention_bytes) echo 1073741824 ;;
+          group_offset_retention_sec) echo 86400 ;;
           *) echo "unexpected config get $4" >&2; exit 2 ;;
         esac
         exit 0 ;;

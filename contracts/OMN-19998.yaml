@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
+  - id: req-omn19998-lab-alarm-dev-tag-heartbeat
+    statement: 'Operator RULINGs 2026-10-16T07:34:18Z and 2026-10-16T09:35:49Z: the deploy agent publishes a dev-tag heartbeat on /dev-tag-heartbeat and nothing read it. The lab alarm must read it and raise when the beat of a followed repository has gone quiet, is missing, or reports the lane behind its newest dev tag, and must stay quiet on a fresh beat.'
+    acceptance:
+      - id: AC21
+        statement: 'AC21: against a fresh heartbeat fixture the dev_tag_heartbeat condition reads OK; against the stale fixture, the same document with observed_at 3h50m before the read, it raises one alarm naming omnimarket; a missing beat and a beat reporting the lane behind its newest tag each raise one; an unreachable or malformed answer reads INDETERMINATE; through run_once a stale beat raises once across two runs and clears -- falsifier: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"'
   - id: req-omn19998-prepr-isolated-docker-auths
     statement: The pre-PR pool prover's isolated docker config must hold no credential store, no credential helper and no credential, and must keep a non-empty auths map so the docker CLI stays on the plain file store instead of detecting the macOS keychain again.
     acceptance:
@@ -86,6 +91,11 @@ requirements:
     acceptance:
       - id: AC15
         statement: 'AC15: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
+  - id: req-omn19998-broker-profile-checks
+    statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
+    acceptance:
+      - id: AC21
+        statement: 'AC21: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -102,6 +112,9 @@ evidence_requirements:
   - kind: tests
     description: The checkout tests build tags against a local origin; the agent tests drive the heartbeat, the alarm and the followed head through the agent's seams.
     command: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+  - kind: tests
+    description: The heartbeat tests read a fresh and a stale recording-shaped fixture of /dev-tag-heartbeat through the condition, the shipped config and run_once.
+    command: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"
   - kind: tests
     description: The isolated-config test runs the prover's own config snippet against a fake keychain-backed docker config and reads the written file.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
@@ -185,6 +198,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn19998-ac21-lab-alarm-dev-tag-heartbeat
+    description: AC21 tests drive the dev_tag_heartbeat condition over a fresh and a stale fixture, a missing beat, a lane-behind beat and unreadable answers, and run_once for the raise-once and clear edge.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC21
   - id: dod-omn19998-ac5-studio-multiarch-ci-pool
     description: AC6 tests assert the Mac Studio multiarch pool declaration, its compose labels, caps and absent mounts, the amd64 pools' opt-in label and the unchanged action total.
     source: manual
@@ -335,3 +357,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC15
+  - id: dod-omn19998-broker-profile-checks
+    description: Run the corrected broker profile and control-plane regression files and inspect their named-key and fake broker support.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py tests/unit/infra/test_lane_control_plane_topic_omn19543.py -q
+        cwd: .
+      - check_type: command
+        check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 86400 ;;' in t"
+        cwd: .
+    binds_ac:
+      - AC21

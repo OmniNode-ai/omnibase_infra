@@ -17,6 +17,10 @@
   "chain_canary_branch": "dev",
   "chain_canary_max_age_minutes": 180,
 
+  "_comment_dev_tag_heartbeat": "OMN-19998: the dev_tag_heartbeat condition reads the deploy agent's /dev-tag-heartbeat (agent_url) and alarms on a beat whose observed_at is older than dev_tag_heartbeat_max_age_minutes, on a followed repository with no beat, and on a beat that reports the lane behind its newest dev tag. dev_tag_heartbeat_repositories is the agent's DEV_TAG_FOLLOWED_REPOSITORIES (scripts/deploy-agent/deploy_agent/tracking_ref.py). The agent re-reads every 60 s and publishes every 15 minutes, so 30 minutes is two publish periods and one tick of 600 s is far inside it; an agent that stopped beating is seen on the third tick.",
+  "dev_tag_heartbeat_repositories": ["omnimarket"],
+  "dev_tag_heartbeat_max_age_minutes": 30,
+
   "_comment_census_command": "OMN-19418: census_command reads the live snapshot the existing lane-census timer writes on the lab host and emits on its census bus topics. It never reads the checked-in snapshot. A lane-census.json in the alarm state directory is the fixture injection seam. census_max_age_minutes is two hours: one hourly census period plus slack; missing, invalid or stale data stays INDETERMINATE and feeds the existing stale alarm.",
   "census_command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "${ONEX_RUNTIME_SSH_HOST}", "cat", ".local/state/onex/census-snapshot.json"],
   "census_max_age_minutes": 120,
