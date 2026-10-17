@@ -76,11 +76,16 @@ requirements:
     acceptance:
       - id: AC12
         statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
+  - id: req-omn19998-drain-then-relabel-roll
+    statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
   - id: req-omn19998-role-omnidash-projection-watermarks
     statement: The dev lane's live-events writer connects as role_omnidash and upserts omninode_internal.projection_watermarks after every batch; role_omnidash must hold schema USAGE and SELECT, INSERT and UPDATE on that one table and nothing else in the schema.
     acceptance:
-      - id: AC14
-        statement: 'AC14: node_projection_registration migration 0008 grants USAGE ON SCHEMA omninode_internal and SELECT, INSERT, UPDATE ON omninode_internal.projection_watermarks to role_omnidash, nothing more, with a manifest row binding its bytes; applied to a Postgres where 0005 created the table, the watermark upsert as role_omnidash fails with permission denied for schema omninode_internal before it and succeeds after -- falsifier: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0 fails at the merge base, where the migration file does not exist'
+      - id: AC15
+        statement: 'AC15: node_projection_registration migration 0008 grants USAGE ON SCHEMA omninode_internal and SELECT, INSERT, UPDATE ON omninode_internal.projection_watermarks to role_omnidash, nothing more, with a manifest row binding its bytes; applied to a Postgres where 0005 created the table, the watermark upsert as role_omnidash fails with permission denied for schema omninode_internal before it and succeeds after -- falsifier: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0 fails at the merge base, where the migration file does not exist'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -115,6 +120,9 @@ evidence_requirements:
   - kind: tests
     description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
     command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+  - kind: tests
+    description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
+    command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
   - kind: tests
     description: The grant tests read the migration statements, its assertions, its manifest row checksum and the live-events writer's compose binding.
     command: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
@@ -294,16 +302,34 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC13
-  - id: dod-omn19998-role-omnidash-projection-watermarks
-    description: AC14 tests pass at the head; at the merge base the migration file does not exist and every test fails.
+  - id: dod-omn19998-ac11-drain-then-relabel-roll
+    description: AC14 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real; the four -k groups together select every test in the module, each inside the per-check budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "parses_and or combine_with or dry_run_changes or a_real_roll or compose_declarations or busy_runner_is_never"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "token_never_reaches_output_or_argv or minted_token or listener_log or missing_image_tag or may_not_drop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "lands_between or does_not_return or compose_lacks"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "already_online or limit_counts or reads_are_capped or secondary_pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14
+  - id: dod-omn19998-omnidash-watermarks
+    description: AC15 tests pass at the head; at the merge base the migration file does not exist and every test fails.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC14
-  - id: dod-omn19998-role-omnidash-projection-watermarks-deploy-probe
+      - AC15
+  - id: dod-omn19998-omnidash-watermarks-deploy-probe
     description: Hosted-runner probe reads the migration at this commit and requires both grants to role_omnidash; the base has no such file and the probe fails.
     source: manual
     checks:
