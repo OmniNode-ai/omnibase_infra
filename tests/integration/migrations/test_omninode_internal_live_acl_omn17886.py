@@ -37,7 +37,11 @@ def _setup(pg: EphemeralPostgres) -> None:
     declared = declared_acl(load_topology_profile("onex-dev"))
     statements = [f"CREATE DATABASE {DB}"]
     assert pg.psql("-v", "ON_ERROR_STOP=1", "-c", statements[0]).returncode == 0
-    body = [f"CREATE ROLE {role} NOLOGIN;" for role in ROLES]
+    # Every principal the topology grants must exist, or the GRANT refuses.
+    principals = {p for p, _ in declared.schema_grants} | {
+        p for p, _, _ in declared.table_grants
+    }
+    body = [f"CREATE ROLE {role} NOLOGIN;" for role in sorted(principals | set(ROLES))]
     body.append("CREATE SCHEMA omninode_internal;")
     for principal, privilege in sorted(declared.schema_grants):
         body.append(f"GRANT {privilege} ON SCHEMA omninode_internal TO {principal};")

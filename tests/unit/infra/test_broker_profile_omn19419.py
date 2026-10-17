@@ -156,6 +156,7 @@ state_topic_memory_per_partition=1048576
 state_segment_fallocation_step=33554432
 state_log_segment_ms=1209600000
 state_retention_bytes=null
+state_group_offset_retention_sec=604800
 rpk() {
   echo "$*" >> "$PROFILE_TRACE"
   if [ "$1 $2" = "cluster config" ]; then
