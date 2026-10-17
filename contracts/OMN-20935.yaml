@@ -46,5 +46,5 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF 'workspace_runtime_config_root(workspace_root)'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'workspace_runtime_config_root(workspace_root)'
         cwd: ${OMNI_HOME}/omnibase_infra
