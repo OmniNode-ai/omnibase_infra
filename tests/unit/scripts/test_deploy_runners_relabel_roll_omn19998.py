@@ -219,9 +219,13 @@ def _build_world(tmp_path: Path, prefix: str, count: int) -> World:
     (tmp_path / "home").mkdir()
     ssh = bindir / "ssh"
     # A remote mkdir is recorded, not run: the host path (/home/jonah/...) does
-    # not exist, and may not be created, on a hosted CI runner.
+    # not exist, and may not be created, on a hosted CI runner. docker and gh
+    # are shell functions naming the stubs, because the secondary-host PATH
+    # preamble puts /usr/local/bin and /opt/homebrew/bin ahead of the stub dir.
     ssh.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\nshift\n"
+        f'docker() {{ "{bindir}/docker" "$@"; }}; gh() {{ "{bindir}/gh" "$@"; }}\n'
+        "export -f docker gh\n"
         'exec bash -c \'mkdir() { echo "MKDIR $*" >> "$FAKE_CALLS"; }; \'"$1"\n'
     )
     rsync = bindir / "rsync"

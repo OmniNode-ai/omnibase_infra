@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: success, skipped and neutral runs cause no job-list reads, while failure, cancelled, timed_out and missing conclusions retain wedge detection; the recorded 100-run list reads only candidate runs -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"'
+  - id: req-omn19998-contracts-strict-load-precommit
+    statement: A commit that touches a ticket contract under contracts/ must run the strict contract load test, so a merge that keeps two description and command pairs under one evidence item is refused at commit instead of in CI.
+    acceptance:
+      - id: AC20
+        statement: 'AC20: the contracts-strict-load pre-commit hook runs tests/ci/test_contracts_strict_load_omn20945.py at the pre-commit stage and fires on contracts/*.yaml, and run against the OMN-19998 contract with an evidence item carrying two description and command pairs it fails -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py -q -n 0 fails on the merge-base .pre-commit-config.yaml, which has no such hook'
   - id: req-omn19998-routing-audit-gateway-split
     statement: The runner routing audit's private-workflow batch read must read a batch again in halves when GitHub answers it with a gateway error (HTTP 502, 503 or 504), and must still raise when a single repository stays unread.
     acceptance:
@@ -56,15 +61,33 @@ requirements:
     acceptance:
       - id: AC10
         statement: 'AC10: .github/workflows/dev-merge-tag.yml triggers only on push to dev, and its tag step, run against a throwaway repository with a +05:30 committer date, pushes one lightweight tag named dev-<committer time in UTC>-<sha12> at the commit, pushes nothing on a second run or when a dev tag for that sha already exists, pushes nothing in a dry run, and refuses a value that is not a full sha -- falsifier: uv run pytest tests/ci/test_dev_merge_tag_workflow_omn19998.py -q -n 0 fails at the merge base, where the workflow does not exist'
+  - id: req-omn19998-pr-merged-unique-key-vendor
+    statement: Node migration 0003 of node_pr_merged_projection, which collapses duplicate pr_merged_events rows and adds UNIQUE (repo, pr_number), is deployed with only its two PostgreSQL catalog reads qualified as pg_catalog, with pinned source and deployment digests, one checksum-bound ledger row and the forward-only class the migration class checker reads from its statements.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: the deployment copy hashes to 2a1141966f9b9cdc83caf6e60d64cf866953312453d560f32efcd00a59651309, reversing only the two pg_catalog qualifications recovers source digest 68c4220235df46969883a9febc3887cc7b867a5d18b928aaeba6cc2c72be6634, its catalog reads pass application database domain enforcement, it deletes duplicates before adding UNIQUE (repo, pr_number), has exactly one ledger row carrying that checksum and is declared forward-only -- falsifier: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py fails at the dev base, where the file is absent'
+  - id: req-omn19998-ci-runner-uv-cache-hardlink
+    statement: The second lab host's CI runners must keep their uv cache inside the job-workspace mount, with uv's default link mode, so a warm uv sync hardlinks wheel contents instead of copying them across two bind mounts.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: each of the sixteen services of the second-host CI runner pool sets UV_CACHE_DIR to a path under its _work mount, binds no separate uv cache mount and sets no UV_LINK_MODE -- falsifier: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache fails on the merge-base compose'
+  - id: req-omn19998-runner-hook-dir-mount
+    statement: A runner container must see a hook file that a deploy replaced, and a runner whose job-started hook is missing, empty or not a script must stop taking jobs instead of staying unhealthy while it runs them.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
   - id: req-omn19998-drain-then-relabel-roll
     statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
     acceptance:
-      - id: AC11
-        statement: 'AC11: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+      - id: AC14
+        statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
     command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"
+  - kind: tests
+    description: The hook tests read .pre-commit-config.yaml for the contracts-strict-load hook, its stage, its entry and the paths its files pattern fires on.
+    command: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py tests/ci/test_contracts_strict_load_omn20945.py -q -n 0
   - kind: tests
     description: The gateway-split tests drive the batch reader with a fake gh that answers HTTP 504 and count the reads.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "gateway"
@@ -86,6 +109,13 @@ evidence_requirements:
   - kind: tests
     description: The follow tests drive the decision table and the agent's idle tick through its seams with a lab fence, and the fragment test runs compose env inside a dev and a stability-lane job.
     command: uv run pytest scripts/deploy-agent/tests/unit/test_stability_follows_dev_tag_omn19998.py scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+  - kind: tests
+    description: The pr_merged_events 0003 deployment digest and source provenance, catalog qualification, ledger checksum and forward-only class are checked.
+    command: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q -n 0
+  - kind: tests
+    description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
+    command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+  - kind: tests
     description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
     command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
 emergency_bypass:
@@ -102,6 +132,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn19998-ac20-contracts-strict-load-precommit
+    description: AC20 tests read the contracts-strict-load hook from .pre-commit-config.yaml and run the strict load over every ticket contract.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py tests/ci/test_contracts_strict_load_omn20945.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC20
   - id: dod-omn19998-ac2-routing-audit-gateway-split
     description: AC2 tests split a batch answered HTTP 504, raise for a repository still unread after its retry and do not retry a non-gateway failure.
     source: manual
@@ -201,12 +240,75 @@ dod_evidence:
         check_value: >-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/dev-merge-tag.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/branches: \[dev\]/{a=1} /git push origin "refs\/tags\//{b=1} END{exit !(a&&b)}'
         cwd: .
-  - id: dod-omn19998-ac11-drain-then-relabel-roll
-    description: AC11 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real.
+  - id: dod-omn19998-ac8-pr-merged-unique-key-vendor
+    description: Infra deployment half only. Pins the deployed 0003 bytes and the original source bytes after reversing only the two catalog qualifications, the delete-before-key order, the exact ledger checksum and the forward-only class; the SQL must pass application database domain enforcement. It does not prove the projection handler, which the omnimarket change tests.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
+        check_value: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q -n 0
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC11
+  - id: dod-omn19998-pr-merged-deploy-artifact-probe
+    description: Hosted-runner deployment artifact check for AC11. Verifies the exact SQL bytes that the forward migration runner will deploy, the checksum-bound ledger row, the forward-only class and the pg_catalog qualification. This probes the deployment artifact; it does not claim a deployed consumer readback.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/migrations/test_omn19998_pr_merged_unique_key_vendor.py -q
+        cwd: .
+    binds_ac:
+      - AC11
+  - id: dod-omn19998-ac12-ci-runner-uv-cache-hardlink
+    description: AC13 test asserts the uv cache directory shares the work mount on all sixteen services of the second-host CI runner pool, with no separate uv mount and no UV_LINK_MODE.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC13
+  - id: dod-omn19998-ac10-runner-hook-dir-mount
+    description: AC12 tests parse every runner compose service for the directory mount and the paths inside it, and run healthcheck.sh against a missing, empty, truncated and intact hook with a stub docker that records the stop.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
+  - id: dod-omn19998-runner-hook-deploy-artifact-probe
+    description: Hosted-runner deployment artifact check for AC12. Parses all runner compose services to reject individual hook mounts and require the read-only hook directory, job hook path, entrypoint and healthcheck paths in that directory. This checks deployment configuration and does not claim live runner activation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 -k "population or bind_mounts or mounts_the_hook_directory or point_inside_the_hook_directory"
+        cwd: .
+    binds_ac:
+      - AC12
+  - id: dod-omn19998-uv-cache-deploy-artifact-probe
+    description: Hosted-runner deployment configuration check for AC13. Parses all sixteen second-host CI runner services and requires each uv cache to share its work mount, with no separate cache mount and no explicit link mode.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0 -k uv_cache
+        cwd: .
+    binds_ac:
+      - AC13
+  - id: dod-omn19998-ac11-drain-then-relabel-roll
+    description: AC14 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real; the four -k groups together select every test in the module, each inside the per-check budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "parses_and or combine_with or dry_run_changes or a_real_roll or compose_declarations or busy_runner_is_never"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "token_never_reaches_output_or_argv or minted_token or listener_log or missing_image_tag or may_not_drop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "lands_between or does_not_return or compose_lacks"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "already_online or limit_counts or reads_are_capped or secondary_pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14

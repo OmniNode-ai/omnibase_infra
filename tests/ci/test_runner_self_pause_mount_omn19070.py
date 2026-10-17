@@ -43,7 +43,7 @@ from scripts.ci.ci_summary_gate import evaluate_external_sweep
 
 _DOCKER_DIR = Path(__file__).resolve().parents[2] / "docker"
 _RUNNER_COMPOSE_FILES = sorted(_DOCKER_DIR.glob("docker-compose.runners*.yml"))
-_HOOK_TARGET = "/usr/local/bin/runner-job-started.sh"
+_HOOK_TARGET = "/opt/onex-runner-hooks"
 _PAUSE_TARGET = "/home/runner/.onex-disk-admission-pause"
 _HOST_105_LEG = "arm64-verify-proof (host-105)"
 

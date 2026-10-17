@@ -23,6 +23,17 @@
 repos:
   - repo: local
     hooks:
+      # OMN-19998: a ticket contract loads through the strict loader at commit, so
+      # a merge that keeps both sides' description and command under one
+      # `- kind: tests` item is refused before CI. The same test runs in the CI
+      # test splits (OMN-20945).
+      - id: contracts-strict-load
+        name: Ticket contracts load with no duplicate mapping key (OMN-19998)
+        entry: uv run --frozen pytest tests/ci/test_contracts_strict_load_omn20945.py -q -n 0 -p no:randomly
+        language: system
+        files: ^(contracts/[^/]+\.yaml|tests/ci/test_contracts_strict_load_omn20945\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: imperative-contract-guard-caller
         name: Caller-owned imperative guard regression (OMN-21004)
         entry: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0

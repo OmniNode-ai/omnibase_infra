@@ -2267,15 +2267,18 @@ relabel_container_idle() {
 
 relabel_wait_healthy() {
     local name="${1}" elapsed=0 state
-    while [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]]; do
-        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
-        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+    # Read before the first sleep, so a runner that is already healthy costs
+    # no wait; the loop still gives up after ROLL_ONLINE_MAX_SECONDS.
+    while true; do
         state=$(relabel_remote "docker inspect --format '{{if .State.Health}}health:{{.State.Health.Status}}{{else}}state:{{.State.Status}}{{end}}' ${name} 2>/dev/null") || state=""
         state="${state//[$'\r\n ']/}"
         if [[ "${state}" == "health:healthy" || "${state}" == "state:running" ]]; then
             log "  ${name} is ${state#*:} again after ~${elapsed}s."
             return 0
         fi
+        [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]] || break
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
     done
     return 1
 }

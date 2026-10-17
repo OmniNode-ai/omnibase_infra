@@ -22,7 +22,6 @@ COMPOSE = (
 )
 
 CACHE_TARGETS = {
-    "uv": "/home/runner/.cache/uv",
     "pip": "/home/runner/.cache/pip",
     "pre-commit": "/home/runner/.cache/pre-commit",
     "pnpm": "/home/runner/.cache/pnpm",
@@ -98,3 +97,27 @@ def test_no_bind_mount_hides_the_image_tmp(
         assert isinstance(volumes, list)
         targets = [PurePosixPath(str(v).split(":")[1]) for v in volumes]
         assert PurePosixPath("/") / "tmp" not in targets
+
+
+# OMN-19998: the uv cache sits inside the work mount so uv can hardlink.
+UV_CACHE_DIR = "/home/runner/actions-runner/_work/.uv-cache"
+
+
+@pytest.mark.unit
+def test_uv_cache_shares_the_work_mount_so_installs_hardlink(
+    services: dict[str, dict[str, object]],
+) -> None:
+    """A hardlink cannot cross a mount; copy mode took a warm sync from 32 s to 262 s."""
+    assert len(services) == 16
+    for service in services.values():
+        volumes = service["volumes"]
+        environment = service["environment"]
+        assert isinstance(volumes, list)
+        assert isinstance(environment, dict)
+        assert environment["UV_CACHE_DIR"] == UV_CACHE_DIR
+        assert "UV_LINK_MODE" not in environment
+        targets = [PurePosixPath(str(v).split(":")[1]) for v in volumes]
+        mount_of_cache = [
+            t for t in targets if PurePosixPath(UV_CACHE_DIR).is_relative_to(t)
+        ]
+        assert mount_of_cache == [PurePosixPath(JOB_DIR_TARGETS["work"])]
