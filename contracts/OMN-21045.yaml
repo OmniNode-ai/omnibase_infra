@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21045"
+title: "A developer principal may publish expire-memory and read the two memory lifecycle outcomes"
+summary: "The developer principal's wire bindings declared no omnimemory topic, so the derived grants gave the dev-lane bus principal no WRITE on onex.cmd.omnimemory.expire-memory.v1 and no READ on onex.evt.omnimemory.memory-expired.v1 or onex.evt.omnimemory.lifecycle-transition-failed.v1, and the memory lifecycle proof was refused by the broker. This change declares those three bindings and one prefixed consumer group in deploy/lab/developer-principal-bindings.yaml and regenerates deploy/lab/developer-principal-derived-grants.json from node_broker_grant_derive_compute. The deriver itself is unchanged. Applying the grants on the dev lane broker and the live expire-memory proof are not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-memory-lifecycle-grants-declared"
+    statement: "The developer principal's bindings declare the memory lifecycle proof, and the grants the issuer applies are the derivation's output for them."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: node_broker_grant_derive_compute derives from deploy/lab/developer-principal-bindings.yaml WRITE and DESCRIBE on onex.cmd.omnimemory.expire-memory.v1, READ and DESCRIBE on onex.evt.omnimemory.memory-expired.v1 and onex.evt.omnimemory.lifecycle-transition-failed.v1, READ and DESCRIBE on the group prefix local.omnimemory.memory_lifecycle_probe.consume.v1., and no other omnimemory topic, and the committed deploy/lab/developer-principal-derived-grants.json is that output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k 'memory_lifecycle or nodes_output or typed_by_hand' fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The derivation tests pin the memory lifecycle rows, the committed derived file and the issuer's writable topic set."
+    command: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21045-ac1-derived-memory-grants"
+    description: "The derivation reproduces the memory lifecycle rows from the bindings, and the committed derived file is its output."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k 'memory_lifecycle or nodes_output or typed_by_hand'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -k developer_principal_issuer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21045-ac1-deploy-derived-grants-shipped"
+    description: "The derived grants the issuer image ships at the merged head carry the expire-memory command topic; the deployed surface is the source at the merged head."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/deploy/lab/developer-principal-derived-grants.json?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'onex.cmd.omnimemory.expire-memory.v1'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
