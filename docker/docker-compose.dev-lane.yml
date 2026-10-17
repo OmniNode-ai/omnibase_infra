@@ -727,6 +727,14 @@ services:
       RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set}
       REDPANDA_CONTROL_PLANE_TOPIC: onex.tenant.events
+      # OMN-19998: 40,662 Empty consumer groups (2026-10-16 container audit),
+      # 41,398 on this lane's broker at 2026-10-16T20:12Z, almost all one-shot
+      # per-run groups (CLI terminal runs, scm and ledger clients, pr-handoff,
+      # canary probes) whose id embeds a fresh run id and is never reused. The
+      # cluster default keeps each for 7 days after its last member; 24 hours
+      # expires them a day after the run, and an expired offset set removes the
+      # group.
+      REDPANDA_GROUP_OFFSET_RETENTION_SEC: "86400"
     depends_on:
       redpanda-sasl-enable:
         condition: service_completed_successfully
