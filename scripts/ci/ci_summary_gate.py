@@ -348,6 +348,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # OMN-20703: node-boundary import gate; unconditional in ci.yml (no needs/if).
     # A skip or absence fails closed here instead of reading green.
     "Node Boundary Imports (OMN-20703)",  # node-boundary-imports
+    # OMN-19998: public-repository runner placement; unconditional in ci.yml (no
+    # needs/if). A skip or absence fails closed here instead of reading green.
+    "Public Runner Placement (OMN-19998)",  # public-runner-placement
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

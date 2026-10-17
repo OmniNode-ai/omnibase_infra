@@ -255,7 +255,7 @@ def test_boot_job_runs_on_uses_self_hosted_conditional(workflow: Workflow) -> No
     # fallback, and inserting anything else into this chain still fails here.
     assert (
         "fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || "
-        'vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || \'["self-hosted","omnibase-ci"]\')'
+        "vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '[\"ubuntu-latest\"]')"
     ) in normalized
 
 

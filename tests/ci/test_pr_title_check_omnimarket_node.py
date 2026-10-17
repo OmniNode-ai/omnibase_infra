@@ -39,7 +39,7 @@ RUNS_ON = """${{
   (github.event_name == 'pull_request' &&
    github.event.pull_request.head.repo.full_name != github.repository)
   && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-  || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+  || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
 }}"""
 LEGACY_BASH = r"""# Guard: workflow_call must be triggered by a pull_request event
 if [[ -z "$PR_TITLE" ]]; then
