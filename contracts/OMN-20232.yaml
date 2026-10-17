@@ -10,7 +10,7 @@ requirements:
     statement: "The principal issuer's deploy definition serves with --overlay and mounts the overlay file read-only, and fails the deploy when the file is not named."
     acceptance:
       - id: "AC1"
-        statement: "AC1: docker/Dockerfile.principal-issuer's serve command passes --overlay /overlay/developer-principal-overlay.yaml and docker/docker-compose.principal-issuer.yml bind-mounts a host file named by the required variable PRINCIPAL_ISSUER_OVERLAY_FILE read-only at that path without creating a missing host path -- falsifier: uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -k overlay fails at the merge base and passes at the head"
+        statement: "AC1: docker/Dockerfile.principal-issuer's serve command passes --overlay /overlay/developer-principal-overlay.yaml and docker/docker-compose.principal-issuer.yml bind-mounts a host file named by the required variable PRINCIPAL_ISSUER_OVERLAY_FILE read-only at that path without creating a missing host path -- falsifier: uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted fails at the merge base and passes at the head"
 evidence_requirements:
   - kind: "tests"
     description: "The deploy-definition tests pin the serve command's --overlay path, the read-only bind mount, the required variable and create_host_path false."
@@ -25,7 +25,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q -k overlay"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-omn20232-ac1-deploy-probe"
