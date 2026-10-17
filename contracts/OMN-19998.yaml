@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: success, skipped and neutral runs cause no job-list reads, while failure, cancelled, timed_out and missing conclusions retain wedge detection; the recorded 100-run list reads only candidate runs -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"'
+  - id: req-omn19998-contracts-strict-load-precommit
+    statement: A commit that touches a ticket contract under contracts/ must run the strict contract load test, so a merge that keeps two description and command pairs under one evidence item is refused at commit instead of in CI.
+    acceptance:
+      - id: AC20
+        statement: 'AC20: the contracts-strict-load pre-commit hook runs tests/ci/test_contracts_strict_load_omn20945.py at the pre-commit stage and fires on contracts/*.yaml, and run against the OMN-19998 contract with an evidence item carrying two description and command pairs it fails -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py -q -n 0 fails on the merge-base .pre-commit-config.yaml, which has no such hook'
   - id: req-omn19998-routing-audit-gateway-split
     statement: The runner routing audit's private-workflow batch read must read a batch again in halves when GitHub answers it with a gateway error (HTTP 502, 503 or 504), and must still raise when a single repository stays unread.
     acceptance:
@@ -76,6 +81,9 @@ evidence_requirements:
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
     command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"
   - kind: tests
+    description: The hook tests read .pre-commit-config.yaml for the contracts-strict-load hook, its stage, its entry and the paths its files pattern fires on.
+    command: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py tests/ci/test_contracts_strict_load_omn20945.py -q -n 0
+  - kind: tests
     description: The gateway-split tests drive the batch reader with a fake gh that answers HTTP 504 and count the reads.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "gateway"
   - kind: tests
@@ -116,6 +124,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn19998-ac20-contracts-strict-load-precommit
+    description: AC20 tests read the contracts-strict-load hook from .pre-commit-config.yaml and run the strict load over every ticket contract.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_precommit_omn19998.py tests/ci/test_contracts_strict_load_omn20945.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC20
   - id: dod-omn19998-ac2-routing-audit-gateway-split
     description: AC2 tests split a batch answered HTTP 504, raise for a repository still unread after its retry and do not retry a non-gateway failure.
     source: manual
