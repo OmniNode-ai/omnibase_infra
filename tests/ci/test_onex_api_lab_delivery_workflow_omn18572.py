@@ -69,12 +69,17 @@ def test_the_sasl_pair_is_required_and_no_hmac_secret_is() -> None:
 
     The deploy-agent HMAC belongs to the runtime deploy EFFECT that emits
     rebuild-requested, not to this upstream start command; declaring it here
-    would make a caller supply a secret this path never uses.
+    would make a caller supply a secret this path never uses. The App pair
+    (OMN-20935) reads the lane table from the CI overlay and stays optional.
     """
     secrets = _load()[True]["workflow_call"]["secrets"]
-    assert set(secrets) == {"KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"}
-    for name in secrets:
-        assert secrets[name]["required"] is True, name
+    required = {name for name, spec in secrets.items() if spec["required"] is True}
+    assert required == {"KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"}
+    optional = set(secrets) - required
+    assert optional == {"ONEXBOT_OCC_APP_ID", "ONEXBOT_OCC_PRIVATE_KEY"}
+    for name in optional:
+        assert secrets[name]["required"] is False, name
+    assert not any("HMAC" in name for name in secrets)
 
 
 # --------------------------------------------------------------------------- #

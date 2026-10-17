@@ -18,6 +18,11 @@ requirements:
         statement: "AC1: a probe script grades all three C28 clauses and the boot premise and exits 0 only when every one holds, 1 when one fails, 2 when it could not look -- falsifier: uv run pytest tests/ci/test_c28_consumer_flow_probe.py fails when any grading branch is removed"
       - id: AC4
         statement: "AC4: a deliberately broken run is RED, not green: the probe exits 1 when a named subscription kind has no instrumented row or a live group is unreachable -- falsifier: uv run pytest tests/ci/test_c28_consumer_flow_probe.py -k red"
+  - id: req-omn19812-workflow-runner-selection
+    statement: The scheduled C28 workflow runs the probe on the lab runner the overlay selects and uploads its record.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the scheduled workflow chain-canary-c28-consumer-flow.yml runs the probe on the lab runner selected through vars.LAB_PROBE_RUNS_ON_JSON against the dev lane and uploads its record -- falsifier: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py::test_the_workflow_runs_the_probe_beside_the_resolved_lane"
 evidence_requirements:
   - kind: tests
     description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
@@ -66,3 +71,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn19812-ac2-workflow-runs-probe-on-resolved-lab-runner
+    description: "AC2 offline workflow coverage checks the schedule and workflow_dispatch triggers, overlay runner selection, dev compose project resolution, propagation of the resolved lane and projection URL into the node request, and upload of the generated record even on failure. The upload rejects a missing record. These tests add coverage of existing behavior; they do not claim a live scheduled run or a merged product fix."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py::test_the_workflow_runs_the_probe_beside_the_resolved_lane -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_c28_workflow_ac2_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

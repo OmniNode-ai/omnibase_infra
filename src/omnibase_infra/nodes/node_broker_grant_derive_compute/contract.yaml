@@ -6,15 +6,15 @@ node_name: node_broker_grant_derive_compute
 contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: COMPUTE_GENERIC
-description: Derive exact broker grants from a principal's resolved wire bindings, without I/O.
+description: Derive broker grants from a principal's resolved wire bindings, without I/O.
 input_model:
-  name: ModelResolvedBusBindings
-  module: omnibase_core.models.event_bus.model_resolved_bus_bindings
-  description: Physical topic bindings and explicitly inspected consumer groups.
+  name: ModelBrokerGrantBindings
+  module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings
+  description: Physical topic bindings, explicitly inspected consumer groups and the consumer group prefixes read under.
 output_model:
   name: ModelBrokerGrantDerivation
   module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation
-  description: Sorted exact topic and group permissions per logical broker.
+  description: Sorted topic and group permissions per logical broker; exact unless marked prefixed, and the describe-only wildcard group.
 capabilities:
   - name: broker.grant.derive
     description: Derive desired permissions from resolved bus operations.
@@ -25,12 +25,12 @@ handler_routing:
       handler:
         name: HandlerBrokerGrantDerive
         module: omnibase_infra.handlers.handler_broker_grant_derive
-      description: Pure READ, WRITE and DESCRIBE grant derivation.
+      description: Pure READ, WRITE and DESCRIBE grant derivation, with prefixed group grants.
       supported_operations: [broker.grant.derive]
       input_model:
-        name: ModelResolvedBusBindings
-        module: omnibase_core.models.event_bus.model_resolved_bus_bindings
-        description: Resolved wire operations for one principal.
+        name: ModelBrokerGrantBindings
+        module: omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings
+        description: Resolved wire operations and group prefixes for one principal.
 error_handling:
   retry_policy:
     max_retries: 0
@@ -39,8 +39,8 @@ error_handling:
     exponential_base: 1
     retry_on: []
 metadata:
-  description: Derive exact broker topic and group grants from a principal's resolved wire bindings, without I/O.
+  description: Derive broker topic and group grants, prefixed group grants and the describe-only wildcard included, from a principal's resolved wire bindings, without I/O.
   author: OmniNode Team
   license: MIT
   tags: [compute, broker, grants]
-  related_tickets: [OMN-19939, OMN-17427]
+  related_tickets: [OMN-19939, OMN-17427, OMN-19975]

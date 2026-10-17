@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Pure conversion of resolved wire operations into exact broker grants."""
+"""Pure conversion of resolved wire operations into broker grants."""
 
 from typing import Literal
 
@@ -31,7 +31,14 @@ class HandlerBrokerGrantDerive:
         return EnumHandlerTypeCategory.COMPUTE
 
     def handle(self, request: ModelResolvedBusBindings) -> ModelBrokerGrantDerivation:
-        """Grant topic access and group READ; inspect only declared groups."""
+        """Grant topic access and group READ; inspect only declared groups.
+
+        A group prefix stated beside the bindings is granted READ and DESCRIBE as a
+        prefix, and a consumed group under it is covered by that prefix instead of
+        getting an exact grant of its own.
+        """
+        # ModelBrokerGrantBindings carries the prefixes; a plain resolved request has none.
+        prefixes = getattr(request, "group_prefixes", ())
         grants: set[ModelBrokerGrant] = set()
         for binding in request.bindings:
             consuming = binding.direction == EnumBusBindingDirection.CONSUME
@@ -50,12 +57,29 @@ class HandlerBrokerGrantDerive:
                 )
             if consuming:
                 assert binding.consumer_group is not None
+                if any(
+                    prefix.broker == binding.broker
+                    and binding.consumer_group.startswith(prefix.prefix)
+                    for prefix in prefixes
+                ):
+                    continue
                 grants.add(
                     ModelBrokerGrant(
                         broker=binding.broker,
                         resource_type="GROUP",
                         resource=binding.consumer_group,
                         operation="READ",
+                    )
+                )
+        for prefix in prefixes:
+            for operation in ("READ", "DESCRIBE"):
+                grants.add(
+                    ModelBrokerGrant(
+                        broker=prefix.broker,
+                        resource_type="GROUP",
+                        resource=prefix.prefix,
+                        operation=operation,
+                        pattern="PREFIXED",
                     )
                 )
         for inspection in request.described_groups:
@@ -76,6 +100,7 @@ class HandlerBrokerGrantDerive:
                         grant.broker,
                         grant.resource_type,
                         grant.resource,
+                        grant.pattern,
                         grant.operation,
                     ),
                 )
