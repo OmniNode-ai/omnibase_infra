@@ -3,10 +3,8 @@ ticket_id: OMN-19427
 title: A rolled-back stability lane keeps lane_sync failing against the desired state until a fixed release reconciles it
 summary: The stability refresh's post-rollback census was never handed a desired state, so the planner did not grade revision_mismatch and a rolled-back lane read lane_sync clean. verify_stability_refresh.py now takes --desired-state (the document for the release being delivered) and --desired-state-record-only; the forward gate is judged against the desired state, and the post-rollback re-verify records the same comparison as desired_state_sync without letting it decide the rollback gate, so the lane stays FAILED_ROLLED_BACK (healthy, exit 1) while its receipt reads FAIL with revision_mismatch. refresh_stability_lane.sh forwards STABILITY_DESIRED_STATE to both gates. Unset, nothing changes. This is the receipt half of the ticket; the injected-bad-release lab step (AC1) needs the stability reconcile path that renders and supplies the desired state, which is not built, so AC1 stays unmet.
 is_seam_ticket: false
-interface_change: true
-interfaces_touched:
-  - scripts/runtime_build/verify_stability_refresh.py
-  - scripts/runtime_build/refresh_stability_lane.sh
+interface_change: false
+interfaces_touched: []
 requirements:
   - id: req-rollback-receipt-compares-against-desired-state
     statement: A post-rollback receipt compares the lane with the desired state and reads lane_sync FAIL with revision_mismatch, while the rollback result stays FAILED_ROLLED_BACK.
