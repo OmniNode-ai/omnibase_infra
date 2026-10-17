@@ -31,5 +31,3 @@ repos:
     label: "omnimemory"
   - name: omniintelligence
     label: "omniintelligence"
-  - name: onex_change_control
-    label: "onex-change-control"

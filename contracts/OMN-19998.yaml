@@ -86,6 +86,11 @@ requirements:
     acceptance:
       - id: AC14
         statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+  - id: req-omn19998-infra-no-omnimarket-dependency
+    statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
+    acceptance:
+      - id: AC15
+        statement: 'AC15: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
   - id: req-omn19998-broker-profile-checks
     statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
     acceptance:
@@ -94,8 +99,8 @@ requirements:
   - id: req-omn19998-bump-regenerates-runner-lock
     statement: The release workflow's post-release dev version bump must regenerate docker/runners/runner-image.lock.json after it re-locks uv.lock and stage it in the bump commit, because uv.lock bytes feed the runner image identity and a bump PR with a stale lock fails tests/ci/test_runner_image_identity.py and runner-image-build-smoke.
     acceptance:
-      - id: AC15
-        statement: 'AC15: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
+      - id: AC16
+        statement: 'AC16: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -139,6 +144,9 @@ evidence_requirements:
   - kind: tests
     description: The workflow wiring tests read the post-release-dev-bump job's own YAML slice from release.yml.
     command: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0
+  - kind: tests
+    description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
+    command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -342,6 +350,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC14
+  - id: dod-omn19998-ac6-infra-no-omnimarket-dependency
+    description: AC15 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_entrypoint_preflight_no_omnimarket_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: 'gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=eeba91e21e702d29c420e5fe8ceaf4a43e334572 --jq .content | base64 -d | python3 -c "import sys; s = sys.stdin.read(); sys.exit(len(s) < 100 or ''omnimarket'' in s)"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC15
   - id: dod-omn19998-broker-profile-checks
     description: Run the corrected broker profile and control-plane regression files and inspect their named-key and fake broker support.
     source: manual
@@ -355,20 +378,20 @@ dod_evidence:
     binds_ac:
       - AC21
   - id: dod-omn19998-ac11-bump-regenerates-runner-lock
-    description: AC15 tests assert the post-release-dev-bump job regenerates the runner image lock after uv lock and stages it in the bump commit.
+    description: AC16 tests assert the post-release-dev-bump job regenerates the runner image lock after uv lock and stages it in the bump commit.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC15
+      - AC16
   - id: dod-omn19998-bump-runner-lock-deploy-probe
-    description: Hosted-runner deployment artifact check for AC15. Reads the release workflow and requires runner image lock generation after uv lock and inclusion in the bump commit.
+    description: Hosted-runner deployment artifact check for AC16. Reads the release workflow and requires runner image lock generation after uv lock and inclusion in the bump commit.
     source: manual
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -k "runner_image_lock"
         cwd: .
     binds_ac:
-      - AC15
+      - AC16
