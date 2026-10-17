@@ -491,6 +491,43 @@ def test_the_overlay_container_names_match_the_manifest_services(slot: int) -> N
     )
 
 
+@pytest.mark.parametrize("slot", sorted(policy.SLOTS))
+def test_every_overlay_container_carries_the_slot_marker(slot: int) -> None:
+    """The render check accepts every container name the overlay renders.
+
+    The gateway is ``onex-api-prepr-<slot>``, which ends at the slot number.
+    The check required ``-prepr-<slot>-`` with a trailing dash, so it refused
+    the whole slot before anything booted (OMN-19972). This reads the overlay
+    through the verifier's own predicate.
+    """
+    slot_policy = policy.resolve_slot(slot)
+    overlay = _overlay_for_slot(slot)
+    named = {
+        name: svc["container_name"]
+        for name, svc in overlay["services"].items()
+        if isinstance(svc, dict) and "container_name" in svc
+    }
+    assert "onex-api" in named, "positive control: the gateway must be checked."
+    bare = {
+        n: c
+        for n, c in named.items()
+        if not verifier.carries_slot_marker(c, slot_policy)
+    }
+    assert not bare, f"services whose container_name does not name slot {slot}: {bare}"
+
+
+@pytest.mark.parametrize("slot", sorted(policy.SLOTS))
+def test_the_slot_marker_is_a_whole_segment_not_a_substring(slot: int) -> None:
+    slot_policy = policy.resolve_slot(slot)
+    carries = verifier.carries_slot_marker
+    assert carries(f"onex-api-prepr-{slot}", slot_policy)
+    assert carries(f"omninode-prepr-{slot}-runtime", slot_policy)
+    assert not carries(f"onex-api-prepr-{slot}0", slot_policy)
+    assert not carries(f"omninode-prepr-{slot}0-runtime", slot_policy)
+    assert not carries("onex-api", slot_policy)
+    assert not carries(f"omninode-prepr-{slot + 1}-runtime", slot_policy)
+
+
 def test_every_shared_dependency_is_fenced_behind_an_unreachable_profile() -> None:
     """The fence, not the caller, is what stops a bare ``up``.
 

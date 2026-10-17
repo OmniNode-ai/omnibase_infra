@@ -123,6 +123,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import http.client
 import io
 import json
 import os
@@ -131,6 +132,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -223,6 +225,13 @@ class EnumAlarmCondition(StrEnum):
     or no completed scheduled run inside the declared window, is an alarm:
     until this condition a red canary was a failed run nobody watched.
 
+    DEV_TAG_HEARTBEAT (OMN-19998) reads the deploy agent's
+    ``/dev-tag-heartbeat``, the latest beat against each tag-followed
+    repository's newest ``dev-*`` tag. A beat that has gone quiet, a followed
+    repository with no beat, or a beat that reports the lane behind its newest
+    tag past the agent's own bound is an alarm: until this condition the
+    heartbeat was published and served and nothing read it.
+
     WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger
     file's newest canonical row against ``max(row_ts)`` in the work-ledger
     projection table. The projection sat frozen for about 36 hours while its
@@ -236,6 +245,7 @@ class EnumAlarmCondition(StrEnum):
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
     WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
     DELEGATION_CHAIN_CANARY = "delegation_chain_canary"
+    DEV_TAG_HEARTBEAT = "dev_tag_heartbeat"
     LANE_DRIFT = "lane_drift"
     CONTAINER_UNHEALTHY = "container_unhealthy"
     STALE_INDETERMINATE = "stale_indeterminate"
@@ -2385,6 +2395,139 @@ def evaluate_delegation_chain_canary(
 
 
 # ---------------------------------------------------------------------------
+# Condition 3b — the dev-tag heartbeat gone quiet or behind (OMN-19998)
+# ---------------------------------------------------------------------------
+#
+# The deploy agent re-reads each tag-followed repository every 60 s and keeps
+# the latest ModelDevTagHeartbeat per repository, served on /dev-tag-heartbeat.
+# Three readings are an ALARM: the beat's observed_at is older than the bound
+# (the agent's idle loop stopped, so nothing is watching the lane), a followed
+# repository has no beat at all, and the beat itself reports ``alarm`` (the
+# lane has run behind the newest dev tag past the agent's own bound). An
+# unreachable agent, an agent with no heartbeat to report and a beat this
+# cannot parse are INDETERMINATE, on the same terms as every other condition:
+# an unread surface is not a verdict, and STALE_INDETERMINATE watches it.
+
+
+class HeartbeatReader(Protocol):
+    def __call__(self) -> Mapping[str, Any]:
+        """Return the agent's ``/dev-tag-heartbeat`` document; raise when unread."""
+
+
+def read_dev_tag_heartbeat(
+    agent_url: str, timeout_seconds: float = 10.0
+) -> Mapping[str, Any]:
+    """``GET <agent_url>/dev-tag-heartbeat``, parsed. Raises on any failure."""
+    parts = urllib.parse.urlsplit(agent_url)
+    if parts.scheme != "http" or not parts.hostname:
+        raise ValueError(f"agent_url {agent_url!r} is not an http URL with a host")
+    connection = http.client.HTTPConnection(
+        parts.hostname, parts.port or 80, timeout=timeout_seconds
+    )
+    try:
+        connection.request("GET", f"{parts.path.rstrip('/')}/dev-tag-heartbeat")
+        response = connection.getresponse()
+        if response.status != 200:
+            raise OSError(f"/dev-tag-heartbeat answered HTTP {response.status}")
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    finally:
+        connection.close()
+    if not isinstance(payload, dict):
+        raise ValueError("/dev-tag-heartbeat did not answer a JSON object")
+    return payload
+
+
+def _parse_utc(text: str) -> datetime:
+    parsed = datetime.fromisoformat(text)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def evaluate_dev_tag_heartbeat(
+    reader: HeartbeatReader,
+    *,
+    repositories: Sequence[str],
+    now: datetime,
+    max_age: timedelta,
+) -> ModelConditionReport:
+    condition = EnumAlarmCondition.DEV_TAG_HEARTBEAT
+    try:
+        document = reader()
+        beats = document.get("heartbeat")
+        if not isinstance(beats, Mapping):
+            reason = document.get("reason") or "no heartbeat object in the answer"
+            raise ValueError(f"the agent reported no heartbeat: {reason}")
+        alarms: list[ModelAlarm] = []
+        readings: list[str] = []
+        for repository in repositories:
+            beat = beats.get(repository)
+            if not isinstance(beat, Mapping):
+                alarms.append(
+                    ModelAlarm(
+                        condition=condition,
+                        subject=repository,
+                        detail=(
+                            f"the deploy agent has no beat for {repository}, so "
+                            "nothing is checking the lane against its newest dev tag"
+                        ),
+                    )
+                )
+                continue
+            age = now - _parse_utc(str(beat["observed_at"]))
+            readings.append(f"{repository} observed_at={beat['observed_at']} age={age}")
+            if age > max_age:
+                alarms.append(
+                    ModelAlarm(
+                        condition=condition,
+                        subject=repository,
+                        detail=(
+                            f"the dev-tag heartbeat for {repository} is stale: last "
+                            f"observed {beat['observed_at']}, {age} ago, past the "
+                            f"{max_age} bound"
+                        ),
+                    )
+                )
+            elif beat.get("alarm") is True:
+                alarms.append(
+                    ModelAlarm(
+                        condition=condition,
+                        subject=repository,
+                        detail=(
+                            f"the lane is behind {repository}'s newest dev tag "
+                            f"{beat.get('newest_tag')}: running "
+                            f"{beat.get('running_ref')}, behind for "
+                            f"{beat.get('lag_seconds')}s, past the agent's "
+                            f"{beat.get('alarm_after_seconds')}s bound"
+                        ),
+                    )
+                )
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        subprocess.SubprocessError,
+    ) as exc:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=f"dev-tag heartbeat unreadable: {exc!r}",
+        )
+    evidence = "; ".join(readings) or "no repository carried a beat"
+    if alarms:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.ALARM,
+            evidence=f"{evidence}; {len(alarms)} alarming",
+            alarms=tuple(alarms),
+        )
+    return ModelConditionReport(
+        condition=condition,
+        outcome=EnumConditionOutcome.OK,
+        evidence=f"{evidence}; every followed repository beat inside {max_age}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Condition 4 — a condition stuck INDETERMINATE for too long (OMN-19091)
 # ---------------------------------------------------------------------------
 
@@ -2539,6 +2682,10 @@ class ModelAlarmConfig:
     chain_canary_max_age: timedelta = timedelta(hours=3)
     census_command: tuple[str, ...] = ()
     census_max_age: timedelta = timedelta(hours=2)
+    #: OMN-19998: the repositories the agent beats against (its
+    #: ``DEV_TAG_FOLLOWED_REPOSITORIES``) and how old a beat may be.
+    dev_tag_heartbeat_repositories: tuple[str, ...] = ("omnimarket",)
+    dev_tag_heartbeat_max_age: timedelta = timedelta(minutes=30)
     #: OMN-20794: the ledger tool's argv prefix, ledger path and ``--append``
     #: excluded. Empty only for a caller that injects its own appender.
     ledger_append_command: tuple[str, ...] = ()
@@ -2571,6 +2718,20 @@ class ModelAlarmConfig:
         if type(census_max_age_minutes) is not int or census_max_age_minutes <= 0:
             raise ValueError(
                 f"{path}: census_max_age_minutes must be a positive integer"
+            )
+        heartbeat_repositories = payload["dev_tag_heartbeat_repositories"]
+        if (
+            not isinstance(heartbeat_repositories, list)
+            or not heartbeat_repositories
+            or not all(isinstance(r, str) and r for r in heartbeat_repositories)
+        ):
+            raise ValueError(
+                f"{path}: dev_tag_heartbeat_repositories must be a non-empty string list"
+            )
+        heartbeat_minutes = payload["dev_tag_heartbeat_max_age_minutes"]
+        if type(heartbeat_minutes) is not int or heartbeat_minutes <= 0:
+            raise ValueError(
+                f"{path}: dev_tag_heartbeat_max_age_minutes must be a positive integer"
             )
         ledger_command = payload["ledger_append_command"]
         if (
@@ -2624,6 +2785,8 @@ class ModelAlarmConfig:
                 expand_env(part, source=path) for part in census_command
             ),
             census_max_age=timedelta(minutes=census_max_age_minutes),
+            dev_tag_heartbeat_repositories=tuple(heartbeat_repositories),
+            dev_tag_heartbeat_max_age=timedelta(minutes=heartbeat_minutes),
         )
 
 
@@ -2648,6 +2811,7 @@ def run_once(
     lag_reader: GroupLagReader,
     effects_reader: EffectsHeldReader,
     canary_reader: CanaryVerdictReader,
+    heartbeat_reader: HeartbeatReader,
     posting_channel: str,
     env_file: Path,
     ledger_appender: LedgerAppender,
@@ -2692,6 +2856,12 @@ def run_once(
         branch=config.chain_canary_branch,
         max_age=config.chain_canary_max_age,
     )
+    heartbeat_report = evaluate_dev_tag_heartbeat(
+        heartbeat_reader,
+        repositories=config.dev_tag_heartbeat_repositories,
+        now=_parse_utc(started),
+        max_age=config.dev_tag_heartbeat_max_age,
+    )
     census_reports = evaluate_lane_census(
         state_dir=state_dir,
         command=config.census_command,
@@ -2706,6 +2876,7 @@ def run_once(
         effects_report,
         work_ledger_report,
         canary_report,
+        heartbeat_report,
         *census_reports,
     )
     stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
@@ -2983,6 +3154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             group_suffix=config.effects_group_suffix,
         ),
         canary_reader=read_chain_canary_verdict,
+        heartbeat_reader=lambda: read_dev_tag_heartbeat(config.agent_url),
         posting_channel=args.posting_channel,
         env_file=args.env_file,
         ledger_appender=make_ledger_appender(config.ledger_append_command, args.ledger),
