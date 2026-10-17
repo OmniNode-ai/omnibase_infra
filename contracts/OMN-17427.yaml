@@ -113,11 +113,21 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-mac-deploy-agent-topics-declared
+    statement: Every topic the deploy agent publishes is declared in a topics.yaml manifest or the omnimarket contract that owns it, so the provisioner creates it and a publish no longer fails with the topic absent from cluster metadata.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: dev-tag-heartbeat, dev-lane-drift and the deploy-command DLQ are declared in src/omnibase_infra/services/topics.yaml and every TOPIC_* constant in deploy_agent.events is declared for provisioning -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q'
+  - id: req-omn17427-autoclose-diagnose-off-occ
+    statement: The evidence autoclose sweep's diagnose step probes read access to no change-control repository.
+    acceptance:
+      - id: AC27
+        statement: 'AC27: the diagnose credential-capability list in evidence-autoclose-sweep.yml names four repositories, among them omnibase_infra, omnimarket and omnibase_core, and no change-control repository -- falsifier: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q'
   - id: req-omn17427-hook-push-rehearsal-caller
     statement: A pull request that changes a pre-push hook path runs the omnibase_core hook push rehearsal through a caller workflow pinned to a commit on omnibase_core dev.
     acceptance:
-      - id: AC26
-        statement: 'AC26: the caller workflow triggers on pull_request and merge_group, grants contents read with no runs-on, pins the reusable at a full sha that equals the recorded commit on origin/dev, its path-regex matches the hook paths and neither this caller nor README.md, and every input it passes is declared by the reusable -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+      - id: AC28
+        statement: 'AC28: the caller workflow triggers on pull_request and merge_group, grants contents read with no runs-on, pins the reusable at a full sha that equals the recorded commit on origin/dev, its path-regex matches the hook paths and neither this caller nor README.md, and every input it passes is declared by the reusable -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -194,6 +204,9 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The autoclose diagnose step probes no change-control repository.
+    command: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
   - kind: tests
     description: The hook push rehearsal caller workflow matches the omnibase_core reusable at its pin.
     command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
@@ -501,6 +514,33 @@ dod_evidence:
     binds_ac:
       - AC25
   - id: dod-omn-17427-ac26
+    description: Every topic the deploy agent publishes is declared for provisioning, including the dev-tag heartbeat.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
+  - id: dod-omn-17427-ac27
+    description: The autoclose diagnose credential-capability list names no change-control repository and keeps the repositories the sweep reads.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC27
+  - id: dod-omn-17427-ac27-deploy-autoclose-diagnose
+    description: Hosted-runner smoke -- the workflow file on the runner lists the probed repositories without a change-control repository, with no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC27
+  - id: dod-omn-17427-ac28
     description: The hook push rehearsal caller workflow triggers, permissions, full-sha pin, path-regex and inputs match the omnibase_core reusable recorded at the pinned commit.
     source: manual
     checks:
@@ -508,4 +548,4 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC26
+      - AC28

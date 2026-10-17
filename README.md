@@ -164,6 +164,16 @@ mode set to 0600) the next time `make local-env` or `make up-local` runs.
 Every service connects as the postgres superuser, so row-level security is not
 exercised by this profile.
 
+To also mirror your delegation topics to a lab lane, copy the two templates in
+`docker/lane-overlays/` (`local.lane-mirror.example.yaml`,
+`local.lane-credentials.example.yaml`), edit them, set
+`ONEX_LOCAL_LANE_MIRROR_OVERLAY` and `ONEX_LOCAL_LANE_CREDENTIAL_MAP` to their
+absolute paths in `~/.omnibase/local.env`, and run `make up-local-mirror`. The
+`lane-mirror-forwarder` service republishes only the topic set the overlay
+selects, unchanged, so the lab keeps the run under your tenant. The lab address
+and the principal that writes the lab lane are yours to supply; this repo holds
+neither.
+
 ### Development and testing
 
 ```bash
