@@ -76,11 +76,16 @@ requirements:
     acceptance:
       - id: AC12
         statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
+  - id: req-omn19998-drain-then-relabel-roll
+    statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
   - id: req-omn19998-infra-no-omnimarket-dependency
     statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
     acceptance:
-      - id: AC14
-        statement: 'AC14: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
+      - id: AC15
+        statement: 'AC15: the guard passes on the tree and fails on a manifest, lock or module that names omnimarket, and fails the live tree with an omnimarket requirement in pyproject.toml or a module-scope import in src -- falsifier: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 fails with "import omnimarket" appended to src/omnibase_infra/runtime/entrypoint_preflight.py'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -115,6 +120,9 @@ evidence_requirements:
   - kind: tests
     description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
     command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+  - kind: tests
+    description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
+    command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
   - kind: tests
     description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
     command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
@@ -294,8 +302,26 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC13
+  - id: dod-omn19998-ac11-drain-then-relabel-roll
+    description: AC14 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real; the four -k groups together select every test in the module, each inside the per-check budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "parses_and or combine_with or dry_run_changes or a_real_roll or compose_declarations or busy_runner_is_never"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "token_never_reaches_output_or_argv or minted_token or listener_log or missing_image_tag or may_not_drop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "lands_between or does_not_return or compose_lacks"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "already_online or limit_counts or reads_are_capped or secondary_pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14
   - id: dod-omn19998-ac6-infra-no-omnimarket-dependency
-    description: AC14 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
+    description: AC15 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
     source: manual
     checks:
       - check_type: test_passes
@@ -308,4 +334,4 @@ dod_evidence:
         check_value: 'gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=eeba91e21e702d29c420e5fe8ceaf4a43e334572 --jq .content | base64 -d | python3 -c "import sys; s = sys.stdin.read(); sys.exit(len(s) < 100 or ''omnimarket'' in s)"'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC14
+      - AC15
