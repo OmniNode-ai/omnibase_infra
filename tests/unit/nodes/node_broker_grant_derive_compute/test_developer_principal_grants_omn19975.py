@@ -126,7 +126,8 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 )
 # The grants added by declaring a binding after OMN-19975 (OMN-21045): the memory
 # lifecycle proof publishes expire-memory and reads the two outcomes under its own
-# group prefix.
+# group prefix. The morning ground-state run (OMN-20673) adds its start command, its two
+# terminals, the delegation request and the reply under the morning_phase reply group.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "topic",
@@ -152,6 +153,43 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "prefixed",
         ("read", "describe"),
     ),
+    (
+        "topic",
+        "onex.cmd.omnimarket.morning-ground-state-start.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.morning-ground-state-completed.v1",
+        "literal",
+        ("read", "write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.morning-ground-state-failed.v1",
+        "literal",
+        ("read", "write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.cmd.omnibase-infra.delegation-request.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnibase-infra.delegation-failed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    ("group", "local.rr.morning_phase.", "prefixed", ("read", "describe")),
 )
 BROKER = "dev"
 
@@ -194,6 +232,38 @@ def test_the_memory_lifecycle_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnimemory.memory-expired.v1", "DESCRIBE"),
         ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "READ"),
         ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "DESCRIBE"),
+    }
+
+
+def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
+    """The run may start the node, read and write its terminals, and delegate its phases."""
+    rows = derive(shipped_bindings())
+    morning = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "morning" in resource or "delegation" in resource
+    } - {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "delegate-skill" in resource
+    }
+    assert morning == {
+        ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-completed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-completed.v1", "WRITE"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-completed.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-failed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-failed.v1", "WRITE"),
+        ("TOPIC", "onex.evt.omnimarket.morning-ground-state-failed.v1", "DESCRIBE"),
+        ("TOPIC", "onex.cmd.omnibase-infra.delegation-request.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnibase-infra.delegation-request.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnibase-infra.delegation-completed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnibase-infra.delegation-completed.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnibase-infra.delegation-failed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnibase-infra.delegation-failed.v1", "DESCRIBE"),
+        ("GROUP", "local.rr.morning_phase.", "READ"),
+        ("GROUP", "local.rr.morning_phase.", "DESCRIBE"),
     }
 
 

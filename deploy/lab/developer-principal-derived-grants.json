@@ -67,6 +67,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "local.rr.morning_phase.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.rr.morning_phase.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "pr-handoff-request.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -81,6 +95,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.delegate-skill.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -103,6 +131,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.morning-ground-state-start.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.morning-ground-state-start.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -146,6 +188,34 @@
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimemory.expire-memory.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {
@@ -202,6 +272,48 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.github-repo-gateway-read-completed.v1",
       "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-completed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.morning-ground-state-failed.v1",
+      "operation": "WRITE",
       "pattern": "LITERAL"
     },
     {

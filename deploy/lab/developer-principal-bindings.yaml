@@ -53,6 +53,16 @@
 # orchestrator's own group, `<env>.omnimemory.node_memory_lifecycle_orchestrator...`,
 # does not start with that prefix, so a developer principal cannot join it and take
 # commands.
+#
+# MORNING GROUND STATE (OMN-20673): the operator machine's scheduled morning run starts
+# `node_morning_ground_state_orchestrator` and reads its two terminals, and the node's phase
+# gateway sends each phase as a delegation request and reads the reply. The start command
+# and the two terminals are the topics its contract declares (`morning-ground-state-start`,
+# `-completed`, `-failed`); a machine that runs the node itself publishes its own terminals,
+# as for a delegate task. The delegation request is the contract's request_response
+# instance `morning_phase`, whose reply group is `<env>.rr.morning_phase.<boot nonce>`
+# (RequestResponseWiring); a developer machine's env token is `local`. The prefix names
+# that one instance, so a developer principal cannot join another instance's reply group.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -74,11 +84,20 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimemory.expire-memory.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimemory.memory-expired.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimemory.lifecycle-transition-failed.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.morning-ground-state-start.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.morning-ground-state-completed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.morning-ground-state-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.morning-ground-state-failed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.morning-ground-state-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omnibase-infra.delegation-request.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-completed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
+  - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
   - {broker: dev, prefix: pr-handoff-request.}
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
+  - {broker: dev, prefix: local.rr.morning_phase.}
 described_groups:
   - {broker: dev, group: "*"}
