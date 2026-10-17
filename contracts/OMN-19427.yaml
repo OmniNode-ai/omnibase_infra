@@ -20,7 +20,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-rollback-receipt-compares-against-desired-state-ac2
+  - id: dod-rollback-desired-state-ac2
     description: The focused rollback tests prove the post-rollback gate records the desired-state comparison as FAIL with revision_mismatch, leaves the rollback gate PASS and the receipt result FAILED_ROLLED_BACK, and that the refresh script forwards the desired state to both gates.
     source: manual
     checks:
