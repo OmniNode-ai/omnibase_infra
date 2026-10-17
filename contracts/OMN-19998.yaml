@@ -96,6 +96,11 @@ requirements:
     acceptance:
       - id: AC21
         statement: 'AC21: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
+  - id: req-omn19998-forwarder-inbound-survives-bad-record
+    statement: The gateway forwarder inbound leg keeps delivering when one cloud record carries no event_type or a consumer start does not finish.
+    acceptance:
+      - id: AC17
+        statement: 'AC17: an inbound envelope with no event_type is refused as a GatewayRecordRefusedError (quarantined, never republished), and a KafkaTransport whose consumer start raised or was cancelled holds no never-started consumer and builds a fresh one on the next poll -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0 fails on the merge-base tree'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -139,6 +144,9 @@ evidence_requirements:
   - kind: tests
     description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
     command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
+  - kind: tests
+    description: The inbound refusal tests drive ServiceGatewayForwarder with a real ModelEventEnvelope; the transport tests replace aiokafka's consumer with one whose getmany fails like aiokafka 0.13.0 before start() finishes.
+    command: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -369,3 +377,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC21
+  - id: dod-omn19998-ac17-forwarder-inbound-recovery
+    description: AC17 tests refuse an untyped inbound envelope and recover a transport whose consumer start raised or was cancelled on the refused-topic retry path.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17
+  - id: dod-omn19998-forwarder-inbound-deploy-probe
+    description: Hosted-runner deployment artifact check for AC17. Exercises the gateway delivery and transport code from this checkout with an untyped inbound record and a failed consumer start, requiring quarantine, acknowledgement, continued delivery and consumer recovery without a live broker.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/gateway/test_forwarder_inbound_untyped_record_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC17
