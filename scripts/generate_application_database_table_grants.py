@@ -149,9 +149,18 @@ def _render_instance(path: Path, derived: TopologyTableGrants) -> str:
     document = yaml.safe_load(original)
     for database_ref, database in document["databases"].items():
         database_grants = derived.per_database.get(database_ref)
+        bound_principals = {
+            binding["principal"] for binding in database.get("bindings", {}).values()
+        }
         for principal_name, principal in database["principals"].items():
-            # Drop every existing TABLE grant: this script owns that subset
-            # entirely, so a stale entry must not survive a regeneration.
+            if principal_name not in bound_principals:
+                # No binding names this principal, so no contract's
+                # ``db_io.db_tables`` can derive a grant for it: its TABLE grants
+                # are declared by hand and are not this script's to clear.
+                continue
+            # Drop every existing TABLE grant of a bound principal: this script
+            # owns that subset entirely, so a stale entry must not survive a
+            # regeneration.
             retained = [
                 grant
                 for grant in principal.get("grants", [])
