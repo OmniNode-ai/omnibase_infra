@@ -1321,7 +1321,10 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     in the same change; the failure names the bundle.
     """
     bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
-    assert sorted(set(bundles) - {"local"}) == sorted(_OTHER_BUNDLE_DIGESTS)
+    # local-lane-mirror (OMN-19983) is the laptop stack plus one service.
+    assert sorted(set(bundles) - {"local", "local-lane-mirror"}) == sorted(
+        _OTHER_BUNDLE_DIGESTS
+    )
     drifted = sorted(
         name
         for name, pinned in _OTHER_BUNDLE_DIGESTS.items()
