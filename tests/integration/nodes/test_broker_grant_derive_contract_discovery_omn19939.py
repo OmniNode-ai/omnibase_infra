@@ -149,6 +149,6 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
         for g in result.grants
     }
     assert rows == expected
-    assert len(rows) == 35
+    assert len(rows) == 43
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}

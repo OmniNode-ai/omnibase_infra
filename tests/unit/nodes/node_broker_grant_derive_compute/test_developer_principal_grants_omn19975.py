@@ -124,13 +124,42 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ),
     ("group", "*", "literal", ("describe",)),
 )
+# The grants added by declaring a binding after OMN-19975 (OMN-21045): the memory
+# lifecycle proof publishes expire-memory and reads the two outcomes under its own
+# group prefix.
+DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
+        "topic",
+        "onex.cmd.omnimemory.expire-memory.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimemory.memory-expired.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimemory.lifecycle-transition-failed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "group",
+        "local.omnimemory.memory_lifecycle_probe.consume.v1.",
+        "prefixed",
+        ("read", "describe"),
+    ),
+)
 BROKER = "dev"
 
 
 def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
-        for resource, name, pattern, operations in TYPED_GRANTS
+        for resource, name, pattern, operations in TYPED_GRANTS + DECLARED_GRANTS
         for operation in operations
     }
 
@@ -148,6 +177,24 @@ def shipped_bindings() -> ModelBrokerGrantBindings:
 
 def test_bindings_derive_exactly_the_grants_that_were_typed_by_hand() -> None:
     assert derive(shipped_bindings()) == typed_rows()
+
+
+def test_the_memory_lifecycle_grants_are_declared_and_nothing_wider() -> None:
+    """The proof may publish expire-memory and read two outcomes, not the memory topics."""
+    rows = derive(shipped_bindings())
+    memory_topics = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource_type == "TOPIC" and ".omnimemory." in resource
+    }
+    assert memory_topics == {
+        ("TOPIC", "onex.cmd.omnimemory.expire-memory.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnimemory.expire-memory.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimemory.memory-expired.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimemory.memory-expired.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "DESCRIBE"),
+    }
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:

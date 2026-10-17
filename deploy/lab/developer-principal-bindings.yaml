@@ -44,6 +44,15 @@
 # SOURCE-CONTROL READS: `onex scm <read verb>` publishes one github-repo-gateway read
 # command and reads its one terminal, under `local.omnimarket.scm_command_client.consume.v1.`
 # plus a per-call suffix. The write node's topics are deliberately not granted.
+#
+# MEMORY LIFECYCLE PROOF (OMN-21045): a machine proves the omnimemory lifecycle by
+# publishing `expire-memory` and reading the two outcomes the lifecycle orchestrator
+# publishes, `memory-expired` and `lifecycle-transition-failed` (the topics its
+# contract declares under publish_topics and subscribe_topics). The caller reads under
+# `local.omnimemory.memory_lifecycle_probe.consume.v1.` plus a per-call suffix; the
+# orchestrator's own group, `<env>.omnimemory.node_memory_lifecycle_orchestrator...`,
+# does not start with that prefix, so a developer principal cannot join it and take
+# commands.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -62,10 +71,14 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-failed.v1, direction: consume, consumer_group: pr-handoff-request.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.github-repo-gateway-read-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-gateway-read-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimemory.expire-memory.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimemory.memory-expired.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.evt.omnimemory.lifecycle-transition-failed.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
   - {broker: dev, prefix: pr-handoff-request.}
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
+  - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
 described_groups:
   - {broker: dev, group: "*"}
