@@ -101,6 +101,11 @@ requirements:
     acceptance:
       - id: AC17
         statement: 'AC17: an inbound envelope with no event_type is refused as a GatewayRecordRefusedError (quarantined, never republished), and a KafkaTransport whose consumer start raised or was cancelled holds no never-started consumer and builds a fresh one on the next poll -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0 fails on the merge-base tree'
+  - id: req-omn19998-dev-lane-group-offset-retention
+    statement: The dev lane's shared broker-profile one-shot must set the Redpanda cluster property group_offset_retention_sec to 86400 and read it back, so per-run consumer groups with no member for a day expire instead of accumulating for seven; a lane that declares no value keeps the cluster default.
+    acceptance:
+      - id: AC16
+        statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -147,6 +152,9 @@ evidence_requirements:
   - kind: tests
     description: The inbound refusal tests drive ServiceGatewayForwarder with a real ModelEventEnvelope; the transport tests replace aiokafka's consumer with one whose getmany fails like aiokafka 0.13.0 before start() finishes.
     command: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0
+  - kind: tests
+    description: The retention tests render the dev lane and the base infra file with docker compose config and run the rendered one-shot script against a stubbed rpk.
+    command: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -395,3 +403,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC17
+  - id: dod-omn19998-dev-lane-group-offset-retention
+    description: AC16 tests render the dev lane and the base infra file and run the rendered broker-profile script against a stubbed rpk; at the merge base the dev lane renders no retention variable and all three new tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
+  - id: dod-omn19998-group-offset-retention-deploy-probe
+    description: Hosted-runner probe reads the dev-lane overlay in this checkout and requires the 86400 retention on the broker-profile one-shot; the merge-base overlay has no such line and the probe fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -q 'REDPANDA_GROUP_OFFSET_RETENTION_SEC. "86400"' docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
