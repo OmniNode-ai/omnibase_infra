@@ -409,5 +409,17 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn-17427-ac22-deploy-collectors
+    description: Hosted-runner collector smoke -- both C28 collectors send the recorded index-backed SQL to psql and return the same 533 groups as the recorded whole-table read. Replays real PostgreSQL stdout without a deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC22
