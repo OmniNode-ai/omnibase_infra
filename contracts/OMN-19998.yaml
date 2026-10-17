@@ -111,6 +111,11 @@ requirements:
     acceptance:
       - id: AC16
         statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
+  - id: req-omn19998-core-pin-meets-omnimarket-floor
+    statement: The exact omnibase-core pin must meet the floor that the omnimarket release and dev declare, because the runtime image installs omnimarket with --no-deps over that pin and a lower pin crash-loops both kernels under strict wiring.
+    acceptance:
+      - id: AC23
+        statement: 'AC23: pyproject.toml pins omnibase-core==0.47.46 and uv.lock resolves omnibase-core 0.47.46, which ships omnibase_core.enums.enum_binding_kind -- falsifier: uv run pytest tests/unit/docker/test_runtime_core_binding_kind_omn19998.py -q fails at the merge base, where core 0.47.44 is locked and the binding-kind module is absent'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -166,6 +171,9 @@ evidence_requirements:
   - kind: tests
     description: The retention tests render the dev lane and the base infra file with docker compose config and run the rendered one-shot script against a stubbed rpk.
     command: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
+  - kind: tests
+    description: The regression tests read the core override and lock, require the binding-kind release floor, and load both binding kinds from the installed core.
+    command: uv run pytest tests/unit/docker/test_runtime_core_binding_kind_omn19998.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -452,3 +460,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC16
+  - id: dod-omn19998-core-pin-meets-omnimarket-floor
+    description: Hosted-runner regression check for AC23. Requires the core override and lock to agree at or above the binding-kind release floor and imports both binding kinds. At the merge base core 0.47.44 is locked and both tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_runtime_core_binding_kind_omn19998.py -q
+        cwd: .
+    binds_ac:
+      - AC23
