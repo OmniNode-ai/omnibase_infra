@@ -113,6 +113,11 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-mac-deploy-agent-topics-declared
+    statement: Every topic the deploy agent publishes is declared in a topics.yaml manifest or the omnimarket contract that owns it, so the provisioner creates it and a publish no longer fails with the topic absent from cluster metadata.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: dev-tag-heartbeat, dev-lane-drift and the deploy-command DLQ are declared in src/omnibase_infra/services/topics.yaml and every TOPIC_* constant in deploy_agent.events is declared for provisioning -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -492,3 +497,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC25
+  - id: dod-omn-17427-ac26
+    description: Every topic the deploy agent publishes is declared for provisioning, including the dev-tag heartbeat.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
