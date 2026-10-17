@@ -457,3 +457,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC24
+  - id: dod-omn-17427-ac24-deploy-scans
+    description: Hosted-runner scan smoke -- the infra-signature script runs in dry-run mode with a stand-in gh and scans the canonical registry, while the wedge script and workflow defaults match and omit the retired repository. No deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py tests/ci/test_runner_disk_preflight.py -q -k "omits_retired_repo or omit_retired_repo"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC24
