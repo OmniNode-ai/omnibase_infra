@@ -34,7 +34,16 @@ and the ``gosu`` privilege drop (they run before the unprivileged user exists,
 and re-exec the script), and the deployment-identity banner (pure ``echo``, no
 interpreter).
 
+Bounded restart (OMN-18550): the container's restart policy relaunches this
+process after every failing exit, so on its own it loops forever on a boot that
+can never succeed. :func:`main` therefore counts consecutive failing exits in the
+durable boot-failure ledger, publishes a boot-failed event (cause and count) for
+each, and once the declared bound is reached records the exhausted event and
+parks the container instead of booting again: the restart policy has nothing left
+to relaunch, and the container reports unhealthy with the cause in its log.
+
 Related Tickets:
+    - OMN-18550: unbounded, unreported restart loop on a malformed contract.
     - OMN-17372: runtime boot latency — four cold interpreters before the kernel.
     - OMN-13666: required (own DB) vs best-effort (non-owned DB) stamp policy.
     - OMN-15807: the Bifrost renderer always rebuilds from the packaged base.
@@ -42,11 +51,26 @@ Related Tickets:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
+import socket
 import sys
 import time
 from collections.abc import Callable, Mapping, MutableMapping
+from datetime import UTC, datetime
 from pathlib import Path
+
+from omnibase_infra.handlers.handler_boot_failure_ledger import (
+    HandlerBootFailureLedger,
+)
+from omnibase_infra.models.health.model_boot_attempt_outcome import (
+    ModelBootAttemptOutcome,
+)
+from omnibase_infra.models.health.model_boot_identity import ModelBootIdentity
+from omnibase_infra.models.health.model_runtime_boot_failed_event import (
+    ModelRuntimeBootFailedEvent,
+)
 
 #: Retry policy for the schema-fingerprint stamp, ported verbatim from the
 #: shell loop it replaces (5 attempts, 1 s apart, exit 2 is not retried).
@@ -60,6 +84,22 @@ STAMP_RC_MISMATCH: int = 2
 #: ``onex-runtime`` is the packaged console script declared in ``pyproject.toml``
 #: (``omnibase_infra.runtime.kernel:main``) and the image's ``CMD``.
 IN_PROCESS_KERNEL_COMMANDS: frozenset[str] = frozenset({"onex-runtime"})
+
+#: OMN-18550: declared bound on consecutive failing boots before the container
+#: stops retrying, and the uptime after which a later failure is a new incident.
+#: Both are overridable per service through the environment variables below.
+ENV_BOOT_FAILURE_MAX: str = "ONEX_BOOT_FAILURE_MAX_CONSECUTIVE"
+ENV_BOOT_FAILURE_HEALTHY_AFTER: str = "ONEX_BOOT_FAILURE_HEALTHY_AFTER_SECONDS"
+DEFAULT_MAX_CONSECUTIVE_BOOT_FAILURES: int = 5
+DEFAULT_HEALTHY_AFTER_SECONDS: float = 600.0
+
+#: The logger whose ERROR records carry the kernel's own account of why it died.
+#: The capture handler hangs on this logger and NOT on the root logger: the
+#: kernel's ``logging.basicConfig`` is a no-op once the root has a handler.
+_KERNEL_LOGGER_NAME: str = "omnibase_infra.runtime.service_kernel"
+_MAX_CAUSE_CHARS: int = 500
+_PARK_SLEEP_SECONDS: float = 3600.0
+_PUBLISH_TIMEOUT_SECONDS: float = 8.0
 
 
 def _echo(message: str) -> None:
@@ -260,13 +300,239 @@ def handoff(argv: list[str]) -> int:
     raise AssertionError("unreachable: os.execvp does not return")  # pragma: no cover
 
 
+class KernelErrorCapture(logging.Handler):
+    """Remembers the kernel's last ERROR record as a sanitized one-line cause."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.cause: str = ""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        from omnibase_infra.utils.util_error_sanitization import (
+            sanitize_error_message,
+        )
+
+        cause = record.getMessage()
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, Exception):
+            cause = f"{cause} | {sanitize_error_message(exc)}"
+        self.cause = cause[:_MAX_CAUSE_CHARS]
+
+
+def _exit_code(exc: SystemExit) -> int:
+    """The process exit status a ``SystemExit`` stands for."""
+    if exc.code is None:
+        return 0
+    return exc.code if isinstance(exc.code, int) else 1
+
+
+def _env_number(env: Mapping[str, str], name: str, default: float) -> float:
+    raw = env.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        _echo_err(f"[entrypoint] ignoring non-numeric {name}={raw!r}")
+        return default
+    return value if value > 0 else default
+
+
+def _publish_boot_failed(
+    event: ModelRuntimeBootFailedEvent, env: Mapping[str, str]
+) -> None:
+    """Publish the event on the bus. Best effort: the ledger already holds it.
+
+    The bus may be the very thing the boot failed on, so a publish failure is
+    reported and swallowed rather than allowed to mask the exit code.
+    """
+    bootstrap = env.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+    if not bootstrap:
+        _echo_err(
+            "[entrypoint] boot-failed event not published: no KAFKA_BOOTSTRAP_SERVERS"
+        )
+        return
+
+    from aiokafka.errors import KafkaError
+
+    from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
+        EnumOmnibaseInfraTopic,
+    )
+
+    async def _send() -> None:
+        from aiokafka import AIOKafkaProducer
+
+        from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
+        from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
+            ModelKafkaEventBusConfig,
+        )
+        from omnibase_infra.runtime.gateway_forwarder import ensure_topics_exist
+
+        topic = EnumOmnibaseInfraTopic.EVT_RUNTIME_BOOT_FAILED_V1.value
+        bus_config = ModelKafkaEventBusConfig.default()
+        # A lane broker with auto-create off has never seen this topic if no
+        # healthy boot of this build has provisioned it yet; creation is
+        # idempotent and best effort, like the publish.
+        await ensure_topics_exist(bus_config, (topic,))
+        # The bus is authenticated on the lab lanes: the producer needs the same
+        # SASL/TLS settings the kernel's own producers get from the environment.
+        producer = AIOKafkaProducer(
+            bootstrap_servers=bus_config.bootstrap_servers,
+            request_timeout_ms=5000,
+            **build_aiokafka_auth_kwargs(bus_config),
+        )
+        await producer.start()
+        try:
+            await producer.send_and_wait(
+                topic,
+                value=event.model_dump_json().encode("utf-8"),
+                key=event.service.encode("utf-8"),
+            )
+        finally:
+            await producer.stop()
+
+    try:
+        asyncio.run(asyncio.wait_for(_send(), timeout=_PUBLISH_TIMEOUT_SECONDS))
+    except (KafkaError, OSError, TimeoutError) as exc:
+        _echo_err(
+            f"[entrypoint] boot-failed event not published to the bus: {type(exc).__name__}"
+        )
+
+
+def _park(event: ModelRuntimeBootFailedEvent) -> int:
+    """Stop retrying: report why, then idle so the restart policy has nothing to relaunch.
+
+    Exiting would hand the container straight back to its restart policy, which
+    relaunches on any exit under ``unless-stopped``. Idling leaves no health
+    endpoint, so the container reads unhealthy. ``SIGTERM`` ends it as usual; a
+    new image (new source hash) or removing the ledger lets the next start boot.
+    """
+    _echo_err(
+        "[entrypoint] RETRIES EXHAUSTED: "
+        f"{event.consecutive_failures} consecutive failing boots of "
+        f"{event.runtime_source_hash} (declared bound {event.max_consecutive_failures}); "
+        f"last exit {event.exit_code}; cause: {event.cause}"
+    )
+    _echo_err(
+        "[entrypoint] not booting again: recreate the container (a redeploy does), "
+        "or remove boot_failures/ from the state directory, to retry"
+    )
+    while True:
+        time.sleep(_PARK_SLEEP_SECONDS)
+
+
+def _record_failure(
+    ledger: HandlerBootFailureLedger,
+    identity: ModelBootIdentity,
+    env: Mapping[str, str],
+    *,
+    exit_code: int,
+    cause: str,
+    started: float,
+    healthy_after: float,
+) -> ModelRuntimeBootFailedEvent:
+    """Count one failing boot, say so on stderr, and publish its event."""
+    event = ledger.handle(
+        ModelBootAttemptOutcome(
+            identity=identity,
+            exit_code=exit_code,
+            cause=cause or f"runtime exited {exit_code} without a logged error",
+            uptime_seconds=time.monotonic() - started,
+            healthy_after_seconds=healthy_after,
+            observed_at=datetime.now(UTC),
+        )
+    )
+    _echo_err(
+        f"[entrypoint] BOOT FAILED {event.consecutive_failures}/"
+        f"{event.max_consecutive_failures}: exit {event.exit_code}: {event.cause}"
+    )
+    _publish_boot_failed(event, env)
+    return event
+
+
+def _supervised_start(cmd: list[str], env: MutableMapping[str, str]) -> int:
+    """Run preflight and the CMD once; count and report a failing exit (OMN-18550)."""
+    state_dir = (
+        env.get("ONEX_STATE_DIR", "").strip() or env.get("ONEX_STATE_ROOT", "").strip()
+    )
+    if not state_dir:
+        rc = run_preflight(env)
+        return rc if rc != 0 else handoff(cmd)
+
+    ledger = HandlerBootFailureLedger()
+    identity = ModelBootIdentity(
+        state_dir=state_dir,
+        service=env.get("ONEX_GROUP_ID", "").strip() or "onex-runtime",
+        container_ref=env.get("HOSTNAME", "").strip() or socket.gethostname(),
+        runtime_source_hash=env.get("RUNTIME_SOURCE_HASH", "").strip() or "unknown",
+        max_consecutive_failures=int(
+            _env_number(
+                env, ENV_BOOT_FAILURE_MAX, DEFAULT_MAX_CONSECUTIVE_BOOT_FAILURES
+            )
+        ),
+    )
+    healthy_after = _env_number(
+        env, ENV_BOOT_FAILURE_HEALTHY_AFTER, DEFAULT_HEALTHY_AFTER_SECONDS
+    )
+
+    exhausted = ledger.exhausted_event(identity)
+    if exhausted is not None:
+        return _park(exhausted)
+
+    capture = KernelErrorCapture()
+    kernel_logger = logging.getLogger(_KERNEL_LOGGER_NAME)
+    kernel_logger.addHandler(capture)
+    started = time.monotonic()
+    cause = ""
+    try:
+        rc = run_preflight(env)
+        if rc != 0:
+            cause = f"boot preflight aborted with exit {rc}"
+        else:
+            rc = handoff(cmd)
+    except SystemExit as exc:
+        rc = _exit_code(exc)
+    except Exception as exc:
+        # An unhandled crash is a failing boot too: count it, then let it
+        # propagate so the traceback and exit status are unchanged. The next
+        # start reads the ledger and parks if this was the last allowed boot.
+        from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+
+        _record_failure(
+            ledger,
+            identity,
+            env,
+            exit_code=1,
+            cause=sanitize_error_message(exc),
+            started=started,
+            healthy_after=healthy_after,
+        )
+        raise
+    finally:
+        kernel_logger.removeHandler(capture)
+
+    if rc == 0:
+        ledger.record_clean_exit(identity)
+        return 0
+
+    event = _record_failure(
+        ledger,
+        identity,
+        env,
+        exit_code=rc,
+        cause=capture.cause or cause,
+        started=started,
+        healthy_after=healthy_after,
+    )
+    if event.retries_exhausted:
+        return _park(event)
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: preflight in one warm interpreter, then start the CMD."""
     cmd = list(sys.argv[1:] if argv is None else argv)
-    rc = run_preflight(os.environ)
-    if rc != 0:
-        return rc
-    return handoff(cmd)
+    return _supervised_start(cmd, os.environ)
 
 
 if __name__ == "__main__":
