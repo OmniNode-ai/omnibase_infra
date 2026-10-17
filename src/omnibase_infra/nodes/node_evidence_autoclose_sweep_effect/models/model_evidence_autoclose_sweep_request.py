@@ -500,6 +500,20 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "over an offer, before any GitHub or Linear I/O about it."
         ),
     )
+    product_repos: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "owner/repo of each product repository whose own merged PRs the "
+            "forward window also reads (OMN-16106). A repository that has cut "
+            "over from change control keeps a ticket's contract in its own "
+            "contracts/<ticket>.yaml and mints no change-control companion, so "
+            "the change-control enumeration never sees its tickets. A merged PR "
+            "here is a candidate only through its changed files: exactly one "
+            "contracts/OMN-<n>.yaml binds it, none leaves it unbound, more than "
+            "one refuses it. A recurring bot PR is dropped before any read. "
+            "Empty (the default) reads change control only."
+        ),
+    )
     # OMN-18489. The In Progress demotion leg. The window is declared here, in
     # the contract-bound request, and nowhere as a literal in the handler.
     demotion_window_hours: int = Field(
