@@ -13,6 +13,9 @@ requirements:
         statement: 'AC5: A restart loop on a failing boot is bounded at a declared count and each failing exit is durably recorded as an event with its cause and count -- falsifier: uv run pytest tests/unit/runtime/test_entrypoint_boot_failure_omn18550.py -q'
 evidence_requirements:
   - kind: tests
+    description: The real entrypoint, relaunched against a malformed runtime contract, records three failing boots and then stops booting.
+    command: uv run pytest tests/integration/runtime/test_entrypoint_boot_failure_omn18550.py -q -m integration
+  - kind: tests
     description: Unit tests cover the counted streak, the bound that parks the container, the new-image and new-container resets, and the event cause and count.
     command: uv run pytest tests/unit/runtime/test_entrypoint_boot_failure_omn18550.py -q
 emergency_bypass:
