@@ -30,13 +30,15 @@ pytestmark = pytest.mark.integration
 _DECLARED = "Qwen3.8-27B"
 
 
-def _serve(model_ids: list[str]) -> tuple[HTTPServer, threading.Thread]:
+def _serve(
+    model_ids: list[str], *, status: int = 200
+) -> tuple[HTTPServer, threading.Thread]:
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             body = json.dumps(
                 {"data": [{"id": model_id} for model_id in model_ids]}
             ).encode()
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(body)))
             self.end_headers()
@@ -63,6 +65,24 @@ def stub_serving_other_model() -> Iterator[int]:
 @pytest.fixture
 def stub_serving_declared_model() -> Iterator[int]:
     server, thread = _serve([_DECLARED])
+    yield server.server_address[1]
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
+
+
+@pytest.fixture
+def stub_serving_declared_model_among_others() -> Iterator[int]:
+    server, thread = _serve(["some-other-model", _DECLARED, "a-third-model"])
+    yield server.server_address[1]
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
+
+
+@pytest.fixture
+def stub_answering_with_server_error() -> Iterator[int]:
+    server, thread = _serve([_DECLARED], status=500)
     yield server.server_address[1]
     server.shutdown()
     thread.join(timeout=5)
@@ -203,3 +223,36 @@ def test_boot_marks_an_unreachable_backend_dark_and_continues(
     assert by_id["local-coder"]["endpoint_url"] is None
     assert by_id["local-coder"]["model_name"] == _DECLARED
     assert by_id["local-sibling"]["endpoint_url"].endswith("/v1/chat/completions")
+
+
+def test_boot_accepts_a_backend_that_serves_its_declared_model_among_others(
+    tmp_path: Path, stub_serving_declared_model_among_others: int
+) -> None:
+    source, overlay, target = _files(tmp_path, stub_serving_declared_model_among_others)
+
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=overlay,
+        target_path=target,
+        verify_endpoints=True,
+    )
+
+    backend = yaml.safe_load(target.read_text(encoding="utf-8"))["backends"][0]
+    assert backend["endpoint_url"].endswith("/v1/chat/completions")
+    assert backend["model_name"] == _DECLARED
+
+
+def test_boot_refuses_a_reachable_backend_that_answers_with_a_server_error(
+    tmp_path: Path, stub_answering_with_server_error: int
+) -> None:
+    source, overlay, target = _files(tmp_path, stub_answering_with_server_error)
+
+    with pytest.raises(ProtocolConfigurationError, match="local-coder"):
+        render_bifrost_delegation_contract(
+            source_path=source,
+            overlay_path=overlay,
+            target_path=target,
+            verify_endpoints=True,
+        )
+
+    assert not target.exists()
