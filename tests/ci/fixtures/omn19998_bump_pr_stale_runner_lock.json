@@ -1,0 +1,17 @@
+{
+  "_provenance": {
+    "source": "OmniNode-ai/omnibase_infra#5043 (automated post-release dev bump to 0.38.75, head 763923960838f5e56a81bad4a3575a5736769203): job logs of runner-image-build-smoke (job 117105855087) and Test-Failure Ratchet Gate (job 117114075482), read with onex scm job-log; bump commit file list read with git show --name-only on the canonical clone",
+    "captured_utc": "2026-10-16T19:14:00Z"
+  },
+  "pr": "OmniNode-ai/omnibase_infra#5043",
+  "head_sha": "763923960838f5e56a81bad4a3575a5736769203",
+  "bump_commit_files": [
+    "pyproject.toml",
+    "uv.lock"
+  ],
+  "runner_image_build_smoke_error": "runner image shared_env_digest is stale (recorded='209f1eb9e4e23a714d6afadc', recomputed='b2f37e742656c202bc8f78fd'); run scripts/ci/runner_image_identity.py --mode generate",
+  "ratchet_new_failures": [
+    "tests.ci.test_runner_image_identity::test_recorded_identity_matches_recomputed_identity",
+    "tests.ci.test_runner_image_identity::test_identity_uses_shared_env_digest_as_a_binding_component"
+  ]
+}

@@ -86,6 +86,11 @@ requirements:
     acceptance:
       - id: AC14
         statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+  - id: req-omn19998-role-omnidash-projection-watermarks
+    statement: The dev lane's live-events writer connects as role_omnidash and upserts omninode_internal.projection_watermarks after every batch; role_omnidash must hold schema USAGE and SELECT, INSERT and UPDATE on that one table and nothing else in the schema.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: node_projection_registration migration 0008 grants USAGE ON SCHEMA omninode_internal and SELECT, INSERT, UPDATE ON omninode_internal.projection_watermarks to role_omnidash, nothing more, with a manifest row binding its bytes; applied to a Postgres where 0005 created the table, the watermark upsert as role_omnidash fails with permission denied for schema omninode_internal before it and succeeds after -- falsifier: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0 fails at the merge base, where the migration file does not exist'
   - id: req-omn19998-infra-no-omnimarket-dependency
     statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
     acceptance:
@@ -101,6 +106,16 @@ requirements:
     acceptance:
       - id: AC17
         statement: 'AC17: an inbound envelope with no event_type is refused as a GatewayRecordRefusedError (quarantined, never republished), and a KafkaTransport whose consumer start raised or was cancelled holds no never-started consumer and builds a fresh one on the next poll -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0 fails on the merge-base tree'
+  - id: req-omn19998-dev-lane-group-offset-retention
+    statement: The dev lane's shared broker-profile one-shot must set the Redpanda cluster property group_offset_retention_sec to 86400 and read it back, so per-run consumer groups with no member for a day expire instead of accumulating for seven; a lane that declares no value keeps the cluster default.
+    acceptance:
+      - id: AC16
+        statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
+  - id: req-omn19998-bump-regenerates-runner-lock
+    statement: The release workflow's post-release dev version bump must regenerate docker/runners/runner-image.lock.json after it re-locks uv.lock and stage it in the bump commit, because uv.lock bytes feed the runner image identity and a bump PR with a stale lock fails tests/ci/test_runner_image_identity.py and runner-image-build-smoke.
+    acceptance:
+      - id: AC23
+        statement: 'AC23: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -142,11 +157,23 @@ evidence_requirements:
     description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
     command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
   - kind: tests
+    description: The grant tests read the migration statements, its assertions, its manifest row checksum and the live-events writer's compose binding.
+    command: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
+  - kind: tests
+    description: The topology tests read the three shipped instances for the role_omnidash declaration the live-ACL gate diffs the grant against, and the generator's retention of an unbound principal's TABLE grants.
+    command: uv run pytest tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+  - kind: tests
+    description: The workflow wiring tests read the post-release-dev-bump job's own YAML slice from release.yml.
+    command: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0
+  - kind: tests
     description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
     command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
   - kind: tests
     description: The inbound refusal tests drive ServiceGatewayForwarder with a real ModelEventEnvelope; the transport tests replace aiokafka's consumer with one whose getmany fails like aiokafka 0.13.0 before start() finishes.
     command: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0
+  - kind: tests
+    description: The retention tests render the dev lane and the base infra file with docker compose config and run the rendered one-shot script against a stubbed rpk.
+    command: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -350,6 +377,26 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC14
+  - id: dod-omn19998-omnidash-watermarks
+    description: AC22 tests pass at the head; at the merge base the migration file does not exist and every test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn19998-omnidash-watermarks-deploy-probe
+    description: Hosted-runner probe reads the migration at this commit and requires both grants to role_omnidash; the base has no such file and the probe fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/forward/nodes/node_projection_registration/0008_grant_role_omnidash_projection_watermarks.sql?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/GRANT USAGE ON SCHEMA omninode_internal TO role_omnidash/{a=1} /TO role_omnidash;/{b++} END{exit !(a&&b>=2)}'
+        cwd: .
   - id: dod-omn19998-ac6-infra-no-omnimarket-dependency
     description: AC15 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
     source: manual
@@ -395,3 +442,39 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC17
+  - id: dod-omn19998-dev-lane-group-offset-retention
+    description: AC16 tests render the dev lane and the base infra file and run the rendered broker-profile script against a stubbed rpk; at the merge base the dev lane renders no retention variable and all three new tests fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
+  - id: dod-omn19998-group-offset-retention-deploy-probe
+    description: Hosted-runner probe reads the dev-lane overlay in this checkout and requires the 86400 retention on the broker-profile one-shot; the merge-base overlay has no such line and the probe fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -q 'REDPANDA_GROUP_OFFSET_RETENTION_SEC. "86400"' docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC16
+  - id: dod-omn19998-ac23-bump-regenerates-runner-lock
+    description: AC23 tests assert the post-release-dev-bump job regenerates the runner image lock after uv lock and stages it in the bump commit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC23
+  - id: dod-omn19998-bump-runner-lock-deploy-probe
+    description: Hosted-runner deployment artifact check for AC23. Reads the release workflow and requires runner image lock generation after uv lock and inclusion in the bump commit.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -k "runner_image_lock"
+        cwd: .
+    binds_ac:
+      - AC23

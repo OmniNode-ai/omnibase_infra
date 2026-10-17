@@ -17,6 +17,11 @@ services:
       REDPANDA_PROFILE_MEMORY: "12G"
       REDPANDA_PARTITIONS_PER_SHARD: "7000"
       REDPANDA_CONTROL_PLANE_TOPIC: ""
+      # OMN-19998: empty leaves the cluster default (7 days) untouched. A lane
+      # whose clients open one consumer group per run sets this to expire the
+      # offsets of a group that has had no member for that long, which is also
+      # what removes the group itself.
+      REDPANDA_GROUP_OFFSET_RETENTION_SEC: ${REDPANDA_GROUP_OFFSET_RETENTION_SEC:-}
     command:
       - |
         set -eu
@@ -25,7 +30,7 @@ services:
         ADMIN="-X admin.hosts=redpanda:9644"
         export RPK_BROKERS=redpanda:9092
         # Log each prior value before any mutation, including on a warm volume.
-        for key in topic_partitions_per_shard topic_memory_per_partition segment_fallocation_step log_segment_ms retention_bytes; do
+        for key in topic_partitions_per_shard topic_memory_per_partition segment_fallocation_step log_segment_ms retention_bytes group_offset_retention_sec; do
           prior=$$(/usr/bin/rpk cluster config get "$$key" $$ADMIN)
           echo "OMN-19419 prior $$key=$$prior"
         done
@@ -83,5 +88,9 @@ services:
         test "$$(/usr/bin/rpk cluster config get segment_fallocation_step $$ADMIN)" = "$$REDPANDA_SEGMENT_FALLOCATION_STEP"
         test "$$(/usr/bin/rpk cluster config get log_segment_ms $$ADMIN)" = "$$REDPANDA_LOG_SEGMENT_MS"
         test "$$(/usr/bin/rpk cluster config get retention_bytes $$ADMIN)" = "$$REDPANDA_RETENTION_BYTES"
+        if [ -n "$$REDPANDA_GROUP_OFFSET_RETENTION_SEC" ]; then
+          /usr/bin/rpk cluster config set group_offset_retention_sec "$$REDPANDA_GROUP_OFFSET_RETENTION_SEC" $$ADMIN
+          test "$$(/usr/bin/rpk cluster config get group_offset_retention_sec $$ADMIN)" = "$$REDPANDA_GROUP_OFFSET_RETENTION_SEC"
+        fi
         echo "OMN-19419: broker profile read back"
     restart: "no"
