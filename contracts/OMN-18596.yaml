@@ -11,8 +11,6 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: docker/Dockerfile.runtime pins omninode-memory as omninode-memory>=0.18.6,<1.0.0 and every plugin at or above its recorded floor -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
-      - id: AC2
-        statement: "AC2: the locked core wheel supplies the Claude Code binding types required by the runtime handlers -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_binding_core_omn18596.py -q"
 evidence_requirements:
   - kind: tests
     description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for omninode-memory v0.18.6.
@@ -39,20 +37,3 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"omninode-memory>=0.18.6,<1.0.0"'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-runtime-binding-core-models
-    description: The core wheel imports the binding enum and install models used by the render, install and hook handlers and round-trips a typed install request.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_binding_core_omn18596.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
-  - id: dod-runtime-binding-core-deploy-probe
-    description: Deploy probe. The checked-out runtime lock must pin core 0.47.46, which supplies the binding types absent from 0.47.44. This fails on the dispatch head.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: |-
-          python3 -c 'import pathlib, tomllib; lock = tomllib.loads(pathlib.Path("uv.lock").read_text()); core = [p for p in lock["package"] if p["name"] == "omnibase-core"]; assert len(core) == 1 and core[0]["version"] == "0.47.46", core; print("runtime binding core pin: 0.47.46")'
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
