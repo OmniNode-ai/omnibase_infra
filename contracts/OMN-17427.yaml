@@ -93,6 +93,11 @@ requirements:
     acceptance:
       - id: AC21
         statement: 'AC21: the alert and digest units that run omninode-system-slack-report.sh declare KillMode=process, and the probe no-report message says the refresh log is empty and the sweep was killed -- falsifier: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"'
+  - id: req-omn17427-c28-live-groups-index
+    statement: The C28 live-groups read stays on the (consumer_group, window_end) index of omninode_internal.consumer_flow_windows instead of a whole-table scan, in the node and the script collector alike.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: LIVE_WINDOW_SQL walks the distinct groups with a recursive loose index scan and bounds each group on window_end and window_start, the node and script carry the same SQL, and live_groups runs it in omnibase-infra-postgres -- falsifier: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q'
   - id: req-omn17427-fleet-lists-off-occ
     statement: omnibase_infra's fleet tooling repo lists and defaults (pull-all, merge sweep, merge-method and merge-queue audits, runner git mirror and uv rewrite default, lab tracked extras, enforcement parity manifest, version matrix) no longer name onex_change_control.
     acceptance:
@@ -167,6 +172,9 @@ evidence_requirements:
   - kind: tests
     description: The reporter's units keep the detached sweep alive and an empty refresh log names the kill.
     command: uv run pytest tests/unit/scripts/test_fleet_failure_sink_omn18942.py -q -k "detached_sweep_alive or empty_refresh_log_names"
+  - kind: tests
+    description: The C28 live-groups read uses the index-backed SQL in the node and the script.
+    command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
   - kind: tests
     description: The fleet tooling repo lists and defaults omit onex_change_control.
     command: uv run pytest tests/ci/test_no_occ_fleet_lists_omn17427.py -q
@@ -410,6 +418,27 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC21
+  - id: dod-omn-17427-ac22
+    description: The C28 live-groups read walks the (consumer_group, window_end) index instead of scanning consumer_flow_windows, with one SQL shared by the node and the script collector.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_live_groups_query.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn-17427-ac22-deploy-collectors
+    description: Hosted-runner collector smoke -- both C28 collectors send the recorded index-backed SQL to psql and return the same 533 groups as the recorded whole-table read. Replays real PostgreSQL stdout without a deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_c28_live_groups_omn17427.py -q -k recorded
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
   - id: dod-omn-17427-ac23
     description: The fleet tooling repo lists and defaults no longer name onex_change_control.
     source: manual
