@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: when the head changes CHANGELOG.md against its merge base with origin/dev, or that merge base cannot be read, the first CHANGELOG.md heading names the pyproject.toml version -- falsifier: the check below exits 1 at a release PR''s merge base outside a git checkout, and at a head whose added changelog section names another version'
+  - id: req-omn18595-core-0-47-46-cascade
+    statement: The dependency cascade moves omnibase-core to 0.47.46 in the uv override and uv.lock together, and the frozen released-core seam, the contract-validation core check and the release-backmerge identity check admit that pin.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the pyproject.toml uv override pins omnibase-core==0.47.46 and uv.lock locks omnibase-core at 0.47.46, and the three version-sensitive core checks pass at that pin -- falsifier: the pin check below exits 1 at the merge base, where the override and the lock name 0.47.44'
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -34,3 +39,16 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-18595-core-0-47-46-cascade
+    description: The uv override and uv.lock both name omnibase-core 0.47.46, and the version-sensitive core checks pass at that pin.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          uv run --frozen python -c "import tomllib; m=tomllib.load(open('pyproject.toml','rb')); l=tomllib.load(open('uv.lock','rb')); v=[p['version'] for p in l['package'] if p['name']=='omnibase-core']; assert 'omnibase-core==0.47.46' in m['tool']['uv']['override-dependencies'], 'override'; assert v==['0.47.46'], v"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_contract_validation_core_validator_omn20074.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/unit/runtime/test_seam_released_core_pin.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
