@@ -39,7 +39,7 @@ permissions:
 jobs:
   governed-helper-primitive-gate:
     name: Governed helper primitive gate
-    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
