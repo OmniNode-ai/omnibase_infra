@@ -392,6 +392,40 @@ for _role in $LOGIN_ONLY_ROLES; do
 "
 done
 
+# Databases a forward migration creates through an `onex-create-database`
+# directive (`keycloak`). The migration runner asks the slot's migration
+# principal to create them, and that principal is NOCREATEDB by design, so the
+# slot's first forward migration died with "permission denied to create
+# database" (OMN-19064). The provisioner holds the admin connection, so it
+# creates them here, under the slot suffix, and the runner's own
+# `CREATE DATABASE ... WHERE NOT EXISTS` finds the database present and issues
+# nothing. The list is read from the migration corpus rather than named here, so
+# a directive added later is covered the day it lands. A name the maps above
+# already derive is left to the map loop.
+DIRECTIVE_MIGRATIONS_DIR="${MIGRATIONS_DIR:-$(dirname "$0")/../docker/migrations/forward}"
+if [ -z "$(find "$DIRECTIVE_MIGRATIONS_DIR" -name '*.sql' 2>/dev/null | head -1)" ]; then
+    fail "$EXIT_DERIVED_NAME_OUT_OF_FENCE" \
+        "no .sql files under ${DIRECTIVE_MIGRATIONS_DIR}: the directive scan has nothing to read, so an empty result would be a broken scan rather than a corpus without directives"
+fi
+SLOT_DIRECTIVE_DATABASES=""
+_directive_names="$(
+    grep -rhiE '^--[[:space:]]*onex-create-database[[:space:]]*:' "$DIRECTIVE_MIGRATIONS_DIR" 2>/dev/null \
+        | sed -E 's/^--[[:space:]]*[Oo][Nn][Ee][Xx]-[Cc][Rr][Ee][Aa][Tt][Ee]-[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//' \
+        | sort -u
+)"
+for _db in $_directive_names; do
+    _sdb="$(derive "$_db")"
+    assert_in_fence "$_sdb" "directive database"
+    case "
+${SLOT_DATABASES}" in
+        *"
+${_sdb}
+"*) continue ;;
+    esac
+    SLOT_DIRECTIVE_DATABASES="${SLOT_DIRECTIVE_DATABASES}${_sdb}
+"
+done
+
 # Every slot role's budget, resolved before any connection so that a missing
 # entry refuses in --print-scope exactly as it would in --apply.
 SLOT_ROLE_LIMITS=""
@@ -407,6 +441,7 @@ if [ "$MODE" = "--print-scope" ]; then
     echo "slot=${SLOT}"
     echo "group_role=${GROUP_ROLE}"
     for _n in $SLOT_DATABASES; do echo "database=${_n}"; done
+    for _n in $SLOT_DIRECTIVE_DATABASES; do echo "directive_database=${_n}"; done
     for _n in $SLOT_ROLES; do echo "role=${_n}"; done
     for _n in $SLOT_ROLE_LIMITS; do echo "connection_limit=${_n}"; done
     echo "slot_connection_budget=${SLOT_CONNECTION_BUDGET}"
@@ -680,6 +715,21 @@ EOSQL
         # rather than relying on the cluster already having been hardened is the
         # difference between a fail-closed provisioner and one whose isolation
         # is a property of somebody else's earlier run.
+        psql_admin -c "REVOKE CONNECT ON DATABASE \"${_db}\" FROM PUBLIC;"
+    done
+
+    # --- directive-created databases (OMN-19064) -----------------------------
+    for _db in $SLOT_DIRECTIVE_DATABASES; do
+        assert_in_fence "$_db" "directive database"
+        if database_exists "$_db"; then
+            echo "[provision-db-slot]   directive database ${_db} already present"
+        else
+            echo "[provision-db-slot]   creating directive database ${_db}"
+            psql_admin <<EOSQL
+SELECT 'CREATE DATABASE "${_db}"'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${_db}')\gexec
+EOSQL
+        fi
         psql_admin -c "REVOKE CONNECT ON DATABASE \"${_db}\" FROM PUBLIC;"
     done
 
