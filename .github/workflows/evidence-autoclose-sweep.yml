@@ -1900,10 +1900,11 @@ jobs:
 
           # Probes capability, never the credential itself — no token value is
           # printed, derived, or written anywhere in this step.
+          # OMN-17427: the list holds the repositories a pull request is read
+          # from; the change-control repository is not probed.
           echo "== credential capability =="
           for repo in \
             OmniNode-ai/omnibase_infra \
-            OmniNode-ai/onex_change_control \
             OmniNode-ai/omninode_infra \
             OmniNode-ai/omnimarket \
             OmniNode-ai/omnibase_core

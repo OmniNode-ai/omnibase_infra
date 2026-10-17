@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "git rev-parse origin/dev in the canonical clone of each repository named under response, run on host h201",
+    "captured_utc": "2026-10-17T14:18:55Z",
+    "source_sha256": "9c93a75596faf3ca54ca6c0e51421fab1a17ae2f271e62ef611717b6cb4bd002",
+    "ticket": "OMN-17427",
+    "note": "source_sha256 covers one line per repository, repo TAB default branch TAB head sha plus a newline, in the order they appear under response"
+  },
+  "response": {
+    "OmniNode-ai/omnibase_infra": {
+      "default_branch": "dev",
+      "head": "291f2f747e17c5d5148a5545fc09879a03749376"
+    },
+    "OmniNode-ai/omnimarket": {
+      "default_branch": "dev",
+      "head": "b2b2bf0fcd12291541bf22e699e7f7085a85cfa9"
+    },
+    "OmniNode-ai/omnibase_core": {
+      "default_branch": "dev",
+      "head": "8096ef1c99658003281ab3507a3a01a4ba98d7a8"
+    }
+  }
+}

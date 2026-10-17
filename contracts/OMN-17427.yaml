@@ -113,6 +113,11 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-autoclose-diagnose-off-occ
+    statement: The evidence autoclose sweep's diagnose step probes read access to no change-control repository.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: the diagnose credential-capability list in evidence-autoclose-sweep.yml names four repositories, among them omnibase_infra, omnimarket and omnibase_core, and no change-control repository -- falsifier: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -189,6 +194,9 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The autoclose diagnose step probes no change-control repository.
+    command: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -492,3 +500,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC25
+  - id: dod-omn-17427-ac26
+    description: The autoclose diagnose credential-capability list names no change-control repository and keeps the repositories the sweep reads.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
+  - id: dod-omn-17427-ac26-deploy-autoclose-diagnose
+    description: Hosted-runner smoke -- the workflow file on the runner lists the probed repositories without a change-control repository, with no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
