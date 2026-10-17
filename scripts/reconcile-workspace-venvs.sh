@@ -776,11 +776,62 @@ sys.exit(0 if rc == 0 else 1)
 PYEOF
 }
 
+# The sibling that holds the generation a swap displaced (OMN-17427).
+dispatch_previous_path() { printf '%s.previous' "$1"; }
+
+# The distributions a venv carries, one `name-version.dist-info` per line, less
+# omnimarket: the one package a provider-only pass is allowed to change. Sorted
+# so two venvs compare with `==`.
+venv_package_set() {
+  local d n
+  for d in "$1"/lib/python*/site-packages/*.dist-info; do
+    [[ -e "$d" ]] || continue
+    n="${d##*/}"
+    [[ "$n" == omnimarket-* ]] || printf '%s\n' "$n"
+  done | LC_ALL=C sort
+}
+
+# Stage the next additive pass from the generation the LAST swap displaced,
+# instead of cloning the live venv again (OMN-17427).
+#
+# Observed trigger of the repeated "rebuilds": the lock was in sync on every
+# pass and only the omnimarket commit had moved, yet each pass cloned the whole
+# dispatch venv (37,556 entries on the Mac), rewrote one package in it, swapped
+# it in and deleted the old generation (37,556 more). That is the file-change
+# storm the host's tracker logged -- 13,518 new files in `.rebuilding` at 08:51.
+# The displaced generation is the live venv one pass ago, so bringing IT forward
+# rewrites the package that changed and nothing else, and the swap stays one
+# atomic exchange, which is what OMN-19432 requires.
+#
+# Reused only when it is demonstrably the same environment as the live venv:
+# on the required interpreter, relocatable, and carrying the identical package
+# set (omnimarket aside). Anything else is not trusted and the caller clones.
+# Every readback the staged venv gets before the swap still runs on it.
+seed_staging_from_previous() {
+  local live="$1" staging="$2" base_python="$3"
+  local previous live_set
+  previous="$(dispatch_previous_path "$live")"
+  [[ -d "$previous" && -x "$previous/bin/python" ]] || return 1
+  venv_is_relocatable "$previous" || return 1
+  dispatch_interpreter_ok "$base_python" "$previous" || return 1
+  live_set="$(venv_package_set "$live")"
+  [[ -n "$live_set" && "$live_set" == "$(venv_package_set "$previous")" ]] || return 1
+  rm -rf "$staging"
+  mv "$previous" "$staging"
+}
+
+# The third argument says whether the displaced generation is worth keeping as
+# the next pass's seed. A rebuild displaces a venv on the WRONG interpreter,
+# which is scrap, so it passes 0.
 swap_dispatch_venv() {
-  local staging="$1" live="$2" previous="$2.previous"
+  local staging="$1" live="$2" keep="${3:-0}" previous
+  previous="$(dispatch_previous_path "$live")"
   rm -rf "$previous"
-  # After the exchange `$staging` holds the OLD venv, which is scrap.
+  # After the exchange `$staging` holds the OLD venv.
   if [[ -d "$live" ]] && exchange_dirs_atomically "$staging" "$live"; then
+    if [[ "$keep" -eq 1 ]] && mv "$staging" "$previous"; then
+      return 0
+    fi
     rm -rf "$staging"
     return 0
   fi
@@ -1897,11 +1948,15 @@ run_repair() {
     target_venv="$staging"
     target_python="$staging/bin/python"
     say "dispatch venv: staging the additive pass at $staging"
-    trace "cp -c $DISPATCH_VENV $staging"
-    if ! clone_venv_to_staging "$DISPATCH_VENV" "$staging"; then
-      fail "could not stage the dispatch venv; the live venv is UNTOUCHED and" \
-        "still serving, and the gate venv was NOT touched." \
-        "Free the disk space or remove $staging and re-run."
+    if seed_staging_from_previous "$DISPATCH_VENV" "$staging" "$base_python"; then
+      say "dispatch venv: staged from the previous generation (no whole-venv clone)"
+    else
+      trace "cp -c $DISPATCH_VENV $staging"
+      if ! clone_venv_to_staging "$DISPATCH_VENV" "$staging"; then
+        fail "could not stage the dispatch venv; the live venv is UNTOUCHED and" \
+          "still serving, and the gate venv was NOT touched." \
+          "Free the disk space or remove $staging and re-run."
+      fi
     fi
   fi
 
@@ -2074,7 +2129,7 @@ run_repair() {
         "Expected 'relocatable = true' in $staging/pyvenv.cfg."
     fi
     say "dispatch venv: swapping the proven rebuild into $DISPATCH_VENV"
-    swap_dispatch_venv "$staging" "$DISPATCH_VENV"
+    swap_dispatch_venv "$staging" "$DISPATCH_VENV" "$((1 - rebuild))"
   fi
 
   # ---- surface 2: the GATE venv, lock-governed ONLY (OMN-17819) ------------ #
