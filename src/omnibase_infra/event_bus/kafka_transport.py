@@ -315,6 +315,15 @@ class KafkaTransport:
                         self._refused_topic_retry_seconds,
                     )
                 continue
+            except BaseException:
+                # OMN-19998: a start that raised anything else, or was
+                # cancelled, never set aiokafka's coordinator, and every later
+                # getmany on it fails with AttributeError on check_errors.
+                # Never leave that consumer on the transport.
+                self._consumer = None
+                with contextlib.suppress(Exception):
+                    await consumer.stop()
+                raise
 
             # Trigger the group join + first fetch now, buffering the first batch, so
             # the runtime's first poll() returns the available records instead of
@@ -628,6 +637,16 @@ class KafkaTransport:
         ):
             await asyncio.sleep(timeout_ms / 1000)
             return []
+        if self._consumer is None and self._started and self._topics:
+            # OMN-19998: the last consumer start did not finish. Build a fresh
+            # one rather than fail every poll until a watchdog recreate.
+            await self._start_consumer()
+            if self._buffer:
+                batch = self._buffer[:max_messages]
+                del self._buffer[:max_messages]
+                return batch
+            if self._consumer is None:
+                return []
         consumer = self._require_consumer()
         raw = await consumer.getmany(timeout_ms=timeout_ms, max_records=max_messages)
         polled: list[ModelTransportMessage] = []

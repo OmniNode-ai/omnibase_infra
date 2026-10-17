@@ -57,8 +57,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ORG="OmniNode-ai"
 
-# Repos to scan for infra-casualty runs. Caller can override with --repos.
-DEFAULT_REPOS="omnibase_infra,omniclaude,omnibase_core,omnibase_spi,omnibase_compat,omniintelligence,omnimemory,omninode_infra,onex_change_control,omnimarket"
+# Repos to scan for infra-casualty runs: the canonical registry (REPOS in
+# lib/merge_sweep_common.sh). Caller can override with --repos.
+# shellcheck source=lib/merge_sweep_common.sh
+source "${SCRIPT_DIR}/lib/merge_sweep_common.sh"
+DEFAULT_REPOS="$(IFS=,; echo "${REPOS[*]}")"
 
 REPOS_CSV="${DEFAULT_REPOS}"
 DRY_RUN=false

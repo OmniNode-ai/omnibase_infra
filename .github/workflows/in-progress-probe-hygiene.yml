@@ -4,13 +4,13 @@
 # in-progress-probe-hygiene.yml — OMN-17942 / OMN-16106 class (g)
 #
 # The evidence closer (OMN-16106) closes a ticket by re-running
-# `onex skill dod_verify` against the checks its OCC contract declares. A
+# `onex skill dod_verify` against the checks its contract declares. A
 # ticket that declares NONE is not failing that verifier — it is invisible to
 # it, and to every other mechanical closing path. It can only ever be closed by
 # a person reading it, and nothing on the board says so.
 #
-# Worse, the invisibility is silent: the closer enumerates merged OCC
-# companions, so a ticket with none never appears in its outcomes at all, and
+# Worse, the invisibility is silent: the closer enumerates merged
+# evidence companions, so a ticket with none never appears in its outcomes at all, and
 # that absence reads exactly like "nothing to report". Four tickets in the
 # 2026-08-31 sprint are in that state — OMN-17926, OMN-17277, OMN-17380,
 # OMN-17353 — and no run of any sweep has ever mentioned them.
@@ -117,19 +117,42 @@ jobs:
         with:
           fetch-depth: 1
 
-      # The contracts the closer's verifier resolves against. Checked out at
-      # `dev` for the same reason the closer does: OCC contracts land on dev
-      # first and are batched to main later, so reading main would report a
-      # ticket as probe-less minutes after its companion merged.
-      - name: Checkout onex_change_control (the contracts the closer runs)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: dev
-          path: .occ-src
-          token: ${{ steps.app-token.outputs.token }}
-          persist-credentials: false
-          fetch-depth: 1
+      # The contracts the closer's verifier resolves against. A ticket's
+      # contract lives in the product repository that carries its work
+      # (`contracts/OMN-<n>.yaml`), so the sweep reads one root per repository
+      # and sums a ticket's checks across them. Each is cloned at its default
+      # (landing) branch, sparse on `contracts/` only. CONTRACT_REPOS names the
+      # public fleet repositories that carry contracts. A private repository
+      # is not named in this tree: the repository variable
+      # ONEX_CONTRACT_REPOS_PRIVATE lists those, space-separated, and is empty
+      # until an operator sets it.
+      - name: Check out every product repository's contracts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CONTRACT_REPOS: >-
+            omniclaude omnibase_compat omnibase_core omnibase_infra omnibase_spi
+            omnidash omnidash-v2 omniintelligence omnimarket omnimemory
+          CONTRACT_REPOS_PRIVATE: ${{ vars.ONEX_CONTRACT_REPOS_PRIVATE }}
+        run: |
+          set -euo pipefail
+          roots_dir="${RUNNER_TEMP}/contract-roots"
+          mkdir -p "${roots_dir}"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+          for repo in ${CONTRACT_REPOS} ${CONTRACT_REPOS_PRIVATE:-}; do
+            dest="${roots_dir}/${repo}"
+            # A clone that fails is a runner that could not look: refuse the run
+            # rather than let a missing root read as 'this ticket has no probe'.
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" \
+              git clone --quiet --depth 1 --filter=blob:none --sparse \
+                "https://github.com/OmniNode-ai/${repo}.git" "${dest}"
+            git -C "${dest}" sparse-checkout set contracts
+            # A repository that declares no contracts/ directory was read and
+            # holds none: that is a real answer, so the root is made readable.
+            mkdir -p "${dest}/contracts"
+          done
 
       # Assert the read BEFORE the sweep runs. Without this the failure mode is
       # silent and inverted: a missing contracts/ directory does not look like
@@ -141,20 +164,17 @@ jobs:
       # (ERROR_CONTRACT_UNREADABLE, never the finding). This step is the
       # earlier, louder half: fail the job rather than emit a run whose every
       # row is an error.
-      - name: Verify the OCC contracts directory is readable
+      - name: Verify the contract roots are readable
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -d .occ-src/contracts ]; then
-            echo "::error::.occ-src/contracts is missing — the sweep could not tell 'this ticket declares no check' from 'I could not look', so refusing to run." >&2
-            exit 1
-          fi
-          count="$(find .occ-src/contracts -name 'OMN-*.yaml' -type f | wc -l | tr -d ' ')"
+          roots_dir="${RUNNER_TEMP}/contract-roots"
+          count="$(find "${roots_dir}" -path '*/contracts/OMN-*.yaml' -type f | wc -l | tr -d ' ')"
           if [ "${count}" -eq 0 ]; then
-            echo "::error::.occ-src/contracts contains zero OMN-*.yaml contracts. That is not a board with no probes, it is a checkout that did not land." >&2
+            echo "::error::the contract roots contain zero OMN-*.yaml contracts. That is not a board with no probes, it is a checkout that did not land." >&2
             exit 1
           fi
-          echo "OCC contracts readable: ${count} ticket contracts present."
+          echo "Contracts readable: ${count} ticket contracts across $(find "${roots_dir}" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ') repositories."
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -209,8 +229,12 @@ jobs:
             echo "provenance: DRY RUN — every decision is reported and nothing is written."
           fi
 
+          # One comma-separated list: the CLI splits a string_list on commas, and
+          # a runner temp path holds none.
+          contract_roots="$(find "${RUNNER_TEMP}/contract-roots" -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)"
+
           uv run onex skill in_progress_probe_hygiene \
-            --occ-repo-dir "${GITHUB_WORKSPACE}/.occ-src" \
+            --contract-root "${contract_roots}" \
             "${budget_args[@]+"${budget_args[@]}"}" \
             "${project_args[@]+"${project_args[@]}"}" \
             "${apply_args[@]+"${apply_args[@]}"}"
@@ -223,7 +247,7 @@ jobs:
             echo "## In-Progress Probe Hygiene (OMN-17942)"
             echo ""
             echo "Named every In-Progress ticket declaring no executable close"
-            echo "probe — no OCC \`dod_evidence[].checks[]\` entry and no"
+            echo "probe — no contract \`dod_evidence[].checks[]\` entry and no"
             echo "\`Probe: <command> => <observation>\` line. Those tickets are"
             echo "not failing the evidence closer; they are invisible to it."
             echo ""

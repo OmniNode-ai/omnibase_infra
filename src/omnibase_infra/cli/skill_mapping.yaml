@@ -195,7 +195,7 @@ skills:
     node_name: node_in_progress_probe_hygiene_effect
     result_model: omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.model_probe_hygiene_result.ModelProbeHygieneResult
     args:
-      - {name: occ-repo-dir, payload_field: occ_repo_dir, arg_type: string}
+      - {name: contract-root, payload_field: contract_roots, arg_type: string_list}
       - {name: project, payload_field: project, arg_type: string}
       - {name: max-tickets, payload_field: max_tickets, arg_type: integer}
       - {name: max-comments-per-run, payload_field: max_comments_per_run, arg_type: integer}

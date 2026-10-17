@@ -5,7 +5,7 @@
 Why this exists
 ---------------
 The scheduled evidence closer (OMN-16106) re-runs ``onex skill dod_verify``
-against the checks a ticket's OCC contract declares. A ticket that declares
+against the checks a ticket's contract declares. A ticket that declares
 none is not merely *failing* that verifier — it is **invisible** to it, and to
 every other mechanical closing path. It can only ever be closed by a person
 reading it, and nothing on the board says so.
@@ -14,7 +14,7 @@ Four tickets in the 2026-08-31 sprint are in exactly that state (OMN-17926,
 OMN-17277, OMN-17380, OMN-17353): prose deliverables — a PRD, a doctrine
 paragraph, a validator hand-off — with no executable assertion anywhere. They
 do not appear in the closer's outcomes at all, because the closer enumerates
-merged OCC companions and they have none. Their absence reads exactly like
+merged evidence companions and they have none. Their absence reads exactly like
 "nothing to report".
 
 ``OMN-17942``'s creation gate stops NEW tickets entering In Progress without a
@@ -37,8 +37,9 @@ Where the probe can live
 ------------------------
 Two places, checked in this order:
 
-1. The ticket's OCC contract ``contracts/<TICKET>.yaml`` — any
-   ``dod_evidence[].checks[]`` entry. This is the one the closer actually
+1. The ticket's contract ``contracts/<TICKET>.yaml``, in whichever product
+   repository carries the ticket's work — any ``dod_evidence[].checks[]``
+   entry. This is the one the closer actually
    runs, so it is the authoritative answer.
 2. A ``Probe: <command> => <observation>`` line in the Linear description —
    the OMN-17942 creation-gate grammar, matched whole-line and unbulleted for
@@ -56,6 +57,7 @@ import logging
 import os
 import random
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 from uuid import uuid4
@@ -162,30 +164,55 @@ def _well_formed_probe_lines(description: str) -> int:
     return count
 
 
-def _occ_contract_check_count(occ_repo_dir: str, ticket: str) -> int | None:
-    """Executable checks declared in the ticket's OCC contract.
+def _contract_check_count(contract_roots: Sequence[str], ticket: str) -> int | None:
+    """Executable checks declared in the ticket's contract, across every root.
 
-    ``None`` means the contract could NOT be read — no clone, an unreadable
-    path, malformed YAML. ``0`` means the contract was read and declares
-    nothing. Those are different facts with the same cardinality, and
-    collapsing them would report a broken runner as a board-wide finding.
+    A root is a checkout whose ``contracts/`` directory holds
+    ``<ticket>.yaml`` files; a ticket's contract lives in the product
+    repository that carries its work, so the sweep reads one root per
+    repository and sums the checks a ticket declares in any of them.
+
+    ``None`` means the contract could NOT be read — no root, a root without a
+    ``contracts/`` directory, an unreadable path, malformed YAML — and no
+    check was found elsewhere to prove a mechanical path exists. ``0`` means
+    every root was readable and none declares anything. Those are different
+    facts with the same cardinality, and collapsing them would report a broken
+    runner (a checkout that did not land) as a board-wide finding.
 
     ``ticket`` is validated against the ticket-id shape before it is joined
     onto a path: it arrives from the Linear API, and a path segment built from
     remote text is a traversal waiting to happen.
     """
-    if not occ_repo_dir or not _TICKET_ID.match(ticket):
+    if not contract_roots or not _TICKET_ID.match(ticket):
         return None
-    contract = Path(occ_repo_dir) / "contracts" / f"{ticket.upper()}.yaml"
+    total = 0
+    unreadable = False
+    for root in contract_roots:
+        count = _root_check_count(root, ticket)
+        if count is None:
+            unreadable = True
+        else:
+            total += count
+    return None if unreadable and total == 0 else total
+
+
+def _root_check_count(contract_root: str, ticket: str) -> int | None:
+    """Checks one root's contract declares for the ticket; ``None`` if unreadable.
+
+    A root that is readable but holds no file for the ticket answers ``0``: the
+    one absence that is a real answer.
+    """
+    if not contract_root:
+        return None
+    contracts_dir = Path(contract_root) / "contracts"
+    contract = contracts_dir / f"{ticket.upper()}.yaml"
     try:
         raw = yaml.safe_load(contract.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        # The one absence that is a real answer: the governance clone is
-        # readable and this ticket simply has no contract in it.
-        return 0 if Path(occ_repo_dir, "contracts").is_dir() else None
+        return 0 if contracts_dir.is_dir() else None
     except (OSError, yaml.YAMLError) as exc:
         logger.warning(
-            "OCC contract for %s unreadable: %s", ticket, sanitize_error_message(exc)
+            "Contract for %s unreadable: %s", ticket, sanitize_error_message(exc)
         )
         return None
     if not isinstance(raw, dict):
@@ -209,13 +236,13 @@ def _comment_body(ticket: str) -> str:
         f"{_HYGIENE_COMMENT_MARKER}\n"
         "**This ticket is In Progress and declares no executable close probe.**\n\n"
         "The scheduled evidence closer (OMN-16106) closes a ticket by re-running "
-        "`onex skill dod_verify`, which runs the checks the ticket's OCC contract "
+        "`onex skill dod_verify`, which runs the checks the ticket's contract "
         f"declares. `contracts/{ticket}.yaml` declares none, and the "
         "description carries no probe line — so no mechanical path can ever close "
         "this ticket. It is not failing the closer; it is invisible to it.\n\n"
         "**What is missing**, either of:\n\n"
-        f"1. An OCC contract check — a `dod_evidence[].checks[]` entry in "
-        f"`contracts/{ticket}.yaml`, landed by an evidence companion PR. This "
+        f"1. A contract check — a `dod_evidence[].checks[]` entry in "
+        f"`contracts/{ticket}.yaml` of the repository that carries the work. This "
         "is the one the closer actually runs.\n"
         "2. A probe line in this description, on a line of its own, unbulleted:\n"
         "   `Probe: <command> => <observation that settles it>`\n"
@@ -515,7 +542,7 @@ class HandlerInProgressProbeHygiene:
 
         description = str(issue.get("description") or "")
         probe_lines = _well_formed_probe_lines(description)
-        contract_checks = _occ_contract_check_count(request.occ_repo_dir, ticket)
+        contract_checks = _contract_check_count(request.contract_roots, ticket)
 
         if contract_checks is None:
             return (
@@ -523,7 +550,7 @@ class HandlerInProgressProbeHygiene:
                     ticket=ticket,
                     decision=EnumProbeHygieneDecision.ERROR_CONTRACT_UNREADABLE,
                     reason=(
-                        "The OCC contract could not be read, so 'declares no "
+                        "The ticket's contract could not be read, so 'declares no "
                         "check' could not be distinguished from 'could not "
                         "look'. Reported as an error, never as the finding."
                     ),
@@ -538,7 +565,7 @@ class HandlerInProgressProbeHygiene:
                     ticket=ticket,
                     decision=EnumProbeHygieneDecision.HAS_PROBE,
                     reason=(
-                        f"{contract_checks} OCC contract check(s) and "
+                        f"{contract_checks} contract check(s) and "
                         f"{probe_lines} description probe line(s) — a "
                         "mechanical closing path exists."
                     ),

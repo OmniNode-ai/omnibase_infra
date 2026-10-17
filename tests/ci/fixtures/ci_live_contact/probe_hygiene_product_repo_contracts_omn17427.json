@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "OmniNode-ai/omnibase_core@441a0924ad9cf635d746d1c7ad45369f461c59de:contracts/OMN-10512.yaml; OmniNode-ai/omniclaude@b818d987b4fbdac5010626a44f7faf2f96811b6b:contracts/OMN-13064.yaml, each read from the canonical clone with git show; expected_checks counts the dod_evidence[].checks[] mappings by parsing the YAML directly, independent of the sweep handler",
+    "captured_utc": "2026-10-17T07:14:55Z",
+    "source_sha256": "2056fb20cbda5e2bbcca661b78343b8726e5931c04846b2f77bb29ca2d193ca9",
+    "ticket": "OMN-17427",
+    "note": "source_sha256 covers the two contract texts concatenated in the order they appear under response"
+  },
+  "response": {
+    "omnibase_core": {
+      "ticket": "OMN-10512",
+      "contract": "---\nschema_version: \"1.0.0\"\nticket_id: \"OMN-10512\"\ntitle: \"Extract shared contract-to-topics resolver\"\nsummary: \"Add a reusable CLI-layer resolver for node contract paths and command/terminal topics.\"\nis_seam_ticket: false\ninterface_change: false\ninterfaces_touched: []\nevidence_requirements:\n  - kind: \"tests\"\n    description: \"Focused resolver unit tests pass in omnibase_core PR #1032\"\n    command: \"uv run pytest tests/unit/cli/test_cli_resolve_contract_topics.py -q\"\nemergency_bypass:\n  enabled: false\n  justification: \"\"\n  follow_up_ticket_id: \"\"\ndod_evidence:\n  - id: \"dod-001\"\n    description: \"Focused unit tests cover resolver success and error paths\"\n    source: \"manual\"\n    checks:\n      - check_type: \"command\"\n        check_value: \"uv run pytest tests/unit/cli/test_cli_resolve_contract_topics.py -q\"\n  - id: \"dod-deploy\"\n    description: \"Deploy-gate evidence: pure CLI utility, no runtime process or service deploy required\"\n    source: \"manual\"\n    checks:\n      - check_type: \"command\"\n        check_value: \"echo 'deploy-gate: OMN-10512 adds a pure CLI utility; no Docker image, daemon, broker\n          topic, runtime process, docker exec, or service deploy is required'\"\n",
+      "expected_checks": 2
+    },
+    "omniclaude": {
+      "ticket": "OMN-13064",
+      "contract": "---\nschema_version: \"1.0.0\"\nticket_id: \"OMN-13064\"\ntitle: \"Referenced prerequisite context for OMN-13090\"\nsummary: >\n  Repo-local context contract for a prerequisite ticket referenced by PR contract validation metadata.\n  OMN-13090 is the active delivery ticket for this PR.\nis_seam_ticket: false\ninterface_change: false\ninterfaces_touched: []\nemergency_bypass:\n  enabled: false\n  justification: \"\"\n  follow_up_ticket_id: \"\"\ndod_evidence:\n  - id: \"dod-context-reference\"\n    description: \"Context-only repo-local contract so PR contract validation has a ticket file for the referenced ID.\"\n    source: \"manual\"\n    status: \"verified\"\n    checks:\n      - check_type: \"command\"\n        check_value: \"test -f contracts/OMN-13064.yaml\"\n",
+      "expected_checks": 1
+    }
+  }
+}

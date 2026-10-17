@@ -5,17 +5,17 @@
 # OMN-17942 / OMN-16106 class (g).
 #
 # The scheduled evidence closer (OMN-16106) closes a ticket by re-running
-# `onex skill dod_verify` against the checks its OCC contract declares. A
+# `onex skill dod_verify` against the checks its contract declares. A
 # ticket that declares NONE is not failing that verifier -- it is invisible to
 # it, and to every other mechanical closing path. It can only ever be closed by
 # a person reading it, and nothing on the board says so. Four tickets in the
 # 2026-08-31 sprint are in exactly that state (OMN-17926, OMN-17277, OMN-17380,
 # OMN-17353), and they do not appear in the closer's outcomes at all, because
-# the closer enumerates merged OCC companions and they have none. Their absence
+# the closer enumerates merged evidence companions and they have none. Their absence
 # reads exactly like "nothing to report".
 #
 # This sweep enumerates In-Progress tickets, asks whether each declares an
-# executable close probe -- an OCC `dod_evidence[].checks[]` entry, or a
+# executable close probe -- a contract `dod_evidence[].checks[]` entry, or a
 # `Probe: <command> => <observation>` line in the description -- and comments
 # ONCE on each that declares neither, naming exactly what is missing.
 #
@@ -68,7 +68,7 @@ handler_routing:
       handler:
         name: "HandlerInProgressProbeHygiene"
         module: "omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.handlers.handler_in_progress_probe_hygiene"
-      description: "Linear enumerate -> OCC contract + description probe read -> one marker-guarded comment"
+      description: "Linear enumerate -> contract + description probe read -> one marker-guarded comment"
       output_fields:
         - tickets_scanned
         - tickets_with_probe
@@ -92,7 +92,7 @@ io_operations:
   - operation: "sweep_in_progress_probe_hygiene"
     description: "Name every In-Progress ticket with no executable close probe."
     input_fields:
-      - occ_repo_dir
+      - contract_roots
       - project
       - max_tickets
       - max_comments_per_run
@@ -129,7 +129,7 @@ dependencies:
   - name: "pyyaml"
     type: "library"
     library: "pyyaml"
-    description: "Reads the ticket's OCC contract to count its declared checks."
+    description: "Reads the ticket's contract to count its declared checks."
 health_check:
   enabled: true
   endpoint: "/health"

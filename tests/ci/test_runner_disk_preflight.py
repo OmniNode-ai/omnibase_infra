@@ -14,7 +14,9 @@ Coverage:
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -375,6 +377,49 @@ def test_infra_rerun_script_uses_runner_selector_for_repos() -> None:
     )
     # Must include omniclaude.
     assert "omniclaude" in source, "infra-signature-rerun.sh must scan omniclaude."
+
+
+def test_infra_rerun_default_repos_omit_retired_repo(tmp_path: Path) -> None:
+    """OMN-17427: a bare invocation scans the registry's repos, and the retired change-control repo is not among them."""
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    calls = tmp_path / "gh-calls.txt"
+    stub = stub_dir / "gh"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  if [ "$1" = "--repo" ]; then echo "$2" >> "$GH_CALLS"; fi\n'
+        "  shift\n"
+        "done\n"
+        'echo "[]"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+        "GH_CALLS": str(calls),
+        "ONEX_STATE_DIR": str(tmp_path / "state"),
+    }
+    result = subprocess.run(
+        ["bash", str(INFRA_RERUN_SCRIPT), "--dry-run"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    scanned = calls.read_text(encoding="utf-8").split()
+    registry_source = (
+        REPO_ROOT / "scripts" / "lib" / "merge_sweep_common.sh"
+    ).read_text(encoding="utf-8")
+    registry = re.search(r"^REPOS=\(([^)]*)\)", registry_source, re.MULTILINE)
+    assert registry is not None
+    assert registry.group(1).split()
+    assert scanned == [f"OmniNode-ai/{name}" for name in registry.group(1).split()]
+    assert "OmniNode-ai/onex_change_control" not in scanned
 
 
 # ---------------------------------------------------------------------------

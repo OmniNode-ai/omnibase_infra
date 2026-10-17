@@ -7,27 +7,30 @@ interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn18595-release-cut-changelog
-    statement: A release cut's head carries a CHANGELOG.md section for the version it releases.
+    statement: A release cut's head carries a CHANGELOG.md section for the version it releases; a head that does not change CHANGELOG.md against origin/dev is not a release cut (the dependency cascade carries OMN-18595 into bump PRs that cut nothing).
     acceptance:
       - id: AC1
-        statement: 'AC1: the first CHANGELOG.md heading names the pyproject.toml version -- falsifier: the check below exits 1 at a release PR''s merge base'
+        statement: 'AC1: when the head changes CHANGELOG.md against its merge base with origin/dev, or that merge base cannot be read, the first CHANGELOG.md heading names the pyproject.toml version -- falsifier: the check below exits 1 at a release PR''s merge base outside a git checkout, and at a head whose added changelog section names another version'
 evidence_requirements:
   - kind: ci
-    description: The top changelog heading names the pyproject version.
+    description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
     command: |-
-      python3 -c "import re,tomllib; v=tomllib.load(open('pyproject.toml','rb'))['project']['version']; h=re.search(r'^## v(\S+)', open('CHANGELOG.md').read(), re.M); raise SystemExit(0 if h and h.group(1)==v else 1)"
+      uv run --frozen python -c "import subprocess,tomllib; from omnibase_infra.models.model_release_cut_changelog import ModelReleaseCutChangelog as M; mb=subprocess.run(['git','merge-base','HEAD','origin/dev'],capture_output=True,text=True); cut=mb.returncode!=0 or subprocess.run(['git','diff','--quiet',mb.stdout.strip(),'HEAD','--','CHANGELOG.md']).returncode!=0; d=M(pyproject_version=tomllib.load(open('pyproject.toml','rb'))['project']['version'], changelog_text=open('CHANGELOG.md').read(), is_release_cut=cut); print(*d.violations); raise SystemExit(d.exit_code)"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-18595-release-cut-changelog
-    description: The release head's top changelog section names the released version.
+    description: A release head (one that changes CHANGELOG.md against origin/dev) has a top changelog section naming the released version; other heads citing OMN-18595, such as dependency cascades, pass.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          python3 -c "import re,tomllib; v=tomllib.load(open('pyproject.toml','rb'))['project']['version']; h=re.search(r'^## v(\S+)', open('CHANGELOG.md').read(), re.M); raise SystemExit(0 if h and h.group(1)==v else 1)"
+          uv run --frozen python -c "import subprocess,tomllib; from omnibase_infra.models.model_release_cut_changelog import ModelReleaseCutChangelog as M; mb=subprocess.run(['git','merge-base','HEAD','origin/dev'],capture_output=True,text=True); cut=mb.returncode!=0 or subprocess.run(['git','diff','--quiet',mb.stdout.strip(),'HEAD','--','CHANGELOG.md']).returncode!=0; d=M(pyproject_version=tomllib.load(open('pyproject.toml','rb'))['project']['version'], changelog_text=open('CHANGELOG.md').read(), is_release_cut=cut); print(*d.violations); raise SystemExit(d.exit_code)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/models/test_model_release_cut_changelog_omn18595.py -q -p no:randomly -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1

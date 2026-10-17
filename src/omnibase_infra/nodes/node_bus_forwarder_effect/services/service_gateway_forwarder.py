@@ -869,6 +869,14 @@ class ServiceGatewayForwarder:
             raise GatewayRecordRefusedError(
                 "envelope principal_id does not match attached tenant"
             )
+        # OMN-19998: ModelEventEnvelope.event_type is optional and
+        # ModelGatewayEnvelope.event_type is not. Left to pydantic, an untyped
+        # record raised ValidationError, which the delivery node nacks and
+        # re-raises, so one such record restarted the whole delivery loop on
+        # every redelivery. The verdict never changes for the same bytes:
+        # refuse it, so it is quarantined like any other per-record refusal.
+        if not envelope.event_type:
+            raise GatewayRecordRefusedError("inbound envelope carries no event_type")
 
         gateway_envelope = ModelGatewayEnvelope(
             tenant_id=identity.tenant_id,

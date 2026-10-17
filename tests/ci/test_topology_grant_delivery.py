@@ -969,6 +969,31 @@ def test_alter_default_privileges_is_not_read_as_a_named_delivery() -> None:
 
 
 @pytest.mark.unit
+def test_alter_default_privileges_on_sequences_is_not_read_as_a_named_delivery(
+    tmp_path: Path,
+) -> None:
+    """``... GRANT ... ON SEQUENCES TO <role>`` names no relation either [OMN-19998].
+
+    096_grant_role_omnidash_omnidash_analytics.sql carries one. Once
+    ``role_omnidash`` was a modelled principal the regex's ``SEQUENCES`` read as a
+    relation and surfaced as an undeclared ``public.SEQUENCES`` pair that no
+    declaration could ever close.
+    """
+    corpus = tmp_path / "forward"
+    corpus.mkdir()
+    (corpus / "0001_default_sequence_privileges.sql").write_text(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public\n"
+        "  GRANT USAGE, SELECT ON SEQUENCES TO some_role;\n"
+        "GRANT SELECT ON public.a_real_table TO some_role;\n",
+        encoding="utf-8",
+    )
+    delivered = delivered_grants(corpus)
+    # Positive control: the ordinary grant in the same file is still read.
+    assert GrantKey("some_role", "public", "a_real_table") in delivered
+    assert not [key for key in delivered if key.table.upper() == "SEQUENCES"]
+
+
+@pytest.mark.unit
 def test_one_grant_statement_naming_several_relations_delivers_each(
     tmp_path: Path,
 ) -> None:
