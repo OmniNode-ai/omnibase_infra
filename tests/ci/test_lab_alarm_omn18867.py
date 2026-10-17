@@ -2525,6 +2525,33 @@ def test_lab_alarm_ledger_row_cells_cannot_break_the_row(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
+def test_lab_alarm_ledger_row_names_the_mechanism_as_actor() -> None:
+    """The ruling audit counts a mechanism as acting only by its ``actor=`` cell.
+
+    ``ruling_mechanisms.py`` (queue-status) credits a ledger row to a mechanism
+    when its ``actor=`` is ``<kind>:<name>`` with a mechanism kind and a name
+    derived from the mechanism path. The alarm wrote ``lane=lab-alarm`` alone, so
+    the rulings it carries read NOT-ACTING while it raised rows every day.
+    """
+    from scripts.lab_alarm import render_ledger_row
+
+    row = render_ledger_row(
+        ModelAlarm(
+            condition=EnumAlarmCondition.CONTAINER_RESTARTS,
+            subject="omninode-runtime",
+            detail="restarted",
+        ),
+        evidence="e",
+        stamp="2026-10-17T09:55:27Z",
+        raised_at="2026-10-17T09:55:27+00:00",
+        ticket="OMN-20769",
+    )
+    kind, _, name = _ledger_cells(row)["actor"].partition(":")
+    assert kind == "launchd"
+    assert name in {"lab-alarm", "lab_alarm"}
+
+
+@pytest.mark.unit
 def test_lab_alarm_failed_ledger_append_is_loud_and_retried(tmp_path: Path) -> None:
     """An alarm that believes it recorded and did not is this ticket's defect."""
     from scripts.lab_alarm import EXIT_ALARM, exit_code
