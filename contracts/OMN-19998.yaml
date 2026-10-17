@@ -116,6 +116,11 @@ requirements:
     acceptance:
       - id: AC23
         statement: 'AC23: the post-release-dev-bump job runs scripts/ci/runner_image_identity.py --mode generate after uv lock and its git add names docker/runners/runner-image.lock.json -- falsifier: uv run pytest tests/ci/test_post_release_dev_bump_workflow.py -q -n 0 -k "runner_image_lock" fails against the merge-base release.yml'
+  - id: req-omn19998-public-runner-placement
+    statement: 'Operator RULING 2026-10-16T07:07:09Z: CI runners are for private repositories only. omnibase_infra is public, so no workflow routing fallback may name the self-hosted fleet except the two lab-broker carve-outs (runtime rebuild, hostile review), the nightly performance benchmarks and the dev merge tag run on a GitHub-hosted label, and omnibase_core''s check-public-runner-placement runs as a CI Summary registered job and as a pre-commit hook at one core pin.'
+    acceptance:
+      - id: AC22
+        statement: 'AC22: no workflow line outside the two carve-outs carries the self-hosted fleet fallback, performance-tests and dev-merge-tag run on ubuntu-latest, the Public Runner Placement job is unconditional, hosted, carries a positive control and the same core pin as the hook, and CI Summary registers it -- falsifier: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0 fails at the merge base, where 178 fallback lines name the fleet and neither the job nor the hook exists'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -174,6 +179,9 @@ evidence_requirements:
   - kind: tests
     description: The retention tests render the dev lane and the base infra file with docker compose config and run the rendered one-shot script against a stubbed rpk.
     command: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0
+  - kind: tests
+    description: The placement tests read every workflow file for the fleet fallback, the ci.yml job, .pre-commit-config.yaml and the CI Summary gate list.
+    command: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -478,3 +486,15 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC23
+  - id: dod-omn19998-ac22-public-runner-placement
+    description: AC22 tests read the workflows, the CI job, the pre-commit hook and the CI Summary gate list; the runner routing audit accepts the two new bare hosted pins.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0
+        cwd: .
+      - check_type: command
+        check_value: uv run python scripts/audit-runner-routing.py --local-workflows
+        cwd: .
+    binds_ac:
+      - AC22

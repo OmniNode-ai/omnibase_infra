@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: "AC1: for an overlay binding source dev-local, mirror dev and topic set delegation, HandlerBrokerGrantDerive over build_gateway_transports yields READ and DESCRIBE (never WRITE) on lane.dev-local.kafka.broker and WRITE and DESCRIBE (never READ) on lane.dev.kafka.broker for each delegation topic, and no grant on another lane broker -- falsifier: the same test with topic set hook_edge in the overlay fails on the missing delegation READ grant"
+  - id: "req-local-lane-mirror-bundle"
+    statement: "A laptop's compose stack can mirror its declared delegation topics to the lab lane its overlay names, as an opt-in bundle."
+    acceptance:
+      - id: "AC4"
+        statement: "AC4: the `local-lane-mirror` bundle renders the laptop stack plus one mirror-only `lane-mirror-forwarder` (no cloud leg, operator overlay and credential map mounted read-only, started after the broker requires SASL), the shipped overlay and credential templates load through `load_gateway_forwarder_runtime_config` and select exactly the delegation topic set from dev-local to dev, and the `local` bundle renders without the forwarder -- falsifier: `uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py -n 0 -q` fails on the pre-change bundle, or the overlay naming `hook_edge` still selects a delegation topic"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay binding tests, including the per-lane-broker grant derivation."
     command: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_lane_mirror_overlay_binding_omn19983.py -n 0 -q"
+  - kind: "tests"
+    description: "The laptop lane-mirror bundle render and the shipped overlay templates."
+    command: "uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py tests/unit/infra/test_catalog_local_profile.py -n 0 -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -28,3 +36,11 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_lane_mirror_overlay_binding_omn19983.py -n 0 -q -k grants_are_derived"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn19983-ac4-local-lane-mirror-bundle"
+    description: "The local-lane-mirror bundle adds one mirror-only forwarder to the laptop stack, and its shipped templates select the delegation topic set from dev-local to dev."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py -n 0 -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC4"]

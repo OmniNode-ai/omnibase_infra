@@ -38,6 +38,13 @@ HOW A PRINCIPAL IS HELD TO THE FILE (OMN-19975)
     Either one exits 1. It never creates or deletes an ACL: revoking an extra is a
     separate, consented act.
 
+WHO HOLDS A PRINCIPAL (OMN-19975)
+    With ``--overlay FILE`` (the lab's ``developer.principal`` document, see
+    :func:`load_overlay`) the issuer reads the developer machines from that document
+    instead of the ledger: ``apply-grants`` and ``audit-grants`` act on its principals,
+    and ``serve`` issues only a (login, device) the document declares. The document
+    carries no grant; the grants are the ones this file's grant declaration derives.
+
 WHAT IT RECORDS
     One JSON line per issuance in the ledger: when, which login and device, which
     principal, created or rotated, and the digest of the grant file applied. Never
@@ -51,10 +58,10 @@ HOW IT TALKS TO THE BROKER
 
 Usage::
 
-    lab_principal_issuer.py check --grants FILE
-    lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N
-    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--principal NAME ...]
-    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--principal NAME ...]
+    lab_principal_issuer.py check --grants FILE [--overlay FILE]
+    lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
+    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...]
+    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...]
     lab_principal_issuer.py health --socket PATH
 """
 
@@ -168,7 +175,16 @@ def load_declaration(path: Path) -> Declaration:
         raise DeclarationError(
             f"{path}: allowed_login_domains must be a list of domains"
         )
-    grants_raw = doc.get("grants")
+    digest = hashlib.sha256(raw)
+    if "grants_from" in doc:
+        if "grants" in doc:
+            raise DeclarationError(
+                f"{path}: grants_from and grants are exclusive; a derived grant is never typed here"
+            )
+        grants_raw, derived = _derived_grants(path, doc["grants_from"], lane)
+        digest.update(derived)
+    else:
+        grants_raw = doc.get("grants")
     if not isinstance(grants_raw, list) or not grants_raw:
         raise DeclarationError(f"{path}: grants must be a non-empty list")
     grants = tuple(_grant(path, i, g) for i, g in enumerate(grants_raw))
@@ -178,8 +194,67 @@ def load_declaration(path: Path) -> Declaration:
         max_devices_per_login=max_devices,
         allowed_login_domains=tuple(d.lower() for d in domains),
         grants=grants,
-        digest=hashlib.sha256(raw).hexdigest(),
+        digest=digest.hexdigest(),
     )
+
+
+def _derived_grants(
+    path: Path, grants_from: object, lane: str
+) -> tuple[list[dict[str, object]], bytes]:
+    """Read the grants ``node_broker_grant_derive_compute`` derived (OMN-19975).
+
+    ``grants_from`` names a ``ModelBrokerGrantDerivation`` JSON document beside the
+    policy file. Its rows are one per operation; they are folded into one grant per
+    resource, which ``_grant`` then holds to the same rules as any other. A principal
+    owns a templated topic it may write, so the issuer creates that topic for it.
+    """
+    if not isinstance(grants_from, str) or not grants_from:
+        raise DeclarationError(f"{path}: grants_from must be a file name")
+    source = path.parent / grants_from
+    if source.name != grants_from:
+        raise DeclarationError(f"{path}: grants_from must name a file beside it")
+    raw = source.read_bytes()
+    doc = json.loads(raw)
+    if (
+        not isinstance(doc, dict)
+        or set(doc) != {"principal", "grants"}
+        or not isinstance(doc["grants"], list)
+    ):
+        raise DeclarationError(
+            f"{source}: holds exactly principal and grants, as the grant derivation emits"
+        )
+    folded: dict[tuple[str, str, str], set[str]] = {}
+    for index, row in enumerate(doc["grants"]):
+        if not isinstance(row, dict) or set(row) != {
+            "broker",
+            "resource_type",
+            "resource",
+            "operation",
+            "pattern",
+        }:
+            raise DeclarationError(f"{source}: grants[{index}] is not a derived grant")
+        if row["broker"] != lane:
+            raise DeclarationError(
+                f"{source}: grants[{index}] is for broker {row['broker']}, not lane {lane}"
+            )
+        key = (
+            str(row["resource_type"]).lower(),
+            str(row["resource"]),
+            str(row["pattern"]).lower(),
+        )
+        folded.setdefault(key, set()).add(str(row["operation"]).lower())
+    grants: list[dict[str, object]] = []
+    for (resource, name, pattern), operations in sorted(folded.items()):
+        grant: dict[str, object] = {
+            "resource": resource,
+            "name": name,
+            "pattern": pattern,
+            "operations": sorted(operations),
+        }
+        if "{principal}" in name:
+            grant["create_topic"] = "write" in operations
+        grants.append(grant)
+    return grants, raw
 
 
 def _grant(path: Path, index: int, raw: object) -> Grant:
@@ -271,6 +346,103 @@ def principal_name(declaration: Declaration, login: str, device: str) -> str:
         digest = hashlib.sha256(name.encode()).hexdigest()[:8]
         name = f"{name[: PRINCIPAL_MAX_LEN - 9].rstrip('-')}-{digest}"
     return name
+
+
+OVERLAY_SCHEMA_VERSION = "developer_principal.v1"
+OVERLAY_GRANTS_SOURCE = "omnibase_infra:deploy/lab/developer-principal-grants.yaml"
+_OVERLAY_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+@dataclasses.dataclass(frozen=True)
+class OverlayRow:
+    principal: str
+    login: str
+    device: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Overlay:
+    rows: tuple[OverlayRow, ...]
+
+    @property
+    def principals(self) -> frozenset[str]:
+        return frozenset(row.principal for row in self.rows)
+
+    def declares(self, principal: str, login: str) -> bool:
+        return any(
+            row.principal == principal and row.login == login for row in self.rows
+        )
+
+
+def load_overlay(path: Path, declaration: Declaration) -> Overlay:
+    """Read a ``developer.principal`` overlay document (OMN-19975).
+
+    The document names who holds a principal and never a grant: the document must
+    name this issuer's grant file as its ``grants_source``, and each row's
+    principal must be the name the issuer derives from the row's login and device.
+    Mirrors omnibase_core ``ModelDeveloperPrincipalOverlay``; the issuer image
+    carries no omnibase_core, so the unit tests hold the two together.
+    """
+    doc = yaml.safe_load(path.read_bytes())
+    if not isinstance(doc, dict) or set(doc) != {
+        "schema_version",
+        "grants_source",
+        "principals",
+    }:
+        raise DeclarationError(
+            f"{path}: an overlay holds exactly schema_version, grants_source and principals"
+        )
+    if doc["schema_version"] != OVERLAY_SCHEMA_VERSION:
+        raise DeclarationError(
+            f"{path}: schema_version must be {OVERLAY_SCHEMA_VERSION}"
+        )
+    if doc["grants_source"] != OVERLAY_GRANTS_SOURCE:
+        raise DeclarationError(
+            f"{path}: grants_source must be {OVERLAY_GRANTS_SOURCE}, "
+            "the declaration this issuer applies"
+        )
+    raw_rows = doc["principals"]
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise DeclarationError(f"{path}: principals must be a non-empty list")
+    rows: list[OverlayRow] = []
+    for index, raw in enumerate(raw_rows):
+        where = f"{path}: principals[{index}]"
+        if not isinstance(raw, dict) or set(raw) != {"principal", "login", "device"}:
+            raise DeclarationError(
+                f"{where} holds exactly principal, login and device; a grant cannot be typed here"
+            )
+        principal, login, device = raw["principal"], raw["login"], raw["device"]
+        if not all(isinstance(v, str) for v in (principal, login, device)):
+            raise DeclarationError(f"{where}: principal, login and device are strings")
+        if not login.strip():
+            raise DeclarationError(f"{where}: login must not be blank")
+        if not _OVERLAY_NAME.fullmatch(principal) or not _OVERLAY_NAME.fullmatch(
+            device
+        ):
+            raise DeclarationError(
+                f"{where}: principal and device use lower-case letters, digits and hyphens"
+            )
+        derived = principal_name(declaration, login, device)
+        if principal != derived:
+            raise DeclarationError(
+                f"{where}: principal {principal} is not the name this issuer derives "
+                f"from its login and device ({derived})"
+            )
+        rows.append(OverlayRow(principal, login.strip().lower(), device))
+    if len({row.principal for row in rows}) != len(rows):
+        raise DeclarationError(f"{path}: principal names must be unique")
+    if len({(row.login, row.device) for row in rows}) != len(rows):
+        raise DeclarationError(
+            f"{path}: each login and device pair may hold one principal"
+        )
+    for login in {row.login for row in rows}:
+        held = sum(1 for row in rows if row.login == login)
+        if held > declaration.max_devices_per_login:
+            raise DeclarationError(
+                f"{path}: {login} holds {held} principals, more than "
+                f"{declaration.max_devices_per_login}"
+            )
+    return Overlay(rows=tuple(rows))
 
 
 @dataclasses.dataclass(frozen=True, order=True)
@@ -494,11 +666,16 @@ def _apply_grants(broker: Broker, principal: str, grants: tuple[Grant, ...]) -> 
 
 class Issuer:
     def __init__(
-        self, declaration: Declaration, broker: Broker, ledger: Ledger
+        self,
+        declaration: Declaration,
+        broker: Broker,
+        ledger: Ledger,
+        overlay: Overlay | None = None,
     ) -> None:
         self._declaration = declaration
         self._broker = broker
         self._ledger = ledger
+        self._overlay = overlay
         self._lock = threading.Lock()
 
     def issue(self, login: str | None, body: object) -> dict[str, str]:
@@ -530,6 +707,11 @@ class Issuer:
                 HTTPStatus.BAD_REQUEST, "device must be a non-empty string"
             )
         principal = principal_name(self._declaration, login, device)
+        if self._overlay is not None and not self._overlay.declares(principal, login):
+            raise IssuerError(
+                HTTPStatus.FORBIDDEN,
+                f"{principal} is not declared for {login} in the developer.principal overlay",
+            )
 
         with self._lock:
             held = self._ledger.principals_for(login)
@@ -729,22 +911,45 @@ def _broker_from_environment() -> BrokerConfig:
     )
 
 
+def _selected_principals(
+    args: argparse.Namespace,
+    declaration: Declaration,
+    overlay: Overlay | None,
+    ledger: Ledger,
+) -> list[str]:
+    """The overlay's principals when one is given, else those the ledger recorded."""
+    if overlay is None:
+        return sorted(
+            set(args.principal or ledger.principals_in_lane(declaration.lane))
+        )
+    undeclared = sorted(set(args.principal or ()) - overlay.principals)
+    if undeclared:
+        raise IssuerError(
+            HTTPStatus.BAD_REQUEST,
+            f"not declared in the developer.principal overlay: {', '.join(undeclared)}",
+        )
+    return sorted(set(args.principal or overlay.principals))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check", help="validate the grant file and exit")
     check.add_argument("--grants", type=Path, required=True)
+    check.add_argument("--overlay", type=Path)
     serve = sub.add_parser("serve", help="serve issuance requests")
     serve.add_argument("--grants", type=Path, required=True)
     serve.add_argument("--ledger", type=Path, required=True)
     serve.add_argument("--socket", type=Path, required=True)
     serve.add_argument("--proxy-uid", type=int, required=True)
+    serve.add_argument("--overlay", type=Path)
     apply = sub.add_parser(
         "apply-grants", help="re-apply grants without rotating passwords"
     )
     apply.add_argument("--grants", type=Path, required=True)
     apply.add_argument("--ledger", type=Path, required=True)
     apply.add_argument("--principal", action="extend", nargs="+")
+    apply.add_argument("--overlay", type=Path)
     audit = sub.add_parser(
         "audit-grants",
         help="compare each principal's live ACLs with the rows the grant file derives",
@@ -752,6 +957,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     audit.add_argument("--grants", type=Path, required=True)
     audit.add_argument("--ledger", type=Path, required=True)
     audit.add_argument("--principal", action="extend", nargs="+")
+    audit.add_argument("--overlay", type=Path)
     health_parser = sub.add_parser(
         "health", help="check the Unix socket health endpoint"
     )
@@ -763,6 +969,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         declaration = load_declaration(args.grants)
+        overlay = (
+            load_overlay(args.overlay, declaration)
+            if args.overlay is not None
+            else None
+        )
     except (OSError, DeclarationError, yaml.YAMLError) as exc:
         print(f"lab_principal_issuer: {exc}", file=sys.stderr)
         return 2
@@ -770,15 +981,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"{args.grants}: {len(declaration.grants)} grants for lane {declaration.lane}, sha256 {declaration.digest}"
         )
+        if overlay is not None:
+            print(f"{args.overlay}: {len(overlay.rows)} developer principals")
         return 0
 
     broker = Broker(_broker_from_environment())
     ledger = Ledger(args.ledger)
     if args.command == "apply-grants":
         try:
-            principals = sorted(
-                set(args.principal or ledger.principals_in_lane(declaration.lane))
-            )
+            principals = _selected_principals(args, declaration, overlay, ledger)
             for principal in principals:
                 if not broker.user_exists(principal):
                     raise IssuerError(
@@ -803,9 +1014,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "audit-grants":
         try:
-            principals = sorted(
-                set(args.principal or ledger.principals_in_lane(declaration.lane))
-            )
+            principals = _selected_principals(args, declaration, overlay, ledger)
             for principal in principals:
                 if not broker.user_exists(principal):
                     raise IssuerError(
@@ -831,7 +1040,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         return int(drifted)
 
-    issuer = Issuer(declaration, broker, ledger)
+    issuer = Issuer(declaration, broker, ledger, overlay)
     with UnixHTTPServer(args.socket, make_handler(issuer, args.proxy_uid)) as server:
         print(
             f"lab_principal_issuer: lane {declaration.lane} on {args.socket}",
