@@ -31,9 +31,26 @@ EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
 CURSOR_FIELD: Final[str] = "projection_cursor"
 DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
+# consumer_flow_windows keeps every window (48M rows, 32 GB on dev-201) and no
+# index leads with window_start, so a plain distinct over it is a whole-table
+# scan that outran the 120 s psql timeout under host load (C28 run 38968109234).
+# Walk the distinct groups on (consumer_group, window_end DESC) instead, and
+# check each group's recent windows on the same index; window_end >= window_start,
+# so the extra window_end bound keeps every row the window_start predicate keeps.
 LIVE_WINDOW_SQL: Final[str] = (
-    "select distinct consumer_group from omninode_internal.consumer_flow_windows "
-    "where window_start > now() - interval '10 minutes'"
+    "with recursive g(consumer_group) as ("
+    "(select consumer_group from omninode_internal.consumer_flow_windows "
+    "order by consumer_group limit 1) "
+    "union all "
+    "select (select c.consumer_group from omninode_internal.consumer_flow_windows c "
+    "where c.consumer_group > g.consumer_group "
+    "order by c.consumer_group limit 1) "
+    "from g where g.consumer_group is not null) "
+    "select g.consumer_group from g where g.consumer_group is not null and exists ("
+    "select 1 from omninode_internal.consumer_flow_windows w "
+    "where w.consumer_group = g.consumer_group "
+    "and w.window_end > now() - interval '10 minutes' "
+    "and w.window_start > now() - interval '10 minutes')"
 )
 
 #: (kind, consumer-group prefix, subscribed topic, the counter that must move)
