@@ -9,8 +9,8 @@ requirements:
   - id: req-lane-lock-status-reads-the-flock
     statement: lane_lock.py status reports held from the flock, not from the holder sidecar, and returns the sidecar as holder.
     acceptance:
-      - id: AC-STATUS
-        statement: 'AC-STATUS: lane_lock.py status reads a free lane as held=false, a held lane as held=true with the holder named, and a lane whose holder was killed as held=false, without disturbing a holder -- falsifier: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py -q'
+      - id: AC1
+        statement: 'AC1: lane_lock.py status reads a free lane as held=false, a held lane as held=true with the holder named, and a lane whose holder was killed as held=false, without disturbing a holder -- falsifier: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py -q'
 evidence_requirements:
   - kind: tests
     description: The status operation reads the flock, names the holder, leaves a held lane held and a free lane acquirable, and rejects a traversing project name.
@@ -28,4 +28,4 @@ dod_evidence:
         check_value: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py tests/scripts/test_lane_lock_omn16729.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC-STATUS
+      - AC1
