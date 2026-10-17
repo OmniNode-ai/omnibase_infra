@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-20935
+title: omnibase_infra's CI bus lane table readers take the table from the CI overlay, not omnimarket
+summary: Every workflow in this repository that sparse-checked-out config/ci_bus_lanes.yaml from omnimarket now fetches config/lab/ci_bus_lanes.yaml from the CI overlay repository (the org Actions variable OMNI_CI_OVERLAY_REPO) through the new composite action .github/actions/fetch-lane-table, which mints a read-only App token, places the file at the path the publishers already read and fails when the variable is unset, the repository is unreadable or the file is missing. The onex delegate CLI resolves its lane declaration under the workspace config root (service_kernel.workspace_runtime_config_root) at config/lab/ci_bus_lanes.yaml instead of under omnimarket's checkout. The runtime image's packaged-resource readers and the Dockerfile routing_tiers copy are not changed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20935-infra-readers-take-the-lane-table-from-the-overlay
+    statement: The workflows and the delegate CLI in this repository resolve the CI bus lane table from the CI overlay or the workspace config root and never from omnimarket's config/ci_bus_lanes.yaml.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: each repointed reader here resolves the lane table from the CI overlay or the workspace config root, and refuses naming how to supply it when none does -- falsifier: pytest tests/ci/test_ci_bus_lane_table_read_from_overlay_omn20935.py fails on the workflows at origin/dev (eleven steps in ten workflows sparse-check-out config/ci_bus_lanes.yaml from omnimarket) and passes after this change; tests/unit/cli/test_delegate_lane_broker.py proves the CLI reads the config root and no longer reads <workspace>/omnimarket/config/ci_bus_lanes.yaml'
+evidence_requirements:
+  - kind: tests
+    description: 'AC2: no workflow checks out the lane table from omnimarket, every fetch step names the overlay variable, the App credentials and the destination, the reusable workflows declare the App secrets they pass, and the fetch action is read-only and fails loud.'
+    command: uv run pytest tests/ci/test_ci_bus_lane_table_read_from_overlay_omn20935.py tests/ci/test_chain_canary_workflow.py tests/ci/test_dlq_and_baselines_lane_broker_omn17163.py tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py tests/ci/test_r1_front_door_probe_omn19445.py tests/unit/scripts/test_ci_bus_overlay_live_binding.py -q -p no:randomly --no-cov
+  - kind: tests
+    description: 'AC2: the delegate CLI locates the lane declaration under the workspace config root, follows ONEX_WORKSPACE_CONFIG_ROOT and ignores a copy left at the omnimarket path.'
+    command: uv run pytest tests/unit/cli/test_delegate_lane_broker.py tests/unit/cli/test_omn19193_workspace_tier1_transport.py tests/unit/cli/test_omn19212_materialised_workspace_transport.py -q -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20935-ac2-workflows-read-the-overlay
+    description: 'AC2: no workflow here reads the lane table from omnimarket; each fetches it from the CI overlay through the composite action.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_bus_lane_table_read_from_overlay_omn20935.py tests/ci/test_chain_canary_workflow.py tests/ci/test_dlq_and_baselines_lane_broker_omn17163.py tests/ci/test_omn18096_ci_bus_overlay_gate_wiring.py tests/ci/test_r1_front_door_probe_omn19445.py tests/unit/scripts/test_ci_bus_overlay_live_binding.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20935-ac2-cli-reads-the-config-root
+    description: 'AC2: the delegate CLI resolves the lane declaration from the workspace config root.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_lane_broker.py tests/unit/cli/test_omn19193_workspace_tier1_transport.py tests/unit/cli/test_omn19212_materialised_workspace_transport.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20935-deploy-probe-lane-table-reader
+    description: 'Deploy probe for the reader change: read the delegate CLI lane resolver from GitHub at the evaluated checkout''s commit and require the workspace config root lookup. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base resolver, which reads the lane table under the omnimarket checkout. The AC2 tests above exercise the config root, the environment override and the refusal.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'workspace_runtime_config_root(workspace_root)'
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -203,7 +203,7 @@ class ModelChainCanaryRequest(BaseModel):
             "lands in argv, so a DSN here would be durably persisted and "
             "readable from /proc by every process on the host. The NAME is "
             "resolved from the lane's declared `projection_readback.dsn_env` "
-            "(omnimarket config/ci_bus_lanes.yaml); the value is injected "
+            "(the CI overlay lane table config/lab/ci_bus_lanes.yaml); the value is injected "
             "into the job environment under that name and read there. EMPTY "
             "means the run has no evidence about the projection and reports "
             "NOT_CONFIGURED. It deliberately does NOT fall back to the bus "
@@ -228,7 +228,7 @@ class ModelChainCanaryRequest(BaseModel):
             "#3072 shipped; there is no shim, because no CLI row ever set it "
             "and so no caller can be broken by the replacement. The NAME is "
             "resolved from the lane's declared `ledger_readback.dsn_env` "
-            "(omnimarket config/ci_bus_lanes.yaml); the value is injected "
+            "(the CI overlay lane table config/lab/ci_bus_lanes.yaml); the value is injected "
             "into the job environment under that name and read there. EMPTY "
             "means the run has no evidence about the chain and reports "
             "NOT_CONFIGURED. It deliberately does NOT fall back to the bus "
@@ -462,7 +462,7 @@ class ModelChainCanaryRequest(BaseModel):
                 "a connection string. A DSN passed here would land in argv, "
                 "in this run's log and in the event log. Pass the name "
                 f"declared by the lane's {declaration} "
-                "(omnimarket config/ci_bus_lanes.yaml) and inject the value "
+                "(the CI overlay lane table config/lab/ci_bus_lanes.yaml) and inject the value "
                 "into the environment under that name."
             )
         return value

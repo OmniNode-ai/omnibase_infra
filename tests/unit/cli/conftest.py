@@ -101,3 +101,15 @@ def stand_in_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cli_delegate, "_delegate_request_model", lambda: ModelStandInDelegateRequest
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_workspace_config_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a lab host's private config root out of every CLI test (OMN-20935).
+
+    The lane declaration the CLI reads lives under the workspace config root,
+    and a lab host exports ONEX_WORKSPACE_CONFIG_ROOT at its real one. A test
+    that wants a root sets it, or builds the developer layout under its own
+    tmp workspace.
+    """
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)

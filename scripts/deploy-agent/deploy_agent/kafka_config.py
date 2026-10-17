@@ -6,7 +6,7 @@ TRANSPORT IS DECLARED, NEVER INFERRED (OMN-18012)
 -------------------------------------------------
 
 The CI publishers read their control-bus transport out of a checked-in lane
-declaration -- omnimarket ``config/ci_bus_lanes.yaml``, keys ``security_protocol``
+declaration -- the CI overlay lane table ``config/lab/ci_bus_lanes.yaml``, keys ``security_protocol``
 and ``sasl_mechanism`` beside each lane's broker -- and
 ``omnibase_infra/scripts/trigger_rebuild_on_merge.py`` enforces that contract
 field-for-field. This module is the deploy agent's half of the same contract,

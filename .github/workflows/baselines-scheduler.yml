@@ -56,7 +56,7 @@ on:
         required: false
         default: 'false'
       bus_lane:
-        description: 'CI bus lane whose DECLARED broker + transport the publish uses (omnimarket config/ci_bus_lanes.yaml).'
+        description: 'CI bus lane whose DECLARED broker + transport the publish uses (the CI overlay lane table config/lab/ci_bus_lanes.yaml).'
         required: false
         default: 'dev'
 
@@ -70,7 +70,7 @@ jobs:
     # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
     # must not rely on one machine). Any runner of the overlay's pool
     # (vars.LAB_PROBE_RUNS_ON_JSON): this job reads the lane over the network
-    # only (the broker declared in omnimarket config/ci_bus_lanes.yaml), and a
+    # only (the broker declared in the CI overlay lane table config/lab/ci_bus_lanes.yaml), and a
     # runner on any lab host reaches it. No host label is written here.
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
@@ -105,15 +105,12 @@ jobs:
       # every CI client of this bus, is the whole point: an address that lives
       # in two places drifts in one of them silently (OMN-14800).
       - name: Fetch the declared CI bus lanes
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          ref: dev
-          path: .ci-bus-overlay
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       - name: Resolve the declared lane transport
         id: transport
@@ -135,7 +132,7 @@ jobs:
           )
           lane = os.environ['BUS_LANE']
           transport = load_lane_transport(
-              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), lane
           )
           print(f'lane {lane!r} declares {transport.bootstrap_servers} '
                 f'({transport.security_protocol}/{transport.sasl_mechanism})')
