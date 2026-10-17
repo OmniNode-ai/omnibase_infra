@@ -191,6 +191,37 @@ databases:
               - USAGE
             schema: platform_catalog
         login: true
+      role_omnidash:
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            objects: []
+            privileges:
+              - USAGE
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - projection_watermarks
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - generation_events
+            privileges:
+              - INSERT
+              - SELECT
+              - UPDATE
+            schema: public
+          - object_type: TABLE
+            objects:
+              - tenant_registry_mirror
+            privileges:
+              - SELECT
+            schema: public
+        login: true
       tenant_projection_writer:
         bypass_rls: false
         grants:
@@ -392,5 +423,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 70627917b4528ae363c9dc451dc782b585544722c8b814a16d330a461a7b9757
+  sha256: 3e44d5eef78d000470b1c2076ba7b8d76213785251c810b9f38de3d98761193c
 topology_instance: onex-prod

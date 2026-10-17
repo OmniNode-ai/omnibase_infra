@@ -187,6 +187,28 @@ databases:
             privileges: [USAGE]
             schema: platform_catalog
         login: true
+      role_omnidash:
+        bypass_rls: false
+        grants:
+          - object_type: SCHEMA
+            privileges: [USAGE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - projection_watermarks
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
+              - generation_events
+            privileges: [INSERT, SELECT, UPDATE]
+            schema: public
+          - object_type: TABLE
+            objects:
+              - tenant_registry_mirror
+            privileges: [SELECT]
+            schema: public
+        login: true
       tenant_projection_writer:
         bypass_rls: false
         grants:
