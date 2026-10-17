@@ -78,3 +78,33 @@ def test_issuer_publishes_no_port_and_serves_a_unix_socket() -> None:
     assert cmd[cmd.index("--proxy-uid") + 1] == "0"
     assert "--bind" not in cmd
     assert "--port" not in cmd
+
+
+OVERLAY_TARGET = "/overlay/developer-principal-overlay.yaml"
+
+
+@pytest.mark.unit
+def test_issuer_serves_with_the_developer_principal_overlay_mounted() -> None:
+    """OMN-20232: the deployed issuer reads the developer.principal overlay.
+
+    The overlay lives in another repository, so the image cannot carry it: compose
+    bind-mounts it read-only from a host path the operator names, and the serve
+    command points ``--overlay`` at the mount. A missing host file fails the deploy
+    instead of compose creating a directory in its place.
+    """
+    compose = _load_yaml("docker/docker-compose.principal-issuer.yml")
+    service = compose["services"]["principal-issuer"]
+    (mount,) = [
+        volume
+        for volume in service["volumes"]
+        if isinstance(volume, dict) and volume.get("target") == OVERLAY_TARGET
+    ]
+    assert mount["type"] == "bind"
+    assert mount["read_only"] is True
+    assert mount["bind"] == {"create_host_path": False}
+    assert mount["source"].startswith("${PRINCIPAL_ISSUER_OVERLAY_FILE:?")
+    dockerfile = (REPO_ROOT / "docker/Dockerfile.principal-issuer").read_text()
+    (cmd_line,) = [line for line in dockerfile.splitlines() if line.startswith("CMD ")]
+    cmd = json.loads(cmd_line.removeprefix("CMD "))
+    assert cmd[0] == "serve"
+    assert cmd[cmd.index("--overlay") + 1] == OVERLAY_TARGET

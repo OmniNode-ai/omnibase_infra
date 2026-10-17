@@ -10,6 +10,7 @@
 # The issuer checks the kernel-attested peer uid is root before trusting the
 # tailnet login header set by tailscale serve:
 #
+#   PRINCIPAL_ISSUER_OVERLAY_FILE=<the lab developer.principal overlay file> \
 #   docker compose -f docker/docker-compose.principal-issuer.yml \
 #     --env-file <the operator env file> up -d --build
 #   tailscale serve --bg --https=8443 "unix:$(docker volume inspect -f '{{.Mountpoint}}' omnibase-infra-principal-issuer_principal-issuer-socket)/issuer.sock"
@@ -34,6 +35,16 @@ services:
     volumes:
       - principal-issuer-ledger:/data
       - principal-issuer-socket:/run/principal-issuer
+      # The developer.principal overlay lives in another repository, so the image cannot
+      # carry it (OMN-20232). The operator names the host file; a missing file fails the
+      # deploy rather than compose creating a directory there. The issuer reads it once at
+      # start, so a changed overlay takes effect on the next container (re)creation.
+      - type: bind
+        source: ${PRINCIPAL_ISSUER_OVERLAY_FILE:?PRINCIPAL_ISSUER_OVERLAY_FILE must name the lab developer.principal overlay file on this host}
+        target: /overlay/developer-principal-overlay.yaml
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - dev-lane
     restart: unless-stopped
