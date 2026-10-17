@@ -18,6 +18,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.enums.enum_database_privilege import EnumDatabasePrivilege
+from omnibase_infra.topology import load_topology_profile
+from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROFILES
+from omnibase_infra.topology.table_grant_derivation import PRUNE_PRIVILEGES
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -108,3 +113,27 @@ def test_the_migration_is_classed_expand_only() -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     key = f"forward/nodes/node_projection_consumer_flow/{_GRANT_FILE.name}"
     assert classes[key] == "expand-only"
+
+
+def test_the_prune_shape_is_select_and_delete_only() -> None:
+    assert (
+        frozenset({EnumDatabasePrivilege.SELECT, EnumDatabasePrivilege.DELETE})
+        == PRUNE_PRIVILEGES
+    )
+
+
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+def test_every_profile_declares_the_grant_in_the_prune_shape(profile: str) -> None:
+    principal = (
+        load_topology_profile(profile)
+        .databases["application"]
+        .principals["role_omnidash"]
+    )
+    grants = [
+        grant
+        for grant in principal.grants
+        if "consumer_flow_windows" in grant.objects
+        and grant.schema == "omninode_internal"
+    ]
+    assert len(grants) == 1
+    assert frozenset(grants[0].privileges) == PRUNE_PRIVILEGES

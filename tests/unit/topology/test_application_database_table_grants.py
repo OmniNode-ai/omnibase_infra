@@ -46,6 +46,7 @@ from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROF
 from omnibase_infra.topology.table_grant_derivation import (
     DOMAIN_PROJECTION_BINDINGS,
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
+    PRUNE_PRIVILEGES,
     READ_PRIVILEGES,
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
@@ -67,8 +68,9 @@ _INSTANCE_NAMES = ("local", "onex-dev", "onex-prod")
 _DATABASE_REFS = ("application", "omnibase_infra", "omniintelligence")
 _HELPER = Path(__file__).parents[2] / "helpers" / "application_db_topology.py"
 
-# The only privilege shapes the validator can ever require.
-_LEGAL_PRIVILEGE_SETS = (READ_PRIVILEGES, WRITE_PRIVILEGES)
+# The only privilege shapes the validator can ever require, plus the one
+# hand-declared retention shape (SELECT and DELETE, OMN-17427).
+_LEGAL_PRIVILEGE_SETS = (READ_PRIVILEGES, WRITE_PRIVILEGES, PRUNE_PRIVILEGES)
 
 
 def _declaration(
