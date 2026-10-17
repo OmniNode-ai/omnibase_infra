@@ -137,6 +137,11 @@ requirements:
         statement: 'AC30: downstream floors equal to or older than the pin are accepted -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k equal_or_older'
       - id: AC31
         statement: 'AC31: the current override and resolved lock meet every recorded downstream floor and agree with each other -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"'
+  - id: req-omn17427-lab-alarm-ledger-actor
+    statement: Every lab alarm FRICTION row names the launchd lab-alarm mechanism in an actor cell so the ruling audit can attribute the action.
+    acceptance:
+      - id: AC32
+        statement: 'AC32: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -595,3 +600,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC28
+  - id: dod-omn-17427-ac28-lab-alarm-ledger-actor
+    description: The alarm row renderer names the launchd lab-alarm actor; the regression fails with a missing actor cell before the product change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
+  - id: dod-omn-17427-ac28-deploy-lab-alarm-ledger-actor
+    description: Hosted-runner deploy smoke -- the real alarm renderer emits a FRICTION row whose actor identifies the launchd lab-alarm mechanism. No deployed container, ledger append or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
