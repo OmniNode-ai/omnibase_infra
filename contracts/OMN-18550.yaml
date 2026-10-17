@@ -29,3 +29,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn-18550-ac5-deploy
+    description: The evaluated revision of the runtime entrypoint carries the boot-failure supervisor that bounds the restart loop.
+    source: manual
+    checks:
+      - check_type: command
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/entrypoint_preflight.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'RETRIES EXHAUSTED' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
