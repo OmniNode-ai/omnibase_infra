@@ -113,6 +113,11 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-hook-push-rehearsal-caller
+    statement: A pull request that changes a pre-push hook path runs the omnibase_core hook push rehearsal through a caller workflow pinned to a commit on omnibase_core dev.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: the caller workflow triggers on pull_request and merge_group, grants contents read with no runs-on, pins the reusable at a full sha that equals the recorded commit on origin/dev, its path-regex matches the hook paths and neither this caller nor README.md, and every input it passes is declared by the reusable -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -189,6 +194,9 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The hook push rehearsal caller workflow matches the omnibase_core reusable at its pin.
+    command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -492,3 +500,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC25
+  - id: dod-omn-17427-ac26
+    description: The hook push rehearsal caller workflow triggers, permissions, full-sha pin, path-regex and inputs match the omnibase_core reusable recorded at the pinned commit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
