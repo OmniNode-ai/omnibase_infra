@@ -352,8 +352,11 @@ jobs:
             # The manifest and the lockfile move together: uv.lock records the
             # root package's own version, so a bump of pyproject.toml alone
             # fails every `uv sync --locked` check on the release PR (OMN-18595, 0.4.314).
+            # --repo moves the repo's declared version_surfaces (for example
+            # omnibase_spi's api-reference badges) in the same commit (OMN-19998).
             bumped=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" bump-version \
               --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
+              --repo "${TARGET_REPO}" \
               --clone . \
               --version "${VERSION}")
             read -r -d '' -a bumped_paths <<<"${bumped}" || true

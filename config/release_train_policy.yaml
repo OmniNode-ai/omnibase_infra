@@ -40,6 +40,16 @@
 #   a release, so a tag does not deliver them. Re-derive the list by reading
 #   the downstream workflows' tag clones; do not extend it from memory.
 #
+# version_surfaces (OMN-19998)
+#   Tracked files OUTSIDE pyproject.toml and uv.lock that spell the package
+#   version and are compared against it by a repo test. Each entry is a `glob`
+#   (repo-relative) and a `pattern`, a regex with a named group `version` around
+#   the version string. `release_train.py bump-version --repo <repo>` moves every
+#   match together with the manifest, in the same release commit, and refuses a
+#   surface that matches nothing. omnibase_spi's api-reference version badges are
+#   the first: its test_version_badges_match_live_package_version failed the
+#   0.23.6 and 0.23.7 release PRs until the badges were edited by hand.
+#
 # release_relevant_paths
 #   What can change the published artifact. `src` is the packaged tree and
 #   `pyproject.toml` carries the dependency floor that ships with it. Commits
@@ -123,6 +133,9 @@ repos:
     mode: cut
     mode_note: >-
       green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 18, so the release fast- forward can succeed. Green verified live the same day, all 24 required contexts on dev reporting success for the gating commit.
+    version_surfaces:
+      - glob: docs/api-reference/*.md
+        pattern: 'img\.shields\.io/badge/SPI-v(?P<version>\d+\.\d+\.\d+)-'
   omnimemory:
     package: omnimemory
     default_branch: dev

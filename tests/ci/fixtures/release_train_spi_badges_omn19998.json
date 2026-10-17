@@ -1,0 +1,28 @@
+{
+  "_provenance": {
+    "source": "OmniNode-ai/omnibase_spi dev commit 2a2ccf8f08464e16b1fc012004cd09decb76df53: the first line of each docs/api-reference/*.md that carries an SPI-vX.Y.Z badge, read with git show; the pyproject.toml of that commit declares version 0.23.6",
+    "captured_utc": "2026-10-17T02:43:00Z",
+    "source_sha256": "7e433aded15f7de1632c1b46ec79fd250074b8fb5abd6b70ba00fe53f806bcc9",
+    "hash_of": "path, newline, badge line, newline, for each file in path order"
+  },
+  "response": {
+    "package_version": "0.23.6",
+    "badge_lines": {
+      "docs/api-reference/CONTAINER.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.2.0-lightgrey)",
+      "docs/api-reference/CONTRACTS.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.2.0-lightgrey)",
+      "docs/api-reference/CORE.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.1.0-lightgrey)",
+      "docs/api-reference/EVENT-BUS.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.2.0-lightgrey)",
+      "docs/api-reference/EXCEPTIONS.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.1.0-lightgrey)",
+      "docs/api-reference/FILE-HANDLING.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.3.0-lightgrey)",
+      "docs/api-reference/HANDLERS.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.1.0-lightgrey)",
+      "docs/api-reference/MCP.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.3.0-lightgrey)",
+      "docs/api-reference/MEMORY.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.3.0-lightgrey)",
+      "docs/api-reference/NETWORKING.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.3.0-lightgrey)",
+      "docs/api-reference/NODES.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.1.0-lightgrey)",
+      "docs/api-reference/PROJECTIONS.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.22.0-lightgrey)",
+      "docs/api-reference/REGISTRY.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.1.0-lightgrey)",
+      "docs/api-reference/VALIDATION.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.3.0-lightgrey)",
+      "docs/api-reference/WORKFLOW-ORCHESTRATION.md": "![Version](https://img.shields.io/badge/SPI-v0.23.6-blue) ![Status](https://img.shields.io/badge/status-stable-green) ![Since](https://img.shields.io/badge/since-v0.2.0-lightgrey)"
+    }
+  }
+}

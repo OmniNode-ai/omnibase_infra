@@ -81,6 +81,11 @@ requirements:
     acceptance:
       - id: AC14
         statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+  - id: req-omn19998-release-train-version-surfaces
+    statement: The release train's release commit must move every version surface a repo declares (omnibase_spi's api-reference version badges) together with the manifest and the lock, so a release PR no longer ships a stale badge that its own repo test refuses.
+    acceptance:
+      - id: AC15
+        statement: 'AC15: bump-version with --repo omnibase_spi rewrites the SPI-vX.Y.Z badge in every docs/api-reference markdown file to the release version beside pyproject.toml and uv.lock, a manifest-only bump leaves badges that stale_version_surfaces reports, a declared surface that matches nothing refuses, a malformed declaration refuses at policy load, and the nightly cut job passes --repo -- falsifier: uv run pytest tests/ci/test_release_train_version_surfaces_omn19998.py -q -n 0 fails at the merge base, where bump-version has no version-surface support'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -118,6 +123,9 @@ evidence_requirements:
   - kind: tests
     description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
     command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
+  - kind: tests
+    description: The version-surface tests read the real policy file, bump a fixture clone of omnibase_spi's badge layout through the bump-version subcommand and check the badges, the stale-surface control, the refusals and the cut job's --repo argument.
+    command: uv run pytest tests/ci/test_release_train_version_surfaces_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -312,3 +320,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC14
+  - id: dod-omn19998-ac15-release-train-version-surfaces
+    description: AC15 tests move a fixture omnibase_spi clone's badges through bump-version and check the stale control, both refusals and the workflow argument.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_release_train_version_surfaces_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC15

@@ -376,6 +376,20 @@ class ModelConsumedPath:
 
 
 @dataclass(frozen=True)
+class ModelVersionSurface:
+    """A tracked file set that spells the package version outside the manifest.
+
+    ``pattern`` is a regex with a named group ``version`` around the version
+    string; ``glob`` selects the files, relative to the clone root. The release
+    commit has to move every match together with ``pyproject.toml``, because a
+    repo test compares the two (omnibase_spi's version-badge test, OMN-19998).
+    """
+
+    glob: str
+    pattern: str
+
+
+@dataclass(frozen=True)
 class ModelRepoReleasePolicy:
     """One repo's declared release-train policy."""
 
@@ -388,6 +402,7 @@ class ModelRepoReleasePolicy:
     mode: EnumTrainMode
     mode_note: str
     consumed_paths: tuple[ModelConsumedPath, ...] = ()
+    version_surfaces: tuple[ModelVersionSurface, ...] = ()
 
     @property
     def counted_paths(self) -> tuple[str, ...]:
@@ -603,7 +618,57 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
         consumed_paths=_parse_consumed_paths(
             repo, entry.get("tag_clone_consumed_paths"), release_paths, path
         ),
+        version_surfaces=_parse_version_surfaces(
+            repo, entry.get("version_surfaces"), path
+        ),
     )
+
+
+def _parse_version_surfaces(
+    repo: str, raw: Any, policy_path: Path
+) -> tuple[ModelVersionSurface, ...]:
+    """Validate ``version_surfaces``; an absent field means none."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        msg = f"{policy_path}: repo {repo} 'version_surfaces' is not a list"
+        raise ReleaseTrainConfigError(msg)
+    parsed: list[ModelVersionSurface] = []
+    for item in raw:
+        glob = item.get("glob") if isinstance(item, dict) else None
+        pattern = item.get("pattern") if isinstance(item, dict) else None
+        if (
+            not isinstance(glob, str)
+            or not glob
+            or glob.startswith("/")
+            or ".." in glob.split("/")
+        ):
+            msg = (
+                f"{policy_path}: repo {repo} declares a version surface glob "
+                f"{glob!r} that is not a clean repo-relative glob"
+            )
+            raise ReleaseTrainConfigError(msg)
+        if not isinstance(pattern, str) or not pattern:
+            msg = (
+                f"{policy_path}: repo {repo} version surface {glob!r} has no 'pattern'"
+            )
+            raise ReleaseTrainConfigError(msg)
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            msg = (
+                f"{policy_path}: repo {repo} version surface {glob!r} pattern "
+                f"does not compile: {exc}"
+            )
+            raise ReleaseTrainConfigError(msg) from exc
+        if "version" not in compiled.groupindex:
+            msg = (
+                f"{policy_path}: repo {repo} version surface {glob!r} pattern "
+                "has no named group 'version' around the version string"
+            )
+            raise ReleaseTrainConfigError(msg)
+        parsed.append(ModelVersionSurface(glob, pattern))
+    return tuple(parsed)
 
 
 def _parse_consumed_paths(
@@ -1803,11 +1868,55 @@ def rewrite_lock_root_version(text: str, package: str, new_version: str) -> str:
     )
 
 
-def bump_declared_version(clone: Path, version: str) -> list[str]:
-    """Move ``[project].version`` and, when present, ``uv.lock``'s own entry.
+def _surface_files(clone: Path, surface: ModelVersionSurface) -> list[Path]:
+    return sorted(path for path in clone.glob(surface.glob) if path.is_file())
 
-    Returns the clone-relative paths written. Both texts are computed before
-    either file is written, so a refusal leaves the manifest untouched.
+
+def rewrite_version_surface(
+    text: str, surface: ModelVersionSurface, version: str
+) -> str:
+    """Return ``text`` with every ``version`` group of the surface's pattern moved."""
+    pattern = re.compile(surface.pattern)
+
+    def _swap(match: re.Match[str]) -> str:
+        start, end = match.span("version")
+        base = match.start()
+        whole = match.group(0)
+        return whole[: start - base] + version + whole[end - base :]
+
+    return pattern.sub(_swap, text)
+
+
+def stale_version_surfaces(
+    clone: Path, surfaces: Sequence[ModelVersionSurface], version: str
+) -> list[str]:
+    """Clone-relative ``path: found X, want Y`` lines for every surface off ``version``."""
+    stale: list[str] = []
+    for surface in surfaces:
+        pattern = re.compile(surface.pattern)
+        for path in _surface_files(clone, surface):
+            text = path.read_text(encoding="utf-8")
+            for match in pattern.finditer(text):
+                found = match.group("version")
+                if found != version:
+                    stale.append(
+                        f"{path.relative_to(clone).as_posix()}: found {found}, "
+                        f"want {version}"
+                    )
+    return stale
+
+
+def bump_declared_version(
+    clone: Path,
+    version: str,
+    surfaces: Sequence[ModelVersionSurface] = (),
+) -> list[str]:
+    """Move ``[project].version``, ``uv.lock``'s own entry and the version surfaces.
+
+    Returns the clone-relative paths written. Every text is computed before any
+    file is written, so a refusal leaves the clone untouched. A declared surface
+    that matches nothing is refused: the declaration has drifted from the repo
+    and the release would otherwise leave a stale version behind.
     """
     pyproject = clone / "pyproject.toml"
     raw = pyproject.read_text(encoding="utf-8")
@@ -1824,6 +1933,23 @@ def bump_declared_version(clone: Path, version: str) -> list[str]:
         writes["uv.lock"] = rewrite_lock_root_version(
             lock.read_text(encoding="utf-8"), name, version
         )
+    for surface in surfaces:
+        pattern = re.compile(surface.pattern)
+        matched = False
+        for path in _surface_files(clone, surface):
+            text = path.read_text(encoding="utf-8")
+            if not pattern.search(text):
+                continue
+            matched = True
+            writes[path.relative_to(clone).as_posix()] = rewrite_version_surface(
+                text, surface, version
+            )
+        if not matched:
+            raise ReleaseTrainConfigError(
+                f"version surface {surface.glob!r} (pattern {surface.pattern!r}) "
+                "matches nothing in the clone; refusing to bump the manifest and "
+                "leave the declared version surface stale"
+            )
     for relative, body in writes.items():
         (clone / relative).write_text(body, encoding="utf-8")
     return list(writes)
@@ -1889,6 +2015,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="move the manifest version and the lockfile's own entry together",
     )
     bump.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
+    bump.add_argument(
+        "--repo",
+        default=None,
+        help="declared repo whose version_surfaces move with the manifest",
+    )
     bump.add_argument("--clone", type=Path, required=True)
     bump.add_argument("--version", required=True)
 
@@ -1922,7 +2053,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "bump-version":
         try:
-            written = bump_declared_version(args.clone, args.version)
+            surfaces = (
+                policy_for(policies, args.repo).version_surfaces if args.repo else ()
+            )
+            written = bump_declared_version(args.clone, args.version, surfaces)
         except ReleaseTrainConfigError as exc:
             print(f"::error::{exc}", file=sys.stderr)
             return 2
