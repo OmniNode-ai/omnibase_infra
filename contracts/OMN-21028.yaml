@@ -40,3 +40,11 @@ dod_evidence:
         check_value: uv run pytest tests/integration/timeouts/test_liveness_expiry_applied_integration.py -q -n 0
     binds_ac:
       - AC2
+  - id: dod-liveness-expiry-backlog
+    description: An ACTIVE row already stamped with the emission marker is selected by the liveness query and expired by one tick, so the dev-lane backlog clears without a hand backfill.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/timeouts/test_liveness_expiry_applied_integration.py tests/unit/projectors/test_projection_reader_registration.py -k "stamped_before or carrying_a_marker" -q -n 0
+    binds_ac:
+      - AC1

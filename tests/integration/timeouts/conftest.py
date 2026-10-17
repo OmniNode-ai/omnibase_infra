@@ -343,8 +343,6 @@ class InMemoryProjectionStore:
                     continue
                 if proj.liveness_deadline >= now:
                     continue
-                if proj.liveness_timeout_emitted_at is not None:
-                    continue
                 results.append(proj)
                 if len(results) >= limit:
                     break

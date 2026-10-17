@@ -681,13 +681,33 @@ class TestNeedsLivenessTimeoutEvent:
         )
         assert proj.needs_liveness_timeout_event(now) is False
 
-    def test_no_liveness_timeout_when_already_emitted(self) -> None:
-        """Test returns False when timeout event already emitted."""
+    def test_liveness_timeout_when_active_row_carries_stale_marker(self) -> None:
+        """An ACTIVE row past its deadline needs expiry even if stamped.
+
+        The marker was stamped by the pre-OMN-21028 emitter, which left the row
+        ACTIVE; current_state is what dedups the event now.
+        """
         now = datetime.now(UTC)
         past_deadline = now - timedelta(minutes=5)
         proj = ModelRegistrationProjection(
             entity_id=uuid4(),
             current_state=EnumRegistrationState.ACTIVE,
+            node_type="effect",
+            last_applied_event_id=uuid4(),
+            liveness_deadline=past_deadline,
+            liveness_timeout_emitted_at=now - timedelta(minutes=1),
+            registered_at=now,
+            updated_at=now,
+        )
+        assert proj.needs_liveness_timeout_event(now) is True
+
+    def test_no_liveness_timeout_when_already_expired(self) -> None:
+        """A row already moved to LIVENESS_EXPIRED is not expired a second time."""
+        now = datetime.now(UTC)
+        past_deadline = now - timedelta(minutes=5)
+        proj = ModelRegistrationProjection(
+            entity_id=uuid4(),
+            current_state=EnumRegistrationState.LIVENESS_EXPIRED,
             node_type="effect",
             last_applied_event_id=uuid4(),
             liveness_deadline=past_deadline,
