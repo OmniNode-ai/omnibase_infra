@@ -247,15 +247,12 @@ jobs:
         # stop the committed census from being refreshed.
         # advisory-ok: OMN-18769 overlay fetch for an observability publish
         continue-on-error: true
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          ref: dev
-          path: .ci-bus-overlay
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       - name: Publish the census-observed fact to the bus
         if: always() && steps.collect.outputs.observed != ''
@@ -274,7 +271,7 @@ jobs:
           uv run python scripts/ci/publish_lab_fact_event.py \
             --event "${{ steps.collect.outputs.observed }}" \
             --bus-lane "dev" \
-            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
+            --bus-overlay ".lane-table/config/ci_bus_lanes.yaml"
 
       - name: Decide whether the committed census has to move
         id: decide

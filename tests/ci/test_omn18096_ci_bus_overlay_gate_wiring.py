@@ -205,19 +205,19 @@ class TestTheGateFailsRatherThanSkips:
     def test_the_cross_repo_checkout_is_not_softened(self) -> None:
         """The fetch itself is the failure mode the ticket names first.
 
-        An unresolvable head or an unreadable file must fail the job. Both
-        surface as a failing ``actions/checkout`` step, which is only true while
-        that step neither continues on error nor is conditioned away.
+        An unreadable overlay repository or a missing file must fail the job.
+        Both surface as a failing fetch step, which is only true while that
+        step neither continues on error nor is conditioned away (OMN-20935:
+        the fetch is the composite action that reads the CI overlay).
         """
-        checkouts = [
+        fetches = [
             step
             for step in _steps()
-            if str(step.get("uses", "")).startswith("actions/checkout")
-            and step.get("with", {}).get("repository") == "OmniNode-ai/omnimarket"
+            if step.get("uses") == "./.github/actions/fetch-lane-table"
         ]
-        assert len(checkouts) == 1, "expected exactly one omnimarket checkout step"
-        assert checkouts[0].get("continue-on-error") is not True
-        assert "if" not in checkouts[0]
+        assert len(fetches) == 1, "expected exactly one CI overlay fetch step"
+        assert fetches[0].get("continue-on-error") is not True
+        assert "if" not in fetches[0]
 
     def test_an_empty_sparse_checkout_is_refused_before_pytest(self) -> None:
         """A silently-empty checkout would make every case skip and the job green.

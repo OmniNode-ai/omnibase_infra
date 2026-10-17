@@ -515,10 +515,32 @@ def test_workflow_checks_out_omnimarket_at_the_sibling_pin_as_a_workspace_root()
     assert step["with"]["repository"] == "OmniNode-ai/omnimarket"
     assert step["with"]["ref"] == pins["pins"]["omnimarket"]
     assert step["with"]["path"] == ".probe-workspace/omnimarket"
-    # The CLI reads <OMNIBASE_PATH>/omnimarket/config/ci_bus_lanes.yaml.
     assert _step("Run the R1 front-door probe")["env"]["OMNIBASE_PATH"] == (
         "${{ github.workspace }}/.probe-workspace"
     )
+
+
+def test_workflow_places_the_lane_table_under_the_workspace_config_root() -> None:
+    """OMN-20935: the CLI reads <config root>/config/lab/ci_bus_lanes.yaml.
+
+    The workspace root is `.probe-workspace`; with no sibling operator repository
+    and no ONEX_WORKSPACE_CONFIG_ROOT its config root is
+    `.probe-workspace/.onex/workspace-config`, where the CI overlay lane table
+    is placed. The omnimarket checkout no longer supplies it.
+    """
+    fetch = _step("Fetch the declared CI bus lanes")
+    assert fetch["uses"] == "./.github/actions/fetch-lane-table"
+    assert fetch["with"]["overlay-repo"] == "${{ vars.OMNI_CI_OVERLAY_REPO }}"
+    assert fetch["with"]["dest"] == (
+        ".probe-workspace/.onex/workspace-config/config/lab/ci_bus_lanes.yaml"
+    )
+    assert _index("Checkout omnimarket") < _index("Fetch the declared CI bus lanes")
+    assert _index("Fetch the declared CI bus lanes") < _index(
+        "Resolve the declared lane transport"
+    )
+    assert "config/ci_bus_lanes.yaml" not in _step(
+        "Resolve the declared lane transport"
+    )["run"].replace("config/lab/ci_bus_lanes.yaml", "")
 
 
 def test_workflow_co_installs_omnimarket_before_the_probe_runs() -> None:
@@ -577,6 +599,7 @@ def test_workflow_record_and_upload_still_run_after_a_failing_probe() -> None:
         ("install_dependencies", "runner-env"),
         ("checkout_provider", "runner-env"),
         ("coinstall_provider", "runner-env"),
+        ("lane_table", "lane-declaration"),
         ("lane_transport", "lane-declaration"),
     ],
 )

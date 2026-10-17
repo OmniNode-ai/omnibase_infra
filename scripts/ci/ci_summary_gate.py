@@ -676,8 +676,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # (.github/workflows/ci-bus-overlay-binding.yml, job id AND job name
     # `ci-bus-overlay-binding`, so the check-run name is that bare string —
     # readback on #3371's head ac679580 and on the merge cc897440 both show
-    # exactly `ci-bus-overlay-binding`). It sparse-checks `omnimarket@dev`'s
-    # `config/ci_bus_lanes.yaml` and loads it through `ModelCiBusOverlay` in
+    # exactly that string). It fetches the lane table
+    # `config/ci_bus_lanes.yaml` from the CI overlay repository (OMN-20935) and
+    # loads it through `ModelCiBusOverlay` in
     # scripts/trigger_rebuild_on_merge.py — the publisher's own `extra="forbid"`
     # model — so a producer-side key that the consumer cannot model reds HERE,
     # named, instead of on whichever unrelated PR next touches runtime.

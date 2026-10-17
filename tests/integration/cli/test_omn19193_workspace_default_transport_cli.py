@@ -74,7 +74,7 @@ event_bus:
 
 def _workspace(root: Path, *, with_config: bool) -> Path:
     """A workspace root: the lane declaration and, optionally, its tier-1 config."""
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_DECLARATION, encoding="utf-8")
     if with_config:

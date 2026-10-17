@@ -71,7 +71,7 @@ node_type: "EFFECT_GENERIC"
 # DSN is no longer an input VALUE. The request field `projection_dsn` is
 # replaced by `projection_dsn_env`, which carries the NAME of the environment
 # variable the DSN arrives under — resolved from the lane's declared
-# `projection_readback.dsn_env` (omnimarket config/ci_bus_lanes.yaml) and read
+# `projection_readback.dsn_env` (the CI overlay lane table config/lab/ci_bus_lanes.yaml) and read
 # by the handler out of os.environ. `onex skill` serialises every input into
 # the node payload, onto the bus and into the event log, and builds them from
 # CLI flags that land in argv, so a DSN in an input field was three durable
