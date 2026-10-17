@@ -37,6 +37,7 @@ RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 BUMP_SCRIPT = REPO_ROOT / "scripts" / "ci" / "post_release_dev_bump.py"
 
 JOB_ID = "post-release-dev-bump"
+LOCK_FILE = "docker/runners/runner-image.lock.json"
 
 
 def _load_release_workflow() -> dict[str, Any]:
@@ -111,6 +112,47 @@ def test_job_relocks_uv_so_the_lockfile_version_moves_with_pyproject() -> None:
     # uv.lock carries this package's own version; bumping pyproject alone
     # produces a lockfile-drift failure on the bump PR itself.
     assert "uv lock" in _job_text()
+
+
+def test_job_regenerates_the_runner_image_lock_after_relocking() -> None:
+    # uv.lock bytes feed the runner image identity (OMN-19998): a re-lock with
+    # no regenerate leaves docker/runners/runner-image.lock.json stale, and the
+    # bump PR goes red on tests/ci/test_runner_image_identity.py and on
+    # runner-image-build-smoke. 0.38.72, 0.38.73, 0.38.74 and 0.38.75 each
+    # needed a hand-pushed regenerate.
+    body = _job_text()
+    relock = body.index("uv lock")
+    regenerate = body.index("scripts/ci/runner_image_identity.py --mode generate")
+    assert regenerate > relock
+
+
+def test_bump_commit_stages_the_regenerated_runner_image_lock() -> None:
+    body = _job_text()
+    add_lines = [line for line in body.splitlines() if "git add" in line]
+    assert add_lines, "the bump job must stage its changes"
+    assert any("docker/runners/runner-image.lock.json" in line for line in add_lines)
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19998_bump_pr_stale_runner_lock.json")
+def test_recorded_bump_pr_red_is_cleared_by_the_job_regenerate(
+    recorded_response: dict[str, Any],
+) -> None:
+    # The 0.38.75 bump PR committed only pyproject.toml and uv.lock, and its
+    # runner-image-build-smoke named the remediation command; the job must
+    # now run that command and stage the lock it rewrites.
+    assert LOCK_FILE not in recorded_response["bump_commit_files"]
+    error = recorded_response["runner_image_build_smoke_error"]
+    assert "shared_env_digest is stale" in error
+    remediation = error.rsplit("run ", 1)[1]
+    body = _job_text()
+    assert body.index(remediation) > body.index("uv lock")
+    add_line = next(line for line in body.splitlines() if "git add" in line)
+    for path in (*recorded_response["bump_commit_files"], LOCK_FILE):
+        assert path in add_line.split()
+    assert all(
+        failure.startswith("tests.ci.test_runner_image_identity::")
+        for failure in recorded_response["ratchet_new_failures"]
+    )
 
 
 def test_bump_lands_through_a_pr_against_dev_never_a_direct_push() -> None:
