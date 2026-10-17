@@ -41,3 +41,10 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn20935-deploy-probe-lane-table-reader
+    description: 'Deploy probe for the reader change: read the delegate CLI lane resolver from GitHub at the evaluated checkout''s commit and require the workspace config root lookup. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base resolver, which reads the lane table under the omnimarket checkout. The AC2 tests above exercise the config root, the environment override and the refusal.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_lane.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF 'workspace_runtime_config_root(workspace_root)'
+        cwd: ${OMNI_HOME}/omnibase_infra
