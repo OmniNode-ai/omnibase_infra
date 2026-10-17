@@ -81,6 +81,11 @@ requirements:
     acceptance:
       - id: AC14
         statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+  - id: req-omn19998-broker-profile-checks
+    statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
+    acceptance:
+      - id: AC21
+        statement: 'AC21: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -312,3 +317,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC14
+  - id: dod-omn19998-broker-profile-checks
+    description: Run the corrected broker profile and control-plane regression files and inspect their named-key and fake broker support.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py tests/unit/infra/test_lane_control_plane_topic_omn19543.py -q
+        cwd: .
+      - check_type: command
+        check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 86400 ;;' in t"
+        cwd: .
+    binds_ac:
+      - AC21
