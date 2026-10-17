@@ -344,6 +344,7 @@ migrations:
   forward/nodes/node_projection_registration/0005_create_projection_watermarks.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_registration/0006_grant_omninode_runtime_node_service_registry.sql: expand-only
   forward/nodes/node_projection_registration/0007_node_service_registry_drop_tenant_posture.sql: forward-only # DROP; ALTER TABLE DISABLE ROW LEVEL; ALTER TABLE DROP COLUMN
+  forward/nodes/node_projection_registration/0008_grant_role_omnidash_projection_watermarks.sql: expand-only
   forward/nodes/node_projection_routing_decision/0021_create_agent_routing_decisions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT AGENT_ROUTING_DECISIONS_PKEY
   forward/nodes/node_projection_routing_decision/0022_agent_routing_decisions_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only

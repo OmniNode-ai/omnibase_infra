@@ -86,6 +86,11 @@ requirements:
     acceptance:
       - id: AC14
         statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
+  - id: req-omn19998-role-omnidash-projection-watermarks
+    statement: The dev lane's live-events writer connects as role_omnidash and upserts omninode_internal.projection_watermarks after every batch; role_omnidash must hold schema USAGE and SELECT, INSERT and UPDATE on that one table and nothing else in the schema.
+    acceptance:
+      - id: AC22
+        statement: 'AC22: node_projection_registration migration 0008 grants USAGE ON SCHEMA omninode_internal and SELECT, INSERT, UPDATE ON omninode_internal.projection_watermarks to role_omnidash, nothing more, with a manifest row binding its bytes; applied to a Postgres where 0005 created the table, the watermark upsert as role_omnidash fails with permission denied for schema omninode_internal before it and succeeds after -- falsifier: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0 fails at the merge base, where the migration file does not exist'
   - id: req-omn19998-infra-no-omnimarket-dependency
     statement: omnibase_infra must not declare omnimarket in pyproject.toml, lock it in uv.lock, or import it at module import time under src/omnibase_infra, enforced by a pre-commit hook and a step of the required Lint job.
     acceptance:
@@ -146,6 +151,12 @@ evidence_requirements:
   - kind: tests
     description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
     command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
+  - kind: tests
+    description: The grant tests read the migration statements, its assertions, its manifest row checksum and the live-events writer's compose binding.
+    command: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
+  - kind: tests
+    description: The topology tests read the three shipped instances for the role_omnidash declaration the live-ACL gate diffs the grant against, and the generator's retention of an unbound principal's TABLE grants.
+    command: uv run pytest tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
   - kind: tests
     description: The guard reads the live pyproject.toml, uv.lock and src tree, and its negative controls feed it manifests, locks and modules that depend on omnimarket.
     command: uv run pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0
@@ -358,6 +369,26 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC14
+  - id: dod-omn19998-omnidash-watermarks
+    description: AC22 tests pass at the head; at the merge base the migration file does not exist and every test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_projection_watermarks_role_omnidash_grant_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC22
+  - id: dod-omn19998-omnidash-watermarks-deploy-probe
+    description: Hosted-runner probe reads the migration at this commit and requires both grants to role_omnidash; the base has no such file and the probe fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/forward/nodes/node_projection_registration/0008_grant_role_omnidash_projection_watermarks.sql?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/GRANT USAGE ON SCHEMA omninode_internal TO role_omnidash/{a=1} /TO role_omnidash;/{b++} END{exit !(a&&b>=2)}'
+        cwd: .
   - id: dod-omn19998-ac6-infra-no-omnimarket-dependency
     description: AC15 guard passes on the live tree and its negative controls fire on every omnimarket dependency shape.
     source: manual
