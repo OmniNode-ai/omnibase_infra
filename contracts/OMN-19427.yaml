@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19427
+title: A rolled-back stability lane keeps lane_sync failing against the desired state until a fixed release reconciles it
+summary: The stability refresh's post-rollback census was never handed a desired state, so the planner did not grade revision_mismatch and a rolled-back lane read lane_sync clean. verify_stability_refresh.py now takes --desired-state (the document for the release being delivered) and --desired-state-record-only; the forward gate is judged against the desired state, and the post-rollback re-verify records the same comparison as desired_state_sync without letting it decide the rollback gate, so the lane stays FAILED_ROLLED_BACK (healthy, exit 1) while its receipt reads FAIL with revision_mismatch. refresh_stability_lane.sh forwards STABILITY_DESIRED_STATE to both gates. Unset, nothing changes. This is the receipt half of the ticket; the injected-bad-release lab step (AC1) needs the stability reconcile path that renders and supplies the desired state, which is not built, so AC1 stays unmet.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-rollback-receipt-compares-against-desired-state
+    statement: A post-rollback receipt compares the lane with the desired state and reads lane_sync FAIL with revision_mismatch, while the rollback result stays FAILED_ROLLED_BACK.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: a post-rollback receipt compares against the desired state, not the rolled-back ref -- falsifier: uv run pytest scripts/runtime_build/tests -k rollback -q'
+evidence_requirements:
+  - kind: tests
+    description: The rollback gate records revision_mismatch against the desired state and stays healthy, the forward gate fails on it, no desired state means no comparison, and the refresh script forwards the desired state to both gates.
+    command: uv run pytest scripts/runtime_build/tests -k rollback -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-rollback-desired-state-ac2
+    description: The focused rollback tests prove the post-rollback gate records the desired-state comparison as FAIL with revision_mismatch, leaves the rollback gate PASS and the receipt result FAILED_ROLLED_BACK, and that the refresh script forwards the desired state to both gates.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests -k rollback -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

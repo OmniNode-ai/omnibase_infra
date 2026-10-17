@@ -278,6 +278,12 @@ class HealthGateReport:
     group_audit: ConsumerGroupAudit | None = None
     partition_headroom: PartitionHeadroomCheck | None = None
     lane_sync: ModelLabPassCheck | None = None
+    #: OMN-19427: the census graded against the desired state, recorded and not
+    #: judged. Set only on a gate run with ``desired_state_gates=False`` (the
+    #: post-rollback re-verify), where the lane is healthy by construction and
+    #: serves the prior release, so it differs from the desired release and
+    #: must still read FAIL here without turning the rollback into a failure.
+    desired_state_sync: ModelLabPassCheck | None = None
     errors: list[str] = field(default_factory=list)
     require_digest_change: bool = True
 
@@ -362,6 +368,9 @@ class HealthGateReport:
             "lane": self.lane,
             "lane_sync": self.lane_sync.to_dict()
             if self.lane_sync is not None
+            else None,
+            "desired_state_sync": self.desired_state_sync.to_dict()
+            if self.desired_state_sync is not None
             else None,
             "require_digest_change": self.require_digest_change,
             "digest_changed": self.digests_changed,
@@ -1063,6 +1072,36 @@ def annotate_dimension_consumer_groups(
     return annotated
 
 
+#: The census planner reads the desired state from this variable (OMN-19414);
+#: with it unset the desired-state kinds (``revision_mismatch`` and the rest)
+#: are not graded at all.
+DESIRED_STATE_ENV = "LANE_CENSUS_DESIRED_STATE"
+
+
+def _with_desired_state(
+    run: Callable[..., subprocess.CompletedProcess[str]], desired_state: Path
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Wrap a census runner so every command it runs sees the desired state.
+
+    The variable rides in the environment of the census command, never in argv
+    (OMN-19427).
+    """
+
+    def run_with_desired_state(
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return run(
+            argv,
+            timeout=timeout,
+            env={**(env or {}), DESIRED_STATE_ENV: str(desired_state)},
+        )
+
+    return run_with_desired_state
+
+
 def run_health_gate(
     *,
     lane: str,
@@ -1087,6 +1126,8 @@ def run_health_gate(
     health_boot_grace_seconds: float = 120.0,
     manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     manifest_clock_fn: Callable[[], float] = time.monotonic,
+    desired_state: Path | None = None,
+    desired_state_gates: bool = True,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -1109,7 +1150,23 @@ def run_health_gate(
         )
 
     def finish_census() -> HealthGateReport:
+        # OMN-19427: ``desired_state`` is the document for the release this
+        # refresh was asked to deliver. The forward gate is judged against it.
+        # The post-rollback gate is not: it records the same comparison beside
+        # the health verdict, so a rolled-back lane reads healthy AND reads
+        # FAIL (revision_mismatch) until a release reconciles it.
+        if desired_state is not None and desired_state_gates:
+            report.lane_sync = check_lane_sync(
+                lane=lane,
+                runner=_with_desired_state(census_runner, desired_state),
+            )
+            return report
         report.lane_sync = check_lane_sync(lane=lane, runner=census_runner)
+        if desired_state is not None:
+            report.desired_state_sync = check_lane_sync(
+                lane=lane,
+                runner=_with_desired_state(census_runner, desired_state),
+            )
         return report
 
     for service, container in CORE_SERVICES.items():
@@ -1376,7 +1433,30 @@ def main(argv: list[str] | None = None) -> int:
             "back to the pre-refresh image)."
         ),
     )
+    parser.add_argument(
+        "--desired-state",
+        type=Path,
+        default=None,
+        help=(
+            "lab-desired-state.v1 document (or directory of them) for the "
+            "release this refresh delivers [OMN-19427]. The census compares "
+            "the lane with it, so a lane serving another release reads "
+            "lane_sync FAIL (revision_mismatch)."
+        ),
+    )
+    parser.add_argument(
+        "--desired-state-record-only",
+        action="store_true",
+        help=(
+            "Record the desired-state comparison as desired_state_sync without "
+            "letting it decide the verdict. For the POST-ROLLBACK "
+            "re-verification, where the lane is back on the prior release by "
+            "design [OMN-19427]."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.desired_state_record_only and args.desired_state is None:
+        parser.error("--desired-state-record-only requires --desired-state")
 
     try:
         pre_image_ids = json.loads(args.pre_image_ids)
@@ -1400,6 +1480,8 @@ def main(argv: list[str] | None = None) -> int:
         min_derived_coverage=args.min_derived_coverage,
         require_digest_change=args.require_digest_change,
         partition_warn_threshold=args.partition_warn_threshold,
+        desired_state=args.desired_state,
+        desired_state_gates=not args.desired_state_record_only,
     )
 
     if args.json_output:
