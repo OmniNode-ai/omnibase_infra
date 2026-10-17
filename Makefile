@@ -32,6 +32,7 @@
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
 #     make tenant-local        # give your runtime a tenant (delegation refuses without one), then make up-local
 #     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
+#     make up-local-mirror     # up-local plus the mirror-only forwarder to the lab lane your overlay names (OMN-19983)
 #     make down-local          # stop the laptop profile (keeps its volumes)
 #     make down-local-volumes  # stop it and delete its volumes (local data)
 #
@@ -50,7 +51,7 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local status-local check-sasl-local delegate-local tenant-local secret-local down-local down-local-volumes
+        local-env up-local up-local-mirror status-local check-sasl-local delegate-local tenant-local secret-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
@@ -154,6 +155,14 @@ up-local: _check-docker local-env ## Laptop profile: build the runtime image and
 	@echo "==> Starting the laptop profile (compose project $(LOCAL_PROJECT))..."
 	$(ONEX_CLI) up local --env-file "$(LOCAL_ENV_FILE)" --build
 	@echo "==> Started. A cold runtime takes several minutes to report healthy; run 'make status-local'."
+
+up-local-mirror: _check-docker local-env ## Laptop profile plus the mirror-only forwarder to the lab lane your overlay names (OMN-19983)
+	@test -f "$(LOCAL_ENV_FILE)" || { echo "ERROR: $(LOCAL_ENV_FILE) is missing; run make local-env." >&2; exit 2; }
+	@for var in ONEX_LOCAL_LANE_MIRROR_OVERLAY ONEX_LOCAL_LANE_CREDENTIAL_MAP; do \
+	  grep -q "^$$var=." "$(LOCAL_ENV_FILE)" || { echo "ERROR: $$var is not set in $(LOCAL_ENV_FILE); see docker/local.env.example" >&2; exit 2; }; \
+	done
+	@echo "==> Starting the laptop profile with the lane mirror (compose project $(LOCAL_PROJECT))..."
+	$(ONEX_CLI) up local-lane-mirror --env-file "$(LOCAL_ENV_FILE)" --build
 
 status-local: _check-docker ## Laptop profile: migration gate, runtime /health bodies, delegate consumer group
 	@echo "migration-gate: $$(docker inspect --format '{{.State.Health.Status}}' $(LOCAL_PROJECT)-migration-gate)"
