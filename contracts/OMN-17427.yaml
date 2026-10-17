@@ -113,6 +113,11 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-deploy-agent-topic-ensure
+    statement: The deploy agent creates the topics only it publishes (dev-tag heartbeat and dev-lane drift) before its first publish to each, once per process, and leaves topics another node declares alone.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: each agent-owned topic is created before its first publish, an existing topic is created once and still published, an admin failure is retried on the next publish, and a topic another node declares is not created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -189,6 +194,9 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The deploy agent creates its own topics before the first publish.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -492,3 +500,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC25
+  - id: dod-omn-17427-ac26
+    description: The topic-creation tests fail on the merge base, whose publisher has no AGENT_OWNED_TOPICS and never creates a missing topic, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
+  - id: dod-omn-17427-ac26-deploy-topic-ensure
+    description: Hosted-runner smoke -- the publisher creates each agent-owned topic through a stand-in admin client before its first send and retries after an admin failure, with no broker, deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
