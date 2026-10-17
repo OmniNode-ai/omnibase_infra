@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from kafka import KafkaProducer
+from kafka import KafkaAdminClient, KafkaProducer
+from kafka.admin import NewTopic
+from kafka.errors import KafkaError, TopicAlreadyExistsError
 
 from deploy_agent.events import (
     TOPIC_DEV_LANE_DRIFT,
@@ -202,6 +204,43 @@ def build_completion_payload(
     return completed.model_dump(mode="json")
 
 
+# OMN-17427: topics the agent alone publishes. No contract's event_bus and no provisioning list
+# declares them, so on the lab broker nothing created them, and a lab deploy agent logged
+# "Topic onex.evt.deploy.dev-tag-heartbeat.v1 not found in cluster metadata" on every heartbeat.
+# The agent creates each once per process before its first publish to it. A topic another node
+# declares (the rebuild topics) is left to that node's contract.
+AGENT_OWNED_TOPICS = frozenset({TOPIC_DEV_LANE_DRIFT, TOPIC_DEV_TAG_HEARTBEAT})
+AGENT_TOPIC_PARTITIONS = 6
+_ENSURED_TOPICS: set[str] = set()
+
+
+def _ensure_topic(topic: str, kafka_config: ModelDeployAgentKafkaConfig) -> None:
+    """Create ``topic`` when the broker lacks it, once per process; a failure is retried next time."""
+    if topic in _ENSURED_TOPICS:
+        return
+    try:
+        admin = KafkaAdminClient(**kafka_config.consumer_kwargs())
+        try:
+            admin.create_topics(
+                [
+                    NewTopic(
+                        name=topic,
+                        num_partitions=AGENT_TOPIC_PARTITIONS,
+                        replication_factor=1,
+                    )
+                ]
+            )
+            logger.info("Created topic %s", topic)
+        except TopicAlreadyExistsError:
+            pass
+        finally:
+            admin.close()
+    except (KafkaError, OSError) as e:
+        logger.warning("Could not ensure topic %s: %s", topic, e)
+        return
+    _ENSURED_TOPICS.add(topic)
+
+
 def _produce(
     topic: str,
     key: str,
@@ -209,6 +248,8 @@ def _produce(
     kafka_config: ModelDeployAgentKafkaConfig,
 ) -> bool:
     """Produce one JSON record on the agent's control bus; False when it failed."""
+    if topic in AGENT_OWNED_TOPICS:
+        _ensure_topic(apply_topic_namespace(topic), kafka_config)
     try:
         producer = KafkaProducer(
             **kafka_config.producer_kwargs(),
