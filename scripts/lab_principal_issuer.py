@@ -175,7 +175,16 @@ def load_declaration(path: Path) -> Declaration:
         raise DeclarationError(
             f"{path}: allowed_login_domains must be a list of domains"
         )
-    grants_raw = doc.get("grants")
+    digest = hashlib.sha256(raw)
+    if "grants_from" in doc:
+        if "grants" in doc:
+            raise DeclarationError(
+                f"{path}: grants_from and grants are exclusive; a derived grant is never typed here"
+            )
+        grants_raw, derived = _derived_grants(path, doc["grants_from"], lane)
+        digest.update(derived)
+    else:
+        grants_raw = doc.get("grants")
     if not isinstance(grants_raw, list) or not grants_raw:
         raise DeclarationError(f"{path}: grants must be a non-empty list")
     grants = tuple(_grant(path, i, g) for i, g in enumerate(grants_raw))
@@ -185,8 +194,67 @@ def load_declaration(path: Path) -> Declaration:
         max_devices_per_login=max_devices,
         allowed_login_domains=tuple(d.lower() for d in domains),
         grants=grants,
-        digest=hashlib.sha256(raw).hexdigest(),
+        digest=digest.hexdigest(),
     )
+
+
+def _derived_grants(
+    path: Path, grants_from: object, lane: str
+) -> tuple[list[dict[str, object]], bytes]:
+    """Read the grants ``node_broker_grant_derive_compute`` derived (OMN-19975).
+
+    ``grants_from`` names a ``ModelBrokerGrantDerivation`` JSON document beside the
+    policy file. Its rows are one per operation; they are folded into one grant per
+    resource, which ``_grant`` then holds to the same rules as any other. A principal
+    owns a templated topic it may write, so the issuer creates that topic for it.
+    """
+    if not isinstance(grants_from, str) or not grants_from:
+        raise DeclarationError(f"{path}: grants_from must be a file name")
+    source = path.parent / grants_from
+    if source.name != grants_from:
+        raise DeclarationError(f"{path}: grants_from must name a file beside it")
+    raw = source.read_bytes()
+    doc = json.loads(raw)
+    if (
+        not isinstance(doc, dict)
+        or set(doc) != {"principal", "grants"}
+        or not isinstance(doc["grants"], list)
+    ):
+        raise DeclarationError(
+            f"{source}: holds exactly principal and grants, as the grant derivation emits"
+        )
+    folded: dict[tuple[str, str, str], set[str]] = {}
+    for index, row in enumerate(doc["grants"]):
+        if not isinstance(row, dict) or set(row) != {
+            "broker",
+            "resource_type",
+            "resource",
+            "operation",
+            "pattern",
+        }:
+            raise DeclarationError(f"{source}: grants[{index}] is not a derived grant")
+        if row["broker"] != lane:
+            raise DeclarationError(
+                f"{source}: grants[{index}] is for broker {row['broker']}, not lane {lane}"
+            )
+        key = (
+            str(row["resource_type"]).lower(),
+            str(row["resource"]),
+            str(row["pattern"]).lower(),
+        )
+        folded.setdefault(key, set()).add(str(row["operation"]).lower())
+    grants: list[dict[str, object]] = []
+    for (resource, name, pattern), operations in sorted(folded.items()):
+        grant: dict[str, object] = {
+            "resource": resource,
+            "name": name,
+            "pattern": pattern,
+            "operations": sorted(operations),
+        }
+        if "{principal}" in name:
+            grant["create_topic"] = "write" in operations
+        grants.append(grant)
+    return grants, raw
 
 
 def _grant(path: Path, index: int, raw: object) -> Grant:
