@@ -5,8 +5,7 @@ summary: >-
   Adds the claude_code_binding_install entry to src/omnibase_infra/cli/skill_mapping.yaml so `onex skill claude_code_binding_install` dispatches to the omnimarket node node_claude_code_binding_install_effect (moved there by omnimarket#3946). The entry's result_model names omnibase_core.models.claude_code_binding.ModelBindingInstallResult — the wire family this ticket relocated to core — because a cross-repo reference into an omnimarket node package is a seam the node-boundary import gate refuses (OMN-17427/ OMN-20703, shrink-only baseline). The surfaced args are the host paths and knobs of ModelBindingInstallRequest; the bindings themselves come from the capability/render pipeline, not the CLI. Lands after the omnimarket re-export PR so the named result model is the node's live return type.
 is_seam_ticket: true
 interface_change: false
-interfaces_touched:
-  - public_api
+interfaces_touched: []
 requirements:
   - id: req-omn21093-skill-entry-resolves
     statement: The skill mapping carries the entry and its node resolves in the canonical catalog with no node-boundary edge.
