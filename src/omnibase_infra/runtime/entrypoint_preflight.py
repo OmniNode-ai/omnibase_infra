@@ -38,7 +38,6 @@ Related Tickets:
     - OMN-17372: runtime boot latency — four cold interpreters before the kernel.
     - OMN-13666: required (own DB) vs best-effort (non-owned DB) stamp policy.
     - OMN-15807: the Bifrost renderer always rebuilds from the packaged base.
-    - OMN-15628: DELEGATION_ROUTING_TIERS_PATH self-heal.
 """
 
 from __future__ import annotations
@@ -221,52 +220,6 @@ def render_resolver_config(env: Mapping[str, str]) -> int:
     return render_resolver_main()
 
 
-def self_heal_delegation_tiers_path(env: MutableMapping[str, str]) -> None:
-    """Re-derive ``DELEGATION_ROUTING_TIERS_PATH`` when the pinned path is gone.
-
-    OMN-15628: the k8s manifests pin the path as a literal string embedding the
-    venv's Python minor version. A base-image Python bump silently invalidates
-    it with no signal until the routing reducer fails closed at first use.
-    Re-derive from the installed ``omnimarket`` package's OWN location, which
-    always matches whatever Python is actually running in this image.
-
-    Best-effort correction, never a silent fallback: if re-derivation does not
-    land on a real file, the original (possibly-stale) pinned value is left
-    untouched and the routing reducer still fails closed attributably.
-    """
-    pinned = env.get("DELEGATION_ROUTING_TIERS_PATH", "")
-    if not pinned or Path(pinned).is_file():
-        return
-
-    _echo(
-        f"[entrypoint] WARNING: DELEGATION_ROUTING_TIERS_PATH={pinned} does not "
-        "exist -- attempting to re-derive from the installed omnimarket package"
-    )
-    resolved = ""
-    try:
-        import omnimarket
-
-        resolved = str(
-            Path(omnimarket.__file__).resolve().parent
-            / "configs"
-            / "routing_tiers.yaml"
-        )
-    except Exception:  # noqa: BLE001 — boundary: any import failure is "unresolved"
-        resolved = ""
-
-    if resolved and Path(resolved).is_file():
-        _echo(f"[entrypoint] Re-derived DELEGATION_ROUTING_TIERS_PATH={resolved}")
-        env["DELEGATION_ROUTING_TIERS_PATH"] = resolved
-        return
-
-    _echo(
-        "[entrypoint] WARNING: could not re-derive a valid routing_tiers.yaml "
-        "path -- leaving DELEGATION_ROUTING_TIERS_PATH as pinned; the routing "
-        "reducer fails closed with an attributable error if it truly does not "
-        "exist (OMN-15628)"
-    )
-
-
 def run_preflight(env: MutableMapping[str, str]) -> int:
     """Run every preflight step in the shell's original order.
 
@@ -281,7 +234,6 @@ def run_preflight(env: MutableMapping[str, str]) -> int:
     rc = render_resolver_config(env)
     if rc != 0:
         return rc
-    self_heal_delegation_tiers_path(env)
     return 0
 
 

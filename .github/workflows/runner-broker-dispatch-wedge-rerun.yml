@@ -44,7 +44,7 @@ jobs:
       - name: Scan for broker-dispatch-wedge signature and rerun matches
         env:
           RUNNER_GITHUB_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN || secrets.CROSS_REPO_PAT }}
-          REPOS_CSV: "omnibase_infra,omnibase_core,omniclaude,omnimarket,onex_change_control"
+          REPOS_CSV: "omnibase_infra,omnibase_core,omniclaude,omnimarket"
         run: |
           ARGS=""
           if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then

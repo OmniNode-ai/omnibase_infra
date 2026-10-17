@@ -158,12 +158,6 @@ repos:
   # --- Merge-policy-only repos (no deploy-gate.yml; not in the gate scope) ---
   # These have no runtime contracts, so deploy-gate/reject-skip parity gates do
   # not apply. The merge_policy dimension still does.
-  onex_change_control:
-    dev:
-      merge_policy:
-        queue: disabled # OMN-14077: dev "Merge Queue" ruleset disabled 2026-07-06
-        strict: false
-        rule: "OMN-14077 (dev queue disabled, zero enforcement lost); strict as-is"
   omnidash:
     dev:
       merge_policy:

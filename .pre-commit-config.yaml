@@ -2531,6 +2531,15 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # OMN-19998: omnibase_infra must not depend on omnimarket (market depends
+      # on infra). Same focused module as the Lint job's step in ci.yml.
+      - id: no-omnimarket-dependency
+        name: Refuse an omnimarket dependency in omnibase_infra (OMN-19998)
+        entry: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        pass_filenames: false
+        files: '^(pyproject\.toml|uv\.lock|src/omnibase_infra/.*\.py|tests/ci/test_no_omnimarket_dependency_omn19998\.py)$'
+        stages: [pre-commit]
       - id: subscribe-wiring-health
         name: Subscribe wiring health + allowlist hygiene (OMN-16795)
         entry: uv run python scripts/check_subscribe_wiring_health.py
