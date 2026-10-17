@@ -61,3 +61,39 @@ dod_evidence:
     binds_ac:
       - AC1
       - AC2
+  - id: dod-omn-19455-ac1-mismatch-refusal-pinned
+    description: 'AC1 as written on the ticket. test_boot_refuses_a_backend_whose_served_model_differs renders the delegation contract with endpoint verification on (the boot path, BIFROST_VERIFY_ENDPOINTS=1 in docker/runtime-policy.env) against a real local /v1/models stub serving a different id, and asserts the refusal names the backend and its declared id. The refusal by backend name predates omnibase_infra#4277: the test also passes at its parent.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_refuses_a_backend_whose_served_model_differs -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19455-ac2-dark-backend-pinned
+    description: 'AC2 as written on the ticket. With one backend on a closed port and a live sibling, the render completes, the closed-port backend reads dark (endpoint_url is None) and the sibling keeps its endpoint. Fails at the parent of omnibase_infra#4277, where the closed port raises ProtocolConfigurationError.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_marks_an_unreachable_backend_dark_and_continues -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19455-ac1-declared-among-others
+    description: 'AC1 boundary. test_boot_accepts_a_backend_that_serves_its_declared_model_among_others boots against a real local /v1/models stub that lists the declared id between two other ids and asserts the render completes with the backend bound to its endpoint, so the mismatch refusal fires only when the declared id is absent from the served list. Coverage-only: the behaviour merged in omnibase_infra#4277, so the test passes at the merge base.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_accepts_a_backend_that_serves_its_declared_model_among_others -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19455-ac2-error-answer-refused
+    description: 'AC2 boundary. test_boot_refuses_a_reachable_backend_that_answers_with_a_server_error boots against a real local stub that answers its models route with HTTP 500 and asserts the boot refusal names the backend and writes no target, so only an unreachable backend reads dark and a backend that answers is never marked dark. Coverage-only: the behaviour merged in omnibase_infra#4277, so the test passes at the merge base.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py::test_boot_refuses_a_reachable_backend_that_answers_with_a_server_error -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
