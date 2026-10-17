@@ -17,7 +17,7 @@ It refuses omnimarket on the package dependency surface:
 * ``uv.lock``: a locked package named omnimarket, or any locked package
   depending on it.
 * ``src/omnibase_infra``: an ``import omnimarket`` or ``from omnimarket ...``
-  executed at import time, that is anywhere outside a function body.
+  at any scope, function bodies included.
 
 There is no allowlist and no suppression marker. The negative controls below
 feed the same checkers a manifest, a lock and a module that do depend on
@@ -125,49 +125,25 @@ def lock_findings(text: str) -> list[str]:
     return findings
 
 
-class _ImportTimeImports(ast.NodeVisitor):
-    """Collect omnimarket imports that run when the module is imported."""
-
-    def __init__(self) -> None:
-        self.depth = 0
-        self.lines: list[int] = []
-
-    def _function(self, node: ast.AST) -> None:
-        self.depth += 1
-        self.generic_visit(node)
-        self.depth -= 1
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._function(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._function(node)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._function(node)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        if self.depth == 0 and any(
-            alias.name.split(".")[0] == FORBIDDEN for alias in node.names
-        ):
-            self.lines.append(node.lineno)
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if (
-            self.depth == 0
-            and node.level == 0
-            and (node.module or "").split(".")[0] == FORBIDDEN
-        ):
-            self.lines.append(node.lineno)
-
-
 def source_findings(source: str, label: str) -> list[str]:
-    """``label:line`` for each import-time omnimarket import in ``source``."""
-    visitor = _ImportTimeImports()
-    visitor.visit(ast.parse(source, filename=label))
-    return [
-        f"{label}:{line}: import-time import of {FORBIDDEN}" for line in visitor.lines
-    ]
+    """``label:line`` for each omnimarket import in ``source``, at any scope.
+
+    A function-body import is a dependency like any other: it fails the first
+    time the function runs on an install without omnimarket.
+    """
+    findings: list[str] = []
+    for node in ast.walk(ast.parse(source, filename=label)):
+        if isinstance(node, ast.Import):
+            forbidden = any(a.name.split(".")[0] == FORBIDDEN for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            forbidden = (
+                node.level == 0 and (node.module or "").split(".")[0] == FORBIDDEN
+            )
+        else:
+            continue
+        if forbidden:
+            findings.append(f"{label}:{node.lineno}: import of {FORBIDDEN}")
+    return findings
 
 
 def _src_files() -> list[Path]:
@@ -191,7 +167,7 @@ def test_lock_resolves_no_omnimarket() -> None:
     assert lock_findings(text) == []
 
 
-def test_src_imports_no_omnimarket_at_import_time() -> None:
+def test_src_imports_no_omnimarket() -> None:
     files = _src_files()
     # Positive control: the scan reaches the package's modules.
     assert len(files) > 500
@@ -272,12 +248,23 @@ def test_lock_checker_fires_on_omnimarket() -> None:
         "class C:\n    from omnimarket import x\n",
     ],
 )
-def test_source_checker_fires_on_import_time_import(source: str) -> None:
+def test_source_checker_fires_on_module_scope_import(source: str) -> None:
     assert source_findings(source, "m.py") != []
 
 
-def test_source_checker_ignores_function_scope_and_lookalikes() -> None:
-    assert source_findings("def f():\n    import omnimarket\n", "m.py") == []
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f():\n    import omnimarket\n",
+        "async def f():\n    from omnimarket.nodes import node_x\n",
+        "class C:\n    def m(self):\n        import omnimarket.nodes as nodes\n",
+    ],
+)
+def test_source_checker_fires_on_function_scope_import(source: str) -> None:
+    assert source_findings(source, "m.py") != []
+
+
+def test_source_checker_ignores_lookalikes() -> None:
     assert (
         source_findings("import omnimarketing\nfrom . import omnimarket\n", "m.py")
         == []
