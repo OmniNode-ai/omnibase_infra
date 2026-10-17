@@ -1992,6 +1992,12 @@ def post_recovery(
 #: lab-alarm`` answers "what has the lab alarm raised".
 LEDGER_LANE = "lab-alarm"
 
+#: The acting identity on every row: the ruling audit (queue-status
+#: ``ruling_mechanisms.py``) credits a row to a mechanism only by an ``actor=``
+#: of a mechanism kind and the unit's name, and the ``lane=`` cell alone left
+#: the rulings this alarm carries reading NOT-ACTING (OMN-17427).
+LEDGER_ACTOR = "launchd:lab-alarm"
+
 #: A FRICTION row must carry a cost with a digit (the ledger's friction guard,
 #: OMN-18274). An alarm cannot know the cost of the condition it detects, so it
 #: states the only honest figure: nothing had accrued when it was raised.
@@ -2076,6 +2082,7 @@ def render_ledger_row(
         stamp,
         "FRICTION",
         f"lane={LEDGER_LANE}",
+        f"actor={LEDGER_ACTOR}",
         f"existing={ticket}",
         f"cost={_LEDGER_COST}",
         f"condition={alarm.condition.value}",

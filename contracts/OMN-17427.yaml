@@ -123,6 +123,11 @@ requirements:
     acceptance:
       - id: AC27
         statement: 'AC27: the diagnose credential-capability list in evidence-autoclose-sweep.yml names four repositories, among them omnibase_infra, omnimarket and omnibase_core, and no change-control repository -- falsifier: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q'
+  - id: req-omn17427-lab-alarm-ledger-actor
+    statement: Every lab alarm FRICTION row names the launchd lab-alarm mechanism in an actor cell so the ruling audit can attribute the action.
+    acceptance:
+      - id: AC28
+        statement: 'AC28: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -532,3 +537,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC27
+  - id: dod-omn-17427-ac28-lab-alarm-ledger-actor
+    description: The alarm row renderer names the launchd lab-alarm actor; the regression fails with a missing actor cell before the product change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC28
+  - id: dod-omn-17427-ac28-deploy-lab-alarm-ledger-actor
+    description: Hosted-runner deploy smoke -- the real alarm renderer emits a FRICTION row whose actor identifies the launchd lab-alarm mechanism. No deployed container, ledger append or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC28
