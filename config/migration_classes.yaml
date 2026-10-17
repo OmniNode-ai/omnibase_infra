@@ -352,6 +352,9 @@ migrations:
   forward/nodes/node_projection_run_trace/0000_create_run_trace.sql: forward-only # ALTER TABLE public.run_trace ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_run_trace/0001_grant_tenant_projection_writer_run_trace.sql: expand-only
   forward/nodes/node_projection_run_trace/0002_force_rls_run_trace.sql: forward-only # ALTER TABLE public.run_trace FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_environment/0000_create_local_environment.sql: forward-only # ALTER TABLE public.local_environment ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_local_environment/0001_grant_tenant_projection_writer_local_environment.sql: expand-only
+  forward/nodes/node_projection_local_environment/0002_force_rls_local_environment.sql: forward-only # ALTER TABLE public.local_environment FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
