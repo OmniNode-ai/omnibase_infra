@@ -42,7 +42,6 @@ REPOS=(
   omnimemory
   omninode_infra
   omniweb
-  onex_change_control
 )
 
 # msc_strict — opt-in strict mode for a merge-controller script. Kept as a

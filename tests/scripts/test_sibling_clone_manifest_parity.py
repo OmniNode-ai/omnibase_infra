@@ -222,7 +222,7 @@ def test_lab_tag_set_is_manifest_plus_declared_extras() -> None:
     reads, plus the declared tag-only extras, and nothing else."""
     manifest = _manifest_array("SIBLING_CLONE_MANIFEST")
     extras = _manifest_array("SIBLING_EXTRA_TRACKED_REPOS")
-    assert extras == ["onex_change_control"]
+    assert extras == []
     assert not set(extras) & set(manifest)
     assert _manifest_array("SIBLING_LAB_TAG_REPOS") == manifest + extras
 

@@ -112,7 +112,7 @@ set -euo pipefail
 
 GITHUB_API_URL="${GITHUB_API_URL:-https://api.github.com}"
 GITHUB_ORG="${GITHUB_ORG:-OmniNode-ai}"
-REPOS_CSV="${REPOS_CSV:-omnibase_infra,omnibase_core,omniclaude,omnimarket,onex_change_control}"
+REPOS_CSV="${REPOS_CSV:-omnibase_infra,omnibase_core,omniclaude,omnimarket}"
 LOOKBACK_HOURS="${LOOKBACK_HOURS:-6}"
 MAX_RUNS_PER_REPO="${MAX_RUNS_PER_REPO:-30}"
 WEDGE_MIN_DURATION_SECONDS="${WEDGE_MIN_DURATION_SECONDS:-595}"

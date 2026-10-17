@@ -50,7 +50,7 @@ def test_repos_array_is_nonempty_and_canonical() -> None:
     assert result.returncode == 0, result.stderr
     repos = result.stdout.split()
     assert len(repos) >= 10
-    for expected in ("omnibase_infra", "omnimarket", "onex_change_control"):
+    for expected in ("omnibase_infra", "omnimarket", "omnibase_core"):
         assert expected in repos, f"{expected} missing from REPOS"
 
 
@@ -67,7 +67,7 @@ def test_for_each_repo_visits_every_repo_in_order() -> None:
         if ln.startswith("visit:")
     ]
     assert visited[0] == "omniclaude"
-    assert "onex_change_control" in visited
+    assert "omnibase_core" in visited
     assert len(visited) >= 10
 
 
@@ -91,7 +91,7 @@ def test_for_each_repo_continue_on_error_visits_all() -> None:
         "for_each_repo _maybe; echo rc=$?"
     )
     assert "omnibase_infra" in result.stdout
-    assert "onex_change_control" in result.stdout
+    assert "omnibase_core" in result.stdout
     assert "rc=1" in result.stdout
 
 

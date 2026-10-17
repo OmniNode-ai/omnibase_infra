@@ -63,6 +63,7 @@ from scripts.lab_alarm import (
     evaluate_lab_pass_receipt,
     evaluate_stale_indeterminate,
     evaluate_work_ledger_projection_stale,
+    exit_code,
     expand_env,
     make_ledger_appender,
     make_runner,
@@ -697,6 +698,7 @@ def _run(
     canary: tuple[int, str] = (0, CANARY_GREEN),
     appender: LedgerAppender | None = None,
     clock: Callable[[], str] | None = None,
+    heartbeat: Callable[[], dict[str, Any]] | None = None,
 ) -> ModelAlarmRun:
     config = ModelAlarmConfig(
         repo="o/r",
@@ -744,11 +746,23 @@ def _run(
         lag_reader=_lag_reader({"savings": lag}),
         effects_reader=_effects_reader(),
         canary_reader=lambda repo, workflow, branch, max_age_hours: canary,
+        heartbeat_reader=heartbeat
+        or _fresh_heartbeat(clock() if clock is not None else None),
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
         ledger_appender=appender if appender is not None else _recording_appender([]),
         **({} if clock is None else {"clock": clock}),
     )
+
+
+def _fresh_heartbeat(at: str | None = None) -> Callable[[], dict[str, Any]]:
+    """A HeartbeatReader answering a beat observed *at* (now when omitted): OMN-19998."""
+
+    def read() -> dict[str, Any]:
+        observed = at or datetime.now(UTC).isoformat(timespec="seconds")
+        return {"heartbeat": {"omnimarket": {"observed_at": observed, "alarm": False}}}
+
+    return read
 
 
 def _recording_appender(rows: list[str]) -> LedgerAppender:
@@ -2731,6 +2745,7 @@ def _replay_tick(
         lag_reader=_lag_reader({"savings": 1}),
         effects_reader=_effects_reader(),
         canary_reader=lambda repo, workflow, branch, max_age_hours: (0, CANARY_GREEN),
+        heartbeat_reader=_fresh_heartbeat(tick),
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
         ledger_appender=appender,
@@ -3337,6 +3352,46 @@ def test_a_red_chain_canary_alarms_once_across_two_runs_and_clears(
     assert canary_alarms(second) == []
     assert canary_alarms(green) == []
     assert len(canary_alarms(again)) == 1
+
+
+@pytest.mark.unit
+def test_a_stale_dev_tag_heartbeat_alarms_once_across_two_runs_and_clears(
+    tmp_path: Path,
+) -> None:
+    """OMN-19998: the stale heartbeat is the negative control, the fresh one the positive."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    stale_at = (datetime.now(UTC) - timedelta(hours=4)).isoformat(timespec="seconds")
+
+    def heartbeat_alarms(run: ModelAlarmRun) -> list[ModelAlarm]:
+        return [
+            a for a in run.raised if a.condition is EnumAlarmCondition.DEV_TAG_HEARTBEAT
+        ]
+
+    def run(heartbeat: Callable[[], dict[str, Any]]) -> ModelAlarmRun:
+        return _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=7,
+            ledger=ledger,
+            heartbeat=heartbeat,
+        )
+
+    fresh = run(_fresh_heartbeat())
+    first = run(_fresh_heartbeat(stale_at))
+    second = run(_fresh_heartbeat(stale_at))
+    cleared = run(_fresh_heartbeat())
+    again = run(_fresh_heartbeat(stale_at))
+    assert heartbeat_alarms(fresh) == []
+    assert [a.subject for a in heartbeat_alarms(first)] == ["omnimarket"]
+    assert heartbeat_alarms(second) == []
+    assert heartbeat_alarms(cleared) == []
+    assert len(heartbeat_alarms(again)) == 1
+    assert exit_code(first) == 1
+    assert {r.condition: r.outcome for r in fresh.reports}[
+        EnumAlarmCondition.DEV_TAG_HEARTBEAT
+    ] is EnumConditionOutcome.OK
 
 
 @pytest.mark.unit

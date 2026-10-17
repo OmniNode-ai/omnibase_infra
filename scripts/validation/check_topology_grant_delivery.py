@@ -609,8 +609,18 @@ def _record_delivered_grant(
     # `ALTER DEFAULT PRIVILEGES ... GRANT ... ON TABLES TO <role>`
     # (099_create_omninode_internal_live_events.sql) names a future
     # default, not a relation, and reading it as `public.TABLES` put a
-    # phantom pair in the delivered set (OMN-18768).
-    if table.upper() in {"ALL", "SCHEMA", "DATABASE", "SEQUENCE", "TABLES"}:
+    # phantom pair in the delivered set (OMN-18768). `SEQUENCES` is that same
+    # class for sequences (`ALTER DEFAULT PRIVILEGES ... GRANT ... ON SEQUENCES
+    # TO <role>`, 096_grant_role_omnidash_omnidash_analytics.sql): it surfaced as
+    # `public.SEQUENCES` once `role_omnidash` was a modelled principal (OMN-19998).
+    if table.upper() in {
+        "ALL",
+        "SCHEMA",
+        "DATABASE",
+        "SEQUENCE",
+        "SEQUENCES",
+        "TABLES",
+    }:
         return
     key = GrantKey(_unquote(role), schema, table)
     delivered.setdefault(key, []).append(file_name)

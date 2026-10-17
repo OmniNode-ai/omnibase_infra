@@ -75,9 +75,8 @@ echo "========================"
 # Everything those steps did lives in
 # `omnibase_infra.runtime.entrypoint_preflight`, in the same order, with the
 # same env guards, the same 5-attempt/1s stamp retry, the same required
-# (omnibase_infra) vs best-effort (omniintelligence) policy (OMN-13666), the
-# same OMN-15628 DELEGATION_ROUTING_TIERS_PATH self-heal, and the same exit
-# codes. It then starts the CMD: the packaged `onex-runtime` console script is
+# (omnibase_infra) vs best-effort (omniintelligence) policy (OMN-13666), and
+# the same exit codes. It then starts the CMD: the packaged `onex-runtime` console script is
 # called IN-PROCESS so the kernel inherits the warm import; any other CMD is
 # `os.execvp`-ed, exactly as `exec "$@"` did.
 #

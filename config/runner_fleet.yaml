@@ -272,7 +272,6 @@ git_mirror:
   # test_runner_fleet_config_git_mirror_repos_match_refresh_script (OMN-20597):
   # omninode_infra sat in the script and not here from 2026-09-19 until then.
   repos:
-    - onex_change_control
     - omnibase_infra
     - omninode_infra
     - omnibase_core

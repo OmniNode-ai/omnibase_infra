@@ -74,7 +74,7 @@ def _first_index(lines: list[str], needle: str) -> int:
 @pytest.mark.unit
 def test_the_override_is_parsed() -> None:
     """Rule 16 positive control: the dev-lane script is read and has cluster sets."""
-    assert len(_cluster_sets(_script_lines(_DEV_LANE))) == 5
+    assert set(_BASE_KEYS + _DIALS) <= _cluster_sets(_script_lines(_DEV_LANE)).keys()
 
 
 @pytest.mark.unit

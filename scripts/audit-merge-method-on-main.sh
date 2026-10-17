@@ -48,7 +48,6 @@ REPOS=(
   omniintelligence
   omnimemory
   omnimarket
-  onex_change_control
 )
 
 # Known, approved one-time merge-commit exceptions (short SHA -> ticket

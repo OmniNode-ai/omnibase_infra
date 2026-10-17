@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # The repos --cut-tag tags: SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh,
 # which is every clone the sibling-pin preflight reads (SIBLING_CLONE_MANIFEST,
 # five repos including the omnibase_infra build context and omnibase_spi) plus
-# onex_change_control (SIBLING_EXTRA_TRACKED_REPOS). It is NOT the set the build
+# any SIBLING_EXTRA_TRACKED_REPOS (currently empty). It is NOT the set the build
 # checks out to <ref>: stage_workspace.sh clean-checks-out only the three
 # source-vendored siblings (SIBLING_VENDORED_REPOS). OMN-19072: this used to be
 # a literal list of its own that omitted omnibase_spi, under a comment that

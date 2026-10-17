@@ -66,8 +66,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Clones that get the LOCAL tag: the same set as cut-lab-ref.sh's --cut-tag,
 # SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh (every clone the pin
-# preflight reads plus onex_change_control). OMN-19072: this used to be a literal
-# list of its own that omitted omnibase_spi.
+# preflight reads plus any declared extras, currently empty). OMN-19072: this
+# used to be a literal list of its own that omitted omnibase_spi.
 # shellcheck source=./sibling_clone_manifest.sh
 source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
 TAG_REPOS=("${SIBLING_LAB_TAG_REPOS[@]}")
