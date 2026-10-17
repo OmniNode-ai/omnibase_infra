@@ -333,16 +333,42 @@ class TestHandlerRuntimeTickLivenessExpiry:
         assert liveness_event.last_heartbeat_at is None
 
     @pytest.mark.asyncio
-    async def test_no_duplicate_liveness_expiry_when_already_emitted(self) -> None:
+    async def test_active_row_with_stale_marker_is_expired(self) -> None:
+        """An ACTIVE row stamped by the pre-OMN-21028 emitter still gets its expiry."""
+        mock_reader = create_mock_projection_reader()
+
+        node_id = uuid4()
+        stamped_active = create_projection(
+            entity_id=node_id,
+            state=EnumRegistrationState.ACTIVE,
+            liveness_deadline=TEST_NOW - timedelta(minutes=2),
+            liveness_timeout_emitted_at=TEST_NOW - timedelta(seconds=30),
+        )
+        mock_reader.get_overdue_liveness_registrations.return_value = [stamped_active]
+
+        handler = HandlerRuntimeTick(mock_reader, _DEFAULT_REDUCER)
+        tick = create_runtime_tick(now=TEST_NOW)
+        envelope = create_envelope(
+            tick, now=TEST_NOW, correlation_id=tick.correlation_id
+        )
+
+        output = await handler.handle(envelope)
+
+        assert isinstance(output, ModelHandlerOutput)
+        assert len(output.events) == 1
+        assert output.events[0].entity_id == node_id
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_liveness_expiry_when_already_expired(self) -> None:
         """Test that liveness expiry is not emitted twice."""
         mock_reader = create_mock_projection_reader()
 
         node_id = uuid4()
         already_emitted = create_projection(
             entity_id=node_id,
-            state=EnumRegistrationState.ACTIVE,
+            state=EnumRegistrationState.LIVENESS_EXPIRED,  # Already expired
             liveness_deadline=TEST_NOW - timedelta(minutes=2),
-            liveness_timeout_emitted_at=TEST_NOW - timedelta(seconds=30),  # Already!
+            liveness_timeout_emitted_at=TEST_NOW - timedelta(seconds=30),
         )
         mock_reader.get_overdue_liveness_registrations.return_value = [already_emitted]
 

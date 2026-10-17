@@ -434,8 +434,11 @@ class ModelRegistrationProjection(BaseModel):
 
         Returns True if:
         - liveness_deadline has passed
-        - liveness_timeout_emitted_at is None (not yet emitted)
         - current_state is ACTIVE
+
+        ``liveness_timeout_emitted_at`` is not consulted: the timeout path moves an
+        expired row out of ACTIVE, so state keeps it from expiring twice, and an
+        ACTIVE row carrying a marker from before OMN-21028 still needs its expiry.
 
         Used by orchestrators during RuntimeTick processing (C2).
 
@@ -446,8 +449,6 @@ class ModelRegistrationProjection(BaseModel):
             True if liveness timeout event should be emitted, False otherwise
         """
         if not self.has_liveness_deadline_passed(now):
-            return False
-        if self.liveness_timeout_emitted_at is not None:
             return False
         return self.current_state.is_active()
 
