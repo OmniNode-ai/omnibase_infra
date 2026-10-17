@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: AC10
         statement: 'AC10: the local bundle runs the T3.6 usage-by-model writer through tenant-projection-writer, and the render test, the CI health step and the stopped-service control cover it -- falsifier: remove tenant-projection-writer from the local bundle and the render and boot-step tests fail'
+  - id: req-omn19972-slot-gateway-marker
+    statement: The rendered-slot verifier accepts every container name the pre-PR slot overlay renders, the gateway's onex-api-prepr-<slot> included, so a slot with the gateway renders and boots.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: every container_name in docker/docker-compose.prepr.yml passes the slot-marker check for slots 1 and 2, and slot 10 style names do not pass for slot 1 -- falsifier: require a trailing dash after the slot number again and the gateway case fails'
 evidence_requirements:
   - kind: tests
     description: The local render carries the carrier under its own profile, group id and capabilities with the tenant principal; the CLI render writes it; the boot job's health step and stopped-service control include it, and the control holds on a recorded real engine answer for the stopped carrier.
     command: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/ci/test_runtime_boot_catalog_local_health_omn19972.py tests/integration/test_catalog_local_render_page_services_omn19972.py -q
+  - kind: tests
+    description: The overlay's container names all pass the verifier's slot-marker check on both slots, and the marker is a whole segment.
+    command: uv run pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -k "slot_marker or whole_segment"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,3 +40,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC10
+  - id: dod-omn-19972-slot-gateway-marker
+    description: The marker tests pass at this head and fail against the verifier that required a trailing dash.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -k "slot_marker or whole_segment"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11
