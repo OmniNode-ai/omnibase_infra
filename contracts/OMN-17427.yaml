@@ -127,7 +127,7 @@ requirements:
     statement: Every lab alarm FRICTION row names the launchd lab-alarm mechanism in an actor cell so the ruling audit can attribute the action.
     acceptance:
       - id: AC28
-        statement: 'AC28: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
+        statement: 'AC28: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -542,7 +542,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC28
@@ -551,7 +551,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC28
