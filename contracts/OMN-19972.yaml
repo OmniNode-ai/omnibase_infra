@@ -14,8 +14,8 @@ requirements:
   - id: req-omn19972-slot-gateway-marker
     statement: The rendered-slot verifier accepts every container name the pre-PR slot overlay renders, the gateway's onex-api-prepr-<slot> included, so a slot with the gateway renders and boots.
     acceptance:
-      - id: AC-prepr-slot-marker
-        statement: 'AC-prepr-slot-marker: every container_name in docker/docker-compose.prepr.yml passes the slot-marker check for slots 1 and 2, and slot 10 style names do not pass for slot 1 -- falsifier: require a trailing dash after the slot number again and the gateway case fails'
+      - id: AC11
+        statement: 'AC11: every container_name in docker/docker-compose.prepr.yml passes the slot-marker check for slots 1 and 2, and slot 10 style names do not pass for slot 1 -- falsifier: require a trailing dash after the slot number again and the gateway case fails'
 evidence_requirements:
   - kind: tests
     description: The local render carries the carrier under its own profile, group id and capabilities with the tenant principal; the CLI render writes it; the boot job's health step and stopped-service control include it, and the control holds on a recorded real engine answer for the stopped carrier.
@@ -48,4 +48,4 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -k "slot_marker or whole_segment"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC-prepr-slot-marker
+      - AC11
