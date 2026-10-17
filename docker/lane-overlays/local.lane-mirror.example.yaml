@@ -1,0 +1,53 @@
+# Laptop lane-mirror overlay TEMPLATE (OMN-19983). Not mounted as-is.
+#
+# Copy this file, edit the three lines marked EDIT, and name the copy by its
+# ABSOLUTE path in ONEX_LOCAL_LANE_MIRROR_OVERLAY in your env file. `make
+# up-local-mirror` then runs a mirror-only forwarder (OMN-20867) that reads the
+# delegation topics from this laptop's broker and republishes them, bytes and
+# headers unchanged, onto the lab lane named here. Your tenant id travels in the
+# envelope, so the lab keeps the run under your tenant.
+#
+# The shipped node contract declares which lane names exist and which topic sets
+# can be selected; this file only selects.
+# A lane or topic set the contract does not declare is refused at startup.
+# The lab address and the principal that writes it come from you: the address
+# below is a placeholder, and the principal lives in the credential map
+# (local.lane-credentials.example.yaml), never in this file.
+forwarder:
+  tenant_identity:
+    # EDIT: your tenant. The slug is the one in ONEX_TENANT_ID; the id is its
+    # uuid and the principal id is "t-" plus that uuid without hyphens.
+    tenant_id: "00000000-0000-4000-8000-000000000001"
+    tenant_slug: "replace-with-your-tenant-slug"
+    principal_id: "t-00000000000040008000000000000001"
+  local_transport_flavor: "containerized"
+  dedupe_store_path: "/app/data/lane-mirror/delivery.sqlite3"
+  lane_mirror_set: "node_bus_forwarder_effect"
+  lane_mirror_binding:
+    source_lane: "dev-local"
+    mirror_lanes:
+      - "dev"
+    topic_sets:
+      - "delegation"
+# This laptop's own broker, reached inside the compose network. redpanda-local-sasl
+# turns SASL on, so the leg authenticates as the local superuser.
+lane_mirror_source_bus:
+  bootstrap_servers: "redpanda:9092"
+  environment: "laptop-lane-mirror-source"
+  timeout_seconds: 30
+  auto_offset_reset: "earliest"
+  enable_auto_commit: false
+  security_protocol: "SASL_PLAINTEXT"
+  sasl_mechanism: "SCRAM-SHA-256"
+  sasl_credential_ref: "lane.dev-local.kafka.scram"
+lane_mirror_buses:
+  dev:
+    # EDIT: the lab lane's external listener, host:port.
+    bootstrap_servers: "lab-dev-broker.example.invalid:19092"
+    environment: "laptop-lane-mirror-dev"
+    timeout_seconds: 30
+    auto_offset_reset: "earliest"
+    enable_auto_commit: false
+    security_protocol: "SASL_PLAINTEXT"
+    sasl_mechanism: "SCRAM-SHA-256"
+    sasl_credential_ref: "lane.dev.kafka.scram"
