@@ -53,3 +53,16 @@ topics:
   # (p1/r1 default, matching sibling onex.cmd.* topics — see line above for the
   # onex.cmd.omninode.routing-requested.v1 precedent). Sibling of OMN-13771.
   - onex.cmd.omnimarket.node-generation-requested.v1
+  # --- Deploy agent topics (OMN-17427) ---
+  # The deploy agent (scripts/deploy-agent) is a standalone uv sub-project with
+  # no node and no contract, so it cannot declare its own topics. Its
+  # rebuild-requested, rebuild-completed and rebuild-rejected topics are declared
+  # by the omnimarket node_redeploy_deploy_effect contract; these three were
+  # declared nowhere, never created (broker auto-create is off), and the first
+  # publish failed with "not found in cluster metadata" (observed on an
+  # operator deploy-agent job for dev-tag-heartbeat). The constants are
+  # deploy_agent.events.TOPIC_DEV_TAG_HEARTBEAT (OMN-19998), TOPIC_DEV_LANE_DRIFT
+  # (OMN-21146) and TOPIC_DEPLOY_COMMAND_DLQ (OMN-16442).
+  - onex.evt.deploy.dev-tag-heartbeat.v1
+  - onex.evt.deploy.dev-lane-drift.v1
+  - onex.dlq.omnibase-infra.deploy-command.v1
