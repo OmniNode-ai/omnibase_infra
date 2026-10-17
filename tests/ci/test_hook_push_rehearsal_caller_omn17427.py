@@ -54,17 +54,23 @@ def test_the_caller_pins_the_reusable_by_full_commit_sha() -> None:
     assert USES.match(_caller_job()["uses"]), _caller_job()["uses"]
 
 
-def test_the_path_regex_matches_hook_paths_and_the_caller_itself() -> None:
+def test_the_path_regex_matches_hook_paths_and_not_the_caller_itself() -> None:
     pattern = re.compile(_caller_job()["with"]["path-regex"])
     for changed in (
         ".pre-commit-config.yaml",
         ".pre-commit-hooks.yaml",
         ".pre-commit-hooks/reject-deploy-gate-skip-token.sh",
         "scripts/hooks/example.sh",
-        ".github/workflows/hook-push-rehearsal.yml",
     ):
         assert pattern.search(changed), changed
-    for unrelated in ("README.md", "src/omnibase_infra/utils/correlation.py"):
+    # The caller is not a hook: a hosted runner holds no sibling clones, so the pre-push hooks that
+    # read them (architecture layers, deploy-scope DoD) refuse any push there, and a caller change
+    # that matched its own regex would fail its own rehearsal.
+    for unrelated in (
+        "README.md",
+        "src/omnibase_infra/utils/correlation.py",
+        ".github/workflows/hook-push-rehearsal.yml",
+    ):
         assert not pattern.search(unrelated), unrelated
 
 

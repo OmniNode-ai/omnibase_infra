@@ -6,6 +6,8 @@
 # the timeout or leaves a file in the work tree. Any other pull request and a merge-queue entry
 # pass without a push.
 # The pin is the squash commit of omnibase_core#2025, which adds the reusable workflow.
+# This caller is not in path-regex: it is not a hook, and a hosted runner holds no sibling clones,
+# so the pre-push hooks that read them refuse the sample push there.
 name: Hook Push Rehearsal
 
 on:
@@ -25,5 +27,5 @@ jobs:
       contents: read
     uses: OmniNode-ai/omnibase_core/.github/workflows/hook-push-rehearsal.yml@74abd85c6a8082ea7f0985e111509df7f1abbba8
     with:
-      path-regex: '^(\.pre-commit-config\.yaml|\.pre-commit-hooks\.yaml|\.pre-commit-hooks/|scripts/hooks/|\.github/workflows/hook-push-rehearsal\.yml)'
+      path-regex: '^(\.pre-commit-config\.yaml|\.pre-commit-hooks\.yaml|\.pre-commit-hooks/|scripts/hooks/)'
       sample-file: src/omnibase_infra/utils/correlation.py
