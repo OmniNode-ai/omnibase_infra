@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: RT-1 checkout with --follow-dev-tag builds the newest well-formed dev-* tag in place of origin/dev or its fallback, keeps explicit SHAs, builds the branch when origin has no dev tag, refuses a newest tag off the branch; the deploy agent follows the newest tag, beats on every instance and alarms past two hours behind -- falsifier: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0 fails against the merge-base deploy_source_ref.py'
+  - id: req-omn19998-lab-alarm-dev-tag-heartbeat
+    statement: 'Operator RULINGs 2026-10-16T07:34:18Z and 2026-10-16T09:35:49Z: the deploy agent publishes a dev-tag heartbeat on /dev-tag-heartbeat and nothing read it. The lab alarm must read it and raise when the beat of a followed repository has gone quiet, is missing, or reports the lane behind its newest dev tag, and must stay quiet on a fresh beat.'
+    acceptance:
+      - id: AC21
+        statement: 'AC21: against a fresh heartbeat fixture the dev_tag_heartbeat condition reads OK; against the stale fixture, the same document with observed_at 3h50m before the read, it raises one alarm naming omnimarket; a missing beat and a beat reporting the lane behind its newest tag each raise one; an unreachable or malformed answer reads INDETERMINATE; through run_once a stale beat raises once across two runs and clears -- falsifier: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"'
   - id: req-omn19998-prepr-isolated-docker-auths
     statement: The pre-PR pool prover's isolated docker config must hold no credential store, no credential helper and no credential, and must keep a non-empty auths map so the docker CLI stays on the plain file store instead of detecting the macOS keychain again.
     acceptance:
@@ -76,6 +81,11 @@ requirements:
     acceptance:
       - id: AC12
         statement: 'AC12: no runner compose service bind-mounts docker/runners files singly; every hook service mounts ./runners read-only at /opt/onex-runner-hooks with the hook env var, entrypoint wrapper and healthcheck inside it; healthcheck.sh fails and, after its grace, runs docker stop on its own container when the hook is missing, empty or has no shebang; on a real docker daemon an rsync-replaced hook is seen through the directory mount and is not seen through a single-file mount -- falsifier: uv run pytest tests/ci/test_runner_hook_dir_mount_omn19998.py -q -n 0 fails on the merge-base compose and healthcheck'
+  - id: req-omn19998-drain-then-relabel-roll
+    statement: deploy-runners.sh must carry a drain-then-relabel roll that re-registers an online runner pool under its rendered label set, one runner at a time and only once the runner is idle on the container's own evidence, on the primary host and on a secondary host pool, at an unchanged runner count.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: --relabel leaves a busy runner untouched, stops and recreates each idle runner in turn under its own compose project with the registration token on stdin and never in argv or output, refuses a runner whose compose lacks the label or would drop a label it holds, halts at a runner that does not return healthy, caps registry reads, and reads the pool back with the same registered count -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q fails on the merge-base deploy-runners.sh'
 evidence_requirements:
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
@@ -92,6 +102,9 @@ evidence_requirements:
   - kind: tests
     description: The checkout tests build tags against a local origin; the agent tests drive the heartbeat, the alarm and the followed head through the agent's seams.
     command: uv run pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py -q -n 0
+  - kind: tests
+    description: The heartbeat tests read a fresh and a stale recording-shaped fixture of /dev-tag-heartbeat through the condition, the shipped config and run_once.
+    command: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"
   - kind: tests
     description: The isolated-config test runs the prover's own config snippet against a fake keychain-backed docker config and reads the written file.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k test_isolated_docker_config_pins_the_file_store_and_holds_no_credential
@@ -110,6 +123,9 @@ evidence_requirements:
   - kind: tests
     description: The structural test reads the sixteen services of the second-host CI runner pool and asserts the uv cache path lies under the work mount, no separate uv bind mount and no copy link mode.
     command: uv run pytest tests/ci/test_omnipc2_ci_runner_scratch_caches.py -q -n 0
+  - kind: tests
+    description: The relabel tests run the real script against a stubbed ssh, rsync, gh and docker over one state file and assert on the calls the script made.
+    command: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -169,6 +185,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn19998-ac21-lab-alarm-dev-tag-heartbeat
+    description: AC21 tests drive the dev_tag_heartbeat condition over a fresh and a stale fixture, a missing beat, a lane-behind beat and unreadable answers, and run_once for the raise-once and clear edge.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_dev_tag_heartbeat_omn19998.py tests/ci/test_lab_alarm_omn18867.py -q -n 0 -k "dev_tag or heartbeat"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC21
   - id: dod-omn19998-ac5-studio-multiarch-ci-pool
     description: AC6 tests assert the Mac Studio multiarch pool declaration, its compose labels, caps and absent mounts, the amd64 pools' opt-in label and the unchanged action total.
     source: manual
@@ -286,3 +311,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC13
+  - id: dod-omn19998-ac11-drain-then-relabel-roll
+    description: AC14 tests run deploy-runners.sh --relabel end to end against a stubbed host and registry, on the primary host and on a secondary pool, in dry-run and for real; the four -k groups together select every test in the module, each inside the per-check budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "parses_and or combine_with or dry_run_changes or a_real_roll or compose_declarations or busy_runner_is_never"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "token_never_reaches_output_or_argv or minted_token or listener_log or missing_image_tag or may_not_drop"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "lands_between or does_not_return or compose_lacks"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_deploy_runners_relabel_roll_omn19998.py -q -k "already_online or limit_counts or reads_are_capped or secondary_pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14
