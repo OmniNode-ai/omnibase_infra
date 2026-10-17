@@ -35,7 +35,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_the_lag_path_makes_no_subprocess_ssh_or_docker_call -q --no-cov -n 0
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k test_the_lag_path_makes_no_subprocess_ssh_or_docker_call
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
@@ -44,7 +44,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_the_resolved_password_never_reaches_evidence_or_output tests/ci/test_lab_alarm_omn18867.py::test_read_onex_lane_credential_refuses_a_non_0600_secrets_file -q --no-cov -n 0
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k "test_the_resolved_password_never_reaches_evidence_or_output or test_read_onex_lane_credential_refuses_a_non_0600_secrets_file"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
@@ -53,7 +53,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py::test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason tests/ci/test_lab_alarm_omn18867.py::test_the_first_sample_is_indeterminate_not_ok -q --no-cov -n 0
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k "test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason or test_the_first_sample_is_indeterminate_not_ok"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
