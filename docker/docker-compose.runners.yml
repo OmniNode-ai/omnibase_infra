@@ -180,7 +180,7 @@ x-runner-base: &runner-base
     LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
     RUNNER_TOKEN: ${RUNNER_TOKEN}
     RUNNER_GROUP: omnibase-ci
-    ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
     # OMN-14027 C3 — fleet-wide uv download stampede cap.
     # 88 runners NAT through one home uplink and share one anonymous egress
     # budget. The hardened setup-python-uv composite serializes downloads to 1 in
@@ -220,9 +220,17 @@ x-runner-base: &runner-base
     # PIP_EXTRA_INDEX_URL: "https://pypi.org/simple/"
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
-    - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-    - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-    - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+    # OMN-19998 — the hook DIRECTORY, not entrypoint.sh / runner-job-started.sh /
+    # healthcheck.sh one file at a time. deploy-runners.sh rsyncs docker/runners/
+    # and rsync replaces each file (new inode). A container that bind-mounts a
+    # single file keeps the old, deleted inode; on Docker Desktop that path then
+    # reads "No such file or directory" and every job fails at "Set up runner"
+    # while the runner stays registered (omninode-studio-runner-1, 2026-10-16,
+    # 9 jobs). A directory mount resolves the name on every open, so a replaced
+    # file is seen by every container with no restart. NOTE: the volume entry is
+    # a list item, and lists are not inherited through the YAML merge key, so
+    # every service block below repeats this line.
+    - ./runners:/opt/onex-runner-hooks:ro
     # OMN-16363 — disk-admission self-pause marker dir (host-durable, read-write).
     # A SINGLE shared host directory across all 88 runners; each container only
     # ever writes its own ${RUNNER_NAME} marker file inside it, so one bind mount
@@ -278,7 +286,7 @@ x-runner-base: &runner-base
   # containers; a bind-mounted file update alone does not change the live
   # container healthcheck command.
   healthcheck:
-    test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+    test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
     interval: 30s
     timeout: 12s
     retries: 3
@@ -295,11 +303,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-1
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -310,11 +317,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-2
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -325,11 +331,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-3
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -340,11 +345,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-4
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -355,11 +359,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-5
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -370,11 +373,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-6
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -385,11 +387,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-7
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -400,11 +401,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-8
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -415,11 +415,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-9
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -430,11 +429,10 @@ services:
     environment:
       !!merge <<: *runner-env
       RUNNER_NAME: omninode-runner-10
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
@@ -584,7 +582,7 @@ services:
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
-        exec /usr/local/bin/entrypoint.sh
+        exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # OMN-17477 arch label; see the fleet anchor above for why it is
       # additive and why it only lands on recreate.
@@ -598,7 +596,7 @@ services:
       # the flag for any non-empty value (see docker/runners/entrypoint.sh).
       # The group scopes repository access -- see the block above.
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
       # OMN-14958: the runtime_build scripts + onex-runtime-deploy need the
       # operator env (POSTGRES_PASSWORD etc.) for compose interpolation, but
@@ -656,9 +654,7 @@ services:
       # OMNIBASE_OPERATOR_ENV_FILE above. The `runner` job user never reads
       # this path.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - deploy-runner-creds:/home/runner/.runner-creds
     # OMN-14958: host-gateway alias so LANE_PROBE_HOST=host.docker.internal
@@ -668,7 +664,7 @@ services:
     group_add:
       - "984" # Match host Docker socket GID for DinD access
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -768,7 +764,7 @@ services:
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
-        exec /usr/local/bin/entrypoint.sh
+        exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       # `host-201` is load-bearing, not decoration: `omnibase-verify` names a
       # runner CLASS and a second verify-class runner already exists on another
@@ -785,7 +781,7 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       # Same reasoning as omninode-deploy-runner: inside this container
       # `localhost` is the container itself, not the lab host.
       LANE_PROBE_HOST: host.docker.internal
@@ -795,9 +791,7 @@ services:
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-1-creds:/home/runner/.runner-creds
     extra_hosts:
@@ -805,7 +799,7 @@ services:
     group_add:
       - "984" # Match host Docker socket GID for DinD access
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -915,14 +909,14 @@ services:
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
-        exec /usr/local/bin/entrypoint.sh
+        exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
       RUNNER_NAME: omninode-verify-runner-2
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
       OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
     volumes:
@@ -930,9 +924,7 @@ services:
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-2-creds:/home/runner/.runner-creds
     extra_hosts:
@@ -940,7 +932,7 @@ services:
     group_add:
       - "984" # Match host Docker socket GID for DinD access
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -969,14 +961,14 @@ services:
         chown "$${runner_uid}:$${runner_gid}" /home/runner/.runner-creds
         install -o "$${runner_uid}" -g "$${runner_gid}" -m 0400 \
           /run/omnibase-operator.env /home/runner/.runner-creds/operator.env
-        exec /usr/local/bin/entrypoint.sh
+        exec /opt/onex-runner-hooks/entrypoint.sh
     environment:
       RUNNER_LABELS: self-hosted,omnibase-verify,host-201,linux,x64,arch-amd64
       RUNNER_NAME: omninode-verify-runner-3
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${DEPLOY_RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-deploy
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       LANE_PROBE_HOST: host.docker.internal
       OMNIBASE_OPERATOR_ENV_FILE: /home/runner/.runner-creds/operator.env
     volumes:
@@ -984,9 +976,7 @@ services:
       # Deliberately NO ${DEPLOY_RUNNER_OMNI_HOME} bind -- see the block
       # comment above omninode-verify-runner-1.
       - ${DEPLOY_RUNNER_OPERATOR_ENV_FILE:?DEPLOY_RUNNER_OPERATOR_ENV_FILE must be set (host path of the operator env file, e.g. /home/<operator>/.omnibase/.env)}:/run/omnibase-operator.env:ro
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - verify-runner-3-creds:/home/runner/.runner-creds
     extra_hosts:
@@ -994,7 +984,7 @@ services:
     group_add:
       - "984" # Match host Docker socket GID for DinD access
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -1091,19 +1081,18 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-ci
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       UV_CONCURRENT_DOWNLOADS: "1"
       UV_CONCURRENT_BUILDS: "1"
       UV_CONCURRENT_INSTALLS: "1"
       UV_HTTP_TIMEOUT: "600"
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - customer-plane-runner-1-creds:/home/runner/.runner-creds
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -1128,19 +1117,18 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-ci
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       UV_CONCURRENT_DOWNLOADS: "1"
       UV_CONCURRENT_BUILDS: "1"
       UV_CONCURRENT_INSTALLS: "1"
       UV_HTTP_TIMEOUT: "600"
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - customer-plane-runner-2-creds:/home/runner/.runner-creds
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3
@@ -1231,19 +1219,18 @@ services:
       GITHUB_ORG_URL: https://github.com/OmniNode-ai
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       RUNNER_GROUP: omnibase-ci
-      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
       UV_CONCURRENT_DOWNLOADS: "1"
       UV_CONCURRENT_BUILDS: "1"
       UV_CONCURRENT_INSTALLS: "1"
       UV_HTTP_TIMEOUT: "600"
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
     volumes:
-      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
-      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
-      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ./runners:/opt/onex-runner-hooks:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - prod-deploy-runner-1-creds:/home/runner/.runner-creds
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
       interval: 30s
       timeout: 12s
       retries: 3

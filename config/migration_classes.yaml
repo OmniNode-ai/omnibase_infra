@@ -163,6 +163,7 @@ migrations:
   forward/nodes/node_pr_lifecycle_state_reducer/0003_grant_omninode_runtime_pr_lifecycle_sequence.sql: expand-only
   forward/nodes/node_pr_merged_projection/0001_create_pr_merged_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_EVENT_I
   forward/nodes/node_pr_merged_projection/0002_grant_omninode_runtime_pr_merged_events.sql: forward-only # EXECUTE
+  forward/nodes/node_pr_merged_projection/0003_pr_merged_events_unique_repo_pr_number.sql: forward-only # DELETE (data rewrite); ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_REPO_PR_NUMBER_KEY (ADD CONSTRAINT class)
   forward/nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql: expand-only
   forward/nodes/node_projection_alert_channel_liveness/0000_create_alert_channel_liveness_verdicts.sql: forward-only # CREATE UNIQUE INDEX idx_alert_channel_liveness_cursor on omninode_internal.alert_channel_liveness_verdicts (UNIQUE INDEX class)
   forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql: expand-only # additive
