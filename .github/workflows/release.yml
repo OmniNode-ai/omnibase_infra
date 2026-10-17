@@ -50,7 +50,7 @@ jobs:
     # script's own diagnostic failure.
     timeout-minutes: 60
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     outputs:
       version: ${{ steps.tag.outputs.tag }}
       ticket: ${{ steps.release_evidence.outputs.ticket }}
@@ -385,7 +385,7 @@ jobs:
     name: Sync main to release tag (sync-only)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_main_to_tag != '' }}
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     permissions:
       contents: write
     steps:
@@ -519,7 +519,7 @@ jobs:
       needs.release.outputs.version != '' &&
       !contains(needs.release.outputs.version, 'rc')
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check
@@ -582,6 +582,10 @@ jobs:
             # uv.lock carries this package's own version, so it must move with
             # pyproject.toml or the lockfile-drift gate fails the bump PR.
             uv lock
+            # uv.lock bytes feed the runner image identity, so the re-lock
+            # leaves docker/runners/runner-image.lock.json stale unless it is
+            # regenerated in the same commit (OMN-19998).
+            PYTHONPATH=scripts/ci python3 scripts/ci/runner_image_identity.py --mode generate
           fi
 
       - name: Open the bump PR and arm auto-merge
@@ -605,7 +609,7 @@ jobs:
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add pyproject.toml uv.lock
+          git add pyproject.toml uv.lock docker/runners/runner-image.lock.json
           git commit -m "chore(OMN-13912): post-release dev version bump to ${TARGET}
 
           Disarms the OMN-13412 release-identity gate that publishing
@@ -622,7 +626,7 @@ jobs:
               "" \
               "Automated post-release disarm step (OMN-13912). Publishing \`${RELEASED_VERSION}\` left dev's \`[project].version\` equal to the highest published tag, which ARMS the OMN-13412 release-identity gate (\`scripts/check_release_identity.py\`) against every subsequent dev PR that touches \`src/**\`." \
               "" \
-              "This PR bumps \`[project].version\` to \`${TARGET}\` and re-locks \`uv.lock\`, so the gate is disarmed by the same flow that armed it rather than by whichever unrelated PR trips it first." \
+              "This PR bumps \`[project].version\` to \`${TARGET}\`, re-locks \`uv.lock\` and regenerates \`docker/runners/runner-image.lock.json\`, so the gate is disarmed by the same flow that armed it rather than by whichever unrelated PR trips it first." \
               "" \
               "## Ticket" \
               "" \
@@ -653,7 +657,7 @@ jobs:
     needs: release
     if: always() && needs.release.result == 'success'
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -696,7 +700,7 @@ jobs:
     # dispatch a runtime rebuild off an empty version string.
     if: ${{ needs.release.result == 'success' && !contains(needs.release.outputs.version, 'rc') }}
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check

@@ -48,7 +48,7 @@ jobs:
   delegation-health:
     name: Delegation Health Check
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     steps:
       - name: Checkout omnibase_infra at the pinned workflow sha

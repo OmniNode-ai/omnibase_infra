@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21093
+title: Register the claude_code_binding_install skill against the core-resident wire models
+summary: >-
+  Adds the claude_code_binding_install entry to src/omnibase_infra/cli/skill_mapping.yaml so `onex skill claude_code_binding_install` dispatches to the omnimarket node node_claude_code_binding_install_effect (moved there by omnimarket#3946). The entry's result_model names omnibase_core.models.claude_code_binding.ModelBindingInstallResult — the wire family this ticket relocated to core — because a cross-repo reference into an omnimarket node package is a seam the node-boundary import gate refuses (OMN-17427/ OMN-20703, shrink-only baseline). The surfaced args are the host paths and knobs of ModelBindingInstallRequest; the bindings themselves come from the capability/render pipeline, not the CLI. Lands after the omnimarket re-export PR so the named result model is the node's live return type.
+is_seam_ticket: true
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21093-skill-entry-resolves
+    statement: The skill mapping carries the entry and its node resolves in the canonical catalog with no node-boundary edge.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the registry contains claude_code_binding_install mapping to node_claude_code_binding_install_effect with result_model omnibase_core.models.claude_code_binding.ModelBindingInstallResult, the node_name resolves against the union of omnimarket''s declared onex.nodes entry points and omnibase_infra''s own, and the node-boundary import gate reports no finding for the mapping -- falsifier: the focused registry/catalog test fails at the merge base where the entry does not exist.'
+evidence_requirements:
+  - kind: tests
+    description: The focused skill-mapping entry test and the node-boundary gate over the branch.
+    command: uv run pytest tests/unit/cli/test_cli_skill.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21093-ac1-entry-resolves
+    description: >-
+      The entry exists with the core result model FQN and the node resolves in the catalog (OMNIMARKET_SRC wires the sibling checkout as CI does). Fails at the merge base where the entry is absent from skill_mapping.yaml.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_skill.py -k test_claude_code_binding_install_entry_resolves -q
+    binds_ac: ["AC1"]
+  - id: dod-omn21093-boundary-gate-clean
+    description: >-
+      The node-boundary import gate reports zero findings over the branch: the mapping names a core model, not an omnimarket node-package seam. Fails at the merge base revision of this branch''s first attempt, where the omnimarket FQN was refused.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'curl --fail --silent --show-error --location --max-time 30 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/cli/skill_mapping.yaml" | grep -F "claude_code_binding_install"'
+    binds_ac: ["AC1"]

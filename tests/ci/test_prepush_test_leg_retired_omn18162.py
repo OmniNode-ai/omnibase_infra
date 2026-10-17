@@ -402,12 +402,12 @@ def test_deselected_tests_keep_an_execution_path() -> None:
         "marker, so it would run without covering what it exists to cover."
     )
 
-    # Pinned, not routed. These assert wall-clock thresholds and the trusted-CI
-    # seam currently resolves to a hosted runner; a seam flip must not silently
-    # move them.
-    assert perf.get("runs-on") == ["self-hosted", "omnibase-ci"], (
-        "The nightly performance job must stay pinned to the lab fleet. It "
-        f"reads {perf.get('runs-on')!r}. Reading the routing seam here means a "
+    # Pinned, not routed: a seam flip must not silently move timing-sensitive
+    # benchmarks. The pin is GitHub-hosted because this repository is public
+    # (RULING 2026-10-16T07:07:09Z, OMN-19998).
+    assert perf.get("runs-on") == "ubuntu-latest", (
+        "The nightly performance job must stay pinned to a GitHub-hosted label. "
+        f"It reads {perf.get('runs-on')!r}. Reading the routing seam here means a "
         "flip elsewhere relocates timing-sensitive benchmarks without review."
     )
 

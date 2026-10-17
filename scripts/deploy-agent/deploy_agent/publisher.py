@@ -204,11 +204,12 @@ def build_completion_payload(
     return completed.model_dump(mode="json")
 
 
-# OMN-17427: topics the agent alone publishes. No contract's event_bus and no provisioning list
-# declares them, so on the lab broker nothing created them, and a lab deploy agent logged
-# "Topic onex.evt.deploy.dev-tag-heartbeat.v1 not found in cluster metadata" on every heartbeat.
-# The agent creates each once per process before its first publish to it. A topic another node
-# declares (the rebuild topics) is left to that node's contract.
+# OMN-17427: topics the agent alone publishes. No contract's event_bus declares them; until
+# src/omnibase_infra/services/topics.yaml listed them nothing created them, and a lab deploy agent
+# logged "Topic onex.evt.deploy.dev-tag-heartbeat.v1 not found in cluster metadata" on every
+# heartbeat. A broker the provisioner has not run against still lacks them, so the agent creates
+# each once per process before its first publish to it. A topic another node declares (the
+# rebuild topics) is left to that node's contract.
 AGENT_OWNED_TOPICS = frozenset({TOPIC_DEV_LANE_DRIFT, TOPIC_DEV_TAG_HEARTBEAT})
 AGENT_TOPIC_PARTITIONS = 6
 _ENSURED_TOPICS: set[str] = set()

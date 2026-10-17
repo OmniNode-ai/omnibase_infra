@@ -4,9 +4,10 @@
 
 Read on the lab 2026-10-17: a lab deploy agent logged "Topic
 onex.evt.deploy.dev-tag-heartbeat.v1 not found in cluster metadata" and every heartbeat
-publish timed out. No contract and no provisioning list declares that topic or the
-dev-lane-drift topic: the agent is their only producer, so the agent creates each once per
-process before its first publish to it. Topics another node declares are left alone.
+publish timed out. No contract declares that topic or the dev-lane-drift topic, and a broker
+the services/topics.yaml provisioner has not run against lacks them: the agent is their only
+producer, so the agent creates each once per process before its first publish to it. Topics
+another node declares are left alone.
 """
 
 from __future__ import annotations
