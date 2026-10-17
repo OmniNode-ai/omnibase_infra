@@ -113,6 +113,11 @@ requirements:
     acceptance:
       - id: AC25
         statement: 'AC25: the sweep workflow, skill mapping and node contract name no onex_change_control checkout or --occ-repo-dir argument, the request takes contract_roots, the checks a ticket declares are summed across the roots, and an unreadable root makes an absence unknown rather than a finding -- falsifier: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q'
+  - id: req-omn17427-consumer-flow-retention-grant
+    statement: role_omnidash, the principal behind OMNIDASH_ANALYTICS_DB_URL that the omnimarket retention node prunes through, holds SELECT and DELETE on omninode_internal.consumer_flow_windows, issued by a node-owned migration and declared in every shipped topology instance.
+    acceptance:
+      - id: AC26
+        statement: 'AC26: node_projection_consumer_flow/0006 grants role_omnidash SELECT and DELETE on omninode_internal.consumer_flow_windows and nothing else, asserts both, is bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that grant -- falsifier: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -189,6 +194,9 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The consumer_flow_windows retention grant to role_omnidash is issued, asserted, ledger-bound and declared.
+    command: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -492,3 +500,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC25
+  - id: dod-omn-17427-ac26
+    description: The consumer_flow_windows retention grant migration grants role_omnidash SELECT and DELETE only, asserts both, is ledger-bound and classed expand-only, and the topology declares it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
+  - id: dod-omn-17427-ac26-deploy-retention-grant
+    description: Hosted-runner smoke -- the migration file, its ledger row and class, and the three topology instances are read from the checkout; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC26
