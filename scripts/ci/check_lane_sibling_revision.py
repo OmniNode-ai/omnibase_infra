@@ -136,9 +136,12 @@ from scripts.ci.check_dev_lane_staleness import (
     ModelAcceptanceProbe,
     ModelConvergenceBudget,
     ModelJobEnd,
+    ModelQueueFacts,
     bind_generation_to_job_end,
     convergence_check_outcome,
+    queue_exceeds_bound,
     read_agent_acceptance,
+    read_agent_queue,
     read_compose_service,
     wait_for_agent_job_end,
 )
@@ -353,6 +356,10 @@ class ModelSiblingConvergenceResult:
     budget: ModelConvergenceBudget
     waited: timedelta
     finished_at: datetime
+    #: OMN-18144. The evidence clause naming this command's place in the deploy
+    #: agent's queue when the wait started (or that it could not be read). Empty
+    #: only when the guard was invoked with no queue reader at all.
+    queue_clause: str = ""
 
 
 def run_sibling_convergence_wait(
@@ -364,6 +371,7 @@ def run_sibling_convergence_wait(
     poll_interval: timedelta,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    resolve_queue: Callable[[], ModelQueueFacts] | None = None,
 ) -> ModelSiblingConvergenceResult:
     """Wait for the lane to vendor the merge, on the LANE's clock (OMN-18685).
 
@@ -393,6 +401,50 @@ def run_sibling_convergence_wait(
         unresolved_reason=probe.reason,
     )
     observation = observe()
+
+    # OMN-18144. Read the deploy agent's queue position once, before the wait.
+    # The unestablished-acceptance wait is a queue this run is not responsible
+    # for, and the agent is the only party that can say how long it is. An
+    # unreadable queue is carried as unread, never as empty.
+    queue = (
+        resolve_queue()
+        if resolve_queue is not None
+        else ModelQueueFacts.unread(
+            "this guard was invoked with no queue reader, so the commands "
+            "ahead of this one were never asked for"
+        )
+    )
+    queue_clause = (
+        queue.evidence_clause(
+            lane_budget_seconds=int(declared_budget.total_seconds()),
+            margin_seconds=int(poll_interval.total_seconds()),
+        )
+        if resolve_queue is not None
+        else ""
+    )
+    # Scoped to an UNESTABLISHED acceptance, as in the infra-revision guard: once
+    # the agent has accepted the command the queue ahead of it is spent and the
+    # lane's own budget governs, so every already-accepted run behaves exactly as
+    # before. A queue this window cannot outlast is a foregone conclusion;
+    # INDETERMINATE naming the depth costs seconds and frees the verify runner.
+    if not budget.established and not observation.carries:
+        refusal = queue_exceeds_bound(
+            queue,
+            lane_budget_seconds=int(declared_budget.total_seconds()),
+            wall_clock_seconds=int(wall_clock.total_seconds()),
+            margin_seconds=int(poll_interval.total_seconds()),
+        )
+        if refusal:
+            now = clock()
+            return ModelSiblingConvergenceResult(
+                outcome=EnumConvergenceOutcome.INDETERMINATE,
+                reason=refusal,
+                observation=observation,
+                budget=budget,
+                waited=now - started,
+                finished_at=now,
+                queue_clause=queue_clause,
+            )
 
     while not observation.carries:
         now = clock()
@@ -434,6 +486,7 @@ def run_sibling_convergence_wait(
             budget=budget,
             waited=waited,
             finished_at=now,
+            queue_clause=queue_clause,
         )
 
     if observation.carries:
@@ -477,6 +530,8 @@ def sibling_convergence_evidence(
     waited_text = _format_age(result.waited)
     phrase = result.budget.acceptance_phrase(result.finished_at)
     acceptance_clause = f"; {phrase}" if phrase else ""
+    if result.queue_clause:
+        acceptance_clause += f"; {result.queue_clause}"
 
     if result.outcome is EnumConvergenceOutcome.INDETERMINATE:
         seen = (
@@ -786,9 +841,16 @@ def main(argv: list[str] | None = None) -> int:
             return ModelAcceptanceProbe(acceptance=None, reason=str(exc))
         return ModelAcceptanceProbe(acceptance=acceptance, reason="")
 
+    def _resolve_queue() -> ModelQueueFacts:
+        return read_agent_queue(
+            args.agent_url,
+            request_timeout_seconds=args.agent_timeout_seconds,
+        )
+
     result = run_sibling_convergence_wait(
         observe=_observe,
         resolve_acceptance=_resolve_acceptance,
+        resolve_queue=_resolve_queue,
         declared_budget=args.wait_timeout,
         wall_clock=timedelta(seconds=args.wall_clock_seconds),
         poll_interval=args.poll_interval,

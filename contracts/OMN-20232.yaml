@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20232"
+title: "The deployed lab principal issuer starts with --overlay, so it serves and audits the developer machines the developer.principal overlay declares"
+summary: "scripts/lab_principal_issuer.py can read the lab developer.principal overlay, but the deploy definition never gave the container the file or the flag, so the deployed issuer kept serving from its ledger alone. The image's serve command now passes --overlay, and the compose file bind-mounts the overlay read-only from a host path the operator names in PRINCIPAL_ISSUER_OVERLAY_FILE. A missing variable or a missing host file fails the deploy. The redeploy of the dev lane issuer and its per-principal grant readback are lab acts recorded outside this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-issuer-deploy-mounts-overlay"
+    statement: "The principal issuer's deploy definition serves with --overlay and mounts the overlay file read-only, and fails the deploy when the file is not named."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: docker/Dockerfile.principal-issuer's serve command passes --overlay /overlay/developer-principal-overlay.yaml and docker/docker-compose.principal-issuer.yml bind-mounts a host file named by the required variable PRINCIPAL_ISSUER_OVERLAY_FILE read-only at that path without creating a missing host path -- falsifier: uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The deploy-definition tests pin the serve command's --overlay path, the read-only bind mount, the required variable and create_host_path false."
+    command: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20232-ac1-issuer-overlay-mount"
+    description: "The issuer image serves with --overlay and compose mounts the overlay file read-only from the operator-named host path."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_issuer_serves_with_the_developer_principal_overlay_mounted -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20232-ac1-deploy-probe"
+    description: "Deploy probe. The issuer image definition and compose file at the checked-out commit carry the --overlay serve flag and the PRINCIPAL_ISSUER_OVERLAY_FILE bind mount; the probe reads both from GitHub at that commit and exits nonzero on a tree without them, so it fails at the merge base. The readout after the redeploy is the dev lane issuer container's serve command naming --overlay and audit-grants run with --overlay printing missing=0 extra=0 for each declared developer principal."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.principal-issuer?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '\"--overlay\", \"/overlay/developer-principal-overlay.yaml\"' > /dev/null"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.principal-issuer.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F 'PRINCIPAL_ISSUER_OVERLAY_FILE' > /dev/null"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

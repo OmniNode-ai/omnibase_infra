@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "GET /queue on the deploy agent serving the dev lane (deploy_agent health surface, read-only request)",
+    "captured_utc": "2026-10-18T01:16:27Z",
+    "captured_by": "lane dropped-fix-24 on a lab host",
+    "note": "Bytes of the live response, unedited. The agent had committed no offset on the control topic in this process yet, so the lag half was unreadable and commands_ahead was null."
+  },
+  "response": {
+    "observed_at": "2026-10-18T01:16:27.696231+00:00",
+    "in_flight_correlation_id": null,
+    "store_depth": 0,
+    "control_topic_lag": null,
+    "control_topic_lag_reason": "this process has committed no offset on TopicPartition(topic='onex.cmd.deploy.rebuild-requested.v1', partition=0) yet, so its place in the topic cannot be read out of band",
+    "control_topic_lag_basis": "",
+    "control_topic_lag_observed_at": null,
+    "control_topic_lag_age_seconds": null,
+    "commands_ahead": null,
+    "mean_service_time_seconds": 1194.1593175,
+    "service_sample_size": 10
+  }
+}
