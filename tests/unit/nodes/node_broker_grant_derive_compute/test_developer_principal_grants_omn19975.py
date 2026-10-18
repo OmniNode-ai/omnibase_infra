@@ -230,6 +230,12 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "prefixed",
         ("read", "describe"),
     ),
+    (
+        "topic",
+        "onex.evt.omnimarket.projection-delegation-applied.v1",
+        "literal",
+        ("read", "describe"),
+    ),
 )
 BROKER = "dev"
 
@@ -309,7 +315,7 @@ def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
     } - {
         (resource_type, resource, operation)
         for _, resource_type, resource, _, operation in rows
-        if "delegate-skill" in resource
+        if "delegate-skill" in resource or "projection-delegation" in resource
     }
     assert morning == {
         ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "WRITE"),
@@ -455,3 +461,19 @@ def test_the_contract_takes_the_prefix_carrying_input() -> None:
         shipped_bindings().model_dump_json()
     )
     assert request == shipped_bindings()
+
+
+def test_the_delegation_terminal_readback_grants_read_one_topic_and_write_none() -> (
+    None
+):
+    """The readback may read and describe the projection terminal, never write it."""
+    rows = derive(shipped_bindings())
+    readback = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "projection-delegation" in resource
+    }
+    assert readback == {
+        ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "DESCRIBE"),
+    }

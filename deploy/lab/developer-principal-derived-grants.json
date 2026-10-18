@@ -445,6 +445,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.projection-delegation-applied.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.projection-delegation-applied.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.work-ledger-append-completed.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
