@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from importlib.metadata import version
+
 import pytest
 
 from omnibase_infra.runtime import version_compatibility as vc
@@ -16,7 +18,7 @@ def test_fallback_matrix_rejects_the_previous_core_pin(
 ) -> None:
     installed_versions = {
         "omnibase_core": "0.47.30",
-        "omnibase_spi": "0.23.5",
+        "omnibase_spi": version("omnibase-spi"),
     }
     monkeypatch.setattr(vc, "_get_installed_version", installed_versions.get)
 
@@ -32,7 +34,7 @@ def test_fallback_matrix_accepts_the_release_core_pin(
 ) -> None:
     installed_versions = {
         "omnibase_core": "0.47.31",
-        "omnibase_spi": "0.23.5",
+        "omnibase_spi": version("omnibase-spi"),
     }
     monkeypatch.setattr(vc, "_get_installed_version", installed_versions.get)
 
