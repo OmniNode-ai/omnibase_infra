@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: at core 0.47.46, the floor omnimarket v0.4.316 declares, the exact-version pin tests, the seam fixture and the runner image identity agree with the pyproject override and uv.lock, and the installed core carries omnibase_core.enums.enum_binding_kind that omnimarket v0.4.316 handlers import -- falsifier: the tests below fail at the merge base, whose followers still name 0.47.44, and the import fails at core 0.47.45"
+  - id: req-omn18595-cascade-core-0-47-48-runner-lock
+    statement: The core 0.47.48 cascade (omnibase_infra#5110) regenerates the runner image lock so its recorded identity binds the new uv.lock.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the cascade resolves core at least 0.47.48, the installed version matches uv.lock and passes runtime version admission, and the runner image lock identity_digest and shared_env_digest equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/unit/runtime/test_core_release_cascade_omn18595.py fails at the merge base, which resolves 0.47.46; tests/ci/test_runner_image_identity.py fails when the runner lock digests do not match the dependency manifests"
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -51,3 +56,18 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn-18595-core-0-47-48-runner-lock
+    description: The core 0.47.48 cascade (omnibase_infra#5110) regenerates docker/runners/runner-image.lock.json so the runner image identity matches the bumped uv.lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
