@@ -9,16 +9,6 @@ requirements:
   - id: req-omn-18508-criteria
     statement: The ticket's labelled acceptance criteria.
     acceptance:
-      - id: AC1
-        statement: 'AC1: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC2
-        statement: 'AC2: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC3
-        statement: 'AC3: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC4
-        statement: 'AC4: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC5
-        statement: 'AC5: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
       - id: AC6
         statement: 'AC6: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
 evidence_requirements:
