@@ -53,6 +53,17 @@ PC=${POSITIVE_CONTROL:-omnibase-infra-dogfood}
 R=$W/root; T=$W/test
 ts() { date -u +%FT%TZ; }
 lsn() { if command -v ss >/dev/null 2>&1; then ss -ltn; else lsof -nP -iTCP -sTCP:LISTEN; fi; }
+# stage_workspace.sh pins each sibling in a worktree under
+# ~/.omnibase/state/deploy_source_trees/<build context path, every character outside
+# [A-Za-z0-9._-] as _>, and each worktree points into this run's clone. $W is keyed by
+# holder and host, so the next run by the same holder reuses the key; with the clone
+# gone, its build refused ("not a git repository" on omnibase_core). Removing only this
+# run's key, before the clone and with the work directory, leaves other runs' trees alone.
+drop_source_trees() {
+  local ctx
+  ctx="$(cd "$W" 2>/dev/null && pwd -P || printf '%s' "$W")/root/omnibase_infra"
+  rm -rf "${HOME}/.omnibase/state/deploy_source_trees/${ctx//[!A-Za-z0-9._-]/_}"
+}
 
 # Image identity is proven from content, never from the revision label (a label
 # is evidence of intent, not of what was built; OMN-18893). For each repository
@@ -303,6 +314,7 @@ snap-pre|snap-post)
   echo "$PHASE lines=$(wc -l < "$out") local-containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') listeners=$(grep -cE ":($PORTS)\b" "$out")"
   ;;
 clone)
+  drop_source_trees
   echo "clone start $(ts)"; mkdir -p "$R" "$T"
   if [ -n "${INFRA_GROUP:-}" ]; then
     fetch_group "$R/omnibase_infra" omnibase_infra "$INFRA_GROUP" "${INFRA_GROUP_BASE:-}" "${INFRA_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
@@ -587,6 +599,7 @@ except (OSError, ValueError):
     print("slot residue unreadable")' "/tmp/$TAG-slot-teardown.json"
     fi
     echo "slot-teardown verdict=$SV"
+    drop_source_trees
     cd "$HOME" || exit 1; rm -rf "$W"
     echo "== zero residue $(ts)"
     echo "containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') volumes=$(docker volume ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') networks=$(docker network ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') images=$SI listeners=$(lsn | grep -cE ":($PORTS)\b") workdir=$([ -e "$W" ] && echo present || echo gone)"
@@ -607,6 +620,7 @@ except (OSError, ValueError):
       echo "$PRE" | grep -qxF "$v" || { docker volume rm "$v" >/dev/null; echo "anon volume rm $v rc=$?"; }
     done
   else echo "no pre-snapshot: anonymous volumes left as they are"; fi
+  drop_source_trees
   cd "$HOME" || exit 1; rm -rf "$W"
   echo "== zero residue $(ts)"
   echo "containers=$(docker ps -a --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') volumes=$(docker volume ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') networks=$(docker network ls --filter label=com.docker.compose.project=$P -q | wc -l | tr -d ' ') images=$(docker images --filter reference="$P*" -q | wc -l | tr -d ' ') listeners=$(lsn | grep -cE ":($PORTS)\b") workdir=$([ -e "$W" ] && echo present || echo gone)"

@@ -4,8 +4,8 @@
 # evidence-autoclose-sweep.yml — OMN-16106 first slice
 #
 # Scheduled companion-merge -> dod_verify -> governed Done flip sweep.
-# Enumerates onex_change_control PRs merged in a lookback window, extracts
-# each merged companion's Evidence-Ticket binding, re-runs the EXISTING
+# Enumerates product PRs merged in a lookback window, binds each through its
+# repository's changed contract files, and re-runs the existing
 # `onex skill dod_verify <ticket>` verifier exactly as the controller does,
 # and would flip the bound Linear ticket Done (or post the honest gap) via
 # `onex skill evidence_autoclose_sweep`.
@@ -147,12 +147,9 @@
 # (2026-08-27, lookback 10h) is the last such run: 27 bindings extracted,
 # 11 ERROR_VERIFY_NONZERO_EXIT, 0 flipped, 0 gap_posted.
 #
-# The runner also needs the OCC CONTRACTS, not just the verifier binary —
-# dod_verify verifies a ticket against `contracts/<ticket>.yaml` in
-# onex_change_control, and with no such checkout it reported a single skipped
-# check for EVERY ticket (`0/1 ACs verified, 0 failed`). That is recorded as a
-# GAP, i.e. the sweep would state an evidence verdict it never reached. Both
-# the checkout and an explicit readability assertion are below.
+# OMN-17427: the runner reads contracts/<ticket>.yaml from each product
+# repository's default branch. The sweep and diagnostic dispatch that file
+# explicitly; neither uses a central governance checkout or a search-path env.
 #
 # The runner ALSO needs the repos the contracts' behaviour checks name
 # (OMN-16902). With OMNI_HOME exported (OMN-16845) and the venvs separated
@@ -172,17 +169,6 @@
 # literal repo list reproduces this bug the first time a new repo appears, and
 # OMN-16434 now auto-mints `cwd: ${OMNI_HOME}/<repo>` on every new companion
 # for whatever repo the work was in, so the population only grows.
-#
-# And the OCC-homed `test_passes` checks needed an INTERPRETER (OMN-16902 D2).
-# `_infer_occ_cwd` does not run those checks in `.occ-src`: it returns
-# `_occ_dev_root`, an ephemeral `git worktree` of the governance ref that the
-# collector materialises mid-run. `UV_NO_SYNC=1` on the sweep step was
-# inherited by that subprocess, so `uv run pytest` there created an EMPTY
-# `.venv` and died on `error: Failed to spawn: pytest` — on all four seeds,
-# a shared evidence item taxing every ticket that carries it. UV_NO_SYNC is
-# therefore gone from the check-bearing steps and the dests are pre-synced
-# instead, so the common case is a cache-hot no-op and the one path no step
-# can pre-provision can provision itself.
 #
 # The co-install is verified, not assumed: a step after it asserts
 # `node_dod_verify` is a resolvable `onex.nodes` entry point THROUGH the exact
@@ -519,7 +505,7 @@ jobs:
       #     GitHub access is entirely `gh api` GETs (the handler's only writes
       #     go to Linear over LINEAR_API_KEY), so none of those are requested.
       #   - repositories: NOT pinned to a list. The repo set this job reads is
-      #     derived at runtime from the `cwd` values the scanned OCC contracts
+      #     derived at runtime from the `cwd` values the scanned product contracts
       #     name (see the materialise step below) — it is data, not a constant,
       #     and a static list would fail-closed the first time a contract named
       #     a repo not on it. `owner:` scopes the token to the installation's
@@ -615,7 +601,7 @@ jobs:
 
       # The GATE venv. `uv sync` is exact-mode, so `.venv` contains exactly
       # what uv.lock declares and nothing else. This is the venv every
-      # behaviour check resolves: the OCC contracts under adjudication declare
+      # behaviour check resolves: the product contracts under adjudication declare
       # `check_type: test_passes` with `check_value: "uv run pytest ..."` and
       # `cwd: "${OMNI_HOME}/omnibase_infra"`, and OMN-16845 wired OMNI_HOME so
       # that path IS this checkout. Nothing may be installed into it after
@@ -903,68 +889,6 @@ jobs:
           print(f"OK: node_dod_verify resolved among {len(eps)} onex.nodes entry points")
           PYEOF
 
-      # OMN-16736. node_dod_verify resolving is necessary but not sufficient:
-      # it verifies the checks declared in the ticket's OCC CONTRACT, and it
-      # finds that contract by searching `${ONEX_CC_REPO_PATH}/contracts` then
-      # `${OMNI_HOME}/onex_change_control/contracts`
-      # (EvidenceCollector._DEFAULT_CONTRACT_ROOTS). Neither existed in this
-      # job, so every ticket resolved to no contract at all and came back as a
-      # single skipped check — `0/1 ACs verified, 0 failed`.
-      #
-      # That reads as "this ticket is not proven" and is recorded as a GAP,
-      # which is WRONG in a specific and dangerous way: the sweep would have
-      # posted six Linear comments (run 33091828068) stating an evidence
-      # verdict it never actually reached. The uniform 0/1 signature across six
-      # unrelated tickets is the tell — it is one environment fault, not six
-      # ticket verdicts.
-      #
-      # Ground truth for the same ticket WITH the contracts present:
-      #   OMN-16757 in that CI run     -> total_checks=1  verified=0 failed=0
-      #   OMN-16757 against a real OCC -> total_checks=14 verified=12 failed=2
-      #                                   (superseded=1, occ_refresh=fetched)
-      #
-      # OMN-16106: this checkout also seeds OCC-homed behaviour checks below.
-      # Their must-fail controls need history even though the contract read
-      # itself only needs the resolved ref.
-      - name: Checkout onex_change_control (the contracts dod_verify verifies against)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: dev
-          path: .occ-src
-          token: ${{ steps.app-token.outputs.token }}
-          persist-credentials: false
-          fetch-depth: 0
-
-      # Assert the exact read the collector performs, before the sweep runs.
-      # Without this the failure mode is silent and mis-labelled: it does not
-      # look like "the runner has no contracts", it looks like "these tickets
-      # are unproven", which is the one thing this whole mechanism must never
-      # say when it has not actually checked.
-      #
-      # `origin/dev` is checked because that is the collector's default
-      # governance ref (OCC contracts land on dev first and are batched to main
-      # later, so a working-tree search alone would miss them).
-      - name: Verify the OCC contracts are readable at the governance ref
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! git -C .occ-src rev-parse --verify --quiet origin/dev >/dev/null; then
-            echo "::error::.occ-src has no origin/dev remote-tracking ref — dod_verify resolves contracts at origin/dev and would find none, reporting every ticket as 0/1 unproven." >&2
-            exit 1
-          fi
-          sha="$(git -C .occ-src rev-parse origin/dev)"
-          count="$(git -C .occ-src ls-tree --name-only "origin/dev" contracts/ | wc -l | tr -d ' ')"
-          echo "OCC governance ref origin/dev = ${sha}"
-          echo "contracts/ entries at that ref: ${count}"
-          # A real OCC dev carries thousands of contracts. A handful means the
-          # checkout is wrong (empty, sparse, or the wrong repo) — fail here
-          # rather than let the sweep publish verdicts it did not reach.
-          if [ "${count}" -lt 100 ]; then
-            echo "::error::only ${count} entries under contracts/ at origin/dev — refusing to run the sweep against an OCC checkout this thin." >&2
-            exit 1
-          fi
-
       # OMN-16902 D1. The checkout set must be DERIVED from the contracts that
       # are about to be adjudicated, not declared here.
       #
@@ -1052,14 +976,44 @@ jobs:
           fi
           echo "git credential helper provisioned at ${RUNNER_TEMP}/git-askpass.sh"
 
-      - name: Derive and materialise the cwd repo set the OCC contracts name (OMN-16902)
+      - name: Read per-repository contracts (OMN-17427)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GIT_ASKPASS: ${{ runner.temp }}/git-askpass.sh
+          GIT_TERMINAL_PROMPT: "0"
+          CONTRACT_REPOS: omniclaude omnibase_compat omnibase_core omnibase_infra omnibase_spi omnidash omnidash-v2 omniintelligence omnimarket omnimemory
+          CONTRACT_REPOS_PRIVATE: ${{ vars.ONEX_CONTRACT_REPOS_PRIVATE }}
+        run: |
+          set -euo pipefail
+          roots_dir="${RUNNER_TEMP}/contract-roots"
+          mkdir -p "${roots_dir}"
+          for repo in ${CONTRACT_REPOS} ${CONTRACT_REPOS_PRIVATE:-}; do
+            dest="${roots_dir}/${repo}"
+            # A clone that fails is a runner that could not look: refuse the run
+            # rather than let a missing root read as 'this ticket has no probe'.
+            git clone --quiet --filter=blob:none --sparse \
+              "https://github.com/OmniNode-ai/${repo}.git" "${dest}"
+            git -C "${dest}" sparse-checkout set contracts
+            # A repository that declares no contracts/ directory was read and
+            # holds none: that is a real answer, so the root is made readable.
+            mkdir -p "${dest}/contracts"
+          done
+          count="$(find "${roots_dir}/omnibase_infra/contracts" -name 'OMN-*.yaml' -type f | wc -l | tr -d ' ')"
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::the primary product contract corpus is empty; refusing an unexecuted evidence verdict." >&2
+            exit 1
+          fi
+          echo "Primary product contracts readable: ${count}"
+
+      - name: Derive and materialise the cwd repo set the product contracts name (OMN-16902)
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          contracts_dir="${GITHUB_WORKSPACE}/.occ-src/contracts"
+          contracts_dir="${RUNNER_TEMP}/contract-roots"
           if [ ! -d "${contracts_dir}" ]; then
             echo "::error::${contracts_dir} is absent, so the cwd repo set cannot be derived and every non-infra behaviour check would render to a nonexistent path (OMN-16902)." >&2
             exit 1
@@ -1375,9 +1329,6 @@ jobs:
             src="${cache}/${repo}"
             if [ -d "${src}" ]; then
               status="CACHED"
-            elif [ "${repo}" = "onex_change_control" ] && [ -d "${GITHUB_WORKSPACE}/.occ-src" ]; then
-              cp -a "${GITHUB_WORKSPACE}/.occ-src" "${src}"
-              status="REUSED_OCC_CHECKOUT"
             elif [ "${repo}" = "omnimarket" ] && [ -d "${GITHUB_WORKSPACE}/.omnimarket-src" ]; then
               cp -a "${GITHUB_WORKSPACE}/.omnimarket-src" "${src}"
               status="REUSED_OMNIMARKET_CHECKOUT"
@@ -1782,40 +1733,6 @@ jobs:
           print("OK: installed omnimarket == canonical clone HEAD; dispatch will not be refused")
           PYEOF
 
-      # OMN-16902 D2, as an executable precondition rather than a comment.
-      #
-      # The OCC-homed `test_passes` checks do NOT run in `.occ-src`.
-      # `_infer_occ_cwd` returns `_occ_dev_root` — an ephemeral `git worktree`
-      # of the governance ref that the collector materialises mid-run. No step
-      # can pre-provision that path, so the only honest proof is: build a
-      # worktree the same way and show pytest spawns in it.
-      #
-      # What failed on run 33210339910, on all four seeds:
-      #   [failed] dod-occ-evidence-admissibility-validator: FAILED (12ms):
-      #     Creating virtual environment at: .venv
-      #     error: Failed to spawn: `pytest`
-      #
-      # 12ms and a freshly created empty `.venv` is the signature of
-      # UV_NO_SYNC=1 inherited into a project that had never been synced: uv
-      # made the environment and was forbidden from populating it. This step
-      # also warms the uv cache, so the worktree the sweep builds a few minutes
-      # later resolves from cache instead of the network.
-      - name: Prove an OCC governance worktree can spawn pytest (OMN-16902 D2)
-        shell: bash
-        run: |
-          set -euo pipefail
-          probe="${RUNNER_TEMP}/occ-governance-probe"
-          rm -rf "${probe}"
-          git -C "${GITHUB_WORKSPACE}/.occ-src" worktree add --detach "${probe}" origin/dev
-          rc=0
-          ( cd "${probe}" && uv run pytest --version ) || rc=$?
-          git -C "${GITHUB_WORKSPACE}/.occ-src" worktree remove --force "${probe}" || true
-          if [ "${rc}" -ne 0 ]; then
-            echo '::error::a fresh onex_change_control worktree at origin/dev cannot spawn pytest. Every OCC-homed test_passes check would be recorded FAILED on "error: Failed to spawn: pytest" with no test having executed (run 33210339910, all four seeds) -- a false FAILED that names the runner, not the product (OMN-16902 D2).' >&2
-            exit 1
-          fi
-          echo "OK: a fresh OCC governance worktree provisions its own interpreter and spawns pytest"
-
       # OMN-16788. The sweep records only COUNTS per ticket
       # (`dod_verify_total_checks` / `verified` / `failed`); the per-check
       # detail dod_verify produces goes to capture files this job does not
@@ -1844,13 +1761,8 @@ jobs:
         if: ${{ github.event.inputs.diagnose_tickets != '' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          # OMN-16902 D2: no UV_NO_SYNC here. This step spawns the same
-          # behaviour checks the sweep does, so it must reproduce the sweep's
-          # environment exactly — including the OCC governance worktree's
-          # ability to provision its own interpreter. See the sweep step below
-          # for the full reasoning; a divergence between these two steps would
-          # make the diagnostic lie about the thing it exists to diagnose.
-          ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
+          # Product behaviour checks use the same provisioned environment
+          # as the sweep; neither entrypoint forces UV_NO_SYNC.
           DIAGNOSE_TICKETS: ${{ github.event.inputs.diagnose_tickets }}
           # OMN-17976: `EvidenceCollector` spawns `git fetch` for itself as step 2
           # of its product-clone freshness predicate. Without these two it
@@ -1924,7 +1836,12 @@ jobs:
             # the sweep spawns (`_dod_verify_argv`). Going through `uv run`
             # would resolve the gate venv, which by design carries no
             # node_dod_verify.
-            "${DISPATCH_VENV}/bin/onex" skill dod_verify "${ticket}" --execution-audience hosted > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
+            contract_files=("${RUNNER_TEMP}/contract-roots/"*/contracts/"${ticket}.yaml")
+            if [ "${#contract_files[@]}" -ne 1 ] || [ ! -f "${contract_files[0]}" ]; then
+              echo "::error::${ticket} has no unique product contract; no verdict reached." >&2
+              continue
+            fi
+            "${DISPATCH_VENV}/bin/onex" skill dod_verify "${ticket}" --execution-audience hosted --contract-path "${contract_files[0]}" > "${RUNNER_TEMP}/${ticket}.json" 2> "${RUNNER_TEMP}/${ticket}.err" || true
             python3 - "${RUNNER_TEMP}/${ticket}.json" <<'PYEOF'
           import json
           import sys
@@ -2110,10 +2027,8 @@ jobs:
           # incidentally providing is now asserted directly — `uv sync` is
           # exact-mode, so it cannot make `.venv` impure, and the step after
           # the sweep measures that instead of assuming it.
-          # First entry in EvidenceCollector's contract search path. Without it
-          # dod_verify finds no contract for any ticket and every verdict
-          # degrades to a single skipped check (OMN-16736).
-          ONEX_CC_REPO_PATH: ${{ github.workspace }}/.occ-src
+          # OMN-17427: each candidate supplies its owning product contract
+          # explicitly, without a central contract-search environment variable.
           # OMN-16792 AC3 — the kill switch, made reachable.
           #
           # `node_evidence_autoclose_sweep_effect` honours
@@ -2423,6 +2338,8 @@ jobs:
           # bash < 4.4, and this must not become the reason a dry run fails.
           "${DISPATCH_VENV}/bin/onex" skill evidence_autoclose_sweep \
             --lookback-hours "${LOOKBACK_HOURS}" \
+            --clone-root "${RUNNER_TEMP}/contract-roots" \
+            --product-repos "$(find "${RUNNER_TEMP}/contract-roots" -mindepth 1 -maxdepth 1 -type d ! -name omnibase_infra -printf 'OmniNode-ai/%f\n' | sort | paste -sd, -)" \
             --trigger "${SWEEP_TRIGGER}" \
             ${backfill_args[@]+"${backfill_args[@]}"} \
             ${exclude_args[@]+"${exclude_args[@]}"} \
@@ -2481,7 +2398,7 @@ jobs:
           {
             echo "## Evidence Autoclose Sweep (OMN-16106)"
             echo ""
-            echo "Enumerated merged onex_change_control companions, re-ran dod_verify,"
+            echo "Enumerated merged product repository PRs, re-ran dod_verify,"
             echo "and reached a flip/gap/refusal decision per bound ticket."
             echo ""
             if [ "${SWEEP_TRIGGER}" = "schedule" ]; then

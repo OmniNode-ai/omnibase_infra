@@ -50,7 +50,7 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "evidence-autoclose-sweep.yml
 _BEGIN_MARKER = "# ---8<--- OMN-18117 BEGIN product-clone-pin-render"
 _END_MARKER = "# ---8<--- OMN-18117 END product-clone-pin-render"
 
-_MATERIALISE_STEP = "Derive and materialise the cwd repo set the OCC contracts name"
+_MATERIALISE_STEP = "Derive and materialise the cwd repo set the product contracts name"
 # Every step that spawns a dod_verify behaviour check. Both must carry the pin
 # file, or the diagnostic lies about what the sweep does.
 _CHECK_BEARING_STEPS = (
