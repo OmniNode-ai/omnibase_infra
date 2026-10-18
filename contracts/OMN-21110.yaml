@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21110"
-title: "Keep the core fallback compatibility proof independent of the SPI release pin"
-summary: "The core fallback tests inject SPI 0.23.5, causing an unrelated SPI error when the required SPI floor rises to 0.23.7. Read the installed SPI distribution version while retaining both core boundary assertions."
+title: "omnibase_infra pins omnibase-spi 0.23.7, and the core fallback proof reads the installed SPI version"
+summary: "The core fallback tests inject SPI 0.23.5, causing an unrelated SPI error when the required SPI floor rises to 0.23.7. Read the installed SPI distribution version while retaining both core boundary assertions. omnimarket's context pack orchestrator imports omnibase_spi.protocols.intelligence.protocol_context_source.ProtocolContextSource, first published in omnibase-spi 0.23.7, and raises its spi floor to >=0.23.7. Every published omnibase-infra release, 0.38.74 the newest, declares omnibase-spi==0.23.5 exactly, so the omnimarket wheel does not resolve from PyPI (pypi-pin-resolvability) or against the pinned infra dev tag (Sibling Release Compatibility Gate). The exact spi pin in [project.dependencies] and [tool.uv] override-dependencies moves 0.23.5 -> 0.23.7 with uv.lock, the fallback compatibility floor, its sentinel test, the backmerge identity pin test and the runner image lock digests."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: "Both core fallback tests use the installed SPI distribution version, reject core 0.47.30 and accept core 0.47.31 without an unrelated SPI failure."
+  - id: "req-omn21110-infra-spi-0-23-7"
+    statement: "omnibase_infra declares and locks omnibase-spi 0.23.7 exactly, and every exact-version follower of that pin agrees."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: pyproject.toml declares omnibase-spi==0.23.7 in [project.dependencies] and override-dependencies, uv.lock resolves omnibase-spi 0.23.7 from PyPI, the fallback matrix floor is 0.23.7, the runner image lock digests match, and the installed spi carries ProtocolContextSource -- falsifier: the tests below fail at the merge base, whose pins and followers still name 0.23.5, and the import fails at spi 0.23.5"
 evidence_requirements:
   - kind: "tests"
     description: "Focused core fallback proofs retain their core boundary assertions."
     command: "uv run --frozen pytest tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py -q --no-cov"
+  - kind: "tests"
+    description: "The spi pin followers agree at the head and fail at the merge base."
+    command: "uv run --frozen pytest tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/ci/test_runner_image_identity.py -q --no-cov"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -39,3 +47,22 @@ dod_evidence:
         check_value: "python3 -c 'from pathlib import Path; s = Path(\"tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py\").read_text(); assert s.count(\"version(\\\"omnibase-spi\\\")\") == 2'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn21110-ac1-spi-pin-followers"
+    description: "AC2. The spi 0.23.7 pin, its lock, its fallback floor and the runner image lock agree, and the installed spi exposes ProtocolContextSource."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/test_omnibase_spi_runtime_protocol_floor.py tests/integration/infra/test_omn_12765_release_backmerge_identity.py tests/ci/test_runner_image_identity.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run --frozen python -c \"from omnibase_spi.protocols.intelligence.protocol_context_source import ProtocolContextSource\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21110-deploy-probe-spi-pin"
+    description: "Deploy probe for the pin change: read pyproject.toml from GitHub at the evaluated checkout's commit and require the omnibase-spi==0.23.7 pin the next release publishes. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base pyproject.toml, which pins 0.23.5."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/pyproject.toml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '\"omnibase-spi==0.23.7\",'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
