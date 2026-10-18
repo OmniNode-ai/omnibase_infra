@@ -54,6 +54,12 @@
 # does not start with that prefix, so a developer principal cannot join it and take
 # commands.
 #
+# PR POLISH (OMN-21034): a machine starts one polish by publishing the node_pr_polish
+# start command and reads its phase transitions and its completed terminal under the
+# `local.omnibase_core.runtime_local_` group prefix it already holds. The lab runtime
+# consumes the start command and publishes both result topics, so a developer
+# principal gets no write on them.
+#
 # MORNING GROUND STATE (OMN-20673): the operator machine's scheduled morning run starts
 # `node_morning_ground_state_orchestrator` and reads its two terminals, and the node's phase
 # gateway sends each phase as a delegation request and reads the reply. The start command
@@ -81,6 +87,9 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-failed.v1, direction: consume, consumer_group: pr-handoff-request.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.github-repo-gateway-read-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-gateway-read-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-polish-start.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-polish-phase-transition.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-polish-completed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
   - {broker: dev, physical_topic: onex.cmd.omnimemory.expire-memory.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimemory.memory-expired.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimemory.lifecycle-transition-failed.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}

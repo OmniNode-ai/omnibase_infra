@@ -76,11 +76,16 @@ event_bus:
   publish_topics:
     - "onex.evt.omnibase-infra.pattern-b-dispatch-completed.v1"
     - "onex.evt.omnibase-infra.runtime-booted.v1"
+    - "onex.evt.omnibase-infra.runtime-boot-failed.v1"
 published_events:
   - topic: "onex.evt.omnibase-infra.runtime-booted.v1"
     event_type: "RuntimeBootedEvent"
     message_category: "EVENT"
     description: "Runtime boot attestation event carrying the deployed source hash."
+  - topic: "onex.evt.omnibase-infra.runtime-boot-failed.v1"
+    event_type: "RuntimeBootFailedEvent"
+    message_category: "EVENT"
+    description: "Failing runtime exit with its cause, the consecutive failure count and the declared bound (OMN-18550)."
 # Workflow Coordination Subcontract
 workflow_coordination:
   version: {major: 1, minor: 1, patch: 0}

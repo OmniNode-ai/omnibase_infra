@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19424
+title: lane_lock.py gains a status operation that reads whether a lane lock is held and by whom
+summary: The runtime-train pre-merge check has to wait while a reconcile holds the target lane, and lane_lock.py had no machine-readable read of that (describe prints prose and does not probe the flock). This adds `lane_lock.py status --compose-project <p>`, which prints one JSON object whose held field comes from the flock itself and whose holder field is the sidecar. This is the omnibase_infra half of OMN-19424 only; the pre-merge check that consumes it is a separate change in the repository that owns the runtime-train procedure, and the ticket's own acceptance criteria stay unmet until it lands.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-lane-lock-status-reads-the-flock
+    statement: lane_lock.py status reports held from the flock, not from the holder sidecar, and returns the sidecar as holder.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: lane_lock.py status reads a free lane as held=false, a held lane as held=true with the holder named, and a lane whose holder was killed as held=false, without disturbing a holder -- falsifier: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The status operation reads the flock, names the holder, leaves a held lane held and a free lane acquirable, and rejects a traversing project name.
+    command: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py tests/scripts/test_lane_lock_omn16729.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-lane-lock-status-reads-the-flock
+    description: The focused tests drive the real lane_lock.py and lane_lock.sh with a holder in its own process group, and the existing lane lock tests still pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lane_lock_status_omn19424.py tests/scripts/test_lane_lock_omn16729.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

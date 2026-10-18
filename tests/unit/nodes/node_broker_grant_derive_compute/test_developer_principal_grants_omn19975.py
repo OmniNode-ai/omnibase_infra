@@ -126,9 +126,29 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 )
 # The grants added by declaring a binding after OMN-19975 (OMN-21045): the memory
 # lifecycle proof publishes expire-memory and reads the two outcomes under its own
-# group prefix. The morning ground-state run (OMN-20673) adds its start command, its two
-# terminals, the delegation request and the reply under the morning_phase reply group.
+# group prefix. The pr-polish start command and its two result topics (OMN-21034): the
+# group they are read under is the `local.omnibase_core.runtime_local_` prefix above.
+# The morning ground-state run (OMN-20673) adds its start command, its two terminals,
+# the delegation request and the reply under the morning_phase reply group.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
+        "topic",
+        "onex.cmd.omnimarket.pr-polish-start.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.pr-polish-phase-transition.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.pr-polish-completed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
     (
         "topic",
         "onex.cmd.omnimemory.expire-memory.v1",
@@ -233,6 +253,30 @@ def test_the_memory_lifecycle_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "READ"),
         ("TOPIC", "onex.evt.omnimemory.lifecycle-transition-failed.v1", "DESCRIBE"),
     }
+
+
+def test_the_pr_polish_grants_start_it_and_read_both_phases_and_nothing_more() -> None:
+    """A developer principal may start a polish and read its results, never write them."""
+    rows = derive(shipped_bindings())
+    polish = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "pr-polish" in resource
+    }
+    assert polish == {
+        ("TOPIC", "onex.cmd.omnimarket.pr-polish-start.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnimarket.pr-polish-start.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimarket.pr-polish-phase-transition.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.pr-polish-phase-transition.v1", "DESCRIBE"),
+        ("TOPIC", "onex.evt.omnimarket.pr-polish-completed.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.pr-polish-completed.v1", "DESCRIBE"),
+    }
+    # The result group is covered by the runtime_local_ prefix the principal holds, so
+    # the polish adds no group row.
+    assert not any(
+        resource_type == "GROUP" and "polish" in resource
+        for _, resource_type, resource, _, _ in rows
+    )
 
 
 def test_the_morning_grants_are_declared_and_nothing_wider() -> None:

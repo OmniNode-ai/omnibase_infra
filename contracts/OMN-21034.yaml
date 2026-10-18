@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21034"
+title: "A developer principal may start a pr-polish and read its phase transitions and completed terminal"
+summary: "The developer principal's wire bindings declared no pr-polish topic, so the derived grants gave the dev-lane bus principal on a lab host no WRITE on onex.cmd.omnimarket.pr-polish-start.v1 and no READ on onex.evt.omnimarket.pr-polish-phase-transition.v1 or onex.evt.omnimarket.pr-polish-completed.v1, and a polish could not be run on the dev lane from a lane. This change declares those three bindings in deploy/lab/developer-principal-bindings.yaml and regenerates deploy/lab/developer-principal-derived-grants.json from node_broker_grant_derive_compute. The result topics are read under the runtime_local_ group prefix the principal already holds and are not granted for write. The deriver itself is unchanged. Applying the grants on the dev lane broker and the live polish of a lane-owned PR are not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-pr-polish-grants-declared"
+    statement: "The developer principal's bindings declare the pr-polish start command and its two result topics, and the grants the issuer applies are the derivation's output for them."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: node_broker_grant_derive_compute derives from deploy/lab/developer-principal-bindings.yaml WRITE and DESCRIBE on onex.cmd.omnimarket.pr-polish-start.v1, READ and DESCRIBE on onex.evt.omnimarket.pr-polish-phase-transition.v1 and onex.evt.omnimarket.pr-polish-completed.v1, no WRITE on either result topic and no other pr-polish row, and the committed deploy/lab/developer-principal-derived-grants.json is that output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k 'pr_polish or nodes_output or typed_by_hand' fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The derivation tests pin the pr-polish rows, the committed derived file and the issuer's writable topic set."
+    command: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21034-ac1-derived-pr-polish-grants"
+    description: "The derivation reproduces the pr-polish rows from the bindings, and the committed derived file is its output."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k 'pr_polish or nodes_output or typed_by_hand'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -k developer_principal_issuer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21034-ac1-deploy-derived-grants-shipped"
+    description: "The derived grants the issuer image ships at the merged head carry the pr-polish start command topic; the deployed surface is the source at the merged head."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "git show HEAD:deploy/lab/developer-principal-derived-grants.json | grep -cF 'onex.cmd.omnimarket.pr-polish-start.v1'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

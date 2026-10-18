@@ -93,6 +93,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNNER_FLEET_HEALTH_VERDICT_V1 = "onex.evt.omnibase-infra.runner-fleet-health-verdict.v1"  # onex.evt.omnibase-infra.runner-fleet-health-verdict.v1
     EVT_RUNNER_FLEET_MAINTAIN_COMPLETED_V1 = "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"  # onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
+    EVT_RUNTIME_BOOT_FAILED_V1 = "onex.evt.omnibase-infra.runtime-boot-failed.v1"  # onex.evt.omnibase-infra.runtime-boot-failed.v1
     EVT_RUNTIME_BOOTED_V1 = "onex.evt.omnibase-infra.runtime-booted.v1"  # onex.evt.omnibase-infra.runtime-booted.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
     EVT_RUNTIME_ERROR_ESCALATED_V1 = "onex.evt.omnibase-infra.runtime-error-escalated.v1"  # onex.evt.omnibase-infra.runtime-error-escalated.v1
