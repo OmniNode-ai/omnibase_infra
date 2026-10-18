@@ -561,3 +561,65 @@ class TestTheManifestIsReadAfterTheSettleWait:
         checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)}
         assert checks[NODE_INVENTORY_CHECK]["ok"] is True, checks[NODE_INVENTORY_CHECK]
         assert json.loads(inventory_out.read_text())[0]["name"] == "alpha"
+
+    def test_probe_lane_reads_the_manifest_once_after_a_settle_wait_that_timed_out(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        events: list[str] = []
+
+        def _get(url: str, _timeout: float) -> tuple[int, str]:
+            events.append(url)
+            return 0, "URLError: <urlopen error [Errno 111] Connection refused>"
+
+        def _wait(*_a: object, **_k: object) -> object:
+            events.append("<settle wait>")
+            return type(
+                "O",
+                (),
+                {
+                    "phrase": "lane not ready after 900s of a 900s settle budget",
+                    "timed_out": True,
+                    "waited_seconds": 900.0,
+                    "granted_seconds": 0.0,
+                },
+            )()
+
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt._http_get", _get)
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt.wait_for_lane_ready", _wait)
+        inventory_out = tmp_path / "inventory.json"
+
+        assert (
+            main(
+                [
+                    "probe-lane",
+                    "--lane",
+                    EnumLabLane.COMPOSE_DEV.value,
+                    "--main-url",
+                    "http://lane:8085",
+                    "--effects-url",
+                    "http://lane:8086",
+                    "--projection-url",
+                    "http://lane:3002",
+                    "--manifest-url",
+                    "http://lane:8085",
+                    "--node-inventory-out",
+                    str(inventory_out),
+                ]
+            )
+            == 0
+        )
+
+        manifest_reads = [
+            i for i, e in enumerate(events) if e.endswith(INTROSPECTION_MANIFEST_PATH)
+        ]
+        wait_at = events.index("<settle wait>")
+        # A timeout still permits exactly one manifest read, after the wait.
+        assert len(manifest_reads) == 1, events
+        assert manifest_reads[0] > wait_at, events
+
+        checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)}
+        assert checks[NODE_INVENTORY_CHECK]["ok"] is False, checks[NODE_INVENTORY_CHECK]
+        assert json.loads(inventory_out.read_text()) == []
