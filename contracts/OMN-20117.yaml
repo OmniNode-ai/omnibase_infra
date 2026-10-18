@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20117
+title: the pre-merge runtime pool runs a caller-named command on the stack after bring-up
+summary: OMN-20117 AC3 needs a runtime restart during a live call on a pre-PR slot, and the pool runner could not run a command after bring-up. This adds an optional POST_BRINGUP_CMD params key and a post-bringup phase between probe and tests, whose exit status the judge reads as a post_bringup check. This is the omnibase_infra tooling half only; the restart proof itself is a separate run that uses it, and the ticket's own acceptance criteria stay unmet until that run is recorded.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-pool-runs-the-post-bringup-command
+    statement: A params file that names POST_BRINGUP_CMD has that command run on the host after the probe, with the pool member's own project, runtime names and ports in its environment, and a non-zero exit fails the proof.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the driver runs a post-bringup phase between probe and tests only when POST_BRINGUP_CMD is named, the on-host phase runs the command with the member environment, and the judge fails the proof on a non-zero or missing exit status -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -m "not lab_overlay"'
+evidence_requirements:
+  - kind: tests
+    description: The driver orders the phase, the on-host script runs the command with the member environment, and the judge reads its exit status.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -m "not lab_overlay"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-pool-runs-the-post-bringup-command
+    description: Hosted deploy-tooling proof drives the driver against fake hosts and the real prepr_pool_prove.sh post-bringup phase, including non-zero and missing exit status controls. The neutral-manifest collision test runs here too. The private-manifest comparison runs in Lane Census Parity and in the local full-file evidence below.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -m "not lab_overlay"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-pool-full-suite-with-lab-overlay
+    description: The full pool runner test file, including the private lane census comparison, must pass on the lab with its workspace config root configured. Lane Census Parity also runs the lab_overlay comparison in CI with the private overlay fetched.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

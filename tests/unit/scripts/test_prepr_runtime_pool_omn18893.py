@@ -1787,3 +1787,181 @@ def test_the_exercise_phase_runs_the_command_and_reports_its_exit_code(
     assert "marker" in done.stdout
     assert re.search(r"^exercise rc=3 ", done.stdout, re.M), done.stdout
     assert done.returncode == 0
+
+
+# ------------------------------------------------------------------ OMN-20117
+# A proof that must act on the running stack (restart a runtime during a live
+# call) names one command in the params; the host runs it after the probe.
+
+
+def _post_params(tmp_path: Path) -> Path:
+    p = _params(tmp_path)
+    p.write_text(
+        p.read_text(encoding="utf-8")
+        + "POST_BRINGUP_CMD='docker restart $MAIN_RUNTIME'\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def _run_with_post(
+    tmp_path: Path, post: str | None, host: str = "pool-a"
+) -> tuple[int, str, FakeHost]:
+    hosts = {host: FakeHost()}
+    if host == "pool-c-slot-1":
+        hosts[host].phases = dict(SLOT_GOOD)
+    if post is not None:
+        hosts[host].phases["post-bringup"] = post
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _post_params(tmp_path),
+        "me",
+        150,
+        host,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    return code, text, hosts[host]
+
+
+def test_a_named_post_bringup_command_runs_between_probe_and_tests(
+    tmp_path: Path,
+) -> None:
+    code, text, host = _run_with_post(
+        tmp_path,
+        "post-bringup cmd: docker restart x\npost-bringup rc=0 2026-09-27T14:35:00Z",
+    )
+    assert code == pool.EXIT_PASS, text
+    assert host.ran == [
+        "snap-pre",
+        "clone",
+        "build",
+        "probe",
+        "post-bringup",
+        "tests",
+        "teardown",
+        "snap-post",
+    ]
+    assert "ok   post_bringup" in text
+
+
+def test_a_post_bringup_command_that_fails_fails_the_proof(tmp_path: Path) -> None:
+    code, text, _ = _run_with_post(tmp_path, "post-bringup rc=3 2026-09-27T14:35:00Z")
+    assert code == pool.EXIT_FAIL, text
+    assert "FAIL post_bringup" in text
+    assert "post-bringup command rc=3" in text
+
+
+def test_a_post_bringup_command_that_never_finished_fails_the_proof(
+    tmp_path: Path,
+) -> None:
+    code, text, _ = _run_with_post(tmp_path, "")
+    assert code == pool.EXIT_FAIL, text
+    assert "post-bringup command printed no exit status" in text
+
+
+def test_a_post_bringup_command_runs_on_a_prepr_slot(tmp_path: Path) -> None:
+    code, text, host = _run_with_post(
+        tmp_path, "post-bringup rc=0 2026-09-27T14:35:00Z", host="pool-c-slot-1"
+    )
+    assert code == pool.EXIT_PASS, text
+    assert "post-bringup" in host.ran
+    assert f"pre-PR slot project {CFG.host('pool-c-slot-1').compose_project}" in text
+
+
+def test_without_a_post_bringup_command_the_phase_and_check_are_absent(
+    tmp_path: Path,
+) -> None:
+    hosts = {"pool-a": FakeHost()}
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        60,
+        "pool-a",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    assert "post-bringup" not in hosts["pool-a"].ran
+    assert "post_bringup" not in text
+
+
+def test_the_post_bringup_receipt_row_names_the_lines_that_decided_it() -> None:
+    outputs = {**GOOD, "post-bringup": "post-bringup rc=0 2026-09-27T14:35:00Z"}
+    rb = pool.judge(outputs)
+    rows = pool.receipt_checks(rb, outputs, (8085, 8086))
+    row = next(r for r in rows if r.name == "post_bringup")
+    assert row.ok and "post-bringup rc=0" in row.evidence
+
+
+def test_the_base_control_does_not_run_the_post_bringup_command(
+    tmp_path: Path,
+) -> None:
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].phases["probe"] = GOOD["probe"].replace(
+        "healthy True failed_handlers 0", "healthy False failed_handlers 1", 1
+    )
+    hosts["pool-a"].phases["post-bringup"] = "post-bringup rc=0 x"
+    pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _post_params(tmp_path),
+        "me",
+        60,
+        "pool-a",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+        with_base_control=True,
+    )
+    assert "base:post-bringup" not in hosts["pool-a"].ran
+    assert "base:probe" in hosts["pool-a"].ran
+
+
+def test_the_prove_script_runs_the_named_command_with_the_members_names(
+    tmp_path: Path,
+) -> None:
+    slot = 2
+    work = tmp_path / "w"
+    (work / "root" / "omnibase_infra").mkdir(parents=True)
+    env = tmp_path / "params.env"
+    env.write_text(
+        f"TAG=t\nW={work}\nSLOT_KIND=prepr-slot\nPREPR_SLOT={slot}\nMAIN_PORT=38085\n"
+        "EFFECTS_PORT=38086\n"
+        "POST_BRINGUP_CMD='echo main=$MAIN_RUNTIME effects=$EFFECTS_RUNTIME "
+        "project=$PROJECT port=$MAIN_PORT; exit 7'\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(PROVE_SH), str(env), "post-bringup"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (
+        f"main=omninode-prepr-{slot}-runtime "
+        f"effects=omninode-prepr-{slot}-runtime-effects "
+        f"project=omnibase-infra-prepr-{slot} port=38085"
+    ) in proc.stdout
+    assert re.search(r"^post-bringup rc=7 ", proc.stdout, re.M)
+
+
+def test_the_prove_script_without_a_command_runs_nothing(tmp_path: Path) -> None:
+    env = tmp_path / "params.env"
+    env.write_text(f"TAG=t\nW={tmp_path}/w\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(PROVE_SH), str(env), "post-bringup"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "no-post-bringup" in proc.stdout and "post-bringup rc=" not in proc.stdout

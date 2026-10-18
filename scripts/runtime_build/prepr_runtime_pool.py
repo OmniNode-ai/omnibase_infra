@@ -26,7 +26,8 @@ What one ``run`` does
 pick a free host -> take the host lease -> snapshot -> clone (a local test
 merge of the PR head into dev, never pushed) -> build and boot -> probe (image
 identity, migration gate, main and effects health, wiring failures, the PR's
-own live readbacks) -> the PR's focused tests -> teardown -> zero-residue
+own live readbacks) -> the params' own post-bringup command, when named
+(POST_BRINGUP_CMD, OMN-20117) -> the PR's focused tests -> teardown -> zero-residue
 readback against the snapshot -> release the lease -> one PASS/FAIL readback a
 PR body can cite.
 
@@ -104,6 +105,10 @@ EXIT_USAGE = 5
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
+#: OMN-20117: the params key naming a command to run on the host once the stack
+#: is up and probed (a runtime restart during a live call, say). Without it the
+#: phase is not run and the judge reads no post-bringup check.
+POST_BRINGUP_PARAM = "POST_BRINGUP_CMD"
 #: The literal dot prepr_pool_prove.sh puts on each side of a LIVE_GREP term it
 #: derives from a changed node (OMN-19566): a runtime logs ``.<node>.`` only once
 #: the node runs (its consumer group, its own loggers), never on discovery.
@@ -799,6 +804,7 @@ def judge(
     tests = outputs.get("tests", "")
     teardown = outputs.get("teardown", "")
     clone = outputs.get("clone", "")
+    post = outputs.get("post-bringup")
     checks: dict[str, bool] = {}
     notes: list[str] = []
 
@@ -966,6 +972,16 @@ def judge(
     if pr_tests:
         notes.append("fails at the head only: " + ", ".join(pr_tests[:5]))
     checks["focused_tests"] = focused_ok
+    if post is not None:
+        # The phase runs only when the params name POST_BRINGUP_CMD, so a
+        # missing rc line is a command that never finished (timed out, or the
+        # host dropped), never a command that was not asked for.
+        post_rcs = re.findall(r"^post-bringup rc=(\d+)", post, re.M)
+        checks["post_bringup"] = bool(post_rcs) and all(rc == "0" for rc in post_rcs)
+        if not post_rcs:
+            notes.append("post-bringup command printed no exit status")
+        elif not checks["post_bringup"]:
+            notes.append(f"post-bringup command rc={post_rcs[-1]}")
 
     residue_m = re.search(
         r"containers=(\d+) volumes=(\d+) networks=(\d+) images=(\d+) listeners=(\d+) workdir=(\w+)",
@@ -1244,6 +1260,10 @@ def _check_map(
             _lines(probe, r"^\S+ lines=\d+ autowire-fail=.*$"),
         ),
         "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
+        "post_bringup": (
+            "post_bringup",
+            _lines(outputs.get("post-bringup", ""), r"^post-bringup .*$"),
+        ),
         "changed_path_live": (
             "changed_path_live",
             _lines(
@@ -1718,6 +1738,7 @@ def run_proof(
                     "MARKET_GROUP_BASE",
                     "MARKET_GROUP_TREE",
                     "TESTS",
+                    POST_BRINGUP_PARAM,
                 )
             }
             base_out = _run_stack(
@@ -1843,11 +1864,13 @@ def _run_stack(
         env_lines.append(f"POST_UP_COMMAND={shlex.quote(post_up_command)}")
     local_env = params_path.with_suffix(".resolved.env")
     local_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-    phases = (
-        ["snap-pre", "clone", "build", "probe"]
-        + (["exercise"] if post_up_command is not None else [])
-        + (["tests"] if with_tests else [])
-    )
+    phases = ["snap-pre", "clone", "build", "probe"]
+    if params.get(POST_BRINGUP_PARAM):
+        phases.append("post-bringup")
+    if post_up_command is not None:
+        phases.append("exercise")
+    if with_tests:
+        phases.append("tests")
     # probe waits up to PROBE_WAIT_S (default 1500 s) for the runtimes to settle
     # a .201 slot bring-up waits for the pool-wide build lock, builds, migrates
     # and waits for readiness inside the one build phase
@@ -1857,6 +1880,7 @@ def _run_stack(
         "build": build_budget,
         "probe": 1800,
         "exercise": 1800,
+        "post-bringup": 1800,
         "tests": 2400,
     }
     outputs: dict[str, str] = {}
