@@ -1,13 +1,21 @@
 ---
-# OMN-17427: hook push rehearsal. A controller worker's push runs this repository's pre-push hook
-# set, and a refused push loses the fix. On a pull request that changes a hook path in path-regex,
-# the reusable workflow in omnibase_core pushes a sample commit through the pre-push set with the
-# worker's environment and its 1,800 s push timeout, and fails when the push is refused, runs past
-# the timeout or leaves a file in the work tree. Any other pull request and a merge-queue entry
-# pass without a push.
-# The pin is the squash commit of omnibase_core#2025, which adds the reusable workflow.
-# This caller is not in path-regex: it is not a hook, and a hosted runner holds no sibling clones,
-# so the pre-push hooks that read them refuse the sample push there.
+# OMN-17427, OMN-20413: hook push rehearsal. A controller worker's push runs this repository's
+# pre-push hook set, and a refused push loses the fix. On a pull request that changes a path in
+# PATH_REGEX, this job pushes a sample commit through the pre-push set with the worker's
+# environment and its 1,800 s push timeout, and fails when the push is refused, runs past the
+# timeout or leaves a file in the work tree. Any other pull request and a merge-queue entry pass
+# without a push.
+#
+# A worker pushes from a host whose OMNI_HOME holds the sibling clones, and two pre-push hooks read
+# them: ONEX Architecture Layer Validation needs an omnibase_core source tree and the deploy-scope
+# DoD hook imports omniclaude's deploy-gate validator. A hosted runner holds no sibling clones, so
+# the omnibase_core reusable rehearsal (which this job used to call) refused every hook-changing
+# pull request with "Could not find an omnibase_core source package" and "cannot locate the
+# canonical deploy-gate validator", whatever the pull request changed. This job clones both public
+# siblings under $RUNNER_TEMP/siblings and exports OMNI_HOME, as a worker's host does; the rest
+# of the steps are the reusable's at omnibase_core 74abd85c6a8082ea7f0985e111509df7f1abbba8.
+# With the siblings in place this workflow can rehearse itself, so it is in PATH_REGEX.
+# The job name keeps the check context `hook-push-rehearsal / rehearse`.
 name: Hook Push Rehearsal
 
 on:
@@ -23,9 +31,131 @@ permissions:
 
 jobs:
   hook-push-rehearsal:
+    name: hook-push-rehearsal / rehearse
+    # A literal hosted label: config/runner_routing_policy.yaml hosted_runner_allowlist (OMN-19998).
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
     permissions:
       contents: read
-    uses: OmniNode-ai/omnibase_core/.github/workflows/hook-push-rehearsal.yml@74abd85c6a8082ea7f0985e111509df7f1abbba8
-    with:
-      path-regex: '^(\.pre-commit-config\.yaml|\.pre-commit-hooks\.yaml|\.pre-commit-hooks/|scripts/hooks/)'
-      sample-file: src/omnibase_infra/utils/correlation.py
+    env:
+      PATH_REGEX: '^(\.pre-commit-config\.yaml|\.pre-commit-hooks\.yaml|\.pre-commit-hooks/|scripts/hooks/|\.github/workflows/hook-push-rehearsal\.yml$)'
+      SAMPLE_FILE: src/omnibase_infra/utils/correlation.py
+      # The controller worker's push timeout (PUSH_TIMEOUT_S in landing_worker_run.py).
+      PUSH_TIMEOUT_S: "1800"
+      # The sibling clones a worker's OMNI_HOME holds and a pre-push hook reads.
+      SIBLING_REPOS: omnibase_core omniclaude
+    steps:
+      - name: Checkout the pull request head with its history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+      - name: Decide whether this pull request changes a hook path
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+            echo "event $EVENT_NAME is not a pull request: the pull request run rehearsed the push"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          matched="$(printf '%s\n' "$changed" | grep -E -e "$PATH_REGEX" || true)"
+          if [ -z "$matched" ]; then
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+            echo "no changed path matches $PATH_REGEX: no hook, hook script, preflight or push path changed"
+            exit 0
+          fi
+          echo "touched=true" >> "$GITHUB_OUTPUT"
+          echo "changed hook paths:"
+          printf '%s\n' "$matched"
+
+      - name: Clone the sibling repositories a worker's OMNI_HOME holds
+        if: steps.detect.outputs.touched == 'true'
+        run: |
+          set -euo pipefail
+          sibling_root="$RUNNER_TEMP/siblings"
+          rm -rf "$sibling_root"
+          mkdir -p "$sibling_root"
+          for repo in $SIBLING_REPOS; do
+            git clone -q --depth 1 "https://github.com/OmniNode-ai/${repo}.git" "$sibling_root/$repo"
+            echo "$repo at $(git -C "$sibling_root/$repo" rev-parse HEAD)"
+          done
+          echo "OMNI_HOME=$sibling_root" >> "$GITHUB_ENV"
+
+      - name: Install the pre-push hook and push a sample commit through it
+        if: steps.detect.outputs.touched == 'true'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The controller worker's push environment (landing_worker_run.py remote_push_script).
+          export PYTHONDONTWRITEBYTECODE=1
+          unset PYTHONPATH
+          export GIT_TERMINAL_PROMPT=0
+          export ONEX_LANE=hook-push-rehearsal
+          export ONEX_RUN_ID="rehearsal-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          uv tool install --quiet pre-commit
+          PATH="$(uv tool dir --bin):$PATH"
+          export PATH
+
+          test -f .pre-commit-config.yaml || { echo "::error::no .pre-commit-config.yaml"; exit 1; }
+          git ls-files --error-unmatch -- "$SAMPLE_FILE" >/dev/null \
+            || { echo "::error::sample-file $SAMPLE_FILE is not a tracked file"; exit 1; }
+
+          # The remote already holds the pull request head, as it does when a worker fixes an open
+          # pull request; no hook is installed yet, so this push is not judged.
+          remote="$RUNNER_TEMP/hook-push-rehearsal-remote.git"
+          rm -rf "$remote"
+          git init -q --bare "$remote"
+          git checkout -q --detach "$HEAD_SHA"
+          git push -q "$remote" "$HEAD_SHA:refs/heads/rehearsal"
+
+          # The sample change: one appended comment, two blank lines before it so a formatter
+          # check on the file finds nothing to say.
+          printf '\n\n# hook-push-rehearsal sample\n' >> "$SAMPLE_FILE"
+          git add -- "$SAMPLE_FILE"
+          git -c user.name=hook-push-rehearsal -c user.email=hook-push-rehearsal@users.noreply.github.com \
+            commit -q -m "hook push rehearsal sample change"
+
+          if ! pre-commit install -t pre-push; then
+            echo "::error::LANDING-PRE-PUSH-HOOK-NOT-INSTALLED: a worker pushes nothing without the repository's pre-push suite"
+            exit 95
+          fi
+
+          log="$RUNNER_TEMP/hook-push-rehearsal-push.log"
+          start="$(date +%s)"
+          set +e
+          timeout --kill-after=30 "$PUSH_TIMEOUT_S" git push "$remote" "HEAD:refs/heads/rehearsal" 2>&1 | tee "$log"
+          rc="${PIPESTATUS[0]}"
+          set -e
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pre-push set finished in ${elapsed}s (rc=$rc, timeout ${PUSH_TIMEOUT_S}s)"
+
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::error::the pre-push set ran past the ${PUSH_TIMEOUT_S}s push timeout: a controller worker's push would be killed and the fix lost"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::the pre-push set refused the sample push (rc=$rc): a controller worker's push would be refused"
+            exit 1
+          fi
+
+          # validate-clean-root: a hook that leaves a file behind (a root __pycache__, a rewritten
+          # lock file) refuses the next push from the same tree.
+          left="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$left" ]; then
+            echo "::error::the pre-push set left files in the work tree"
+            printf '%s\n' "$left"
+            exit 1
+          fi
+          echo "a controller worker's push of a sample change would be accepted"
