@@ -522,6 +522,68 @@ async def test_in_flight_deploy_at_start_is_waited_out_before_firing() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_a_deploy_waited_out_before_firing_explains_its_aftermath() -> None:
+    """The run-39141887464 shape (2026-10-18T15:45Z, lab dev lane).
+
+    The canary waited 1285 s on deploy job 9705f929 and fired 16 s after it
+    completed. That deploy restarted the runtime family and force-recreated
+    ``omninode-runtime``; the delegations dispatched across the reboot held
+    every delegate-skill slot until their 240 s budgets ran out, so the probe
+    was admitted 224 s after it was published and the attempt ended
+    TERMINAL_MISSING. The job completed BEFORE the attempt's window, so the
+    window check read "no deploy" and the red stood with no retry. A deploy
+    the canary waited on is the reason it fired when it did; its aftermath is
+    inside the attempt, and it earns the one retry like any other.
+    """
+    clock = _Clock()
+    accepted = _T0 - timedelta(seconds=600)
+    agent = _Agent(
+        _deploying(_DEPLOY_JOB, accepted),  # pre-fire read
+        _deploying(_DEPLOY_JOB, accepted),  # wait poll at T0
+        _deploying(_DEPLOY_JOB, accepted),  # wait poll at T0+15
+        # converged at the T0+30 poll; the job completed 16 s before the fire
+        _idle(_DEPLOY_JOB, accepted, _T0 + timedelta(seconds=14)),
+    )
+    readback = _TerminalReadback("", _SUCCESS_TOPIC)
+    handler, ingress = _handler(clock, agent, readback)
+
+    result = await handler.handle(_request())
+
+    window = result.deploy_window
+    # The job completed before the first attempt's window opened, by more
+    # than the window's clock skew ...
+    assert window.window_started_at == (_T0 + timedelta(seconds=30)).isoformat()
+    assert ingress.calls == 2
+    assert result.verdict is EnumChainCanaryVerdict.GREEN
+    assert window.preflight_deploy_correlation_id == _DEPLOY_JOB
+    # ... and still explains it, because the canary waited on it.
+    assert window.status is EnumDeployWindowStatus.DEPLOY_IN_WINDOW_RETRIED
+    assert window.deploy_correlation_ids == (_DEPLOY_JOB,)
+    assert window.first_attempt_verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_deploy_that_ended_before_an_unwaited_fire_still_stands_red() -> None:
+    """Control for the test above: the widening is the pre-fire WAIT, not a
+    clock. An idle agent at pre-fire means the canary waited on nothing, so a
+    job that completed before the window explains nothing and the red stands."""
+    clock = _Clock()
+    agent = _Agent(
+        _idle(_DEPLOY_JOB, _T0 - timedelta(seconds=600), _T0 - timedelta(seconds=16))
+    )
+    handler, ingress = _handler(clock, agent, _TerminalReadback("", _SUCCESS_TOPIC))
+
+    result = await handler.handle(_request())
+
+    assert ingress.calls == 1
+    assert result.verdict is EnumChainCanaryVerdict.TERMINAL_MISSING
+    assert result.deploy_window.status is EnumDeployWindowStatus.NO_DEPLOY_IN_WINDOW
+    assert result.deploy_window.retried is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_in_flight_wait_counts_against_the_retry_budget() -> None:
     """The pre-fire wait and the retry wait share one budget, so a run that
     spent it all waiting cannot also wait out a second deploy."""
