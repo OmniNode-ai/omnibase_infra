@@ -224,7 +224,7 @@ def _handler(linear: LaggingLinear) -> HandlerEvidenceAutocloseSweep:
 def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
     payload: dict[str, object] = {
         "correlation_id": uuid4(),
-        "occ_repo": _OCC_REPO,
+        "evidence_repo": _OCC_REPO,
         "lookback_hours": 24,
         "apply": True,
         "backfill_lookback_hours": 0,

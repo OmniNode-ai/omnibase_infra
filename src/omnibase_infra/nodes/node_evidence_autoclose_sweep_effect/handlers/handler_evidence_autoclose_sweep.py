@@ -7,7 +7,7 @@ Wires: companion-merge -> dod_verify -> governed Done flip.
 Pipeline
 --------
 1. Kill switch: if ``ONEX_AUTOCLOSE_DISABLED`` is set, do zero I/O and return.
-2. Enumerate ``occ_repo`` PRs merged within ``lookback_hours`` via ``gh api``
+2. Enumerate ``evidence_repo`` PRs merged within ``lookback_hours`` via ``gh api``
    (paginated REST, newest-updated-first, bounded by ``max_companions``).
 3. For each merged companion, extract its Evidence-Ticket binding from the
    changed-file list (``contracts/OMN-XXXXX.yaml``) and/or the PR title
@@ -2998,6 +2998,13 @@ class HandlerEvidenceAutocloseSweep:
         # OMN-20368: the runner moved to the shared Done-write guard module so
         # every Done writer launches the verifier the same way. OMN-16846: it
         # resolves the verifier from THIS process's interpreter, not `uv run`.
+        if cwd:
+            contract = Path(cwd).resolve() / "contracts" / f"{ticket_id}.yaml"
+            if not contract.is_file():
+                return None, -1, f"Product contract is unreadable: {contract}"
+            return await run_dod_verify_command(
+                ticket_id, cwd, timeout, contract_path=str(contract)
+            )
         return await run_dod_verify_command(ticket_id, cwd, timeout)
 
     # -- GitHub enumeration ----------------------------------------------
@@ -3055,10 +3062,10 @@ class HandlerEvidenceAutocloseSweep:
 
         1. the PR watcher's state and the canonical clone's default branch
            (``git log --grep``), merged into one candidate per PR number;
-        2. ``node_github_repo_gateway_effect`` through ``onex scm``, when
-           neither of those holds a companion that binds the ticket;
-        3. the product repository's ``contracts/<ticket>.yaml``, when the
-           change-control copy is absent (OCC is being retired).
+        2. each product repository's ``contracts/<ticket>.yaml`` on its
+           default branch, when no merged PR binds the ticket;
+        3. ``node_github_repo_gateway_effect`` through ``onex scm``, when
+           neither local source holds the ticket's evidence.
 
         Returns ``(pr, error)`` with the same fail-closed contract as
         ``_fetch_pr_files``: a non-empty ``error`` means the lookup FAILED and
@@ -3073,6 +3080,11 @@ class HandlerEvidenceAutocloseSweep:
         wanted = ticket_id.strip().upper()
         merged = self._local_offer_candidates(repo, wanted, request)
         if not merged:
+            contract, contract_error = self._product_contract_companion(
+                repo, wanted, request
+            )
+            if contract is not None or contract_error:
+                return contract, contract_error
             (
                 gateway_found,
                 gateway_error,
@@ -3091,7 +3103,7 @@ class HandlerEvidenceAutocloseSweep:
                 )
             merged = self._bind_offer_candidates(gateway_found, wanted)
         if not merged:
-            return self._product_contract_companion(repo, wanted, request)
+            return None, ""
         merged.sort(
             key=lambda pr: (str(pr.get("merged_at") or ""), _as_int(pr.get("number"))),
             reverse=True,
@@ -3139,6 +3151,14 @@ class HandlerEvidenceAutocloseSweep:
             title_binding, _ambiguous = _extract_ticket_binding(
                 str(candidate.get("title") or ""), []
             )
+            if title_binding is None:
+                files = candidate.get("files")
+                if isinstance(files, list):
+                    title_binding, _ambiguous = _extract_ticket_binding(
+                        "", [str(name) for name in files]
+                    )
+                    if _ambiguous:
+                        continue
             if title_binding is None or title_binding.strip().upper() != wanted:
                 continue
             if not str(candidate.get("merged_at") or ""):
@@ -3159,11 +3179,11 @@ class HandlerEvidenceAutocloseSweep:
         The title carries no ``for <repo>#<n>`` product-PR reference, so the
         product-PR fences that read one are not consulted for it.
         """
-        owner, _, occ_name = repo.partition("/")
+        owner = repo.split("/", 1)[0]
         contract, error = offer_companion_sources.find_product_contract(
             Path(request.clone_root) if request.clone_root else None,
             owner,
-            occ_name,
+            "onex_change_control",
             wanted,
             self._run_git,
         )
@@ -3173,6 +3193,7 @@ class HandlerEvidenceAutocloseSweep:
             return None, ""
         return {
             "number": 0,
+            _EVIDENCE_REPO_KEY: str(contract["repo"]),
             "html_url": str(contract["url"]),
             "title": (
                 f"evidence({wanted}): product-repo contract in {contract['repo']}"
@@ -3370,7 +3391,7 @@ class HandlerEvidenceAutocloseSweep:
                     )
                     continue
                 companion, offer_error = await self._fetch_offer_companion(
-                    request.occ_repo,
+                    request.evidence_repo,
                     offered_ticket,
                     request.gh_timeout_seconds,
                     request,
@@ -3400,7 +3421,7 @@ class HandlerEvidenceAutocloseSweep:
                             decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
                             reason=(
                                 "No merged evidence companion in "
-                                f"{request.occ_repo} names {offered_ticket}, so "
+                                f"{request.evidence_repo} names {offered_ticket}, so "
                                 "there is nothing for this run to bind a "
                                 "verdict to. Recorded rather than dropped: a "
                                 "nominated ticket absent from the outcomes "
@@ -3415,7 +3436,7 @@ class HandlerEvidenceAutocloseSweep:
                 candidates.append((companion, EnumEvidenceAutocloseArm.OFFER))
         else:
             companions, enum_error = await self._fetch_merged_companions(
-                request.occ_repo,
+                request.evidence_repo,
                 since_iso,
                 request.max_companions,
                 request.gh_timeout_seconds,
@@ -3445,7 +3466,7 @@ class HandlerEvidenceAutocloseSweep:
                     now - timedelta(hours=request.backfill_lookback_hours)
                 ).strftime("%Y-%m-%dT%H:%M:%SZ")
                 wider, backfill_error = await self._fetch_merged_companions(
-                    request.occ_repo,
+                    request.evidence_repo,
                     backfill_since_iso,
                     request.backfill_pool_size,
                     request.gh_timeout_seconds,
@@ -3609,7 +3630,7 @@ class HandlerEvidenceAutocloseSweep:
                 files, files_error = [str(name) for name in local_files], ""
             else:
                 files, files_error = await self._fetch_pr_files(
-                    str(pr.get(_EVIDENCE_REPO_KEY) or request.occ_repo),
+                    str(pr.get(_EVIDENCE_REPO_KEY) or request.evidence_repo),
                     number,
                     request.gh_timeout_seconds,
                 )
@@ -3705,7 +3726,20 @@ class HandlerEvidenceAutocloseSweep:
                 companion_pr_number=number,
                 companion_pr_url=url,
                 companion_title=title,
-                request=request,
+                request=(
+                    request.model_copy(
+                        update={
+                            "dispatch_cwd": str(
+                                Path(request.clone_root)
+                                / str(
+                                    pr.get(_EVIDENCE_REPO_KEY) or request.evidence_repo
+                                ).split("/", 1)[1]
+                            )
+                        }
+                    )
+                    if request.clone_root
+                    else request
+                ),
                 apply_writes=effective_apply,
                 disarmed_by=disarm_ticket,
                 flip_budget_remaining=flip_budget,
@@ -3879,7 +3913,7 @@ class HandlerEvidenceAutocloseSweep:
                     window_hours=request.demotion_window_hours,
                     apply=effective_apply and not disarm_ticket,
                     max_demotions_per_run=request.max_demotions_per_run,
-                    pr_owner=request.occ_repo.split("/", 1)[0],
+                    pr_owner=request.evidence_repo.split("/", 1)[0],
                     gh_timeout_seconds=request.gh_timeout_seconds,
                     exclude_tickets=tuple(sorted(_excluded_tickets(request))),
                 )
@@ -5491,7 +5525,7 @@ class HandlerEvidenceAutocloseSweep:
                 evidence_landings: tuple[tuple[str, str], ...] = (
                     (
                         (
-                            f"evidence companion {request.occ_repo}#{companion_pr_number}"
+                            f"evidence companion {request.evidence_repo}#{companion_pr_number}"
                             if companion_pr_number
                             else f"product-repo contract {companion_pr_url}"
                         ),
@@ -6065,7 +6099,7 @@ class HandlerEvidenceAutocloseSweep:
                 "FLIP READBACK ticket=%s companion=%s#%d receipt=%s "
                 "pre_write_head=%s readback_entry=%s",
                 ticket_id,
-                request.occ_repo,
+                request.evidence_repo,
                 companion_pr_number,
                 fingerprint,
                 pre_write_head_entry_id or "<empty history>",

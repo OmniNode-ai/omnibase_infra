@@ -55,7 +55,7 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "evidence-autoclose-sweep.yml
 _BEGIN_MARKER = "# ---8<--- OMN-18588 BEGIN cwd-branch-resolution"
 _END_MARKER = "# ---8<--- OMN-18588 END cwd-branch-resolution"
 
-_MATERIALISE_STEP = "Derive and materialise the cwd repo set the OCC contracts name"
+_MATERIALISE_STEP = "Derive and materialise the cwd repo set the product contracts name"
 
 # The status a row whose branch could not be resolved must carry. Asserted as a
 # literal because it is the operator-visible string: the whole cost of this

@@ -9,12 +9,12 @@ in ``prod_promotion_grants.yaml`` names an image digest or a kustomize overlay,
 so a compose-config change (a loopback port bind, for one) had no grant that
 could authorize it. The operator approved a new grant type on 2026-10-01
 (RULING 2026-10-01T10:37:55Z lane=compose-grant-kind). Its anchor is
-``onex_change_control`` ``grants/governed_lane_grants.yaml``, kind
+``omnibase_infra`` ``grants/governed_lane_grants.yaml``, kind
 ``compose_config``; this script is the only path that consumes it.
 
 ``apply`` refuses (exit 1) unless ALL of these hold:
 
-1. The anchor is read from ``onex_change_control@main`` (never a PR branch, and
+1. The anchor is read from ``omnibase_infra@main`` (never a PR branch, and
    never a local file when ``--execute`` is given).
 2. It holds an entry with ``--grant-id``, ``target_kind: compose_config``,
    ``runtime_lane`` equal to ``--lane`` (``stability-test`` or ``judge``), the
@@ -219,13 +219,13 @@ def _git(repo: Path, *args: str) -> str:
     return completed.stdout
 
 
-def fetch_anchor_from_main(occ_repo: Path) -> tuple[bytes, str]:
-    """Read the anchor at ``onex_change_control@main`` after a fresh fetch."""
-    if not (occ_repo / ".git").exists():
-        raise ApplyUsageError(f"not a git clone: {occ_repo}")
-    _git(occ_repo, "fetch", "origin", ANCHOR_REF, "--quiet")
-    commit = _git(occ_repo, "rev-parse", f"origin/{ANCHOR_REF}").strip()
-    raw = _git(occ_repo, "show", f"origin/{ANCHOR_REF}:{ANCHOR_RELPATH}")
+def fetch_anchor_from_main(grants_repo: Path) -> tuple[bytes, str]:
+    """Read the anchor at ``omnibase_infra@main`` after a fresh fetch."""
+    if not (grants_repo / ".git").exists():
+        raise ApplyUsageError(f"not a git clone: {grants_repo}")
+    _git(grants_repo, "fetch", "origin", ANCHOR_REF, "--quiet")
+    commit = _git(grants_repo, "rev-parse", f"origin/{ANCHOR_REF}").strip()
+    raw = _git(grants_repo, "show", f"origin/{ANCHOR_REF}:{ANCHOR_RELPATH}")
     return raw.encode("utf-8"), commit
 
 
@@ -254,13 +254,13 @@ def operator_env_file() -> Path:
     return path
 
 
-def _occ_repo(arg: str) -> Path:
+def _grants_repo(arg: str) -> Path:
     if arg:
         return Path(arg)
-    omni_home = os.environ.get("OMNI_HOME", "").strip()
-    if not omni_home:
-        raise ApplyUsageError("set --occ-repo or OMNI_HOME (no default path)")
-    return Path(omni_home) / "onex_change_control"
+    registry_root = os.environ.get("OMNI_HOME", "").strip()
+    if not registry_root:
+        raise ApplyUsageError("set --grants-repo or OMNI_HOME (no default path)")
+    return Path(registry_root) / "omnibase_infra"
 
 
 def cmd_digest(args: argparse.Namespace) -> int:
@@ -296,12 +296,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
         if args.execute:
             raise ApplyUsageError(
                 "--grants-file is a test seam; --execute reads the anchor at "
-                f"onex_change_control@{ANCHOR_REF} only"
+                f"omnibase_infra@{ANCHOR_REF} only"
             )
         raw, source = Path(args.grants_file).read_bytes(), f"file:{args.grants_file}"
     else:
-        raw, commit = fetch_anchor_from_main(_occ_repo(args.occ_repo))
-        source = f"onex_change_control@{ANCHOR_REF}={commit}"
+        raw, commit = fetch_anchor_from_main(_grants_repo(args.grants_repo))
+        source = f"omnibase_infra@{ANCHOR_REF}={commit}"
 
     entry, refusals = match_grant(raw, grant_id=args.grant_id, lane=args.lane, now=now)
     if entry is not None and not refusals:
@@ -371,7 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply = sub.add_parser("apply", help="check a grant and, with --execute, apply")
     apply.add_argument("--lane", required=True, choices=sorted(GOVERNED_COMPOSE_LANES))
     apply.add_argument("--grant-id", required=True)
-    apply.add_argument("--occ-repo", default="")
+    apply.add_argument("--grants-repo", default="")
     apply.add_argument("--grants-file", default="")
     apply.add_argument("--now", default="")
     apply.add_argument("--execute", action="store_true")
