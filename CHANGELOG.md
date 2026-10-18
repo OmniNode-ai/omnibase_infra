@@ -1,3 +1,29 @@
+## v0.38.75 (2026-10-18)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.75 by the scheduled release train.
+- 17 release-relevant commit(s) merged since v0.38.74.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.74
+- fix: publisher contract fixture reads every publisher declaration shape the topic graph reads (#5097)
+- fix: the kernel publishes the escalation event the runtime error triage handler returns (#5100)
+- fix: cap consecutive boot failures in the runtime entrypoint (#5090)
+- fix: read the CI bus lane table from the CI overlay, not omnimarket (#5087)
+- feat: the evidence closer's forward window reads cut-over product repositories (#5088)
+- fix: expire active rows the old emitter stamped but left active (#5086)
+- fix: replay OmniNode-ai/omnibase_infra#5081 onto dev 77bdd40e3c31419826350707a5ebcd8ece663c95 (#5081)
+- feat: register the claude_code_binding_install skill against the core wire models (#5068)
+- fix: declare the deploy agent's undeclared topics so the provisioner creates them (#5075)
+- chore(deps): bump omnibase-core to 0.47.45 (#5026)
+- fix: grant role_omnidash projection watermarks access (#5052)
+- chore: probe hygiene sweep reads per-repo contracts, not onex_change_control (#5063)
+- fix: the repo-evidence / dod-verify check refuses dependency cascades for a release-cut changelog rule they cannot meet (#5060)
+- fix: forwarder inbound survives untyped record and failed start (#5038)
+- feat: omnibase_infra refuses an omnimarket dependency (#5032)
+- fix: C28 reads live consumer groups on an index, not a 32 GB scan (#5048)
+- feat: vendor pr_merged_events unique key migration 0003 (#5036)
+
 ## v0.38.74 (2026-10-16)
 
 ### Release

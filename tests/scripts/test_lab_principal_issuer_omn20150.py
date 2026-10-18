@@ -233,7 +233,9 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # process alone writes the append terminals. Literal names, no prefix or
     # wildcard grant. The memory lifecycle proof (OMN-21045) adds write on the
     # expire-memory command only. The pr-polish proof (OMN-21034) adds write on the
-    # start command only: the lab runtime writes the two result topics.
+    # start command only: the lab runtime writes the two result topics. The morning
+    # ground-state run (OMN-20673) adds write on its start command, its two terminals (as
+    # for the delegate terminals) and the delegation request.
     # The DoD closeout proof (OMN-21048) adds write on the decide command only.
     writable = [g for g in declaration.grants if "write" in g.operations]
     assert {g.name for g in writable} == {
@@ -245,6 +247,10 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
         "onex.cmd.omnimemory.expire-memory.v1",
         "onex.cmd.omnimarket.pr-polish-start.v1",
+        "onex.cmd.omnimarket.morning-ground-state-start.v1",
+        "onex.evt.omnimarket.morning-ground-state-completed.v1",
+        "onex.evt.omnimarket.morning-ground-state-failed.v1",
+        "onex.cmd.omnibase-infra.delegation-request.v1",
         "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
