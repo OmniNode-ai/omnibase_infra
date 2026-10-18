@@ -189,6 +189,11 @@ requirements:
     acceptance:
       - id: AC42
         statement: 'AC42: the prove script removes only its own run key under the deploy source-tree cache, before the clone and before each teardown removes the work directory -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "source_tree_cache or drops_the_cache"'
+  - id: req-omn17427-delegation-terminal-readback-grant
+    statement: A developer principal can read the projection reducer's delegation terminal to prove a lane delegation end to end, and write none.
+    acceptance:
+      - id: AC43
+        statement: 'AC43: the developer-principal bindings grant READ and DESCRIBE on onex.evt.omnimarket.projection-delegation-applied.v1 and no write, the derived grants file is the node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -289,6 +294,9 @@ evidence_requirements:
   - kind: tests
     description: The shipped developer-principal bindings derive the morning ground-state grants and the committed derived file is the node's output.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+  - kind: tests
+    description: The delegation terminal readback grants read and describe on one topic and write none, and the committed derived grants are the node's output.
+    command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -852,3 +860,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC42
+  - id: dod-omn-17427-delegation-terminal-readback-grant
+    description: The shipped developer-principal bindings derive READ and DESCRIBE on the projection delegation terminal and no write, and the committed derived grants are the node's output. No broker or credential is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC43
