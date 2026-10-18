@@ -1,0 +1,84 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19960"
+title: "Runner containers tell tools their real CPU count"
+summary: |-
+  Evidence-only contract for OMN-19960 (omnibase_infra PR #4269, merge commit
+  dfa23a5d9a0018932dd90c87c7f139e5811a5c04). It carries the acceptance-criterion
+  bindings proposed by lane dod-closeout-bind-2026-10-18T1445Z-c2 and accepted by
+  lane dod-closeout-accept-2026-10-18T1445Z-c2. AC2 and AC4 carry no accepted
+  binding and stay open.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn19960-acceptance-criteria"
+    statement: |-
+      The acceptance criteria OMN-19960 declares, transcribed from the ticket body. The
+      ticket body is the source and this block is the copy.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: the function exports the counts above for all five fixtures -- falsifier: `uv run pytest tests/ci/test_runner_cgroup_cpu_env.py -q` fails
+      - id: "AC2"
+        statement: |-
+          AC2: a recreated runner reports its limit -- falsifier: `docker exec <runner> nproc` prints anything but `2` on a runner with `cpus: "2.0"`
+      - id: "AC3"
+        statement: |-
+          AC3: the image version moved -- falsifier: `docker inspect <runner> --format '{{index .Config.Labels "org.omninode.runner.image.version"}}'` prints anything but `11` after the roll
+      - id: "AC4"
+        statement: |-
+          AC4: xdist starts 2 workers on a runner job -- falsifier: the job log of a `ci.yml` `-n auto` step on a recreated runner shows a worker id `gw2` or higher
+evidence_requirements:
+  - kind: "tests"
+    description: "The cgroup CPU export function produces the expected counts for every cpu.max fixture."
+    command: "env -u PYTHONPATH uv run pytest tests/ci/test_runner_cgroup_cpu_env.py -q"
+  - kind: "manual"
+    description: "Read-only readback on the lab runner host (ssh alias omni-201): a recreated runner carries image version label 11."
+    command: |-
+      ssh -o BatchMode=yes -o ConnectTimeout=10 omni-201 "docker inspect omninode-runner-4 --format '{{index .Config.Labels \"org.omninode.runner.image.version\"}}'" | grep -Fx 11
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19960-ac1-cgroup-cpu-env-fixtures"
+    description: |-
+      AC1. tests/ci/test_runner_cgroup_cpu_env.py (added by PR #4269) runs
+      omni_cgroup_cpu_env over the five cpu.max fixtures the ticket names (2 CPUs with serial
+      pre-commit, fractional quota rounds up, 8 CPUs leave pre-commit concurrent, unlimited
+      exports nothing, a preset value is left alone) and exits 0 with 13 passed at origin/dev
+      0dfb44fa02949c93ec28d663ec240642672caabc. The test file does not exist at the merge
+      parent.
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run pytest tests/ci/test_runner_cgroup_cpu_env.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac:
+      - "AC1"
+    ac_bindings:
+      - label: "AC1"
+        criterion_hash: "490f7aa9f21f6666f54f56ee2df99219d954e094d96a4dcc9bce0e061d450f6b"
+        proposed_by: "lane=dod-closeout-bind-2026-10-18T1445Z-c2"
+        accepted_by: "lane=dod-closeout-accept-2026-10-18T1445Z-c2"
+        accepted_at: "2026-10-18T15:10:48Z"
+  - id: "dod-omn19960-ac3-runner-image-version-label"
+    description: |-
+      AC3. Read-only lab readback on the lab runner host (ssh alias omni-201): the recreated runner omninode-runner-4 carries
+      org.omninode.runner.image.version 11 (PR #4269 moved runner-image.lock.json
+      image_version 10 -> 11), with NanoCpus 2000000000. Run only at the local Done gate,
+      where the lab host is reachable.
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: |-
+          ssh -o BatchMode=yes -o ConnectTimeout=10 omni-201 "docker inspect omninode-runner-4 --format '{{index .Config.Labels \"org.omninode.runner.image.version\"}}'" | grep -Fx 11
+    binds_ac:
+      - "AC3"
+    ac_bindings:
+      - label: "AC3"
+        criterion_hash: "304d55bfff66374032662cadcad1987a45c6e6301ad89b2d5a744c65e48703cb"
+        proposed_by: "lane=dod-closeout-bind-2026-10-18T1445Z-c2"
+        accepted_by: "lane=dod-closeout-accept-2026-10-18T1445Z-c2"
+        accepted_at: "2026-10-18T15:10:48Z"
