@@ -23,6 +23,13 @@ requirements:
         statement: "AC4: the ratchet refuses a vars.<anything>MODEL reference, a model id literal and a MODEL env key bound to a literal, finds all five lines of a known-bad model fixture, and the new cases fail on the merge base -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay"
       - id: "AC5"
         statement: "AC5: the ratchet's test file runs as a step of the lint job that the required CI Summary context covers and as a check-only pre-commit hook -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay_ratchet_is_wired"
+  - id: "req-review-tooling-by-dev-tag"
+    statement: "The Hostile Reviewer reads omniintelligence by its newest dev-* tag, resolved and logged at run time, and hands the Claude API voters' key to the review step alone."
+    acceptance:
+      - id: "AC6"
+        statement: "AC6: the clone step resolves the newest refs/tags/dev-* of omniintelligence with git ls-remote, logs the tag and its commit, fails closed when none exists, and reads no branch tip or pinned sha -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k clone_step"
+      - id: "AC7"
+        statement: "AC7: secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY is exported to the review step alone as ANTHROPIC_API_KEY and REVIEW_ANTHROPIC_API_KEY, and the preflight holds neither -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay and the workflow tests pass at the head."
@@ -64,3 +71,19 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay_ratchet_is_wired"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
+  - id: "dod-omn20910-ac6-dev-tag-read"
+    description: "AC6. The clone step is executed against a fake git: it picks the newest dev-<UTC>-<sha12> tag, logs it, fails closed with none, and carries no branch tip or sha."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k clone_step"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC6"]
+  - id: "dod-omn20910-ac7-claude-key-to-review-step"
+    description: "AC7. The org secret reaches the review step alone under both names the voter code can read."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC7"]

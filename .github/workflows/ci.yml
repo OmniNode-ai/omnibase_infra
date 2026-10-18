@@ -329,7 +329,7 @@ jobs:
 
       # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
       - name: Review voter model comes from the overlay (OMN-20910)
-        run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly
+        run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -n 0 --no-cov -p no:randomly
 
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)

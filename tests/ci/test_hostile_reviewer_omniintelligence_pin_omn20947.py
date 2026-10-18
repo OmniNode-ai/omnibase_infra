@@ -53,6 +53,10 @@ def test_every_workflow_clones_omniintelligence_at_the_sibling_pin() -> None:
     shas: set[str] = set()
     sites = 0
     for path in sorted(_WORKFLOWS.glob("*.y*ml")):
+        # OMN-20910: the Hostile Reviewer reads omniintelligence by its newest
+        # dev tag (tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py).
+        if path.name == "hostile-reviewer.yml":
+            continue
         for line in path.read_text(encoding="utf-8").splitlines():
             if "omniintelligence" in line and "checkout --quiet" in line:
                 shas.update(re.findall(r"\b[0-9a-f]{40}\b", line))
@@ -64,7 +68,7 @@ def test_every_workflow_clones_omniintelligence_at_the_sibling_pin() -> None:
                 if with_.get("repository") == "OmniNode-ai/omniintelligence":
                     shas.add(str(with_.get("ref")))
                     sites += 1
-    assert sites >= 5, sites
+    assert sites >= 4, sites
     assert shas == {pin}
 
 
