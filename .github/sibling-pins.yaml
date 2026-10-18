@@ -16,6 +16,9 @@
 #                                    (core 0.47.31, compat 0.5.7)
 #   omnimarket                       equals .github/omnimarket-contract-pin.yaml
 #   the rest                         the `dev` tip when the pin was added
+#   omniintelligence                 still read at this pin by every workflow but
+#                                    hostile-reviewer.yml, which reads its newest
+#                                    dev-<UTC>-<sha12> tag at run time (OMN-20910)
 #
 # Move a pin only in a PR that also passes the gates reading that sibling at the
 # new sha. NON-GATING MONITOR workflows (schedule/dispatch only) read live tips by

@@ -51,9 +51,11 @@
 # resolution). NEITHER is a required context in this pass (OMN-17492
 # canary; promote-to-required is a recorded follow-up on the ticket).
 #
-# Credential: LOCAL_LLM_SHARED_SECRET is the only reviewer secret (a repo
-# Actions secret, OMN-14176); never committed, never printed. No cloud
-# reviewer credential is wired: the roster is lab-only (OMN-17492).
+# Credentials: LOCAL_LLM_SHARED_SECRET (a repo Actions secret, OMN-14176) signs
+# the lab voters' calls. HOSTILE_REVIEW_ANTHROPIC_API_KEY (an org Actions
+# secret, OMN-20910) is passed to the review step alone, as ANTHROPIC_API_KEY
+# and REVIEW_ANTHROPIC_API_KEY, for the Claude API voters an overlay declares.
+# Neither is committed or printed.
 #
 # Reference: OMN-8468 (W6.1 mandatory CI gate), OMN-8524 (pilot rollout),
 # OMN-14176 (model fix), OMN-17492 (lab-only roster + thread gate)
@@ -197,18 +199,31 @@ jobs:
             exit 1
           fi
 
+      # OMN-20910: the review tooling is read at omniintelligence's newest
+      # dev-<UTC>-<sha12> tag, resolved at run time and logged, not at a sha
+      # pinned in .github/sibling-pins.yaml. Every omniintelligence dev merge is
+      # tagged, so a tag is a released-by-merge revision, never a branch tip.
+      # The other workflows keep reading the pin.
       - name: Clone omniintelligence
         working-directory: ${{ github.workspace }}
         run: |
           for attempt in {1..4}; do
             rm -rf ../omniintelligence
-            if git clone --filter=blob:none --no-checkout \
-              https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
-              && git -C ../omniintelligence checkout --quiet 3fcbf795087a79081c0ceeb676216bf64c5d49ae; then # .github/sibling-pins.yaml
+            TAG="$(git ls-remote --tags --refs \
+              https://github.com/OmniNode-ai/omniintelligence.git 'refs/tags/dev-*' \
+              | sed -n 's#^.*refs/tags/##p' \
+              | grep -E '^dev-[0-9]{14}-[0-9a-f]{12}$' | sort | tail -n 1 || true)"
+            if [ -n "$TAG" ] \
+              && git clone --filter=blob:none --no-checkout --branch "$TAG" \
+                https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
+              && git -C ../omniintelligence checkout --quiet "refs/tags/${TAG}"; then
+              echo "omniintelligence newest dev tag: ${TAG} -> $(git -C ../omniintelligence rev-parse HEAD)"
               exit 0
             fi
+            echo "::warning::omniintelligence newest dev tag unresolved or clone failed (attempt ${attempt}/4)"
             sleep $((attempt * 10))
           done
+          echo "::error::could not resolve and clone omniintelligence's newest refs/tags/dev-* tag"
           exit 1
 
       - name: Clone omnibase_core (omniintelligence dependency)
@@ -420,6 +435,15 @@ jobs:
           # voters overlay declares substitute_votes (OMN-20947).
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          # OMN-20910: the Claude API voters' key, for this step only. An
+          # overlay voter with provider anthropic reads the variable its own
+          # api_key_env names, and omniintelligence reads
+          # ANTHROPIC_API_KEY when none is named; it never substitutes one
+          # variable for another. The key is exported under both names so an
+          # overlay that declares either one resolves it. Unset, the value is
+          # empty and no voter reads it, so the current roster is unchanged.
+          ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
+          REVIEW_ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
           REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
         working-directory: ../omniintelligence
         run: |

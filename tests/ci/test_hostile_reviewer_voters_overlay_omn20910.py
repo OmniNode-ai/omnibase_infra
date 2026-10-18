@@ -189,12 +189,14 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SIBLING_PINS = _ROOT / ".github" / "sibling-pins.yaml"
 
 
-def test_omniintelligence_is_pinned_to_the_sibling_pin() -> None:
+def test_omniintelligence_is_read_by_its_newest_dev_tag_not_the_sibling_pin() -> None:
     pin = yaml.safe_load(_SIBLING_PINS.read_text(encoding="utf-8"))["pins"][
         "omniintelligence"
     ]
     assert re.fullmatch(r"[0-9a-f]{40}", pin)
-    assert f"checkout --quiet {pin}" in str(_step("Clone omniintelligence")["run"])
+    run = str(_step("Clone omniintelligence")["run"])
+    assert "'refs/tags/dev-*'" in run
+    assert pin not in run
 
 
 def _tracked_files() -> list[str]:
