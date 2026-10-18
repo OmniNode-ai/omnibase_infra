@@ -25,6 +25,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "local.omnimarket.dod_closeout_probe.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.dod_closeout_probe.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.omnimarket.scm_command_client.consume.v1.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -117,6 +131,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.delegate-skill.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -272,6 +300,20 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.delegate-skill-failed.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {

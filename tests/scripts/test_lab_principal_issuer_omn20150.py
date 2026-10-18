@@ -236,6 +236,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # start command only: the lab runtime writes the two result topics. The morning
     # ground-state run (OMN-20673) adds write on its start command, its two terminals (as
     # for the delegate terminals) and the delegation request.
+    # The DoD closeout proof (OMN-21048) adds write on the decide command only.
     writable = [g for g in declaration.grants if "write" in g.operations]
     assert {g.name for g in writable} == {
         "onex.cmd.omnimarket.delegate-skill.v1",
@@ -250,6 +251,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnimarket.morning-ground-state-completed.v1",
         "onex.evt.omnimarket.morning-ground-state-failed.v1",
         "onex.cmd.omnibase-infra.delegation-request.v1",
+        "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 

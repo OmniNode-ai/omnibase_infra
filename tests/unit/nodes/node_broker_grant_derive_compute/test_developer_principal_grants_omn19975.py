@@ -130,6 +130,8 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 # group they are read under is the `local.omnibase_core.runtime_local_` prefix above.
 # The morning ground-state run (OMN-20673) adds its start command, its two terminals,
 # the delegation request and the reply under the morning_phase reply group.
+# The DoD closeout proof (OMN-21048) publishes the decide command and reads
+# its decided event under its own group prefix.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "topic",
@@ -210,6 +212,24 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         ("read", "describe"),
     ),
     ("group", "local.rr.morning_phase.", "prefixed", ("read", "describe")),
+    (
+        "topic",
+        "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "group",
+        "local.omnimarket.dod_closeout_probe.consume.v1.",
+        "prefixed",
+        ("read", "describe"),
+    ),
 )
 BROKER = "dev"
 
@@ -308,6 +328,30 @@ def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnibase-infra.delegation-failed.v1", "DESCRIBE"),
         ("GROUP", "local.rr.morning_phase.", "READ"),
         ("GROUP", "local.rr.morning_phase.", "DESCRIBE"),
+    }
+
+
+def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
+    """The proof may publish the decide command and read the decided event only."""
+    rows = derive(shipped_bindings())
+    closeout = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource_type == "TOPIC" and "dod-closeout" in resource
+    }
+    assert closeout == {
+        (
+            "TOPIC",
+            "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+            "WRITE",
+        ),
+        (
+            "TOPIC",
+            "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+            "DESCRIBE",
+        ),
+        ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "DESCRIBE"),
     }
 
 

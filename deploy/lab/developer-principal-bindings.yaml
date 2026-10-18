@@ -69,6 +69,13 @@
 # instance `morning_phase`, whose reply group is `<env>.rr.morning_phase.<boot nonce>`
 # (RequestResponseWiring); a developer machine's env token is `local`. The prefix names
 # that one instance, so a developer principal cannot join another instance's reply group.
+# DOD CLOSEOUT PROOF (OMN-21048): a machine proves the DoD closeout sweep by publishing
+# `dod-closeout-sweep-decide-requested` and reading the one `dod-closeout-sweep-decided`
+# event the node's contract declares as its terminal event, by correlation id. The
+# caller reads under `local.omnimarket.dod_closeout_probe.consume.v1.` plus a per-call
+# suffix; the node's own group, `<env>.omnimarket.node_dod_closeout_sweep_compute...`,
+# does not start with that prefix, so a developer principal cannot join it and take
+# commands.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -101,6 +108,8 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnibase-infra.delegation-request.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-completed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -108,5 +117,6 @@ group_prefixes:
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
   - {broker: dev, prefix: local.rr.morning_phase.}
+  - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
 described_groups:
   - {broker: dev, group: "*"}
