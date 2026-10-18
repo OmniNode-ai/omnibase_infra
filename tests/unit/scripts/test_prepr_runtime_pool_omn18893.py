@@ -1965,3 +1965,54 @@ def test_the_prove_script_without_a_command_runs_nothing(tmp_path: Path) -> None
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "no-post-bringup" in proc.stdout and "post-bringup rc=" not in proc.stdout
+
+
+# ------------------------------------------------------------------ OMN-17427
+# stage_workspace.sh keeps its pinned sibling worktrees under
+# ~/.omnibase/state/deploy_source_trees/<build context path>, and they point into
+# the run's own clone. The work directory is keyed by holder and host, so a second
+# run by the same holder reuses the key; with the first run's clone gone, the
+# build refused with "not a git repository" on omnibase_core.
+
+
+@pytest.mark.unit
+def test_the_prove_script_drops_its_source_tree_cache_and_leaves_other_runs_alone(
+    tmp_path: Path,
+) -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    fn = re.search(r"^drop_source_trees\(\) \{.*?^\}", text, re.M | re.S)
+    assert fn is not None, "prepr_pool_prove.sh defines no drop_source_trees"
+    work = tmp_path / "prove-pool-me-host"
+    (work / "root" / "omnibase_infra").mkdir(parents=True)
+    trees = tmp_path / "home" / ".omnibase" / "state" / "deploy_source_trees"
+    key = re.sub(
+        r"[^A-Za-z0-9._-]", "_", str(work.resolve() / "root" / "omnibase_infra")
+    )
+    (trees / key / "abc").mkdir(parents=True)
+    (trees / "_another_runs_build_context").mkdir(parents=True)
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -u; W={work}; HOME={tmp_path / 'home'}; {fn.group(0)}\ndrop_source_trees",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert not (trees / key).exists()
+    assert (trees / "_another_runs_build_context").is_dir()
+
+
+@pytest.mark.unit
+def test_the_prove_script_drops_the_cache_before_a_clone_and_before_each_teardown_removes_the_work_dir() -> (
+    None
+):
+    lines = PROVE_SH.read_text(encoding="utf-8").splitlines()
+    removals = [i for i, ln in enumerate(lines) if 'rm -rf "$W"' in ln]
+    assert len(removals) == 2, removals
+    for i in removals:
+        assert "drop_source_trees" in lines[i - 1], lines[i - 1 : i + 1]
+    start = lines.index("clone)")
+    assert "drop_source_trees" in lines[start + 1], lines[start : start + 3]
