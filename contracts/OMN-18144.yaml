@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-18144"
+title: "the sibling-revision convergence guard sizes its wait from the deploy agent's queue position"
+summary: >-
+  The sibling-revision convergence guard (scripts/ci/check_lane_sibling_revision.py) reads the deploy agent's GET /queue surface, as the infra-revision guard already does, and when the agent has not accepted the rebuild command and the queue ahead of it is longer than the job can outlast it returns INDETERMINATE naming the depth instead of watching the clock for the whole affordable window.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-sibling-guard-queue-position"
+    statement: "The sibling-revision guard reads queue position, not only the wall clock."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: with the agent's command unaccepted and a queue the window cannot outlast, the guard returns INDETERMINATE naming the depth without starting the wait; an empty queue, an unreadable queue, an accepted command and an already converged lane behave as before -- falsifier: uv run pytest tests/ci/test_sibling_queue_position_omn18144.py -q -n 0"
+evidence_requirements:
+  - kind: "tests"
+    description: "Sibling guard queue-position read for OMN-18144."
+    command: "uv run pytest tests/ci/test_sibling_queue_position_omn18144.py tests/ci/test_lane_sibling_revision_omn18268.py tests/ci/test_convergence_acceptance_budget.py -q -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn18144-ac1-sibling-queue-position"
+    description: "A deep queue is refused up front as INDETERMINATE with the depth; the other four shapes are unchanged; main() hands the agent's /queue read to the wait; the agent's recorded live /queue bytes read as unread and fall back to the clock."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_sibling_queue_position_omn18144.py -q -n 0"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
