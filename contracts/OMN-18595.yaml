@@ -20,7 +20,7 @@ requirements:
     statement: The core 0.47.48 cascade (omnibase_infra#5110) regenerates the runner image lock so its recorded identity binds the new uv.lock.
     acceptance:
       - id: AC3
-        statement: "AC3: at core 0.47.48 the runner image lock identity_digest and shared_env_digest equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/ci/test_runner_image_identity.py fails at ff248aa84, whose lock still records the 0.47.46 digests"
+        statement: "AC3: the cascade resolves core at least 0.47.48, the installed version matches uv.lock and passes runtime version admission, and the runner image lock identity_digest and shared_env_digest equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/unit/runtime/test_core_release_cascade_omn18595.py fails at the merge base, which resolves 0.47.46; tests/ci/test_runner_image_identity.py fails when the runner lock digests do not match the dependency manifests"
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -60,6 +60,9 @@ dod_evidence:
     description: The core 0.47.48 cascade (omnibase_infra#5110) regenerates docker/runners/runner-image.lock.json so the runner image identity matches the bumped uv.lock.
     source: manual
     checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
