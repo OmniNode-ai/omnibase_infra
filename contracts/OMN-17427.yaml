@@ -172,6 +172,18 @@ requirements:
     acceptance:
       - id: AC38
         statement: 'AC38: the shipped bindings derive write on the morning start command, read and write on its two terminals, write on the delegation request, read on the two delegation replies and read on the local.rr.morning_phase. group prefix, and no other morning or delegation grant -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k morning_grants'
+  - id: req-omn17427-remove-repo-documentation
+    statement: Human documentation lives in the public knowledge base; this repository keeps a short entry point, agent instructions, the release changelog, and machine-read inputs.
+    acceptance:
+      - id: AC39
+        statement: 'AC39: README has three to five lines and links to knowledge_base, unused prose and evidence text are removed -- falsifier: the documentation surface check below fails'
+  - id: req-omn17427-retire-live-occ-reads
+    statement: The evidence sweep and deploy preflights read contracts and grants from product repositories.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: the sweep checks out product contracts, binds a product offer through its changed contract, dispatches the owning repository contract explicitly, and refuses an unreadable contract -- falsifier: uv run pytest tests/ci/test_occ_retirement_live_reads_omn17427.py -q'
+      - id: AC41
+        statement: 'AC41: compose and deployment attribution resolve grants from omnibase_infra main, accept a valid approved grant, and refuse missing, expired or mismatched grants -- falsifier: uv run pytest tests/unit/scripts/test_apply_governed_compose_config_omn20260.py tests/scripts/test_preflight_lane_deploy_attribution.py tests/ci/test_occ_retirement_live_reads_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -780,3 +792,49 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC38
+  - id: dod-omn17427-documentation-surface
+    description: The root README links to the knowledge base and unused documentation paths are absent.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "from pathlib import Path; t=Path('README.md').read_text(); assert 3 <= len(t.splitlines()) <= 5; assert 'https://github.com/OmniNode-ai/knowledge_base' in t; assert not any(Path('docs/evidence').rglob('*.txt')); assert not any(Path('tests/fixtures').rglob('README.md')); assert not any(Path(p).exists() for p in ['SECURITY.md', '.github/CONTRIBUTING.md', '.github/CODE_OF_CONDUCT.md']); print('Documentation surface check passed')"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC39
+  - id: dod-omn-17427-retire-occ-product-contracts
+    description: Product contracts replace the recorded default-branch OCC checkout and the verifier receives the owning contract path.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_occ_retirement_live_reads_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC40
+  - id: dod-omn-17427-retire-occ-release-grants
+    description: Approved grants are read from the release repository main and missing or invalid grants fail closed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_apply_governed_compose_config_omn20260.py tests/scripts/test_preflight_lane_deploy_attribution.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC41
+  - id: dod-omn-17427-deploy-product-contract-routing
+    description: Hosted-runner deploy smoke exercises the real handler and verifier subprocess boundary against a temporary product contract, then refuses an absent contract. No deployed service or credentials are used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_occ_retirement_live_reads_omn17427.py -q -k verifier_receives
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC40
+  - id: dod-omn-17427-deploy-release-grant-routing
+    description: Hosted-runner deploy smoke exercises the compose entrypoint against a local main-branch grant registry and a recording Docker executable, allowing the approved grant and refusing the missing-grant control. No deployed service or credentials are used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_apply_governed_compose_config_omn20260.py -q -k 'execute_reads_main or execute_without_a_grant'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC41

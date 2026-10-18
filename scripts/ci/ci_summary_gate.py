@@ -1428,6 +1428,7 @@ class JobState:
     # the OMN-18355 cancellation grace is measured from, so it is read from the
     # row rather than assumed from poll order.
     completed_at: str | None = None
+    infrastructure_error: bool = False
 
 
 def carries_failure_conclusion(state: JobState) -> bool:
@@ -1506,11 +1507,22 @@ def dedup_latest(
         if prev is not None and attempt < prev.run_attempt:
             continue
         conclusion = raw.get("conclusion")
+        steps = raw.get("steps")
         current = JobState(
             name=name,
             status=str(raw.get("status") or ""),
             conclusion=None if conclusion is None else str(conclusion),
             run_attempt=attempt,
+            infrastructure_error=(
+                name == "runner-routing-audit / Runner Routing Audit"
+                and isinstance(steps, list)
+                and any(
+                    isinstance(step, dict)
+                    and step.get("name") == "Runner audit infrastructure error"
+                    and step.get("conclusion") == "failure"
+                    for step in steps
+                )
+            ),
         )
         if (
             prev is not None
@@ -2797,6 +2809,15 @@ def _report(
         )
     if strict_failures:
         lines.append(f"  strict-gate failures: {', '.join(strict_failures)}")
+    infrastructure_errors = sorted(
+        name for name, state in latest.items() if state.infrastructure_error
+    )
+    if infrastructure_errors:
+        lines.append(
+            "  infrastructure errors: RUNNER_AUDIT_INFRASTRUCTURE: "
+            + ", ".join(infrastructure_errors)
+            + " (GitHub quota, transport or response refusal; see the live audit step)"
+        )
     if skippable_failures:
         lines.append(f"  skippable-gate failures: {', '.join(skippable_failures)}")
     if sweep_failures:

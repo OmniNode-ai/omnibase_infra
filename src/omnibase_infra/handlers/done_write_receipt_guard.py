@@ -58,7 +58,7 @@ TypeRunDodVerifyCommand = Callable[
 ]
 
 
-def dod_verify_argv(ticket_id: str) -> list[str]:
+def dod_verify_argv(ticket_id: str, *, contract_path: str = "") -> list[str]:
     """Argv that dispatches the verifier from THIS process's own environment.
 
     OMN-16846. This used to be ``["uv", "run", "onex", "skill", "dod_verify",
@@ -97,6 +97,7 @@ def dod_verify_argv(ticket_id: str) -> list[str]:
         ticket_id,
         "--execution-audience",
         "hosted",
+        *(["--contract-path", contract_path] if contract_path else []),
     ]
 
 
@@ -120,11 +121,11 @@ async def reap_timed_out_process(proc: asyncio.subprocess.Process) -> None:
 
 
 async def run_dod_verify_command(
-    ticket_id: str, cwd: str, timeout: float
+    ticket_id: str, cwd: str, timeout: float, *, contract_path: str = ""
 ) -> tuple[dict[str, object] | None, int, str]:
     # OMN-16846: resolved from THIS process's interpreter, not re-resolved
     # by `uv run` from the cwd. See `dod_verify_argv`.
-    args = dod_verify_argv(ticket_id)
+    args = dod_verify_argv(ticket_id, contract_path=contract_path)
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,

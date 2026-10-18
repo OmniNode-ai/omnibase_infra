@@ -350,7 +350,7 @@ async def read_gateway_candidates(
 def find_product_contract(
     root: Path | None,
     owner: str,
-    change_control_name: str,
+    excluded_repository: str,
     ticket_id: str,
     run_git: TypeRunGit,
 ) -> tuple[dict[str, object] | None, str]:
@@ -367,7 +367,7 @@ def find_product_contract(
     path = f"contracts/{ticket_id}.yaml"
     holders: list[dict[str, object]] = []
     for clone in sorted(root.iterdir()):
-        if clone.name == change_control_name or not (clone / ".git").exists():
+        if clone.name == excluded_repository or not (clone / ".git").exists():
             continue
         ref = _default_ref(clone, run_git)
         if not ref:

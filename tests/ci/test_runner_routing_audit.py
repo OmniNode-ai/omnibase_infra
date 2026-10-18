@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 
 pytestmark = pytest.mark.unit
 
@@ -25,6 +29,242 @@ def _load_script():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_repository_inventory_uses_paginated_rest_not_graphql(monkeypatch) -> None:
+    module = _load_script()
+    calls = []
+
+    def read(args, timeout=20):
+        calls.append(args)
+        return _GhResult(
+            json.dumps(
+                [
+                    [{"name": "private", "private": True, "archived": False}],
+                    [
+                        {"name": "public", "private": False, "archived": False},
+                        {"name": "retired", "private": True, "archived": True},
+                    ],
+                ]
+            )
+        )
+
+    monkeypatch.setattr(module, "_run_gh", read)
+    assert module._live_repository_visibility() == [
+        ("private", True),
+        ("public", False),
+    ]
+    assert calls == [
+        ["api", "--paginate", "--slurp", "orgs/OmniNode-ai/repos?type=all&per_page=100"]
+    ]
+
+
+def test_sparse_default_branch_read_needs_no_graphql(monkeypatch, tmp_path) -> None:
+    """Exercise the production Git reader against a local default branch."""
+    import subprocess
+
+    module = _load_script()
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git_args = ["git", f"--git-dir={origin / '.git'}", f"--work-tree={origin}"]
+
+    def git(*args):
+        return subprocess.run(
+            [*git_args, *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=scrub_git_location_env(os.environ),
+        )
+
+    git("init", "--initial-branch=dev", str(origin))
+    workflows = origin / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("jobs:\n  build:\n    runs-on: ubuntu-latest\n")
+    (workflows / "deploy.yaml").write_text("name: deploy\n")
+    (workflows / "README.md").write_text("ignored\n")
+    (workflows / "nested.yml").mkdir()
+    (workflows / "nested.yml/ignored.yml").write_text("name: nested\n")
+    (origin / "unrelated.txt").write_text("not a workflow\n")
+    git("add", ".")
+    git(
+        "-c",
+        "user.name=Audit Test",
+        "-c",
+        "user.email=audit@example.invalid",
+        "commit",
+        "-m",
+        "fixture",
+    )
+    monkeypatch.setattr(module, "_repository_url", lambda org, repo: str(origin))
+    monkeypatch.setattr(
+        module, "_run_gh", lambda *args, **kwargs: pytest.fail("API workflow read")
+    )
+
+    assert module._default_branch_workflow_texts("fixture") == {
+        ".github/workflows/ci.yml": "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
+        ".github/workflows/deploy.yaml": "name: deploy\n",
+    }
+    git("rm", "-r", ".github")
+    git(
+        "-c",
+        "user.name=Audit Test",
+        "-c",
+        "user.email=audit@example.invalid",
+        "commit",
+        "-m",
+        "no workflows",
+    )
+    assert module._default_branch_workflow_texts("fixture") == {}
+
+
+def test_transport_refusal_is_named_infrastructure_and_keeps_other_findings(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "audit_github_variables",
+        lambda policy: [module.Finding("fixture", "drift")],
+    )
+
+    def refused(*args):
+        raise module.GitHubReadError("RUNNER_AUDIT_TRANSPORT: timed out")
+
+    monkeypatch.setattr(module, "audit_scoped_variables", refused)
+    monkeypatch.setattr(module, "audit_private_repo_hosted_placement", refused)
+    code, output, counts = _run_main(module, monkeypatch, tmp_path, capsys)
+    assert code == 1
+    assert "RUNNER_AUDIT_TRANSPORT" in output
+    assert "Runner routing drift::fixture: drift" in output
+    assert "unreadable=2" in counts
+
+
+def test_workflow_uses_run_token_and_keeps_privileged_reads_explicit() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(RUNNER_ROUTING_AUDIT_WORKFLOW.read_text())
+    steps = workflow["jobs"]["audit"]["steps"]
+    live = next(s for s in steps if s.get("id") == "github_vars")
+    assert live["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert live["env"]["RUNNER_AUDIT_ORG_TOKEN"] == "${{ secrets.CROSS_REPO_PAT }}"
+    marker = next(
+        s for s in steps if s.get("name") == "Runner audit infrastructure error"
+    )
+    assert "always()" in marker["if"]
+    assert "steps.github_vars.outputs.unreadable" in marker["if"]
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_ci_summary_reports_infrastructure_separately_without_passing(marked) -> None:
+    from scripts.ci.ci_summary_gate import evaluate
+
+    name = "runner-routing-audit / Runner Routing Audit"
+    code, report = evaluate(
+        [
+            {
+                "name": name,
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Runner audit infrastructure error",
+                        "conclusion": "failure" if marked else "skipped",
+                    }
+                ],
+            }
+        ],
+        strict_gates=(name,),
+        skippable_gates=(),
+    )
+    assert code == 1
+    assert ("infrastructure errors:" in report) is marked
+
+
+def test_variable_reads_use_org_token_but_same_repo_content_uses_run_token(
+    monkeypatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setenv("GH_TOKEN", "fixture-run-token")
+    monkeypatch.setenv("RUNNER_AUDIT_ORG_TOKEN", "fixture-org-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "OmniNode-ai/omnibase_infra")
+    assert (
+        module._github_env(repository="OmniNode-ai/omnibase_infra")["GH_TOKEN"]
+        == "fixture-run-token"
+    )
+    assert (
+        module._github_env(repository="OmniNode-ai/private")["GH_TOKEN"]
+        == "fixture-org-token"
+    )
+    # Variables metadata needs Variables:read, which GITHUB_TOKEN cannot grant.
+    assert module._github_env()["GH_TOKEN"] == "fixture-org-token"
+
+
+def test_an_empty_repository_is_a_positive_empty_workflow_read(
+    monkeypatch, tmp_path
+) -> None:
+    module = _load_script()
+    origin = tmp_path / "empty"
+    subprocess.run(
+        [
+            "git",
+            f"--git-dir={origin / '.git'}",
+            f"--work-tree={origin}",
+            "init",
+            "--initial-branch=dev",
+            str(origin),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    monkeypatch.setattr(module, "_repository_url", lambda org, repo: str(origin))
+    monkeypatch.setattr(
+        module, "_run_gh", lambda *args, **kwargs: pytest.fail("unexpected API read")
+    )
+    assert module._default_branch_workflow_texts("empty") == {}
+
+
+@pytest.mark.parametrize("body", ["", "{}", "[null]", '[{"name":"X"}]'])
+def test_unread_variable_response_is_infrastructure(monkeypatch, body) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "_run_gh", lambda *args, **kwargs: _GhResult(body))
+    with pytest.raises(module.GitHubReadError, match="RUNNER_AUDIT_RESPONSE"):
+        module._read_variables(["--org", "fixture"])
+
+
+def test_ci_summary_does_not_reuse_a_previous_attempt_infrastructure_marker() -> None:
+    from scripts.ci.ci_summary_gate import evaluate
+
+    name = "runner-routing-audit / Runner Routing Audit"
+    code, report = evaluate(
+        [
+            {
+                "name": name,
+                "run_attempt": 1,
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Runner audit infrastructure error",
+                        "conclusion": "failure",
+                    }
+                ],
+            },
+            {
+                "name": name,
+                "run_attempt": 2,
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ],
+        run_attempt=2,
+        strict_gates=(name,),
+        skippable_gates=(),
+    )
+    assert code == 0
+    assert "infrastructure errors:" not in report
 
 
 def test_local_workflow_audit_rejects_unallowlisted_hosted_runner(
@@ -1378,7 +1618,7 @@ def test_pr_and_scheduled_audit_execute_the_same_live_assertions() -> None:
         .rstrip()
         .endswith("uv run python scripts/audit-runner-routing.py --github-vars")
     )
-    assert 'if [ -z "${GH_TOKEN:-}" ]' in live["run"]
+    assert 'if [ -z "${RUNNER_AUDIT_ORG_TOKEN:-}" ]' in live["run"]
     combined = next(s for s in steps if "combined" in s.get("name", ""))
     # Missing/skipped/error outcomes are not a clean evaluation either.
     assert 'steps.local_workflows.outcome }}" != "success"' in combined["run"]
@@ -1641,61 +1881,6 @@ def test_repository_universe_derived_from_live_visibility(
     assert clean_findings == []
 
 
-def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression: ``gh repo list --visibility all`` is not a real invocation.
-
-    The live post-merge run of this audit (omnibase_infra workflow run
-    35003988912, 2026-09-15) crashed with ``invalid argument "all" for
-    "--visibility" flag: valid values are {public|private|internal}`` --
-    the fixture-based test above mocks ``visibility_fn`` entirely and never
-    exercises the real ``gh`` invocation, so it could not catch this. Omitting
-    ``--visibility`` returns repositories of every visibility the token can
-    see, which is what this check needs since it filters on the returned
-    ``isPrivate`` field itself.
-    """
-    module = _load_script()
-    captured_args: list[list[str]] = []
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> object:
-        captured_args.append(args)
-
-        class _Result:
-            returncode = 0
-            stdout = json.dumps(
-                [
-                    {"name": "a-private-repo", "isPrivate": True},
-                    {"name": "a-public-repo", "isPrivate": False},
-                ]
-            )
-            stderr = ""
-
-        return _Result()
-
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    result = module._live_repository_visibility("OmniNode-ai")
-
-    assert captured_args == [
-        [
-            "repo",
-            "list",
-            "OmniNode-ai",
-            "--no-archived",
-            "--limit",
-            "500",
-            "--json",
-            "name,isPrivate",
-        ]
-    ]
-    assert "--visibility" not in captured_args[0]
-    # OMN-18780: archived repositories run no workflows, so their pins are
-    # out of scope for a merge-gating placement check.
-    assert "--no-archived" in captured_args[0]
-    assert result == [("a-private-repo", True), ("a-public-repo", False)]
-
-
 class _GhResult:
     def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
         self.stdout = stdout
@@ -1703,369 +1888,75 @@ class _GhResult:
         self.stderr = stderr
 
 
-def _workflow_tree(*entries: dict[str, object]) -> str:
-    return json.dumps({"data": {"r0": {"object": {"entries": list(entries)}}}})
-
-
-def _blob(name: str, text: str, **flags: object) -> dict[str, object]:
-    return {
-        "name": name,
-        "path": f".github/workflows/{name}",
-        "type": "blob",
-        "object": {"text": text, "isBinary": False, "isTruncated": False, **flags},
-    }
-
-
-def test_workflow_texts_cost_one_graphql_read_per_repository(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """OMN-20864: a repository's workflows are ONE read, however many files.
-
-    The contents API read cost one REST call per workflow file plus a listing.
-    This pass runs in every omnibase_infra CI run on CROSS_REPO_PAT, the
-    operator's token, and across the org's private repositories (the largest
-    carries about a hundred workflows) it spent the operator's hourly
-    core quota on 2026-10-11 (job 114569998935: rate limit exceeded for the
-    operator's user id), which stopped the landing controller with QUOTA.
-    """
-    module = _load_script()
-    calls: list[list[str]] = []
-    many = [_blob(f"w{i}.yml", f"name: w{i}\n") for i in range(100)]
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        calls.append(args)
-        return _GhResult(_workflow_tree(*many))
-
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    texts = module._default_branch_workflow_texts("a-private-repo")
-
-    assert len(calls) == 1
-    assert calls[0][:2] == ["api", "graphql"]
-    assert "owner=OmniNode-ai" in calls[0] and "n0=a-private-repo" in calls[0]
-    assert not any("contents/" in part for part in calls[0])
-    assert len(texts) == 100
-    assert texts[".github/workflows/w7.yml"] == "name: w7\n"
-
-
-def test_workflow_texts_keep_only_yaml_blobs(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_script()
-    tree = _workflow_tree(
-        _blob("ci.yml", "a: 1\n"),
-        _blob("deploy.yaml", "b: 2\n"),
-        _blob("README.md", "docs\n"),
-        {"name": "nested.yml", "path": ".github/workflows/nested.yml", "type": "tree"},
-    )
-    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(tree))
-
-    assert module._default_branch_workflow_texts("a-private-repo") == {
-        ".github/workflows/ci.yml": "a: 1\n",
-        ".github/workflows/deploy.yaml": "b: 2\n",
-    }
-
-
-def test_a_repository_without_a_workflows_directory_reads_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_script()
-    body = json.dumps({"data": {"r0": {"object": None}}})
-    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(body))
-
-    assert module._default_branch_workflow_texts("a-private-repo") == {}
-
-
 @pytest.mark.parametrize(
-    "result",
+    "body",
     [
-        _GhResult("", returncode=1, stderr="gh: API rate limit exceeded"),
-        _GhResult(json.dumps({"data": {"r0": None}})),
-        _GhResult(_workflow_tree(_blob("big.yml", "x", isTruncated=True))),
-        _GhResult(
-            _workflow_tree(
-                {
-                    "name": "bin.yml",
-                    "path": ".github/workflows/bin.yml",
-                    "type": "blob",
-                    "object": {"text": None, "isBinary": True, "isTruncated": False},
-                }
-            )
-        ),
+        "",
+        "null",
+        "{}",
+        "[]",
+        "[{}]",
+        "[[{}]]",
+        '[[{"name":"private","private":false}]]',
     ],
-    ids=["read-failed", "no-repository", "truncated", "no-text"],
 )
-def test_an_unread_workflow_raises_instead_of_reading_clean(
-    monkeypatch: pytest.MonkeyPatch, result: _GhResult
-) -> None:
-    """A failed or partial read is never an empty, passing repository (rule 16)."""
+def test_unread_repository_inventory_is_never_empty_clean(monkeypatch, body) -> None:
     module = _load_script()
-    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: result)
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(body))
+    with pytest.raises(module.GitHubReadError, match="RUNNER_AUDIT_RESPONSE"):
+        module._live_repository_visibility()
 
-    with pytest.raises(RuntimeError, match="graphql workflow read"):
-        module._default_branch_workflow_texts("a-private-repo")
 
-
-def test_workflow_texts_batch_reads_45_repositories_in_three_queries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """OMN-20413: repository aliases share one GraphQL read per 20 repos."""
+def test_workflow_texts_batch_empty_input_needs_no_reads(monkeypatch) -> None:
     module = _load_script()
-    calls: list[list[str]] = []
-    repo_names = [f"private-repo-{i}" for i in range(45)]
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        calls.append(args)
-        assert args[:2] == ["api", "graphql"]
-        assert "owner=OmniNode-ai" in args
-        query = next(
-            arg.removeprefix("query=") for arg in args if arg.startswith("query=")
-        )
-        names = [arg.split("=", 1)[1] for arg in args if arg.startswith("n")]
-        assert len(names) <= 20
-        data = {}
-        for index, name in enumerate(names):
-            assert f"$n{index}: String!" in query
-            assert f"r{index}: repository(owner: $owner, name: $n{index})" in query
-            data[f"r{index}"] = {
-                "object": {"entries": [_blob("ci.yml", f"name: {name}\n")]}
-            }
-        return _GhResult(json.dumps({"data": data}))
-
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    texts = module._default_branch_workflow_texts_batch(repo_names)
-
-    assert module.WORKFLOW_READ_BATCH_SIZE == 20
-    assert len(calls) == 3
-    assert texts == {
-        name: {".github/workflows/ci.yml": f"name: {name}\n"} for name in repo_names
-    }
-
-
-def _batch_reader(
-    gateway_fails: Callable[[list[str]], bool],
-) -> tuple[list[list[str]], Callable[..., _GhResult]]:
-    """A fake ``gh api graphql`` that answers HTTP 504 when ``gateway_fails(names)``."""
-    calls: list[list[str]] = []
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        names = [arg.split("=", 1)[1] for arg in args if arg.startswith("n")]
-        calls.append(names)
-        if gateway_fails(names):
-            return _GhResult("", returncode=1, stderr="gh: HTTP 504")
-        data = {
-            f"r{index}": {"object": {"entries": [_blob("ci.yml", f"name: {name}\n")]}}
-            for index, name in enumerate(names)
-        }
-        return _GhResult(json.dumps({"data": data}))
-
-    return calls, fake_run_gh
-
-
-def test_workflow_texts_batch_gateway_timeout_splits_the_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """OMN-19998: a batch GitHub answers HTTP 504 is read again in halves.
-
-    CI run 38758500873 on dev 421694574 (job 116503220440) failed because one
-    seventeen-repository workflow read came back ``gh: HTTP 504`` and the pass
-    crashed without a verdict; the scheduled audit fifteen minutes later read
-    the same repositories clean. A gateway timeout on a large response is not
-    an unreadable repository: smaller reads of the same repositories succeed.
-    """
-    module = _load_script()
-    repo_names = [f"private-repo-{i}" for i in range(17)]
-    calls, fake_run_gh = _batch_reader(lambda names: len(names) > 4)
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    texts = module._default_branch_workflow_texts_batch(repo_names)
-
-    assert texts == {
-        name: {".github/workflows/ci.yml": f"name: {name}\n"} for name in repo_names
-    }
-    assert calls[0] == repo_names
-    read = [names for names in calls if len(names) <= 4]
-    assert sorted(name for names in read for name in names) == sorted(repo_names)
-
-
-def test_workflow_texts_batch_gateway_error_on_one_repository_still_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """OMN-19998: splitting never turns an unread repository into a clean one."""
-    module = _load_script()
-    calls, fake_run_gh = _batch_reader(lambda names: "private-bad" in names)
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    with pytest.raises(RuntimeError, match=r"private-bad failed: gh: HTTP 504"):
-        module._default_branch_workflow_texts_batch(
-            ["private-one", "private-bad", "private-two"]
-        )
-    assert calls.count(["private-bad"]) == 1 + module.WORKFLOW_READ_GATEWAY_RETRIES
-
-
-@pytest.mark.parametrize(
-    "stderr", ["gh: HTTP 401: Bad credentials", "gh: HTTP 404: Not Found"]
-)
-def test_workflow_texts_batch_non_gateway_failure_is_not_split(
-    monkeypatch: pytest.MonkeyPatch,
-    stderr: str,
-) -> None:
-    """OMN-19998: only a gateway error is retried; other failures raise at once."""
-    module = _load_script()
-    calls: list[list[str]] = []
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        calls.append(args)
-        return _GhResult("", returncode=1, stderr=stderr)
-
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    with pytest.raises(RuntimeError, match="graphql workflow read"):
-        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
-    assert len(calls) == 1
-
-
-def test_workflow_texts_batch_rate_limit_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_script()
-    monkeypatch.setattr(module, "_rate_limit_reset_note", lambda: "")
     monkeypatch.setattr(
         module,
-        "_run_gh",
-        lambda args, timeout=20: _GhResult(
-            "",
-            returncode=1,
-            stderr="GraphQL: API rate limit already exceeded for user ID 1",
-        ),
+        "_default_branch_workflow_texts",
+        lambda *args: pytest.fail("unexpected read"),
     )
-
-    with pytest.raises(module.GitHubRateLimitError, match="GitHub API rate limit"):
-        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
-
-
-@pytest.mark.parametrize("repository", [None, "unreadable"])
-def test_workflow_texts_batch_null_alias_names_repository(
-    monkeypatch: pytest.MonkeyPatch,
-    repository: object,
-) -> None:
-    module = _load_script()
-    payload = {"data": {"r0": {"object": None}, "r1": repository}}
-    monkeypatch.setattr(
-        module, "_run_gh", lambda args, timeout=20: _GhResult(json.dumps(payload))
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match="graphql workflow read for private-two returned no repository",
-    ):
-        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
-
-
-@pytest.mark.parametrize(
-    "data", [None, {}, {"r0": None}, {"r0": {"object": None}}, {"r0": {}}]
-)
-def test_workflow_texts_batch_errors_without_data_raise(
-    monkeypatch: pytest.MonkeyPatch,
-    data: object,
-) -> None:
-    module = _load_script()
-    payload = {"data": data, "errors": [{"message": "workflow read failed"}]}
-    monkeypatch.setattr(
-        module, "_run_gh", lambda args, timeout=20: _GhResult(json.dumps(payload))
-    )
-
-    with pytest.raises(RuntimeError, match="graphql workflow read for private-one"):
-        module._default_branch_workflow_texts_batch(["private-one"])
-
-
-def test_workflow_texts_batch_names_are_passed_as_variables(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_script()
-    repo_name = 'repo"with\\special-characters'
-
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        assert f"n0={repo_name}" in args
-        assert "owner=another-org" in args
-        query = next(arg for arg in args if arg.startswith("query="))
-        assert repo_name not in query
-        return _GhResult(json.dumps({"data": {"r0": {"object": None}}}))
-
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
-
-    assert module._default_branch_workflow_texts_batch([repo_name], "another-org") == {
-        repo_name: {}
-    }
-
-
-def test_workflow_texts_batch_empty_input_needs_no_reads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_script()
-    monkeypatch.setattr(module, "_run_gh", lambda args: pytest.fail("unexpected read"))
-
     assert module._default_branch_workflow_texts_batch([]) == {}
 
 
-def test_private_hosted_placement_batch_default_ignores_public_repos(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_every_private_repository_still_gets_a_default_branch_read(monkeypatch) -> None:
     module = _load_script()
-    calls: list[list[str]] = []
+    names = [f"private-{i}" for i in range(45)]
+    calls = []
 
-    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
-        calls.append(args)
-        if args[:2] == ["repo", "list"]:
-            return _GhResult(
-                json.dumps(
-                    [
-                        {"name": "private-repo", "isPrivate": True},
-                        {"name": "public-repo", "isPrivate": False},
-                        {"name": "private-fleet-repo", "isPrivate": True},
-                    ]
-                )
-            )
-        assert args[:2] == ["api", "graphql"]
-        assert "n0=private-repo" in args
-        assert "n1=private-fleet-repo" in args
-        assert not any("public-repo" in arg for arg in args)
-        return _GhResult(
-            json.dumps(
-                {
-                    "data": {
-                        "r0": {
-                            "object": {
-                                "entries": [
-                                    _blob(
-                                        "ci.yml",
-                                        "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
-                                    )
-                                ]
-                            }
-                        },
-                        "r1": {
-                            "object": {
-                                "entries": [
-                                    _blob(
-                                        "ci.yml",
-                                        "jobs:\n  build:\n    runs-on: [self-hosted, omnibase-ci]\n",
-                                    )
-                                ]
-                            }
-                        },
-                    }
-                }
-            )
-        )
+    def read(name, org):
+        calls.append((name, org))
+        return {".github/workflows/ci.yml": f"name: {name}"}
 
-    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+    monkeypatch.setattr(module, "_default_branch_workflow_texts", read)
+    result = module._default_branch_workflow_texts_batch(names, "fixture-org")
+    assert calls == [(name, "fixture-org") for name in names]
+    assert list(result) == names
 
-    findings = module.audit_private_repo_hosted_placement()
 
-    assert len(calls) == 2
-    assert len(findings) == 1
-    assert findings[0].scope == "private-repo:.github/workflows/ci.yml:build"
-    assert "pinned to ubuntu-latest" in findings[0].message
+def test_git_workflow_gateway_refusal_does_not_read_clean(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *args, **kwargs: _GhResult("", 1, "HTTP 503")
+    )
+    with pytest.raises(module.GitHubReadError, match="Git workflow read"):
+        module._default_branch_workflow_texts("refused")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("fixture transport unavailable"),
+        subprocess.TimeoutExpired("gh", 20),
+    ],
+)
+def test_gh_transport_failures_are_named(monkeypatch, error) -> None:
+    module = _load_script()
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(module.subprocess, "run", fail)
+    with pytest.raises(module.GitHubReadError, match="RUNNER_AUDIT_TRANSPORT"):
+        module._run_gh(["api", "orgs/fixture/repos"])
 
 
 def test_private_hosted_placement_batch_fetcher_injection() -> None:
@@ -2174,6 +2065,7 @@ def test_a_rate_limited_live_read_is_unreadable_not_a_finding(
     assert "Runner routing drift" not in out
     assert "::error title=Runner audit unreadable::" in out
     assert "rate limit" in out
+    assert "RUNNER_AUDIT_QUOTA" in out
     assert "findings=0" in github_output.splitlines()
     assert "unreadable=3" in github_output.splitlines()
 
@@ -2240,7 +2132,9 @@ def test_a_failed_read_that_is_not_a_rate_limit_is_not_relabelled(
         lambda args, timeout=20: _GhResult("", returncode=1, stderr="HTTP 404"),
     )
 
-    with pytest.raises(RuntimeError, match="gh repo list failed: HTTP 404") as raised:
+    with pytest.raises(
+        RuntimeError, match="REST repository inventory failed: HTTP 404"
+    ) as raised:
         module._live_repository_visibility()
     assert not isinstance(raised.value, module.GitHubRateLimitError)
 
