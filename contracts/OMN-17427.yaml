@@ -644,3 +644,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC33
+  - id: dod-omn-17427-ac33-deploy-publisher-envelope-dispatch
+    description: Hosted-runner integration smoke -- seven independent publisher declarations build envelopes that cross the in-memory bus serialization and real consume callback into an alias-only runtime dispatcher, preserving payload and correlation ID. Undeclared topics are refused. No deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_publisher_contract_envelope_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC33
