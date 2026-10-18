@@ -1200,8 +1200,9 @@ class HandlerChainCanary:
             )
 
         budget_s = float(request.deploy_wait_seconds)
+        preflight_read_at = self._clock()
         preflight = await self._deploy_agent_read(
-            agent_url, _DEPLOY_READ_TIMEOUT_SECONDS, self._clock()
+            agent_url, _DEPLOY_READ_TIMEOUT_SECONDS, preflight_read_at
         )
         preflight_cid: UUID | None = None
         preflight_waited = 0.0
@@ -1286,7 +1287,21 @@ class HandlerChainCanary:
                 ),
             )
 
-        deploy_ids = deploys_in_window(after, window_started_at, window_ended_at)
+        # A deploy the canary waited out before firing is the reason it fired
+        # when it did, so its aftermath is inside the attempt even though the
+        # job completed just before the window opened. Run 39141887464
+        # (2026-10-18T15:45Z): the canary fired 16 s after job 9705f929
+        # completed; the delegations dispatched across that job's runtime
+        # reboots held every delegate-skill slot to their 240 s budgets, the
+        # probe was admitted 224 s after it was published, and a window that
+        # opened at the fire read "no deploy". The widening is the pre-fire
+        # WAIT, not a clock: an idle agent at pre-fire widens nothing.
+        explained_from = (
+            preflight_read_at
+            if preflight.readable and preflight.busy
+            else window_started_at
+        )
+        deploy_ids = deploys_in_window(after, explained_from, window_ended_at)
         if not deploy_ids:
             return _attach(
                 first,
@@ -1327,7 +1342,8 @@ class HandlerChainCanary:
         note = (
             f"[OMN-19811 retry: the first attempt "
             f"({first.probe_correlation_id}) ended {red} while deploy "
-            f"job(s) {', '.join(str(i) for i in deploy_ids)} ran inside its window; this is the "
+            f"job(s) {', '.join(str(i) for i in deploy_ids)} ran inside its window or was "
+            "waited out just before it; this is the "
             "single retry after the lane converged]"
         )
         return _attach(
