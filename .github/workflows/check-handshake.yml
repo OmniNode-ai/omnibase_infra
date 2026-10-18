@@ -16,13 +16,13 @@ concurrency:
 jobs:
   check-handshake:
     name: Check architecture handshake
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     timeout-minutes: 10
 
@@ -34,8 +34,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-                                                                                          # Auto-bumped by omnibase_core publish-downstream-pin-bump.yml to c880801d4dee.
-          ref: c880801d4deeaa1627535c8622ab6c4ab8cfbecd
+                                                                                          # Auto-bumped by omnibase_core publish-downstream-pin-bump.yml to bf3534f9b798.
+          ref: bf3534f9b7989bef77695a08bc2d0961714a2862
           path: omnibase_core
           # OMNIBASE_CORE_TOKEN is required when omnibase_core is private.
           # GITHUB_TOKEN only has read access to the current repo by default.

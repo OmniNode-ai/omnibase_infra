@@ -95,7 +95,11 @@ event_bus:
 
 def _workspace(root: Path, *, tier1: str | None = _TIER1) -> Path:
     """A workspace root with a lane declaration and, optionally, a tier-1 config."""
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    # The lane table belongs to the config owner (OMN-20935), the same root the
+    # tier-1 runtime config is read from.
+    declaration = (
+        Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"]) / LANE_DECLARATION_RELATIVE_PATH
+    )
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_LANES, encoding="utf-8")
     if tier1 is not None:

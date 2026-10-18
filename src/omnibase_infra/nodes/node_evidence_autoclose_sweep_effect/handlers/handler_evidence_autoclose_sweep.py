@@ -333,6 +333,9 @@ _DOD_VERIFY_NON_PROBATIVE_KEY = "non_probative_count"
 
 # Evidence-Ticket binding patterns.
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
+# OMN-16106. The repository a product-PR candidate was enumerated from, so its
+# changed files are read there and not in change control.
+_EVIDENCE_REPO_KEY = "_evidence_repo"
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
 
@@ -3314,6 +3317,7 @@ class HandlerEvidenceAutocloseSweep:
         bindings_extracted = 0
 
         companions: list[dict[str, object]] = []
+        product_prs: list[dict[str, object]] = []
         backfill_pool: list[dict[str, object]] = []
         backfill_slice: list[dict[str, object]] = []
         backfill_error = ""
@@ -3474,13 +3478,44 @@ class HandlerEvidenceAutocloseSweep:
                     _rotation_tick(now, request.backfill_rotation_minutes),
                 )
 
+            # OMN-16106. The product repositories' own merged PRs, in the same
+            # freshness window. A repository cut over from change control mints
+            # no companion, so without this read its tickets are never asked.
+            # Enumerated after `forward_numbers` is taken: a product PR number
+            # is not a change-control number and must not thin the backfill pool.
+            for product_repo in request.product_repos:
+                found, product_error = await self._fetch_merged_companions(
+                    product_repo,
+                    since_iso,
+                    request.max_companions,
+                    request.gh_timeout_seconds,
+                )
+                if product_error:
+                    outcomes.append(
+                        ModelEvidenceAutocloseOutcome(
+                            decision=EnumEvidenceAutocloseDecision.ERROR_GITHUB_API,
+                            reason=(
+                                f"Could not enumerate merged PRs in {product_repo}: "
+                                f"{product_error}. This run reached no verdict about "
+                                "that repository's tickets."
+                            ),
+                        )
+                    )
+                for pr in found:
+                    if _is_recurring_bot_product_pr(pr):
+                        continue
+                    product_prs.append({**pr, _EVIDENCE_REPO_KEY: product_repo})
+
             # Forward first, unconditionally. The freshest companion for a
             # ticket is the one whose verdict should be recorded, and
             # `seen_tickets` resolves a collision in favour of whichever arm
-            # reaches it first.
-            candidates = [
-                (pr, EnumEvidenceAutocloseArm.FORWARD) for pr in companions
-            ] + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
+            # reaches it first. A change-control companion precedes a product
+            # PR for the same ticket.
+            candidates = (
+                [(pr, EnumEvidenceAutocloseArm.FORWARD) for pr in companions]
+                + [(pr, EnumEvidenceAutocloseArm.FORWARD) for pr in product_prs]
+                + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
+            )
 
         for pr, arm in candidates:
             number = _as_int(pr.get("number"))
@@ -3574,7 +3609,9 @@ class HandlerEvidenceAutocloseSweep:
                 files, files_error = [str(name) for name in local_files], ""
             else:
                 files, files_error = await self._fetch_pr_files(
-                    request.occ_repo, number, request.gh_timeout_seconds
+                    str(pr.get(_EVIDENCE_REPO_KEY) or request.occ_repo),
+                    number,
+                    request.gh_timeout_seconds,
                 )
             if files_error:
                 outcomes.append(
@@ -3902,7 +3939,7 @@ class HandlerEvidenceAutocloseSweep:
             # reported 0 companions scanned on a run that adjudicated three
             # nominated tickets would understate exactly what the run did.
             companions_scanned=(
-                len(companions) + len(backfill_slice)
+                len(companions) + len(product_prs) + len(backfill_slice)
                 if not offered
                 else sum(
                     1

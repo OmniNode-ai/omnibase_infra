@@ -133,7 +133,7 @@ def _workspace_with_declared_lane(root: Path, *, broker: str) -> Path:
     the subject under test is the publish attempt itself, not credential
     resolution (that is ``test_omn18432_lane_identity_cli.py``'s subject).
     """
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(
         f'lanes:\n  dev:\n    broker: "{broker}"\n    security_protocol: PLAINTEXT\n',

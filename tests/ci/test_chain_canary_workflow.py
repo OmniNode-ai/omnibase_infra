@@ -178,9 +178,10 @@ def test_the_broker_comes_from_the_declared_lane_overlay(
     canary_job: dict[str, object],
 ) -> None:
     """The address and its transport are read from one declaration."""
-    checkout = _step(canary_job, "Fetch the declared CI bus lanes")
-    assert checkout["with"]["repository"] == "OmniNode-ai/omnimarket"
-    assert "config/ci_bus_lanes.yaml" in str(checkout["with"]["sparse-checkout"])
+    fetch = _step(canary_job, "Fetch the declared CI bus lanes")
+    assert fetch["uses"] == "./.github/actions/fetch-lane-table"
+    assert fetch["with"]["overlay-repo"] == "${{ vars.OMNI_CI_OVERLAY_REPO }}"
+    assert fetch["with"]["dest"] == ".lane-table/config/ci_bus_lanes.yaml"
 
     resolve = _step(canary_job, "Resolve the declared lane transport")
     body = str(resolve["run"])

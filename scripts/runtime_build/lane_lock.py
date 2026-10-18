@@ -51,6 +51,14 @@ stolen -- stealing a lock on a liveness heuristic is what produced the
 mkdir/pid-file lock's recovery branch, and a wrong guess there mutates a live
 lane.
 
+Reading the lock (OMN-19424)
+----------------------------
+``status --compose-project <p>`` prints one JSON object (``held``, ``holder``,
+``holder_alive``, ``lock_path``) and exits 0. ``held`` is read from the flock
+itself, not from the sidecar, so a reader that must WAIT while a reconcile holds
+the lane (the runtime-train pre-merge check) does not mistake a stale sidecar
+for a live holder.
+
 Exit codes
 ----------
     0  acquired (or nothing to do)
@@ -177,6 +185,62 @@ def cmd_describe(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def lock_is_held(project: str) -> bool:
+    """True while some open file description holds the lane's flock.
+
+    Probes with a non-blocking flock on a fresh open of the lock file and drops
+    it at once, so it never disturbs a holder. A lane whose lock file does not
+    exist has never been locked. The lock file is opened read-only: flock does
+    not need write access, and a probe must not create the file.
+    """
+    try:
+        fd = os.open(lock_path(project), os.O_RDONLY)
+    except FileNotFoundError:
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EAGAIN, errno.EACCES):
+                return True
+            raise
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print one JSON object: is the lane locked right now, and by whom.
+
+    ``held`` comes from the flock itself; ``holder`` is the sidecar as written
+    by ``acquire`` (any extra keys a holder recorded ride through), or null when
+    there is none. After a killed holder the sidecar can outlive the lock, so
+    ``held`` false with a non-null holder means the sidecar is stale.
+    """
+    project = validate_project(args.compose_project)
+    holder: dict[str, object] | None
+    try:
+        holder = json.loads(holder_path(project).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        holder = None
+    holder_alive: bool | None = None
+    if holder is not None:
+        try:
+            holder_alive = pid_alive(int(str(holder.get("pid"))))
+        except ValueError:
+            holder_alive = None
+    report = {
+        "compose_project": project,
+        "lock_path": str(lock_path(project)),
+        "held": lock_is_held(project),
+        "holder": holder,
+        "holder_alive": holder_alive,
+    }
+    print(json.dumps(report, sort_keys=True))
+    return EXIT_OK
+
+
 def cmd_acquire(args: argparse.Namespace) -> int:
     """flock an fd the CALLER opened, so the lock outlives this process."""
     project = validate_project(args.compose_project)
@@ -262,6 +326,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_desc = sub.add_parser("describe", help="print the current holder of a lane lock")
     p_desc.add_argument("--compose-project", required=True)
     p_desc.set_defaults(func=cmd_describe)
+
+    p_status = sub.add_parser(
+        "status", help="print JSON: is the lane locked now, and its holder"
+    )
+    p_status.add_argument("--compose-project", required=True)
+    p_status.set_defaults(func=cmd_status)
 
     p_acq = sub.add_parser("acquire", help="flock a caller-opened fd, bounded wait")
     p_acq.add_argument("--compose-project", required=True)

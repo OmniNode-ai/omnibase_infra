@@ -26,7 +26,8 @@ What one ``run`` does
 pick a free host -> take the host lease -> snapshot -> clone (a local test
 merge of the PR head into dev, never pushed) -> build and boot -> probe (image
 identity, migration gate, main and effects health, wiring failures, the PR's
-own live readbacks) -> the PR's focused tests -> teardown -> zero-residue
+own live readbacks) -> the params' own post-bringup command, when named
+(POST_BRINGUP_CMD, OMN-20117) -> the PR's focused tests -> teardown -> zero-residue
 readback against the snapshot -> release the lease -> one PASS/FAIL readback a
 PR body can cite.
 
@@ -104,6 +105,10 @@ EXIT_USAGE = 5
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
+#: OMN-20117: the params key naming a command to run on the host once the stack
+#: is up and probed (a runtime restart during a live call, say). Without it the
+#: phase is not run and the judge reads no post-bringup check.
+POST_BRINGUP_PARAM = "POST_BRINGUP_CMD"
 #: The literal dot prepr_pool_prove.sh puts on each side of a LIVE_GREP term it
 #: derives from a changed node (OMN-19566): a runtime logs ``.<node>.`` only once
 #: the node runs (its consumer group, its own loggers), never on discovery.
@@ -799,6 +804,7 @@ def judge(
     tests = outputs.get("tests", "")
     teardown = outputs.get("teardown", "")
     clone = outputs.get("clone", "")
+    post = outputs.get("post-bringup")
     checks: dict[str, bool] = {}
     notes: list[str] = []
 
@@ -966,6 +972,16 @@ def judge(
     if pr_tests:
         notes.append("fails at the head only: " + ", ".join(pr_tests[:5]))
     checks["focused_tests"] = focused_ok
+    if post is not None:
+        # The phase runs only when the params name POST_BRINGUP_CMD, so a
+        # missing rc line is a command that never finished (timed out, or the
+        # host dropped), never a command that was not asked for.
+        post_rcs = re.findall(r"^post-bringup rc=(\d+)", post, re.M)
+        checks["post_bringup"] = bool(post_rcs) and all(rc == "0" for rc in post_rcs)
+        if not post_rcs:
+            notes.append("post-bringup command printed no exit status")
+        elif not checks["post_bringup"]:
+            notes.append(f"post-bringup command rc={post_rcs[-1]}")
 
     residue_m = re.search(
         r"containers=(\d+) volumes=(\d+) networks=(\d+) images=(\d+) listeners=(\d+) workdir=(\w+)",
@@ -1002,6 +1018,30 @@ def judge(
     return Readback(
         checks=checks, notes=notes, restored=restored, residue=residue, group=group
     )
+
+
+#: how many trailing lines of the post-up command's output the readback carries
+EXERCISE_TAIL_LINES = 15
+
+
+def judge_exercise(rb: Readback, output: str) -> None:
+    """Hold the readback to the post-up command's exit code (the exercise phase).
+
+    The command passes only when the phase printed its ``exercise rc=0`` line;
+    a missing line (the phase never ran, or died before reporting) is a fail,
+    never a quiet pass. The tail of its output rides in the readback so a PR
+    body can cite what the command counted.
+    """
+    code = re.search(r"^exercise rc=(\d+)\b", output, re.MULTILINE)
+    rb.checks["post_up_command"] = code is not None and code.group(1) == "0"
+    if code is None:
+        rb.notes.append("post-up command printed no exit line")
+    body = [
+        ln
+        for ln in output.splitlines()
+        if ln.strip() and not ln.startswith(("exercise start", "exercise rc="))
+    ]
+    rb.notes.extend(f"exercise output: {ln}" for ln in body[-EXERCISE_TAIL_LINES:])
 
 
 def render_readback(
@@ -1220,6 +1260,10 @@ def _check_map(
             _lines(probe, r"^\S+ lines=\d+ autowire-fail=.*$"),
         ),
         "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
+        "post_bringup": (
+            "post_bringup",
+            _lines(outputs.get("post-bringup", ""), r"^post-bringup .*$"),
+        ),
         "changed_path_live": (
             "changed_path_live",
             _lines(
@@ -1574,8 +1618,12 @@ def run_proof(
     receipt_dir: Path | None = None,
     verifier_identity: str | None = None,
     publish: Callable[[Sequence[MintedReceipt]], list[str]] | None = None,
+    overlay: Path | None = None,
+    post_up_command: str | None = None,
 ) -> tuple[int, str]:
     params = read_params(params_path)
+    if overlay is not None and not overlay.is_file():
+        return EXIT_USAGE, f"overlay {overlay} is not a file"
     if not any(
         params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR", "MARKET_GROUP")
     ):
@@ -1657,6 +1705,8 @@ def run_proof(
             holder,
             with_tests=True,
             log=log,
+            overlay=overlay,
+            post_up_command=post_up_command,
         )
         rb = judge(outputs, base_text, ports)
         wiring_or_health = not (
@@ -1688,6 +1738,7 @@ def run_proof(
                     "MARKET_GROUP_BASE",
                     "MARKET_GROUP_TREE",
                     "TESTS",
+                    POST_BRINGUP_PARAM,
                 )
             }
             base_out = _run_stack(
@@ -1713,6 +1764,8 @@ def run_proof(
         log(f"lease {host.name}: {rwhy}")
     if not released:
         rb.notes.append(f"lease not released: {rwhy}")
+    if post_up_command is not None:
+        judge_exercise(rb, outputs.get("exercise", ""))
     finished_at = now_fn()
     text = render_readback(
         rb, host, params, started, finished_at.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1759,6 +1812,8 @@ RESERVED_PARAMS = (
     "SLOT_PORTS",
     "POSITIVE_CONTROL",
     "REASON",
+    "OVERLAY_FILE",
+    "POST_UP_COMMAND",
 )
 
 
@@ -1772,8 +1827,14 @@ def _run_stack(
     holder: str,
     with_tests: bool,
     log: Callable[[str], None],
+    overlay: Path | None = None,
+    post_up_command: str | None = None,
 ) -> dict[str, str]:
-    """One stack on the leased host: every phase, then ALWAYS teardown."""
+    """One stack on the leased host: every phase, then ALWAYS teardown.
+
+    ``overlay`` replaces the stack's Bifrost overlay; ``post_up_command`` runs
+    once against the live stack after the probe (the ``exercise`` phase).
+    """
     # A path on the REMOTE host, private to this run and removed at the end.
     remote_dir = f"/tmp/{tag}"  # noqa: S108
     # keyed by member as well as holder: one lane may hold both .201 slots at
@@ -1797,14 +1858,31 @@ def _run_stack(
         f"POSITIVE_CONTROL={shlex.quote(host.positive_control)}",
         f"REASON={shlex.quote(f'lab pool run {tag} by {holder} (OMN-18893)')}",
     ]
+    if overlay is not None:
+        env_lines.append(f"OVERLAY_FILE={remote_dir}/overlay.bifrost.yaml")
+    if post_up_command is not None:
+        env_lines.append(f"POST_UP_COMMAND={shlex.quote(post_up_command)}")
     local_env = params_path.with_suffix(".resolved.env")
     local_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-    phases = ["snap-pre", "clone", "build", "probe"] + (["tests"] if with_tests else [])
+    phases = ["snap-pre", "clone", "build", "probe"]
+    if params.get(POST_BRINGUP_PARAM):
+        phases.append("post-bringup")
+    if post_up_command is not None:
+        phases.append("exercise")
+    if with_tests:
+        phases.append("tests")
     # probe waits up to PROBE_WAIT_S (default 1500 s) for the runtimes to settle
     # a .201 slot bring-up waits for the pool-wide build lock, builds, migrates
     # and waits for readiness inside the one build phase
     build_budget = 7200 if host.kind == "prepr-slot" else 3600
-    budget = {"clone": 900, "build": build_budget, "probe": 1800, "tests": 2400}
+    budget = {
+        "clone": 900,
+        "build": build_budget,
+        "probe": 1800,
+        "exercise": 1800,
+        "post-bringup": 1800,
+        "tests": 2400,
+    }
     outputs: dict[str, str] = {}
 
     def phase_run(phase: str, timeout: float) -> int:
@@ -1823,6 +1901,10 @@ def _run_stack(
             host, local_env, f"{remote_dir}/params.env"
         ):
             raise RuntimeError("copy to host failed")
+        if overlay is not None and transport.put(
+            host, overlay, f"{remote_dir}/overlay.bifrost.yaml"
+        ):
+            raise RuntimeError("copy of the overlay to host failed")
         for phase in phases:
             if phase_run(phase, budget.get(phase, 120)) != 0 and phase in (
                 "clone",
@@ -1943,7 +2025,7 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument(
         "--bus-overlay",
         type=Path,
-        help="omnimarket config/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
+        help="the CI overlay lane table config/lab/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
     )
     rn.add_argument(
         "--no-dispatch-check-run",
@@ -1953,6 +2035,15 @@ def build_parser() -> argparse.ArgumentParser:
             "receipt posts the informational lab-proof-receipt check run on the "
             "proven head)"
         ),
+    )
+    rn.add_argument(
+        "--overlay",
+        type=Path,
+        help="a Bifrost overlay file mounted in place of the stack's own (a slot reads it as <project>.bifrost.yaml)",
+    )
+    rn.add_argument(
+        "--post-up-command",
+        help="a shell command run once against the live stack after the probe, from the build tree, with MAIN_PORT, EFFECTS_PORT and PROJECT exported; the proof fails unless it exits 0",
     )
     rl = sub.add_parser("release", help="release a lease this holder left behind")
     rl.add_argument("--host", required=True)
@@ -2029,6 +2120,8 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         receipt_dir=args.receipt_dir,
         verifier_identity=args.verifier_identity,
         publish=publisher,
+        overlay=args.overlay,
+        post_up_command=args.post_up_command,
     )
     print(text)
     return code

@@ -10,7 +10,7 @@
 # merge) as one parameterised file, the method the prove-* lanes ran by hand.
 #
 # usage: bash prepr_pool_prove.sh <params.env> <phase>
-#   phases: snap-pre clone build probe tests teardown snap-post
+#   phases: snap-pre clone build probe post-bringup tests teardown snap-post
 #
 # It only ever touches its own compose project and the work directory named by W
 # in the params file. Every other project on the host (a dogfood lane, a runner,
@@ -27,7 +27,7 @@
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE]]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
-#   POSITIVE_CONTROL REASON]
+#   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
 # ON PURPOSE, and the macOS hosts run bash 3.2, which has no mapfile; hence:
@@ -336,6 +336,15 @@ build)
     # The sanctioned .201 entrypoint, from the test-merge tree. Its siblings
     # resolve from the ticket directory ($R), where clone put every one.
     cd "$R/omnibase_infra" || exit 1
+    if [ -n "${OVERLAY_FILE:-}" ]; then
+      # A run that names an overlay swaps the slot's Bifrost overlay: the slot
+      # mounts ${ONEX_LANE_OVERLAY_DIR}/<project>.bifrost.yaml, so a private
+      # directory holding only that file replaces the workspace one.
+      mkdir -p "$W/lane-overlay"
+      cp "$OVERLAY_FILE" "$W/lane-overlay/$P.bifrost.yaml" || { echo "build rc=1 overlay copy failed"; exit 1; }
+      export ONEX_LANE_OVERLAY_DIR="$W/lane-overlay"
+      echo "overlay mounted as $P.bifrost.yaml sha256=$(shasum -a 256 "$OVERLAY_FILE" | cut -c1-12)"
+    fi
     echo "slot $PREPR_SLOT bring-up start $(ts) GIT_SHA=$(git rev-parse HEAD)"
     OMNI_HOME="$R" bash scripts/runtime_build/prepr_verify_lane.sh --slot "$PREPR_SLOT" \
       --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
@@ -367,6 +376,11 @@ build)
   : "${MODEL_ENDPOINT:?MODEL_ENDPOINT is required}"
   sed -i.bak -E "s|endpoint_url: &model_endpoint \"[^\"]*\"|endpoint_url: \\&model_endpoint \"${MODEL_ENDPOINT}\"|" "$W/local.bifrost.yaml"
   grep -n 'model_endpoint "' "$W/local.bifrost.yaml"
+  if [ -n "${OVERLAY_FILE:-}" ]; then
+    # the named overlay replaces the generated one whole, after the pool's model endpoint
+    cp "$OVERLAY_FILE" "$W/local.bifrost.yaml" || { echo "build rc=1 overlay copy failed"; exit 1; }
+    echo "overlay replaces local.bifrost.yaml sha256=$(shasum -a 256 "$OVERLAY_FILE" | cut -c1-12)"
+  fi
   uv run -q python -m omnibase_infra.docker.catalog.cli generate local --env-file "$W/local.env" 2>&1 | tail -2
   RV=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
   if [ "${DOCKER_CONFIG_MODE:-host}" = isolated ]; then
@@ -485,6 +499,27 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     docker exec "$RP" rpk group list 2>&1 | grep -E "$GROUP_GREP" | head -10; echo "groups matching: $(docker exec "$RP" rpk group list 2>&1 | grep -cE "$GROUP_GREP") of $(docker exec "$RP" rpk group list 2>&1 | wc -l)"; fi
   uptime
   ;;
+post-bringup)
+  # OMN-20117: one command the caller names, run on the host once the stack is up
+  # and probed, from the test-merge tree. It is how a proof restarts a runtime
+  # during a live call on a pre-PR slot. The command gets the member's own names
+  # and ports and nothing else of the host's; its exit status is printed on a
+  # line of its own for the judge, and this phase itself exits 0 so teardown
+  # reads the same either way. The driver's phase budget bounds its run time.
+  if [ -z "${POST_BRINGUP_CMD:-}" ]; then
+    echo "no-post-bringup: the params name no POST_BRINGUP_CMD"
+    exit 0
+  fi
+  cd "$R/omnibase_infra" || exit 1
+  echo "post-bringup start $(ts) project=$P main=$M effects=$E ports=$MAIN,$EFF"
+  echo "post-bringup cmd: $POST_BRINGUP_CMD"
+  PROJECT=$P MAIN_RUNTIME=$M EFFECTS_RUNTIME=$E MAIN_PORT=$MAIN EFFECTS_PORT=$EFF \
+    bash -c "$POST_BRINGUP_CMD" > "$W/post-bringup.out" 2>&1
+  prc=$?
+  tail -40 "$W/post-bringup.out"
+  echo "post-bringup rc=$prc $(ts)"
+  exit 0
+  ;;
 tests)
   if [ -z "${TESTS:-}" ]; then
     echo "no-focused-tests: the PR changes no test files"
@@ -512,6 +547,17 @@ tests)
       git switch -q --detach "$HEADSHA"
     fi
   done
+  ;;
+exercise)
+  # The caller's command, run once against the live stack after the probe, from
+  # the build tree. The driver judges it by the rc line below, so this phase
+  # itself exits 0 once the command has run.
+  : "${POST_UP_COMMAND:?POST_UP_COMMAND is required for the exercise phase}"
+  cd "$R/omnibase_infra" || { echo "exercise rc=1 no build tree at $R/omnibase_infra"; exit 0; }
+  export MAIN_PORT=$MAIN EFFECTS_PORT=$EFF PROJECT=$P
+  echo "exercise start $(ts) command: $POST_UP_COMMAND"
+  bash -c "$POST_UP_COMMAND" 2>&1; erc=$?
+  echo "exercise rc=$erc $(ts)"
   ;;
 teardown)
   if [ "$KIND" = prepr-slot ]; then

@@ -37,7 +37,7 @@ OMN-18012 Phase B, which a bare ``--brokers`` invocation does not speak. A step
 that can only warn is not a mechanism, it is a comment that runs.
 
 WHY IT NEVER INFERS THE TRANSPORT. The protocol and mechanism are resolved from
-the checked-in lane overlay (omnimarket ``config/ci_bus_lanes.yaml``) by the
+the checked-in lane overlay (the CI overlay lane table ``config/lab/ci_bus_lanes.yaml``) by the
 helpers ``trigger_rebuild_on_merge.py`` already owns, and from nowhere else.
 Credential PRESENCE is not a statement about transport: the inference this
 deliberately does not reproduce picked ``SASL_SSL`` whenever SASL credentials
@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help=(
-            "path to the checked-in omnimarket config/ci_bus_lanes.yaml, "
+            "path to the checked-in the CI overlay lane table config/lab/ci_bus_lanes.yaml, "
             "sparse-checked-out by the calling job. Absent means there is no "
             "declared transport to publish on, which is reported and skipped."
         ),

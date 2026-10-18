@@ -58,6 +58,17 @@
 #                           live grant id (the acknowledgement is recorded).
 #
 # Optional environment:
+#   STABILITY_DESIRED_STATE  A lab-desired-state.v1 document (or a directory of
+#                           them) for the release this refresh delivers
+#                           (OMN-19427). The health gate grades the lane's
+#                           census against it, so a lane serving another release
+#                           reads lane_sync FAIL (revision_mismatch). After a
+#                           rollback the same comparison is RECORDED in the
+#                           receipt (rollback.gate.desired_state_sync) and does
+#                           not decide the rollback gate: a rolled-back lane is
+#                           healthy and must still read out of sync until a
+#                           release reconciles it. Unset: no desired-state
+#                           comparison, as before.
 #   DEPLOY_SOURCE_CLONE_ROOT  Explicit absolute directory holding the deploy
 #                           clones. Declare the same value in the host operator
 #                           env and deploy-agent-dev unit. It takes precedence
@@ -744,6 +755,18 @@ fi
 # 6. Health-gate
 # =============================================================================
 log "=== Health-gate ==="
+# OMN-19427: the desired state is the release being delivered, so the forward
+# gate is graded against it and the post-rollback re-verify only records it.
+declare -a GATE1_DESIRED_STATE_ARGS=()
+declare -a GATE2_DESIRED_STATE_ARGS=()
+if [[ -n "${STABILITY_DESIRED_STATE:-}" ]]; then
+    if [[ ! -e "${STABILITY_DESIRED_STATE}" ]]; then
+        err "STABILITY_DESIRED_STATE=${STABILITY_DESIRED_STATE} does not exist"
+        exit 64
+    fi
+    GATE1_DESIRED_STATE_ARGS=(--desired-state "${STABILITY_DESIRED_STATE}")
+    GATE2_DESIRED_STATE_ARGS=(--desired-state "${STABILITY_DESIRED_STATE}" --desired-state-record-only)
+fi
 PRE_IMAGE_IDS_JSON="$(
     printf '%s\n' "${!PRE_IMAGE_IDS[@]}" | while read -r k; do
         printf '%s\t%s\n' "${k}" "${PRE_IMAGE_IDS[${k}]}"
@@ -763,6 +786,7 @@ run_verify \
     --consumer-groups-file "${CONSUMER_GROUPS_FILE}" \
     --effects-manifest-url "${EFFECTS_MANIFEST_URL}" \
     --lane-compose-file "${LANE_COMPOSE_FILE}" \
+    ${GATE1_DESIRED_STATE_ARGS[@]+"${GATE1_DESIRED_STATE_ARGS[@]}"} \
     --json > "${GATE1_JSON}" || GATE_EXIT=$?
 
 # Defensive: if the health-gate crashed before printing valid JSON (should not
@@ -962,6 +986,7 @@ else
         --effects-manifest-url "${EFFECTS_MANIFEST_URL}" \
         --lane-compose-file "${LANE_COMPOSE_FILE}" \
         --no-require-digest-change \
+        ${GATE2_DESIRED_STATE_ARGS[@]+"${GATE2_DESIRED_STATE_ARGS[@]}"} \
         --json > "${GATE2_JSON}" || GATE2_EXIT=$?
 
     if ! jq -e . "${GATE2_JSON}" >/dev/null 2>&1; then

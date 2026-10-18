@@ -11,6 +11,16 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: "AC1: scripts/lab_principal_issuer.py audit-grants exits 0 with missing=0 extra=0 when a principal's live ALLOW rows equal the rows derived from deploy/lab/developer-principal-grants.yaml, and exits 1 naming each MISSING or EXTRA row otherwise, without creating or deleting any ACL -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -k audit fails at the merge base and passes at the head"
+  - id: "req-issuer-reads-overlay"
+    statement: "The issuer takes the developer machines it serves, audits and re-grants from the lab developer.principal overlay, and the grants it applies are the ones the overlay's grants_source declares."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: scripts/lab_principal_issuer.py --overlay reads a developer_principal.v1 document, refuses one whose grants_source is not the issuer's grant file, whose row carries a grant or a name the issuer does not derive from the row's login and device, and serve issues only a declared login and device; apply-grants and audit-grants act on the overlay's principals alone -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -k overlay fails at the merge base and passes at the head"
+  - id: "req-grants-derived"
+    statement: "The grants the issuer applies are the output of node_broker_grant_derive_compute, which expresses prefixed group grants and the describe-only wildcard, and are not typed in the grant file."
+    acceptance:
+      - id: "AC3"
+        statement: "AC3: node_broker_grant_derive_compute derives from deploy/lab/developer-principal-bindings.yaml exactly the set of grants deploy/lab/developer-principal-grants.yaml typed by hand (literal topics, prefixed group read and describe, the describe-only group *), the committed deploy/lab/developer-principal-derived-grants.json is that output, and scripts/lab_principal_issuer.py takes its grants from that file through grants_from and refuses a policy file that also types grants -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k derive fails at the merge base and passes at the head"
 evidence_requirements:
   - kind: "tests"
     description: "The audit tests pin the derived rows, a clean listing, an extra row, a missing row, DENY and other-principal rows ignored, a host-bound ALLOW row as extra, and the command's exit codes."
@@ -28,3 +38,30 @@ dod_evidence:
         check_value: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k audit"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn19975-ac2-overlay"
+    description: "The issuer reads the developer.principal overlay and applies and audits the grants derived from the grant file for its principals only."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k overlay"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn19975-ac3-derived-grants"
+    description: "The grant derivation reproduces the typed grant set from the bindings, the derived file is its output, and the issuer reads that file."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -k 'typed_by_hand or nodes_output or derived'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -k developer_principal_issuer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-omn19975-ac3-deploy-derived-grants-shipped"
+    description: "The derived grants the issuer image ships at the merged head carry the prefixed group grants and the describe-only wildcard; the deployed surface is the source at the merged head."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/deploy/lab/developer-principal-derived-grants.json?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF '\"pattern\": \"PREFIXED\"'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]

@@ -47,7 +47,7 @@ jobs:
   validate:
     name: validate
     # workflow_dispatch-only: this trusted maintenance lane never executes PR code.
-    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    runs-on: ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 10
 
     steps:

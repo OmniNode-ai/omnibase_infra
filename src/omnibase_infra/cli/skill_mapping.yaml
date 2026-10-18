@@ -239,6 +239,12 @@ skills:
       # predicate accepts; `--exclude` still wins over an offer, before any
       # GitHub or Linear I/O about it.
       - {name: offer, payload_field: offer_tickets, arg_type: string_list}
+      # OMN-16106. Product repositories whose own merged PRs the forward
+      # window also reads, `--product-repos OmniNode-ai/omnimarket,...`. A
+      # repository cut over from change control mints no companion, so its
+      # tickets bind through the PR's contracts/<ticket>.yaml. Omitted, the
+      # forward window reads change control only.
+      - {name: product-repos, payload_field: product_repos, arg_type: string_list}
       # OMN-17342. The BACKFILL arm. `--backfill-lookback-hours 0` (the default,
       # and what every scheduled tick gets) leaves the sweep single-armed. A
       # non-zero value adds a second enumeration over a wider window and offers
@@ -896,3 +902,22 @@ skills:
       - {name: scope, payload_field: scope, arg_type: string_list, default: ["src/**", "tests/**", "docs/**"]}
       - {name: tools, payload_field: tools, arg_type: string_list, default: ["Edit", "Write"]}
       - {name: ttl-seconds, payload_field: ttl_seconds, arg_type: integer, default: 14400}
+  # OMN-21093: the Claude Code adapter nodes moved into omnimarket
+  # (omnimarket#3946); the install effect writes the rendered binding module
+  # to the Claude Code mods location and registers commands in the user
+  # settings. The wire models live in omnibase_core (moved there by this
+  # ticket so this mapping names a shared model, not a node-package reach-in
+  # the node-boundary gate refuses). The request's `bindings`
+  # (ModelClientBinding objects) is constructed by the capability/render
+  # pipeline rather than the CLI, so the surfaced args are the host paths and
+  # knobs the caller resolves; every arg maps onto a ModelBindingInstallRequest
+  # field (extra="forbid").
+  - skill_name: claude_code_binding_install
+    node_name: node_claude_code_binding_install_effect
+    result_model: omnibase_core.models.claude_code_binding.ModelBindingInstallResult
+    args:
+      - {name: mods-dir, payload_field: mods_dir, arg_type: string, required: true}
+      - {name: settings-path, payload_field: settings_path, arg_type: string, required: true}
+      - {name: max-mode, payload_field: max_mode, arg_type: string}
+      - {name: plugin-name, payload_field: plugin_name, arg_type: string}
+      - {name: supported-probe-rows, payload_field: supported_probe_rows, arg_type: string_list}

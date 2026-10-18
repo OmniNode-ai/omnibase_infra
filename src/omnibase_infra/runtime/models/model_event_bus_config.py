@@ -25,7 +25,7 @@ class ModelEventBusConfig(BaseModel):
             the in-memory bus, which is a first-class configured value for
             local runtimes and the shipped tier-0 default.
         environment: Deployment environment name
-        lane: The declared lane (``omnimarket/config/ci_bus_lanes.yaml``)
+        lane: The declared lane (the CI overlay lane table ``config/lab/ci_bus_lanes.yaml``)
             whose broker a runtime's shared bus is. ``None`` for a runtime
             whose broker is supplied by its own deployment (every lane
             container), and required for none -- but only a ``kafka``

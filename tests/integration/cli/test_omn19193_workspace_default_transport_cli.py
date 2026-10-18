@@ -74,7 +74,12 @@ event_bus:
 
 def _workspace(root: Path, *, with_config: bool) -> Path:
     """A workspace root: the lane declaration and, optionally, its tier-1 config."""
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    # The lane table belongs to the config owner (OMN-20935), the same root the
+    # tier-1 runtime config is read from; without one set, the developer layout.
+    owner = os.environ.get("ONEX_WORKSPACE_CONFIG_ROOT")
+    declaration = (
+        Path(owner) if owner else root / ".onex" / "workspace-config"
+    ) / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_DECLARATION, encoding="utf-8")
     if with_config:

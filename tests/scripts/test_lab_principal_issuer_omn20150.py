@@ -9,9 +9,11 @@ no Docker.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -28,11 +30,13 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from scripts import lab_principal_issuer as lpi
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GRANTS = REPO_ROOT / "deploy" / "lab" / "developer-principal-grants.yaml"
+DERIVED = REPO_ROOT / "deploy" / "lab" / "developer-principal-derived-grants.json"
 LOGIN = "dev.person@omninode.ai"
 UNIX_ONLY = pytest.mark.skipif(
     not hasattr(socket, "SO_PEERCRED"), reason="SO_PEERCRED is Linux-only"
@@ -103,6 +107,7 @@ def apply_broker(broker: FakeBroker, monkeypatch: pytest.MonkeyPatch) -> FakeBro
 
 def _grant_file(tmp_path: Path, grants: list[dict[str, object]]) -> Path:
     doc = yaml.safe_load(GRANTS.read_text())
+    del doc["grants_from"]
     doc["grants"] = grants
     path = tmp_path / "grants.yaml"
     path.write_text(yaml.safe_dump(doc))
@@ -110,6 +115,104 @@ def _grant_file(tmp_path: Path, grants: list[dict[str, object]]) -> Path:
 
 
 # --- the declaration ------------------------------------------------------
+
+
+def test_the_issuer_takes_its_grants_from_the_derived_file_not_the_policy_file() -> (
+    None
+):
+    doc = yaml.safe_load(GRANTS.read_text())
+    assert "grants" not in doc
+    assert doc["grants_from"] == DERIVED.name
+    declaration = lpi.load_declaration(GRANTS)
+    derived = json.loads(DERIVED.read_text())["grants"]
+    assert {
+        (g.resource, g.name, g.pattern, op)
+        for g in declaration.grants
+        for op in g.operations
+    } == {
+        (
+            r["resource_type"].lower(),
+            r["resource"],
+            r["pattern"].lower(),
+            r["operation"].lower(),
+        )
+        for r in derived
+    }
+    templated = [g for g in declaration.grants if g.templated]
+    assert [(g.name, g.create_topic) for g in templated] == [
+        ("onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1", True)
+    ]
+    assert declaration.digest != hashlib.sha256(GRANTS.read_bytes()).hexdigest()
+
+
+def test_a_policy_file_cannot_carry_typed_grants_beside_the_derived_ones(
+    tmp_path: Path,
+) -> None:
+    shutil.copy(DERIVED, tmp_path / DERIVED.name)
+    doc = yaml.safe_load(GRANTS.read_text())
+    doc["grants"] = [
+        {
+            "resource": "topic",
+            "name": "typed.v1",
+            "pattern": "literal",
+            "operations": ["read"],
+        }
+    ]
+    path = tmp_path / "grants.yaml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(lpi.DeclarationError, match="exclusive"):
+        lpi.load_declaration(path)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {
+            "resource_type": "GROUP",
+            "resource": "*",
+            "operation": "READ",
+            "pattern": "LITERAL",
+        },
+        {
+            "resource_type": "GROUP",
+            "resource": "short.",
+            "operation": "READ",
+            "pattern": "PREFIXED",
+        },
+        {
+            "resource_type": "TOPIC",
+            "resource": "x.v1",
+            "operation": "CREATE",
+            "pattern": "LITERAL",
+        },
+    ],
+)
+def test_a_derived_row_is_held_to_the_issuers_rules(
+    tmp_path: Path, row: dict[str, str]
+) -> None:
+    derived = {"principal": "{principal}", "grants": [{"broker": "dev", **row}]}
+    (tmp_path / DERIVED.name).write_text(json.dumps(derived))
+    path = tmp_path / "grants.yaml"
+    path.write_text(GRANTS.read_text())
+    with pytest.raises(lpi.DeclarationError):
+        lpi.load_declaration(path)
+
+
+def test_a_derived_row_for_another_broker_is_refused(tmp_path: Path) -> None:
+    row = {
+        "broker": "cloud",
+        "resource_type": "TOPIC",
+        "resource": "x.v1",
+        "operation": "READ",
+        "pattern": "LITERAL",
+    }
+    (tmp_path / DERIVED.name).write_text(
+        json.dumps({"principal": "{principal}", "grants": [row]})
+    )
+    path = tmp_path / "grants.yaml"
+    path.write_text(GRANTS.read_text())
+    with pytest.raises(lpi.DeclarationError, match="not lane dev"):
+        lpi.load_declaration(path)
 
 
 def test_the_checked_in_grant_file_is_valid(declaration: lpi.Declaration) -> None:
@@ -128,7 +231,10 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # holds write on the two delegate-skill terminals. The ledger write path
     # (OMN-20275) adds write on its append command only: the ledger host's serve
     # process alone writes the append terminals. Literal names, no prefix or
-    # wildcard grant.
+    # wildcard grant. The memory lifecycle proof (OMN-21045) adds write on the
+    # expire-memory command only. The pr-polish proof (OMN-21034) adds write on the
+    # start command only: the lab runtime writes the two result topics.
+    # The DoD closeout proof (OMN-21048) adds write on the decide command only.
     writable = [g for g in declaration.grants if "write" in g.operations]
     assert {g.name for g in writable} == {
         "onex.cmd.omnimarket.delegate-skill.v1",
@@ -137,6 +243,9 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1",
         "onex.cmd.omnimarket.pr-handoff-requested.v1",
         "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+        "onex.cmd.omnimemory.expire-memory.v1",
+        "onex.cmd.omnimarket.pr-polish-start.v1",
+        "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
@@ -383,6 +492,7 @@ def test_a_login_outside_the_allowed_domains_is_refused(
 ) -> None:
     doc = yaml.safe_load(GRANTS.read_text())
     doc["allowed_login_domains"] = ["omninode.ai"]
+    shutil.copy(DERIVED, tmp_path / DERIVED.name)
     path = tmp_path / "grants.yaml"
     path.write_text(yaml.safe_dump(doc))
     issuer = lpi.Issuer(lpi.load_declaration(path), broker, lpi.Ledger(ledger_path))
@@ -905,16 +1015,13 @@ ACL_HEADER = "PRINCIPAL  HOST  RESOURCE-TYPE  RESOURCE-NAME  RESOURCE-PATTERN-TY
 
 def _derived_listing(principal: str) -> list[str]:
     """Rows spelled from the raw YAML, independent of the issuer's own parser."""
-    doc = yaml.safe_load(GRANTS.read_text())
-    rows = []
-    for g in doc["grants"]:
-        name = g["name"].replace("{principal}", principal)
-        resource = g["resource"].upper()
-        for op in g["operations"]:
-            rows.append(
-                f"User:{principal}  *  {resource}  {name}  {g['pattern'].upper()}  {op.upper()}  ALLOW"
-            )
-    return rows
+    doc = json.loads(DERIVED.read_text())
+    return [
+        f"User:{principal}  *  {g['resource_type']}  "
+        f"{g['resource'].replace('{principal}', principal)}  {g['pattern']}  "
+        f"{g['operation']}  ALLOW"
+        for g in doc["grants"]
+    ]
 
 
 def _listing(rows: Sequence[str]) -> str:
@@ -967,12 +1074,19 @@ def test_a_row_the_file_does_not_derive_is_reported_extra(
     )
 
 
+def _delegate_write_row(rows: list[str]) -> int:
+    """Index of the delegate command's WRITE row, wherever the derivation sorts it."""
+    return next(
+        i for i, row in enumerate(rows) if "delegate-skill.v1  LITERAL  WRITE" in row
+    )
+
+
 def test_a_derived_row_the_broker_lacks_is_reported_missing(
     declaration: lpi.Declaration,
 ) -> None:
     principal = "dev-a-mac"
     rows = _derived_listing(principal)
-    dropped = rows.pop(0)
+    dropped = rows.pop(_delegate_write_row(rows))
     live = lpi.parse_acl_listing(_listing(rows), principal)
     missing, extra = lpi.audit_acl_rows(declaration, principal, live)
     assert extra == ()
@@ -1071,7 +1185,7 @@ def test_audit_grants_exits_one_and_names_each_drifted_row(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     rows = _derived_listing("dev-a-mac")
-    rows.pop(0)
+    rows.pop(_delegate_write_row(rows))
     rows.append("User:dev-a-mac  *  TOPIC  extra.v1  LITERAL  READ  ALLOW")
     broker = ListingBroker({"dev-a-mac": _listing(rows)})
     monkeypatch.setattr(lpi, "Broker", lambda config: broker)
@@ -1114,3 +1228,270 @@ def test_audit_grants_refuses_a_principal_the_broker_does_not_have(
     )
     assert code == 2
     assert "the broker has no principal dev-ghost-mac" in capsys.readouterr().err
+
+
+# --- OMN-19975: the issuer reads the developer.principal overlay --------------
+
+OVERLAY_ROW = {
+    "principal": "dev-jake-logyyks-macbook-pro",
+    "login": "jake@omninode.ai",
+    "device": "logyyks-macbook-pro",
+}
+SECOND_ROW = {
+    "principal": "dev-ana-ana-laptop",
+    "login": "ana@omninode.ai",
+    "device": "ana-laptop",
+}
+
+
+def _overlay_doc(*rows: dict[str, str]) -> dict[str, object]:
+    return {
+        "schema_version": "developer_principal.v1",
+        "grants_source": "omnibase_infra:deploy/lab/developer-principal-grants.yaml",
+        "principals": list(rows),
+    }
+
+
+def _overlay_file(tmp_path: Path, doc: dict[str, object]) -> Path:
+    path = tmp_path / "developer-principal-overlay.yaml"
+    path.write_text(yaml.safe_dump(doc))
+    return path
+
+
+@pytest.fixture
+def overlay_path(tmp_path: Path) -> Path:
+    return _overlay_file(tmp_path, _overlay_doc(OVERLAY_ROW, SECOND_ROW))
+
+
+def test_the_issuer_overlay_rules_agree_with_the_core_model(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    from omnibase_core.models.config_overlay.model_developer_principal_overlay import (
+        ModelDeveloperPrincipalOverlay,
+    )
+
+    good = _overlay_doc(OVERLAY_ROW, SECOND_ROW)
+    ModelDeveloperPrincipalOverlay.model_validate(good)
+    assert len(lpi.load_overlay(_overlay_file(tmp_path, good), declaration).rows) == 2
+
+    faults = {
+        "grant": _overlay_doc({**OVERLAY_ROW, "grants": "topic"}),
+        "duplicate principal": _overlay_doc(OVERLAY_ROW, OVERLAY_ROW),
+        "duplicate holder": _overlay_doc(
+            OVERLAY_ROW, {**OVERLAY_ROW, "principal": "dev-other"}
+        ),
+        "blank login": _overlay_doc({**OVERLAY_ROW, "login": " "}),
+        "bad device": _overlay_doc({**OVERLAY_ROW, "device": "Mac_Book"}),
+        "no principals": _overlay_doc(),
+    }
+    for doc in faults.values():
+        with pytest.raises(ValidationError):
+            ModelDeveloperPrincipalOverlay.model_validate(doc)
+        with pytest.raises(lpi.DeclarationError):
+            lpi.load_overlay(_overlay_file(tmp_path, doc), declaration)
+
+
+def test_an_overlay_row_must_hold_the_name_the_issuer_derives(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    doc = _overlay_doc({**OVERLAY_ROW, "principal": "dev-someone-else"})
+    with pytest.raises(lpi.DeclarationError, match="dev-jake-logyyks-macbook-pro"):
+        lpi.load_overlay(_overlay_file(tmp_path, doc), declaration)
+
+
+def test_an_overlay_must_name_this_issuers_grant_file(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    doc = {**_overlay_doc(OVERLAY_ROW), "grants_source": "somewhere:else.yaml"}
+    with pytest.raises(lpi.DeclarationError, match="grants_source"):
+        lpi.load_overlay(_overlay_file(tmp_path, doc), declaration)
+
+
+def test_an_overlay_cannot_exceed_the_devices_one_login_may_hold(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    rows = [
+        {
+            "principal": f"dev-jake-mac{n}",
+            "login": "jake@omninode.ai",
+            "device": f"mac{n}",
+        }
+        for n in range(declaration.max_devices_per_login + 1)
+    ]
+    with pytest.raises(lpi.DeclarationError, match="more than"):
+        lpi.load_overlay(_overlay_file(tmp_path, _overlay_doc(*rows)), declaration)
+
+
+def test_check_validates_the_overlay_and_refuses_a_bad_one(
+    overlay_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        lpi.main(["check", "--grants", str(GRANTS), "--overlay", str(overlay_path)])
+        == 0
+    )
+    assert "2 developer principals" in capsys.readouterr().out
+    bad = _overlay_file(tmp_path, _overlay_doc({**OVERLAY_ROW, "principal": "x"}))
+    assert lpi.main(["check", "--grants", str(GRANTS), "--overlay", str(bad)]) == 2
+
+
+def test_apply_grants_with_an_overlay_grants_exactly_the_derived_rows_to_its_principals(
+    apply_broker: FakeBroker,
+    declaration: lpi.Declaration,
+    overlay_path: Path,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lpi.Ledger(ledger_path).append(
+        {"principal": "dev-in-ledger-only", "lane": "dev", "action": "created"}
+    )
+    expected = sorted({OVERLAY_ROW["principal"], SECOND_ROW["principal"]})
+    for principal in expected:
+        apply_broker.users[principal] = "existing-secret"
+    code = lpi.main(
+        [
+            "apply-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--overlay",
+            str(overlay_path),
+        ]
+    )
+    assert code == 0
+    assert apply_broker.set_calls == []
+    assert apply_broker.acl_argvs == [
+        [principal, g.resource, g.name, g.pattern, *g.operations]
+        for principal in expected
+        for declared in declaration.grants
+        for g in [declared.for_principal(principal)]
+    ]
+    assert capsys.readouterr().out.splitlines() == [
+        f"applied {len(declaration.grants)} grants to {principal}"
+        for principal in expected
+    ]
+
+
+def test_a_principal_outside_the_overlay_is_refused_by_apply_and_audit(
+    apply_broker: FakeBroker,
+    overlay_path: Path,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for command in ("apply-grants", "audit-grants"):
+        code = lpi.main(
+            [
+                command,
+                "--grants",
+                str(GRANTS),
+                "--ledger",
+                str(ledger_path),
+                "--overlay",
+                str(overlay_path),
+                "--principal",
+                "dev-not-declared",
+            ]
+        )
+        assert code == 2
+        assert "not declared in the developer.principal overlay" in (
+            capsys.readouterr().err
+        )
+    assert apply_broker.acl_argvs == []
+
+
+def test_audit_grants_with_an_overlay_reads_back_one_developer_row(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    overlay_path: Path,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    principal = OVERLAY_ROW["principal"]
+    broker = ListingBroker({principal: _listing(_derived_listing(principal))})
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    argv = [
+        "audit-grants",
+        "--grants",
+        str(GRANTS),
+        "--ledger",
+        str(ledger_path),
+        "--overlay",
+        str(overlay_path),
+        "--principal",
+        principal,
+    ]
+    assert lpi.main(argv) == 0
+    count = len(_derived_listing(principal))
+    assert capsys.readouterr().out.splitlines() == [
+        f"principal={principal} expected={count} live={count} missing=0 extra=0"
+    ]
+    broker.listings[principal] = _listing(_derived_listing(principal)[1:])
+    assert lpi.main(argv) == 1
+    assert "missing=1 extra=0" in capsys.readouterr().out
+    assert broker.acl_argvs == [] and broker.set_calls == []
+
+
+def test_audit_grants_with_an_overlay_covers_every_declared_principal(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    overlay_path: Path,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    broker = ListingBroker(
+        {
+            p["principal"]: _listing(_derived_listing(p["principal"]))
+            for p in (OVERLAY_ROW, SECOND_ROW)
+        }
+    )
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    code = lpi.main(
+        [
+            "audit-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--overlay",
+            str(overlay_path),
+        ]
+    )
+    assert code == 0
+    assert [line.split()[0] for line in capsys.readouterr().out.splitlines()] == [
+        "principal=dev-ana-ana-laptop",
+        "principal=dev-jake-logyyks-macbook-pro",
+    ]
+
+
+def test_an_issuer_with_an_overlay_issues_only_a_declared_login_and_device(
+    declaration: lpi.Declaration,
+    broker: FakeBroker,
+    ledger_path: Path,
+    tmp_path: Path,
+) -> None:
+    overlay = lpi.load_overlay(
+        _overlay_file(tmp_path, _overlay_doc(OVERLAY_ROW)), declaration
+    )
+    issuer = lpi.Issuer(declaration, broker, lpi.Ledger(ledger_path), overlay)
+    issued = issuer.issue(
+        OVERLAY_ROW["login"], {"lane": "dev", "device": OVERLAY_ROW["device"]}
+    )
+    assert issued["principal"] == OVERLAY_ROW["principal"]
+    assert issued["action"] == "created"
+    for login, device in (
+        (OVERLAY_ROW["login"], "another-mac"),
+        ("jake@elsewhere.example", OVERLAY_ROW["device"]),
+    ):
+        with pytest.raises(lpi.IssuerError, match="overlay") as exc:
+            issuer.issue(login, {"lane": "dev", "device": device})
+        assert exc.value.status is HTTPStatus.FORBIDDEN
+    assert list(broker.users) == [OVERLAY_ROW["principal"]]
+
+
+def test_the_lab_overlay_shape_validates(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    """The row the lab dev lane's overlay document declares today."""
+    path = _overlay_file(tmp_path, _overlay_doc(OVERLAY_ROW))
+    overlay = lpi.load_overlay(path, declaration)
+    assert overlay.principals == {"dev-jake-logyyks-macbook-pro"}

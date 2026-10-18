@@ -7,7 +7,8 @@
 # consumer-side model.
 #
 # THE SPLIT CONTRACT. `config/ci_bus_lanes.yaml` is written and reviewed in
-# omnimarket. It is validated in omnibase_infra by `ModelCiBusOverlay` in
+# the CI overlay repository (OMN-20935; it lived in omnimarket until then). It
+# is validated in omnibase_infra by `ModelCiBusOverlay` in
 # scripts/trigger_rebuild_on_merge.py, which is `extra="forbid"`. The
 # strictness is deliberate — an unknown key in that file is a typo that would
 # otherwise route a publisher to a lane it never declared — but it puts the two
@@ -23,10 +24,11 @@
 #     omnimarket#2420; ten consecutive rebuild-trigger runs red on
 #     `lanes.dev.projection_readback Extra inputs are not permitted`.
 #
-# This job is the surface that owns the coupling: it checks out the live
-# overlay from omnimarket@dev and loads it through the exact model the
-# publisher uses, so a third key addition reds HERE, named, rather than on
-# whichever pull request happens to touch runtime next.
+# This job is the surface that owns the coupling: it reads the live overlay
+# from the CI overlay repository (config/lab/ci_bus_lanes.yaml, OMN-20935) and
+# loads it through the exact model the publisher uses, so a third key addition
+# reds HERE, named, rather than on whichever pull request happens to touch
+# runtime next.
 #
 # WHY A SCHEDULE AND NOT ONLY A PR GATE. A producer-side key lands in omnimarket
 # without creating a pull request in this repository at all. A PR-only gate
@@ -90,7 +92,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     timeout-minutes: 15
 
@@ -100,26 +102,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout the live omnimarket CI bus overlay
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Fetch the live CI bus overlay from the CI overlay repository
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          # dev, because dev is the ref runtime-rebuild-trigger.yml itself
-          # sparse-checks out at merge time. Binding against anything else
-          # would validate a file the publisher never reads.
-          ref: dev
-          path: .ci-bus-overlay
-          token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       - name: Assert the overlay checkout produced the file
         shell: bash
         run: |
           set -euo pipefail
-          OVERLAY=".ci-bus-overlay/config/ci_bus_lanes.yaml"
+          OVERLAY=".lane-table/config/ci_bus_lanes.yaml"
           # A silently empty sparse checkout is the failure mode that would
           # otherwise turn this whole job into a green no-op, so it is refused
           # before pytest ever runs rather than surfacing as a skip.
@@ -141,7 +136,7 @@ jobs:
 
       - name: Validate the live overlay against the publisher's model
         env:
-          CI_BUS_OVERLAY_LIVE_PATH: .ci-bus-overlay/config/ci_bus_lanes.yaml
+          CI_BUS_OVERLAY_LIVE_PATH: .lane-table/config/ci_bus_lanes.yaml
         run: |
           uv run pytest \
             tests/unit/scripts/test_ci_bus_overlay_live_binding.py \

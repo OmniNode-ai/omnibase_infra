@@ -392,8 +392,9 @@ for _role in $LOGIN_ONLY_ROLES; do
 "
 done
 
-# Every slot role's budget, resolved before any connection so that a missing
-# entry refuses in --print-scope exactly as it would in --apply.
+# Every slot role's budget, resolved before the migration corpus is scanned or
+# any connection is opened. An unbudgeted principal must be refused even when
+# the migration corpus is unavailable.
 SLOT_ROLE_LIMITS=""
 SLOT_CONNECTION_BUDGET=0
 for _role in $SLOT_ROLES; do
@@ -403,10 +404,45 @@ for _role in $SLOT_ROLES; do
     SLOT_CONNECTION_BUDGET=$((SLOT_CONNECTION_BUDGET + _limit))
 done
 
+# Databases a forward migration creates through an `onex-create-database`
+# directive (`keycloak`). The migration runner asks the slot's migration
+# principal to create them, and that principal is NOCREATEDB by design, so the
+# slot's first forward migration died with "permission denied to create
+# database" (OMN-19064). The provisioner holds the admin connection, so it
+# creates them here, under the slot suffix, and the runner's own
+# `CREATE DATABASE ... WHERE NOT EXISTS` finds the database present and issues
+# nothing. The list is read from the migration corpus rather than named here, so
+# a directive added later is covered the day it lands. A name the maps above
+# already derive is left to the map loop.
+DIRECTIVE_MIGRATIONS_DIR="${MIGRATIONS_DIR:-$(dirname "$0")/../docker/migrations/forward}"
+if [ -z "$(find "$DIRECTIVE_MIGRATIONS_DIR" -name '*.sql' 2>/dev/null | head -1)" ]; then
+    fail "$EXIT_DERIVED_NAME_OUT_OF_FENCE" \
+        "no .sql files under ${DIRECTIVE_MIGRATIONS_DIR}: the directive scan has nothing to read, so an empty result would be a broken scan rather than a corpus without directives"
+fi
+SLOT_DIRECTIVE_DATABASES=""
+_directive_names="$(
+    grep -rhiE '^--[[:space:]]*onex-create-database[[:space:]]*:' "$DIRECTIVE_MIGRATIONS_DIR" 2>/dev/null \
+        | sed -E 's/^--[[:space:]]*[Oo][Nn][Ee][Xx]-[Cc][Rr][Ee][Aa][Tt][Ee]-[Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee][[:space:]]*:[[:space:]]*//; s/[[:space:]]*$//' \
+        | sort -u
+)"
+for _db in $_directive_names; do
+    _sdb="$(derive "$_db")"
+    assert_in_fence "$_sdb" "directive database"
+    case "
+${SLOT_DATABASES}" in
+        *"
+${_sdb}
+"*) continue ;;
+    esac
+    SLOT_DIRECTIVE_DATABASES="${SLOT_DIRECTIVE_DATABASES}${_sdb}
+"
+done
+
 if [ "$MODE" = "--print-scope" ]; then
     echo "slot=${SLOT}"
     echo "group_role=${GROUP_ROLE}"
     for _n in $SLOT_DATABASES; do echo "database=${_n}"; done
+    for _n in $SLOT_DIRECTIVE_DATABASES; do echo "directive_database=${_n}"; done
     for _n in $SLOT_ROLES; do echo "role=${_n}"; done
     for _n in $SLOT_ROLE_LIMITS; do echo "connection_limit=${_n}"; done
     echo "slot_connection_budget=${SLOT_CONNECTION_BUDGET}"
@@ -683,6 +719,21 @@ EOSQL
         psql_admin -c "REVOKE CONNECT ON DATABASE \"${_db}\" FROM PUBLIC;"
     done
 
+    # --- directive-created databases (OMN-19064) -----------------------------
+    for _db in $SLOT_DIRECTIVE_DATABASES; do
+        assert_in_fence "$_db" "directive database"
+        if database_exists "$_db"; then
+            echo "[provision-db-slot]   directive database ${_db} already present"
+        else
+            echo "[provision-db-slot]   creating directive database ${_db}"
+            psql_admin <<EOSQL
+SELECT 'CREATE DATABASE "${_db}"'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${_db}')\gexec
+EOSQL
+        fi
+        psql_admin -c "REVOKE CONNECT ON DATABASE \"${_db}\" FROM PUBLIC;"
+    done
+
     # --- grants, slot's own set only ----------------------------------------
     for _pair in $SLOT_DB_ROLE_PAIRS; do
         _db="${_pair%%:*}"
@@ -702,6 +753,19 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${_role}";
 EOSQL
     done
 
+    # Migration 103 requires tenant_projection_writer to hold CONNECT on
+    # omnidash_analytics and refuses to continue when it cannot grant it: the
+    # migration principal holds no grant option on a database it does not own,
+    # and the migration's own hint says to grant it at the provisioning seam
+    # (OMN-17301). Under a slot that seam is this tool, and the grant is on the
+    # slot's own omnidash database to the slot's own principal (OMN-19064).
+    _tpw_db="$(derive omnidash_analytics)"
+    _tpw_role="$(derive tenant_projection_writer)"
+    assert_in_fence "$_tpw_db" "database"
+    assert_in_fence "$_tpw_role" "role"
+    echo "[provision-db-slot]   granting ${_tpw_role} CONNECT on ${_tpw_db}"
+    psql_admin -c "GRANT CONNECT ON DATABASE \"${_tpw_db}\" TO \"${_tpw_role}\";"
+
     # omninode_cloud's corpus opens with CREATE EXTENSION pgcrypto, and
     # `trusted = t` waives the SUPERUSER requirement, never the PRIVILEGE
     # requirement -- CREATE on the DATABASE is a different privilege from CREATE
@@ -719,6 +783,21 @@ EOSQL
        A GRANT issued without grant option on the object warns and returns
        success rather than raising, so this readback is the only thing between a
        real grant and a silent no-op."
+    fi
+
+    # The runner converges the canonical ledger in the application database, and
+    # its first statement is CREATE SCHEMA platform_catalog, which needs CREATE on
+    # the DATABASE. The same grant as the cloud database above, for the same
+    # reason: the live slot bring-up died there with "permission denied for
+    # database omnidash_analytics_prepr1" (OMN-19064).
+    _dash_db="$(derive omnidash_analytics)"
+    _dash_role="$(derive role_omnidash)"
+    assert_in_fence "$_dash_db" "database"
+    assert_in_fence "$_dash_role" "role"
+    psql_admin -c "GRANT CREATE ON DATABASE \"${_dash_db}\" TO \"${_dash_role}\";"
+    _dash_create_ok="$(scalar "SELECT has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')")"
+    if [ "$_dash_create_ok" != "t" ]; then
+        fail 1 "${_dash_role} still lacks CREATE on ${_dash_db} after the grant."
     fi
 
     # --- the falsifier, run in-band -----------------------------------------

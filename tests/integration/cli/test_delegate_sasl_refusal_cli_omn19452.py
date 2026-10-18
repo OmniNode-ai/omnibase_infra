@@ -76,7 +76,7 @@ def _isolated_machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _workspace(root: Path, *, broker: str) -> Path:
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(
         "lanes:\n"

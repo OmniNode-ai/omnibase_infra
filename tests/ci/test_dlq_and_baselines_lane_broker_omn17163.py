@@ -348,25 +348,28 @@ def test_no_omnibase_env_sourcing(workflow_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("workflow_path", _PROBE_WORKFLOWS, ids=lambda p: p.name)
-def test_checks_out_the_lane_declaration_from_omnimarket(
+def test_reads_the_lane_declaration_from_the_ci_overlay(
     workflow_path: Path,
 ) -> None:
-    overlay_steps = [
+    """OMN-20935: the lane table is private config, fetched from the CI overlay."""
+    steps = _steps(workflow_path)
+    assert not [
         step
-        for step in _steps(workflow_path)
-        if str(step.get("uses", "")).startswith("actions/checkout@")
-        and _mapping(step, "with").get("repository") == _LANE_OVERLAY_REPO
+        for step in steps
+        if _mapping(step, "with").get("repository") == _LANE_OVERLAY_REPO
+    ], f"{workflow_path.name} still checks out {_LANE_OVERLAY_REPO}"
+    fetches = [
+        step
+        for step in steps
+        if step.get("uses") == "./.github/actions/fetch-lane-table"
     ]
-    assert len(overlay_steps) == 1, (
-        f"{workflow_path.name} must sparse-check-out the lane declaration "
-        f"from {_LANE_OVERLAY_REPO} exactly once"
+    assert len(fetches) == 1, (
+        f"{workflow_path.name} must fetch the lane declaration from the CI "
+        "overlay exactly once"
     )
-    with_block = _mapping(overlay_steps[0], "with")
-    assert _LANE_OVERLAY_PATH in str(with_block.get("sparse-checkout", ""))
-    assert with_block.get("persist-credentials") is False, (
-        "no git operations follow this checkout — do not leave the Actions "
-        "token in local git config (zizmor artipacked)"
-    )
+    with_block = _mapping(fetches[0], "with")
+    assert with_block.get("overlay-repo") == "${{ vars.OMNI_CI_OVERLAY_REPO }}"
+    assert str(with_block.get("dest")).endswith(_LANE_OVERLAY_PATH)
 
 
 @pytest.mark.unit

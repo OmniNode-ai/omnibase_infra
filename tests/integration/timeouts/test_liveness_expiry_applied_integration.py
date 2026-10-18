@@ -117,6 +117,39 @@ def _emitter(
     )
 
 
+async def test_tick_expires_active_row_stamped_before_the_state_write(
+    mock_event_bus: MockEventBus,
+    in_memory_store: InMemoryProjectionStore,
+    mock_projector: MockProjector,
+) -> None:
+    """A row the old emitter stamped but left active is expired by the next tick.
+
+    This is the dev-lane backlog of OMN-21028: ACTIVE rows past their deadline that
+    already carry the emission marker. No hand backfill; the timeout path does it.
+    """
+    now = datetime.now(UTC)
+    stamped_id = uuid4()
+    stamped = _active_row(
+        entity_id=stamped_id, liveness_deadline=now - timedelta(minutes=30)
+    ).model_copy(update={"liveness_timeout_emitted_at": now - timedelta(minutes=29)})
+    await _store(in_memory_store, stamped)
+
+    result = await _emitter(
+        in_memory_store, mock_event_bus, mock_projector
+    ).process_timeouts(now=now, tick_id=uuid4(), correlation_id=uuid4())
+
+    assert result.liveness_expirations_emitted == 1
+    row = in_memory_store.projections[(stamped_id, "registration")]
+    assert row.current_state is EnumRegistrationState.LIVENESS_EXPIRED
+    assert row.liveness_timeout_emitted_at == now
+
+    again = await _emitter(
+        in_memory_store, mock_event_bus, mock_projector
+    ).process_timeouts(now=now, tick_id=uuid4(), correlation_id=uuid4())
+    assert again.liveness_expirations_emitted == 0
+    assert mock_event_bus.count_events("liveness-expired") == 1
+
+
 async def test_tick_expires_lapsed_row_and_keeps_heartbeating_row_active(
     mock_event_bus: MockEventBus,
     in_memory_store: InMemoryProjectionStore,

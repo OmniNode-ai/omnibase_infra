@@ -1,0 +1,87 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19091
+title: Consumer-lag condition reads offsets in-process via aiokafka, with falsifier tests for AC1 and AC2
+summary: The lab alarm's consumer_group_lag condition reads committed and end offsets in-process via aiokafka (merged in 9f034fd68, #3946). A per-criterion check at dev 2a27db4c5 found AC3, AC4, AC5 and AC7 covered by named passing tests, AC1 and AC2 behaviourally in place but without the falsifier tests their text names, and AC6 a live launchd proof that this repository cannot observe. This change adds the AC1 and AC2 falsifier tests and leaves AC6 unbound.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19091-lag-in-process
+    statement: The consumer_group_lag condition reads offsets in-process, from the ~/.onex identity, with no process escape and no credential leak.
+    acceptance:
+      - id: AC1
+        statement: "AC1: consumer_group_lag reads committed vs. end offsets via aiokafka in-process, no subprocess/ssh/docker in this condition's path -- falsifier: test_the_lag_path_makes_no_subprocess_ssh_or_docker_call in tests/ci/test_lab_alarm_omn18867.py fails when the reader shells out"
+      - id: AC2
+        statement: "AC2: the identity is read from ~/.onex/config.yaml + credentials.json (0600 enforced on read), never from argv/plist/disk copy/log -- falsifier: test_the_resolved_password_never_reaches_evidence_or_output fails when a client error string or credential refusal carries the resolved password into the report evidence or output"
+      - id: AC3
+        statement: "AC3: a GroupAuthorizationFailedError (or equivalent typed refusal) is classified INDETERMINATE with a distinct, named reason, never OK -- falsifier: test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason"
+      - id: AC4
+        statement: "AC4: a never-committed group is INDETERMINATE on the first sample, does not block OK once a baseline exists, and a group that vanishes after committing is an ALARM -- falsifier: test_a_never_committed_groups_first_sample_is_indeterminate_baseline, test_a_never_committed_group_does_not_block_ok_once_a_baseline_exists, test_three_readable_and_three_never_committed_groups_reads_ok, test_a_group_that_vanishes_after_committing_is_an_alarm"
+      - id: AC5
+        statement: "AC5: growth-across-two-samples semantics are unchanged; a first sample after the switch is still INDETERMINATE by design -- falsifier: test_the_first_sample_is_indeterminate_not_ok"
+      - id: AC7
+        statement: "AC7: STALE_INDETERMINATE posts once after 24h of INDETERMINATE samples, clears and can re-raise on recovery -- falsifier: test_stale_indeterminate_raises_exactly_once_past_the_threshold and test_stale_indeterminate_clears_on_recovery_and_can_re_raise"
+evidence_requirements:
+  - kind: tests
+    description: The lab alarm test file passes, including the AC1 and AC2 falsifier tests.
+    command: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn19091-ac1-no-process-escape
+    description: The reader runs with subprocess.run, subprocess.Popen, os.system and asyncio.create_subprocess_exec replaced by refusing guards, and the lag report still reads OK; a positive control shows the guard refuses a real call.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k test_the_lag_path_makes_no_subprocess_ssh_or_docker_call
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19091-ac2-no-credential-leak
+    description: A distinctive resolved password is absent from the report evidence, its repr, stdout, stderr and the store directory listing for a connection error, an authorization refusal, a plain runtime error and a mode 0644 store; the password is shown reaching the client kwargs in the three client-error cases.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k "test_the_resolved_password_never_reaches_evidence_or_output or test_read_onex_lane_credential_refuses_a_non_0600_secrets_file"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19091-ac3-ac5-classification
+    description: The authorization refusal and first-sample cases grade INDETERMINATE with a named reason.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -k "test_a_group_authorization_refusal_is_indeterminate_with_a_named_reason or test_the_first_sample_is_indeterminate_not_ok"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+      - AC5
+  - id: dod-omn19091-ac4-never-committed
+    description: The four never-committed tests pass, including the vanished-group ALARM.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -n 0 -k "never_committed or vanishes_after_committing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn19091-ac7-stale-indeterminate
+    description: The four STALE_INDETERMINATE tests pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q --no-cov -n 0 -k stale_indeterminate
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn19091-deploy-reader-shipped
+    description: The in-process reader is present in scripts/lab_alarm.py at the merged head; the alarm is a launchd job on the operator's Mac, not a lease-governed surface, so no runtime deploy applies to this tests-only change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -cF 'def make_kafka_lag_reader' scripts/lab_alarm.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

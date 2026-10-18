@@ -13,6 +13,11 @@ requirements:
         statement: 'AC1: the escalation rule is declared in contract.yaml (occurrence_threshold 10, new_fingerprint_severity critical) with the publish topic and published_events entry for ModelRuntimeErrorEscalatedEvent -- falsifier: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalat -q -n 0 fails when the contract lacks the rule or the topic.'
       - id: AC2
         statement: 'AC2: later occurrences of an escalated fingerprint publish nothing -- falsifier: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalate_once -q -n 0 fails when a second event is returned.'
+  - id: req-publish-escalation
+    statement: The runtime kernel publishes the escalation event the triage handler returns, to the topic the node contract declares, so an incident that becomes escalated reaches the bus.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the kernel triage consumer publishes each ModelRuntimeErrorEscalatedEvent the handler returns to the topic published_events declares for it, and publishes nothing for an occurrence that returns no event -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_triage_escalation_omn21029.py -q -n 0 fails when the consumer drops the handler output.'
 evidence_requirements:
   - kind: tests
     description: Escalation decision, handler and contract assertions.
@@ -44,4 +49,19 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
+        check_value: env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
+  - id: dod-escalation-publish-ac3
+    description: The kernel publishes each returned escalation event to the contract-declared topic, once, and nothing for an output without events.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_kernel_triage_escalation_omn21029.py -q -n 0
+    binds_ac:
+      - AC3
+  - id: dod-escalation-publish-deploy
+    description: The deployed runtime container imports the kernel step that publishes escalations. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime.service_kernel import publish_triage_escalations'

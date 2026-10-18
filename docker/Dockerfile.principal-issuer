@@ -37,9 +37,10 @@ RUN set -eu; \
 COPY scripts/__init__.py /app/scripts/__init__.py
 COPY scripts/lab_principal_issuer.py /app/scripts/lab_principal_issuer.py
 COPY deploy/lab/developer-principal-grants.yaml /app/developer-principal-grants.yaml
+COPY deploy/lab/developer-principal-derived-grants.json /app/developer-principal-derived-grants.json
 
 USER issuer
 WORKDIR /app
 RUN python3 scripts/lab_principal_issuer.py check --grants /app/developer-principal-grants.yaml
 ENTRYPOINT ["python3", "scripts/lab_principal_issuer.py"]
-CMD ["serve", "--grants", "/app/developer-principal-grants.yaml", "--ledger", "/data/issuances.jsonl", "--socket", "/run/principal-issuer/issuer.sock", "--proxy-uid", "0"]
+CMD ["serve", "--grants", "/app/developer-principal-grants.yaml", "--ledger", "/data/issuances.jsonl", "--socket", "/run/principal-issuer/issuer.sock", "--proxy-uid", "0", "--overlay", "/overlay/developer-principal-overlay.yaml"]

@@ -56,11 +56,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID, uuid4
 
-import yaml
-
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumMessageCategory
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
+from omnibase_infra.validators.contract_topic_graph import parse_contract
 
 __all__ = ["PublisherContractCorpus", "PublisherTopicError"]
 
@@ -69,34 +68,23 @@ class PublisherTopicError(RuntimeError):
     """A topic a golden chain wants to publish on is not declared by any contract."""
 
 
-def _publisher_topics(raw: Mapping[str, object]) -> set[str]:
-    """Every topic this contract declares itself a PUBLISHER of."""
-    topics: set[str] = set()
-    event_bus = raw.get("event_bus")
-    if isinstance(event_bus, dict):
-        publish_topics = event_bus.get("publish_topics")
-        if isinstance(publish_topics, list):
-            for value in publish_topics:
-                if isinstance(value, str):
-                    topics.add(value)
-    published = raw.get("published_events")
-    if isinstance(published, list):
-        for row in published:
-            if isinstance(row, dict) and isinstance(row.get("topic"), str):
-                topics.add(str(row["topic"]))
-    runtime_dispatch = raw.get("runtime_dispatch")
-    if isinstance(runtime_dispatch, dict):
-        command_topic = runtime_dispatch.get("command_topic")
-        if isinstance(command_topic, str):
-            topics.add(command_topic)
-        terminal_events = runtime_dispatch.get("terminal_events")
-        if isinstance(terminal_events, list):
-            for row in terminal_events:
-                if isinstance(row, dict) and isinstance(row.get("topic"), str):
-                    topics.add(str(row["topic"]))
-                elif isinstance(row, str):
-                    topics.add(row)
-    return topics
+def _publisher_topics(path: Path) -> tuple[str, set[str]] | None:
+    """The contract's name and every topic it declares itself a PUBLISHER of.
+
+    Reads the same union of declaration shapes the contract topic graph reads
+    (``parse_contract``), so a topic the graph sees as published is one the fixture
+    resolves. ``runtime_dispatch.command_topic`` also counts: the CLI publishes there.
+    """
+    try:
+        node = parse_contract(path, path.parent.name)
+    except (OSError, RuntimeError):
+        return None
+    if node is None:
+        return None
+    topics = set(node.publish_topics)
+    if node.command_topic is not None:
+        topics.add(node.command_topic)
+    return node.name, topics
 
 
 @dataclass(frozen=True, slots=True)  # internal-dataclass-ok: test-fixture index
@@ -110,14 +98,11 @@ class PublisherContractCorpus:
         """Index the given ``contract.yaml`` paths by the topics they publish."""
         index: dict[str, list[str]] = {}
         for path in contract_paths:
-            try:
-                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except (OSError, yaml.YAMLError):
+            parsed = _publisher_topics(path)
+            if parsed is None:
                 continue
-            if not isinstance(raw, dict):
-                continue
-            name = str(raw.get("name") or path.parent.name)
-            for topic in _publisher_topics(raw):
+            name, topics = parsed
+            for topic in topics:
                 index.setdefault(topic, []).append(name)
         return cls(publishers={t: tuple(sorted(set(v))) for t, v in index.items()})
 

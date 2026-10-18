@@ -50,7 +50,7 @@ jobs:
     # script's own diagnostic failure.
     timeout-minutes: 60
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     outputs:
       version: ${{ steps.tag.outputs.tag }}
       ticket: ${{ steps.release_evidence.outputs.ticket }}
@@ -385,7 +385,7 @@ jobs:
     name: Sync main to release tag (sync-only)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_main_to_tag != '' }}
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     permissions:
       contents: write
     steps:
@@ -519,7 +519,7 @@ jobs:
       needs.release.outputs.version != '' &&
       !contains(needs.release.outputs.version, 'rc')
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check
@@ -657,7 +657,7 @@ jobs:
     needs: release
     if: always() && needs.release.result == 'success'
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -700,7 +700,7 @@ jobs:
     # dispatch a runtime rebuild off an empty version string.
     if: ${{ needs.release.result == 'success' && !contains(needs.release.outputs.version, 'rc') }}
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     steps:
       - name: Check onexbot-occ-writer App credentials are configured
         id: token_check

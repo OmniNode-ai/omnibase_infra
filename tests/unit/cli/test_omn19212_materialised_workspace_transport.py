@@ -110,7 +110,11 @@ def _write_materialised_copy(
 
 
 def _declare_lanes(root: Path) -> None:
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    # The lane table belongs to the config owner (OMN-20935), the same root the
+    # tier-1 runtime config is read from.
+    declaration = (
+        Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"]) / LANE_DECLARATION_RELATIVE_PATH
+    )
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_LANES, encoding="utf-8")
 

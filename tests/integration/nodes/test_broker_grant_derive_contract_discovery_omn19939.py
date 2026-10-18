@@ -15,6 +15,7 @@ from omnibase_core.models.event_bus.model_bus_group_describe import (
 )
 from omnibase_infra.runtime import gateway_forwarder
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
+from scripts import lab_principal_issuer
 from tests.unit.nodes.node_broker_grant_derive_compute.test_broker_grant_derivation import (
     grant_keys,
     shipped_config,
@@ -99,3 +100,55 @@ def test_discovered_contract_derives_gateway_grants(
     assert {
         g for g in inspected_grants if g[1] == "GROUP" and g[3] == "DESCRIBE"
     } == expected_inspection
+
+
+def test_discovered_derivation_feeds_the_developer_principal_issuer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pass discovered node output through the issuer's shipped file interface."""
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase-infra")
+    root = Path(__file__).resolve().parents[3]
+    manifest = discover_contracts()
+    discovered = [
+        c
+        for c in manifest.contracts
+        if c.entry_point_name == "node_broker_grant_derive_compute"
+    ]
+    assert len(discovered) == 1
+    contract = discovered[0]
+    assert contract.handler_routing is not None
+    route = contract.handler_routing.handlers[0]
+    handler_class = getattr(
+        importlib.import_module(route.handler.module), route.handler.name
+    )
+    input_ref = yaml.safe_load(contract.contract_path.read_text())["input_model"]
+    input_class = getattr(
+        importlib.import_module(input_ref["module"]), input_ref["name"]
+    )
+    bindings = yaml.safe_load(
+        (root / "deploy/lab/developer-principal-bindings.yaml").read_text()
+    )
+    result = handler_class().handle(input_class.model_validate(bindings))
+    policy_path = root / "deploy/lab/developer-principal-grants.yaml"
+    policy = yaml.safe_load(policy_path.read_text())
+    assert "grants" not in policy
+    (tmp_path / policy["grants_from"]).write_text(result.model_dump_json())
+    local_policy = tmp_path / policy_path.name
+    local_policy.write_text(policy_path.read_text())
+
+    declaration = lab_principal_issuer.load_declaration(local_policy)
+    principal = "dev-integration-laptop"
+    rows = lab_principal_issuer.expected_acl_rows(declaration, principal)
+    expected = {
+        lab_principal_issuer.AclRow(
+            resource=g.resource_type.lower(),
+            name=g.resource.replace("{principal}", principal),
+            pattern=g.pattern.lower(),
+            operation=g.operation.lower(),
+        )
+        for g in result.grants
+    }
+    assert rows == expected
+    assert len(rows) == 55
+    assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
+    assert {row.operation for row in rows if row.name == "*"} == {"describe"}

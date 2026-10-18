@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from kafka import KafkaProducer
+from kafka import KafkaAdminClient, KafkaProducer
+from kafka.admin import NewTopic
+from kafka.errors import KafkaError, TopicAlreadyExistsError
 
 from deploy_agent.events import (
     TOPIC_DEV_LANE_DRIFT,
@@ -32,6 +34,11 @@ from deploy_agent.events import (
 from deploy_agent.job_state import JobState
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+from omnibase_infra.errors import TopicReplicationPolicyError
+from omnibase_infra.topics.broker_capacity_probe import bind_policy_to_broker_count
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
+)
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
@@ -202,6 +209,59 @@ def build_completion_payload(
     return completed.model_dump(mode="json")
 
 
+# OMN-17427: topics the agent alone publishes. No contract's event_bus declares them; until
+# src/omnibase_infra/services/topics.yaml listed them nothing created them, and a lab deploy agent
+# logged "Topic onex.evt.deploy.dev-tag-heartbeat.v1 not found in cluster metadata" on every
+# heartbeat. A broker the provisioner has not run against still lacks them, so the agent creates
+# each once per process before its first publish to it. A topic another node declares (the
+# rebuild topics) is left to that node's contract.
+AGENT_OWNED_TOPICS = frozenset({TOPIC_DEV_LANE_DRIFT, TOPIC_DEV_TAG_HEARTBEAT})
+AGENT_TOPIC_PARTITIONS = 6
+_ENSURED_TOPICS: set[str] = set()
+
+
+def _broker_count(admin: KafkaAdminClient) -> int | None:
+    """Live broker count from ``describe_cluster``, or None when it cannot be read."""
+    brokers = admin.describe_cluster().get("brokers")
+    return len(brokers) if isinstance(brokers, list) and brokers else None
+
+
+def _ensure_topic(topic: str, kafka_config: ModelDeployAgentKafkaConfig) -> None:
+    """Create ``topic`` when the broker lacks it, once per process; a failure is retried next time."""
+    if topic in _ENSURED_TOPICS:
+        return
+    try:
+        admin = KafkaAdminClient(**kafka_config.consumer_kwargs())
+        try:
+            # OMN-15395: the replication factor comes from the provisioning policy bound to
+            # the measured broker count, never a literal. The agent only reaches SASL
+            # PLAIN/SCRAM brokers, so the self-hosted profile applies.
+            policy = bind_policy_to_broker_count(
+                ModelTopicProvisioningPolicy.self_hosted(), _broker_count(admin)
+            )
+            replication_factor = policy.resolve_replication_factor(
+                topic=topic, declared=None
+            )
+            admin.create_topics(
+                [
+                    NewTopic(
+                        name=topic,
+                        num_partitions=AGENT_TOPIC_PARTITIONS,
+                        replication_factor=replication_factor,
+                    )
+                ]
+            )
+            logger.info("Created topic %s", topic)
+        except TopicAlreadyExistsError:
+            pass
+        finally:
+            admin.close()
+    except (KafkaError, OSError, TopicReplicationPolicyError) as e:
+        logger.warning("Could not ensure topic %s: %s", topic, e)
+        return
+    _ENSURED_TOPICS.add(topic)
+
+
 def _produce(
     topic: str,
     key: str,
@@ -209,6 +269,8 @@ def _produce(
     kafka_config: ModelDeployAgentKafkaConfig,
 ) -> bool:
     """Produce one JSON record on the agent's control bus; False when it failed."""
+    if topic in AGENT_OWNED_TOPICS:
+        _ensure_topic(apply_topic_namespace(topic), kafka_config)
     try:
         producer = KafkaProducer(
             **kafka_config.producer_kwargs(),

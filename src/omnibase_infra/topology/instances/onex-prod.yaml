@@ -190,6 +190,11 @@ databases:
             schema: omninode_internal
           - object_type: TABLE
             objects:
+              - consumer_flow_windows
+            privileges: [DELETE, SELECT]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - generation_events
             privileges: [INSERT, SELECT, UPDATE]
             schema: public

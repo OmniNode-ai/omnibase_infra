@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# What a developer machine's lab bus principal does on the wire (OMN-19975).
+#
+# This is the wire-binding source of `developer-principal-derived-grants.json`. The
+# broker grants are never typed: `node_broker_grant_derive_compute` derives them
+# from these bindings, and `tests/unit/nodes/node_broker_grant_derive_compute/
+# test_developer_principal_grants_omn19975.py` fails when the committed derived file
+# is not that node's output. `scripts/lab_principal_issuer.py` applies the derived
+# file (its `grants_from`), so a grant added by hand on the broker or in the derived
+# file is drift. Regenerate the file with the command that test prints.
+#
+# The model is ModelBrokerGrantBindings (omnibase_infra node_broker_grant_derive_compute).
+#   * a `produce` binding is WRITE and DESCRIBE on the topic;
+#   * a `consume` binding is READ and DESCRIBE on the topic, and READ on its group
+#     unless a `group_prefixes` entry covers that group;
+#   * a `group_prefixes` entry is READ and DESCRIBE on every group that starts with it.
+#     A caller reads under its prefix plus a per-call suffix, so the prefix is the
+#     grant. It must stay specific enough that it cannot reach a lab runtime's group;
+#   * a `described_groups` entry is DESCRIBE on that group; `*` is every group and
+#     carries DESCRIBE only (the CLI refuses to publish unless a live lab consumer is
+#     bound to the command topic, delegate_locus.live_consumer_groups).
+# `{principal}` is the principal the issuer issues for and is the only placeholder.
+#
+# THE MINIMUM FOR ONE LANE DELEGATION (`onex delegate --bus kafka --lane dev`):
+# produce the delegate command, read the two terminals it waits for, and write those
+# same two terminals, since a machine that runs a harness task publishes its own
+# delegate-skill terminal event to the lane. The terminal group is
+# `<env>.omnibase_core.runtime_local_terminal...` (a developer machine's env token is
+# `local`); the lab's kernels subscribe as `local.omnimarket.*` and
+# `local.omnibase_infra.*`, never under `local.omnibase_core.runtime_local_`.
+#
+# THE LEDGER WRITE PATH: a machine writes a ledger row by publishing the append
+# command on its own writer topic. Only its principal may write that topic, so the
+# ledger host attributes the row to the principal named by the topic: the topic WRITE
+# ACL is the attestation. The issuer creates that topic for the principal. The caller
+# reads the two terminals under `local.omnimarket.work_ledger_append_client.consume.v1.`
+# plus a per-call suffix.
+#
+# PR HANDOFF: `onex work-ledger handoff` publishes one request and reads acceptance or
+# a terminal; its per-call group is `pr-handoff-request.<correlation_id prefix>`.
+#
+# SOURCE-CONTROL READS: `onex scm <read verb>` publishes one github-repo-gateway read
+# command and reads its one terminal, under `local.omnimarket.scm_command_client.consume.v1.`
+# plus a per-call suffix. The write node's topics are deliberately not granted.
+#
+# MEMORY LIFECYCLE PROOF (OMN-21045): a machine proves the omnimemory lifecycle by
+# publishing `expire-memory` and reading the two outcomes the lifecycle orchestrator
+# publishes, `memory-expired` and `lifecycle-transition-failed` (the topics its
+# contract declares under publish_topics and subscribe_topics). The caller reads under
+# `local.omnimemory.memory_lifecycle_probe.consume.v1.` plus a per-call suffix; the
+# orchestrator's own group, `<env>.omnimemory.node_memory_lifecycle_orchestrator...`,
+# does not start with that prefix, so a developer principal cannot join it and take
+# commands.
+#
+# PR POLISH (OMN-21034): a machine starts one polish by publishing the node_pr_polish
+# start command and reads its phase transitions and its completed terminal under the
+# `local.omnibase_core.runtime_local_` group prefix it already holds. The lab runtime
+# consumes the start command and publishes both result topics, so a developer
+# principal gets no write on them.
+#
+# DOD CLOSEOUT PROOF (OMN-21048): a machine proves the DoD closeout sweep by publishing
+# `dod-closeout-sweep-decide-requested` and reading the one `dod-closeout-sweep-decided`
+# event the node's contract declares as its terminal event, by correlation id. The
+# caller reads under `local.omnimarket.dod_closeout_probe.consume.v1.` plus a per-call
+# suffix; the node's own group, `<env>.omnimarket.node_dod_closeout_sweep_compute...`,
+# does not start with that prefix, so a developer principal cannot join it and take
+# commands.
+principal: "{principal}"
+bindings:
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.delegate-skill-completed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.delegate-skill-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.delegate-skill-failed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.delegate-skill-failed.v1, direction: produce}
+  - broker: dev
+    physical_topic: onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1
+    direction: produce
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-completed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-failed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-handoff-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-accepted.v1, direction: consume, consumer_group: pr-handoff-request.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-handed-off.v1, direction: consume, consumer_group: pr-handoff-request.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-failed.v1, direction: consume, consumer_group: pr-handoff-request.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.github-repo-gateway-read-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-gateway-read-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-polish-start.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-polish-phase-transition.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.pr-polish-completed.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.cmd.omnimemory.expire-memory.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimemory.memory-expired.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.evt.omnimemory.lifecycle-transition-failed.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
+group_prefixes:
+  - {broker: dev, prefix: local.omnibase_core.runtime_local_}
+  - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
+  - {broker: dev, prefix: pr-handoff-request.}
+  - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
+  - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
+  - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
+described_groups:
+  - {broker: dev, group: "*"}

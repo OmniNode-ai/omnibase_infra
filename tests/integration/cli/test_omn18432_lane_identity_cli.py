@@ -95,7 +95,7 @@ def captured_dispatch(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
 
 def _workspace(root: Path) -> Path:
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_DECLARATION, encoding="utf-8")
     return root

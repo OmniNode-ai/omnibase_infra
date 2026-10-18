@@ -796,10 +796,29 @@ class TestDecideTimeout:
         # Should be no_op because needs_ack_timeout_event returns False
         assert decision.action == "no_op"
 
-    def test_liveness_already_emitted_skipped(self) -> None:
-        """projection with liveness_timeout_emitted_at set -> skipped."""
+    def test_liveness_already_expired_skipped(self) -> None:
+        """projection already in LIVENESS_EXPIRED -> skipped."""
         service = RegistrationReducerService()
-        overdue_liveness = make_projection(
+        expired = make_projection(
+            EnumRegistrationState.LIVENESS_EXPIRED,
+            liveness_deadline=TEST_NOW - timedelta(minutes=2),
+            last_heartbeat_at=TEST_NOW - timedelta(minutes=10),
+            liveness_timeout_emitted_at=TEST_NOW - timedelta(minutes=1),
+        )
+
+        ctx = ModelReducerContext(correlation_id=uuid4(), now=TEST_NOW, tick_id=uuid4())
+        decision = service.decide_timeout(
+            overdue_ack_projections=[],
+            overdue_liveness_projections=[expired],
+            ctx=ctx,
+        )
+
+        assert decision.action == "no_op"
+
+    def test_liveness_active_row_with_stale_marker_expired(self) -> None:
+        """ACTIVE projection stamped before OMN-21028 wrote state -> expiry emitted."""
+        service = RegistrationReducerService()
+        stamped_active = make_projection(
             EnumRegistrationState.ACTIVE,
             liveness_deadline=TEST_NOW - timedelta(minutes=2),
             last_heartbeat_at=TEST_NOW - timedelta(minutes=10),
@@ -809,11 +828,11 @@ class TestDecideTimeout:
         ctx = ModelReducerContext(correlation_id=uuid4(), now=TEST_NOW, tick_id=uuid4())
         decision = service.decide_timeout(
             overdue_ack_projections=[],
-            overdue_liveness_projections=[overdue_liveness],
+            overdue_liveness_projections=[stamped_active],
             ctx=ctx,
         )
 
-        assert decision.action == "no_op"
+        assert decision.action == "emit"
 
 
 # ---------------------------------------------------------------------------

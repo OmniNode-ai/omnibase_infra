@@ -45,8 +45,8 @@ that lane recorded four such CLI terminal-run consumer groups when the finding
 was re-verified. That path is DELETED, not repointed: with the resolved bus on
 ``kafka``, a run that named neither ``--lane`` nor ``--kafka-bootstrap`` is
 refused, and the refusal lists the declared lanes. ``--lane`` resolves the
-broker AND the declared transport from ``omnimarket/config/ci_bus_lanes.yaml``
-under the workspace root — the same declaration the OCC publishers and the
+broker AND the declared transport from ``config/lab/ci_bus_lanes.yaml``
+under the workspace config root — the same declaration the CI publishers and the
 chain canary already read, through the same ``load_lane_transport`` reader, so
 no second source exists. SASL credentials are unchanged and still reach the
 client through the standard ``KAFKA_SASL_*`` environment, which is where a
@@ -3625,9 +3625,11 @@ class DelegateCommand(click.Command):
     default=None,
     help=(
         "Lane this delegation is addressed to, e.g. 'dev'. Its broker and "
-        "transport are read from the checked-in lane declaration "
-        "omnimarket/config/ci_bus_lanes.yaml under the workspace root "
-        "(--omnibase-path / $OMNIBASE_PATH); the refusal lists the declared lanes. "
+        "transport are read from the lane declaration "
+        "config/lab/ci_bus_lanes.yaml under the workspace config root "
+        "($ONEX_WORKSPACE_CONFIG_ROOT, else the sibling operator repository, "
+        "else .onex/workspace-config under --omnibase-path / $OMNIBASE_PATH); "
+        "the refusal lists the declared lanes. "
         "Required whenever the resolved bus is kafka, unless you state a "
         "lane-internal address with --kafka-bootstrap. The broker address is "
         "NOT read from KAFKA_BOOTSTRAP_SERVERS (OMN-16871): on the launching "

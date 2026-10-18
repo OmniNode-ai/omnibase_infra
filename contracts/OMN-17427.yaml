@@ -118,7 +118,59 @@ requirements:
     acceptance:
       - id: AC26
         statement: 'AC26: dev-tag-heartbeat, dev-lane-drift and the deploy-command DLQ are declared in src/omnibase_infra/services/topics.yaml and every TOPIC_* constant in deploy_agent.events is declared for provisioning -- falsifier: uv run pytest tests/unit/scripts/test_deploy_agent_topics_declared_omn17427.py -q'
+  - id: req-omn17427-autoclose-diagnose-off-occ
+    statement: The evidence autoclose sweep's diagnose step probes read access to no change-control repository.
+    acceptance:
+      - id: AC27
+        statement: 'AC27: the diagnose credential-capability list in evidence-autoclose-sweep.yml names four repositories, among them omnibase_infra, omnimarket and omnibase_core, and no change-control repository -- falsifier: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q'
+  - id: req-omn17427-hook-push-rehearsal-caller
+    statement: A pull request that changes a pre-push hook path runs the omnibase_core hook push rehearsal through a caller workflow pinned to a commit on omnibase_core dev.
+    acceptance:
+      - id: AC28
+        statement: 'AC28: the caller workflow triggers on pull_request and merge_group, grants contents read with no runs-on, pins the reusable at a full sha that equals the recorded commit on origin/dev, its path-regex matches the hook paths and neither this caller nor README.md, and every input it passes is declared by the reusable -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn17427-core-pin-compat
+    statement: The recorded downstream omnibase-core floor is checked against both the repository override and its resolved lock version, with the incident pair and a compatible pair as controls.
+    acceptance:
+      - id: AC29
+        statement: 'AC29: the recorded omnimarket v0.4.316 floor of 0.47.46 is refused against the recorded 44542e2a0 pin of 0.47.44, and the recorded lock agrees with that pin -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k recorded_incident'
+      - id: AC30
+        statement: 'AC30: downstream floors equal to or older than the pin are accepted -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k equal_or_older'
+      - id: AC31
+        statement: 'AC31: the current override and resolved lock meet every recorded downstream floor and agree with each other -- falsifier: uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"'
+  - id: req-omn17427-lab-alarm-ledger-actor
+    statement: Every lab alarm FRICTION row names the launchd lab-alarm mechanism in an actor cell so the ruling audit can attribute the action.
+    acceptance:
+      - id: AC32
+        statement: 'AC32: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
+  - id: req-omn17427-ci-summary-registration-selector
+    statement: The tests that hold repo-evidence / dod-verify in CI Summary's expected contexts are selectable by the name ci_summary_registration.
+    acceptance:
+      - id: AC33
+        statement: 'AC33: selecting tests by ci_summary_registration in the dod-verify required-context file runs five tests and they pass -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration exits 5 with every test deselected'
+  - id: req-omn17427-prepr-pool-overlay-exercise
+    statement: A pre-merge pool run can mount a named Bifrost overlay on its stack and run one command against the live stack, so a proof that needs a changed model endpoint is a pool run and not a hand-built slot.
+    acceptance:
+      - id: AC34
+        statement: 'AC34: a pool run given an overlay copies it to the host and the build mounts it as the stack Bifrost overlay (a slot reads it as <project>.bifrost.yaml), and a post-up command runs once after the probe and fails the proof unless it printed exit code 0 -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_an_overlay_and_a_post_up_command_reach_the_host_and_run_after_probe tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_exits_non_zero_fails_the_proof tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_printed_no_exit_line_is_not_a_pass tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_run_without_a_post_up_command_runs_no_exercise_phase tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_missing_overlay_file_is_a_usage_error_before_any_host_is_touched tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_params_file_cannot_set_the_overlay_or_the_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_cli_takes_an_overlay_and_a_post_up_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q'
+  - id: req-omn17427-publisher-fixture-shapes
+    statement: The publisher contract fixture resolves a topic through every publisher declaration shape the contract topic graph reads, so a golden chain over a topic published by a result topic, a produced event or a publication list is not refused as unpublished.
+    acceptance:
+      - id: AC35
+        statement: 'AC35: PublisherContractCorpus resolves topics declared by event_bus.publish success and failure topics, produced_events, publications, topics.produces and runtime_dispatch.command_topic, still refuses a topic no contract publishes, and agrees with the topic graph parser -- falsifier: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q'
+  - id: req-omn17427-deploy-agent-topic-ensure
+    statement: The deploy agent creates the topics only it publishes (dev-tag heartbeat and dev-lane drift) before its first publish to each, once per process, and leaves topics another node declares alone.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: each agent-owned topic is created before its first publish, an existing topic is created once and still published, an admin failure is retried on the next publish, and a topic another node declares is not created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q'
+  - id: req-omn17427-consumer-flow-retention-grant
+    statement: role_omnidash, the principal behind OMNIDASH_ANALYTICS_DB_URL that the omnimarket retention node prunes through, holds SELECT and DELETE on omninode_internal.consumer_flow_windows, issued by a node-owned migration and declared in every shipped topology instance.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: node_projection_consumer_flow/0006 grants role_omnidash SELECT and DELETE on omninode_internal.consumer_flow_windows and nothing else, asserts both, is bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that grant -- falsifier: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
     command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q -k seam_dlq
@@ -194,11 +246,63 @@ evidence_requirements:
   - kind: tests
     description: The probe hygiene sweep reads per-repository contract roots, not a change-control checkout.
     command: uv run pytest tests/ci/test_probe_hygiene_off_occ_omn17427.py tests/unit/nodes/node_in_progress_probe_hygiene_effect -q
+  - kind: tests
+    description: The autoclose diagnose step probes no change-control repository.
+    command: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+  - kind: tests
+    description: The hook push rehearsal caller workflow matches the omnibase_core reusable at its pin.
+    command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+  - kind: tests
+    description: The dod-verify required-context tests are selected by the name ci_summary_registration.
+    command: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration
+  - kind: tests
+    description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads.
+    command: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+  - kind: tests
+    description: The deploy agent creates its own topics before the first publish.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+  - kind: tests
+    description: The consumer_flow_windows retention grant to role_omnidash is issued, asserted, ledger-bound and declared.
+    command: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-core-pin-incident
+    description: The recorded incident pair is refused and its recorded lock agrees with its pin.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k recorded_incident
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC29
+  - id: dod-omn-17427-core-pin-compatible-control
+    description: Equal and older downstream floors are accepted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k equal_or_older
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC30
+  - id: dod-omn-17427-core-pin-current
+    description: The current override and resolved lock meet every recorded downstream floor and agree with each other.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC31
+  - id: dod-omn-17427-core-pin-deploy-artifact
+    description: Hosted-runner deploy artifact check -- the override and lock used to build the runtime agree and satisfy the recorded downstream floor. Reads repository build inputs without containers or credentials; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q -k "repo_pin or resolved_lock or lock_resolves"
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac1
     description: The node collector counts the marker on the seam DLQ when the generic DLQ also advances.
     source: manual
@@ -506,3 +610,147 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC26
+  - id: dod-omn-17427-ac27
+    description: The autoclose diagnose credential-capability list names no change-control repository and keeps the repositories the sweep reads.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC27
+  - id: dod-omn-17427-ac27-deploy-autoclose-diagnose
+    description: Hosted-runner smoke -- the workflow file on the runner lists the probed repositories without a change-control repository, with no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_autoclose_diagnose_probe_off_occ_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC27
+  - id: dod-omn-17427-ac28
+    description: The hook push rehearsal caller workflow triggers, permissions, full-sha pin, path-regex and inputs match the omnibase_core reusable recorded at the pinned commit.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC28
+  - id: dod-omn-17427-ac28-lab-alarm-ledger-actor
+    description: The alarm row renderer names the launchd lab-alarm actor; the regression fails with a missing actor cell before the product change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
+  - id: dod-omn-17427-ac28-deploy-lab-alarm-ledger-actor
+    description: Hosted-runner deploy smoke -- the real alarm renderer emits a FRICTION row whose actor identifies the launchd lab-alarm mechanism. No deployed container, ledger append or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
+  - id: dod-omn-17427-ac33-ci-summary-registration
+    description: The selector runs the five dod-verify required-context tests and they pass; before the rename it deselected all five and exited 5.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC33
+  - id: dod-omn-17427-ac32-pool-overlay-exercise
+    description: The pool driver passes an overlay and a post-up command to the host, the prove script mounts the overlay for both stack kinds and runs the command in the exercise phase, and the proof fails on a non-zero or missing exit line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_an_overlay_and_a_post_up_command_reach_the_host_and_run_after_probe tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_exits_non_zero_fails_the_proof tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_printed_no_exit_line_is_not_a_pass tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_run_without_a_post_up_command_runs_no_exercise_phase tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_missing_overlay_file_is_a_usage_error_before_any_host_is_touched tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_params_file_cannot_set_the_overlay_or_the_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_cli_takes_an_overlay_and_a_post_up_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC34
+  - id: dod-omn-17427-ac33-deploy-pool-overlay-exercise
+    description: Hosted-runner deploy smoke -- the build script mounts the supplied Bifrost overlay before stack generation for both stack kinds, and its exercise phase executes the supplied command with the stack ports and project and reports a non-zero exit. Uses a temporary build tree without containers, credentials or private lab config.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC34
+  - id: dod-omn-17427-ac34
+    description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads; the shape cases fail before the product change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac34-deploy-publisher-fixture-shapes
+    description: Hosted-runner deploy smoke -- the fixture indexes a synthetic contract through each declared publisher shape. Test fixture code only, no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac34-deploy-publisher-envelope
+    description: Hosted-runner integration smoke -- seven independent publisher declarations build envelopes that cross the in-memory bus serialization and real consume callback into an alias-only runtime dispatcher, preserving payload and correlation ID. Undeclared topics are refused. No deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_publisher_contract_envelope_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac36
+    description: The topic-creation tests fail on the merge base, whose publisher has no AGENT_OWNED_TOPICS and never creates a missing topic, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
+  - id: dod-omn-17427-ac36-deploy-topic-ensure
+    description: Hosted-runner smoke -- the publisher creates each agent-owned topic through a stand-in admin client before its first send and retries after an admin failure, with no broker, deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
+  - id: dod-omn-17427-ac29
+    description: The consumer_flow_windows retention grant migration grants role_omnidash SELECT and DELETE only, asserts both, is ledger-bound and classed expand-only, and the topology declares it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC37
+  - id: dod-omn-17427-ac29-deploy-retention-grant
+    description: Hosted-runner smoke -- the migration file, its ledger row and class, and the three topology instances are read from the checkout; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC37
+  - id: dod-omn-17427-ac29-integration-retention-grant
+    description: The migration's grant, the three shipped topology instances and the nine rendered database-topology catalogs all carry exactly the PRUNE shape (SELECT, DELETE) for role_omnidash on omninode_internal.consumer_flow_windows.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/topology/test_consumer_flow_windows_retention_grant_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC37

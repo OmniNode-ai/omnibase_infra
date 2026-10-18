@@ -59,9 +59,9 @@ concurrency:
 jobs:
   refresh:
     name: Advance omnimarket contract pin
-    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci.
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to ubuntu-latest.
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 30
     steps:
       # OMN-16373: CROSS_REPO_PAT retirement -- mint a short-lived

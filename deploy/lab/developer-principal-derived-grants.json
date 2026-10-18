@@ -1,0 +1,390 @@
+{
+  "principal": "{principal}",
+  "grants": [
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "*",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnibase_core.runtime_local_",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnibase_core.runtime_local_",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.dod_closeout_probe.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.dod_closeout_probe.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.scm_command_client.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.scm_command_client.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_append_client.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_append_client.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimemory.memory_lifecycle_probe.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimemory.memory_lifecycle_probe.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "pr-handoff-request.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "pr-handoff-request.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.delegate-skill.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.delegate-skill.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-handoff-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-handoff-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-polish-start.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.pr-polish-start.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimemory.expire-memory.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimemory.expire-memory.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-completed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.delegate-skill-failed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.github-repo-gateway-read-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.github-repo-gateway-read-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-accepted.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-accepted.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-handed-off.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-handoff-handed-off.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-polish-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-polish-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-polish-phase-transition.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.pr-polish-phase-transition.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-append-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-append-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-append-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-append-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimemory.lifecycle-transition-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimemory.lifecycle-transition-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimemory.memory-expired.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimemory.memory-expired.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    }
+  ]
+}
