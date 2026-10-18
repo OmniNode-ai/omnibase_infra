@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "the canonical omnibase_core and omniclaude clones under OMNI_HOME on lab host h201, at the origin/dev head each hosted git clone --depth 1 of the default branch checks out",
+    "captured_utc": "2026-10-18T09:52:50Z",
+    "command": "git -C <clone> remote get-url origin; git -C <clone> symbolic-ref --short refs/remotes/origin/HEAD; git -C <clone> rev-parse origin/dev; git -C <clone> ls-tree --full-tree <commit> -- <paths the pre-push hooks read>"
+  },
+  "siblings": {
+    "omnibase_core": {
+      "origin_url": "https://github.com/OmniNode-ai/omnibase_core.git",
+      "default_branch": "origin/dev",
+      "commit": "eb1432595f6842b10c71bfac01672c20eee20351",
+      "ls_tree": [
+        "100644 blob c21dec37316b11f9efedd4990bcd0a6e3d0c60d0\tpyproject.toml",
+        "100644 blob 405ef828d7ecd01bed9b246d85ad5823d1974e90\tsrc/omnibase_core/__init__.py"
+      ]
+    },
+    "omniclaude": {
+      "origin_url": "https://github.com/OmniNode-ai/omniclaude.git",
+      "default_branch": "origin/dev",
+      "commit": "86209b85108a72f54d744255f3119e41ee3f2529",
+      "ls_tree": [
+        "100644 blob 3af52df62e602f50a2a73015de669ac17cb5dd2f\t.github/actions/deploy-gate/validate_pr_deploy_required.py"
+      ]
+    }
+  }
+}
