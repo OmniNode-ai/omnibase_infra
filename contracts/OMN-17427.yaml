@@ -167,6 +167,11 @@ requirements:
     acceptance:
       - id: AC37
         statement: 'AC37: node_projection_consumer_flow/0006 grants role_omnidash SELECT and DELETE on omninode_internal.consumer_flow_windows and nothing else, asserts both, is bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that grant -- falsifier: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q'
+  - id: req-omn17427-morning-ground-state-grants
+    statement: A developer principal holds the grants the scheduled morning ground-state run needs on the dev broker, declared as bindings and derived, and nothing wider.
+    acceptance:
+      - id: AC38
+        statement: 'AC38: the shipped bindings derive write on the morning start command, read and write on its two terminals, write on the delegation request, read on the two delegation replies and read on the local.rr.morning_phase. group prefix, and no other morning or delegation grant -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k morning_grants'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -264,6 +269,9 @@ evidence_requirements:
   - kind: tests
     description: The consumer_flow_windows retention grant to role_omnidash is issued, asserted, ledger-bound and declared.
     command: uv run pytest tests/unit/db/test_consumer_flow_windows_role_omnidash_retention_grant_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q
+  - kind: tests
+    description: The shipped developer-principal bindings derive the morning ground-state grants and the committed derived file is the node's output.
+    command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -754,3 +762,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC37
+  - id: dod-omn-17427-ac38-morning-grants
+    description: The derivation reproduces exactly the declared morning grants, the committed derived file equals the node's output, and the issuer's writable set lists the four new write topics.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC38
+  - id: dod-omn-17427-ac38-deploy-morning-grants
+    description: Hosted-runner grant artifact check -- the shipped bindings derive exactly the morning grants and the committed derived file matches the node output. No broker, containers or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k "morning_grants or committed_derived_grants"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC38
