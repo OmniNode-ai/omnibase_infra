@@ -56,6 +56,7 @@ __all__ = [
     "UnmappableDeclaration",
     "READ_PRIVILEGES",
     "WRITE_PRIVILEGES",
+    "PRUNE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
     "LEGACY_MIGRATION_TABLE_DECLARATIONS",
@@ -77,6 +78,17 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
         EnumDatabasePrivilege.SELECT,
         EnumDatabasePrivilege.INSERT,
         EnumDatabasePrivilege.UPDATE,
+    }
+)
+# A retention prune's ``DELETE ... WHERE <column> < ...`` reads the rows it
+# removes, so DELETE rides with SELECT and nothing else: no INSERT or UPDATE,
+# and never TRUNCATE. No contract derives it; a principal that prunes declares
+# it by hand on the one relation it prunes (OMN-17427,
+# node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
+PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
+    {
+        EnumDatabasePrivilege.SELECT,
+        EnumDatabasePrivilege.DELETE,
     }
 )
 
