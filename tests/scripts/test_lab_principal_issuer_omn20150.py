@@ -1501,3 +1501,50 @@ def test_the_lab_overlay_shape_validates(
     path = _overlay_file(tmp_path, _overlay_doc(OVERLAY_ROW))
     overlay = lpi.load_overlay(path, declaration)
     assert overlay.principals == {"dev-jake-logyyks-macbook-pro"}
+
+
+# --- The documented client request (OMN-17427) ------------------------------
+
+
+def _client_section() -> str:
+    doc = lpi.__doc__ or ""
+    start = doc.index("THE CLIENT REQUEST")
+    end = doc.index("HOW A PRINCIPAL IS HELD TO THE FILE")
+    return doc[start:end]
+
+
+def _documented_json(first_key: str) -> str:
+    """The JSON block in the client section whose first key is ``first_key``."""
+    section = _client_section()
+    start = section.index("{" + json.dumps(first_key) + ":")
+    return section[start : section.index("}", start) + 1]
+
+
+def test_the_client_section_names_the_route_and_its_content_type() -> None:
+    section = _client_section()
+    assert "POST /v1/principals" in section
+    assert "Content-Type: application/json" in section
+    assert lpi.LOGIN_HEADER in section
+
+
+@UNIX_ONLY
+def test_the_documented_request_is_issued_with_exactly_the_documented_fields(
+    server: str, declaration: lpi.Declaration
+) -> None:
+    request = json.loads(
+        _documented_json("lane").replace("<a device name for this machine>", "nuc")
+    )
+    assert set(request) == {"lane", "device"}
+    documented = json.loads(_documented_json("principal"))
+    with _proxy(server, LOGIN) as url:
+        status, body, cache = _proxy_post(url, request, None)
+    assert status == HTTPStatus.CREATED
+    assert set(body) == set(documented)
+    assert body["principal"] == lpi.principal_name(declaration, LOGIN, "nuc")
+    for field in ("lane", "mechanism", "security_protocol", "action"):
+        assert body[field] == documented[field], field
+    assert cache == "no-store"
+    with _proxy(server, LOGIN) as url:
+        status, again, _ = _proxy_post(url, request, None)
+    assert status == HTTPStatus.CREATED
+    assert again["action"] == "rotated"
