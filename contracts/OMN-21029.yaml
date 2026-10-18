@@ -49,7 +49,7 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
+        check_value: env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
   - id: dod-escalation-publish-ac3
     description: The kernel publishes each returned escalation event to the contract-declared topic, once, and nothing for an output without events.
     source: manual
@@ -64,4 +64,4 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime.service_kernel import publish_triage_escalations'
+        check_value: env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime.service_kernel import publish_triage_escalations'
