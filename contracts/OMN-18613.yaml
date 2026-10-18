@@ -5,14 +5,26 @@ summary: A bare commit() on the deploy agent's accept path committed the consume
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18613-ac1-accepted-20261018t2045z:
+      - label: AC1
+        criterion_hash: eaa2e0f75b1b7fbeaf4dd2d2e0e63d6ccf06e87dbe2260a709668d2c668b4bf3
+        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
+    dod-omn18613-ac4-accepted-20261018t2045z:
+      - label: AC4
+        criterion_hash: 0560f66bdd13ace398c4d81c8d91463160f7621ecaba7a2853e7f5bc25e68610
+        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
 requirements:
   - id: req-omn-18613-criteria
     statement: The ticket's labelled acceptance criteria.
     acceptance:
       - id: AC1
-        statement: 'AC1: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
       - id: AC4
-        statement: 'AC4: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
+        statement: 'AC4: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
 evidence_requirements:
   - kind: tests
     description: 'AC1: accepting a command commits exactly [msg.offset + 1]. Fails against the pre-fix consumer''s bare commit().'
@@ -34,11 +46,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
-    ac_bindings:
-      - label: AC1
-        criterion_hash: eaa2e0f75b1b7fbeaf4dd2d2e0e63d6ccf06e87dbe2260a709668d2c668b4bf3
-        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
-        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
   - id: dod-omn18613-ac4-accepted-20261018t2045z
     description: 'AC4: the measured pair (b046ce97 at 262, 8ba320c4 at 263) leaves 263 uncommitted after 262 is accepted. Fails against the pre-fix consumer at the parent of omnibase_infra#3707.'
     source: manual
@@ -48,8 +55,3 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
-    ac_bindings:
-      - label: AC4
-        criterion_hash: 0560f66bdd13ace398c4d81c8d91463160f7621ecaba7a2853e7f5bc25e68610
-        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
-        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
