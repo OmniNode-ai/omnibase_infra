@@ -784,6 +784,21 @@ EOSQL
        real grant and a silent no-op."
     fi
 
+    # The runner converges the canonical ledger in the application database, and
+    # its first statement is CREATE SCHEMA platform_catalog, which needs CREATE on
+    # the DATABASE. The same grant as the cloud database above, for the same
+    # reason: the live slot bring-up died there with "permission denied for
+    # database omnidash_analytics_prepr1" (OMN-19064).
+    _dash_db="$(derive omnidash_analytics)"
+    _dash_role="$(derive role_omnidash)"
+    assert_in_fence "$_dash_db" "database"
+    assert_in_fence "$_dash_role" "role"
+    psql_admin -c "GRANT CREATE ON DATABASE \"${_dash_db}\" TO \"${_dash_role}\";"
+    _dash_create_ok="$(scalar "SELECT has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')")"
+    if [ "$_dash_create_ok" != "t" ]; then
+        fail 1 "${_dash_role} still lacks CREATE on ${_dash_db} after the grant."
+    fi
+
     # --- the falsifier, run in-band -----------------------------------------
     # AC-4. This is not a post-hoc probe somebody may forget to run: the
     # provisioner refuses to report success until it has proven, from the

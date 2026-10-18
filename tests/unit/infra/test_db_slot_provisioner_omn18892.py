@@ -350,6 +350,22 @@ class TestTenantProjectionWriterReachesTheSlotOmnidashDatabase:
         assert "tenant_projection_writer_prepr1" in _scope_values(result.stdout, "role")
 
 
+class TestOmnidashPrincipalCanCreateTheLedgerSchema:
+    """The ledger convergence opens with CREATE SCHEMA, which needs CREATE on the database (OMN-19064)."""
+
+    def test_apply_grants_create_on_the_slot_omnidash_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive role_omnidash)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_dash_db}\\" TO \\"${_dash_role}\\";' in text
+        )
+        assert (
+            "has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')" in text
+        )
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 
