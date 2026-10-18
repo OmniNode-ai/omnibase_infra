@@ -194,6 +194,11 @@ requirements:
     acceptance:
       - id: AC43
         statement: 'AC43: the developer-principal bindings grant READ and DESCRIBE on onex.evt.omnimarket.projection-delegation-applied.v1 and no write, the derived grants file is the node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q'
+  - id: req-omn17427-lab-principal-issuer-client-request
+    statement: The lab principal issuer's module documentation gives a client the exact request it issues and the response it gets, and the documented request is the one the issuer accepts.
+    acceptance:
+      - id: AC44
+        statement: 'AC44: scripts/lab_principal_issuer.py documents the POST /v1/principals request with its content type and fields, and a request built from the documentation is issued with exactly the documented fields and answers the documented response, rotated on the second ask -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "client_section or documented_request"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -869,3 +874,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC43
+  - id: dod-omn-17427-ac44-issuer-client-request
+    description: The issuer's documented client request section names the route, content type and login header, and the documented request is issued with exactly the documented fields and answered as documented, then rotated on the second ask. Runs against a local issuer and a fake broker; no credential, broker or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "client_section or documented_request"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC44
