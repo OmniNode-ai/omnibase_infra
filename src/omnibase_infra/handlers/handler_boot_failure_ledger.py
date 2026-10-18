@@ -31,6 +31,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.health.model_boot_attempt_outcome import (
     ModelBootAttemptOutcome,
 )
@@ -70,6 +71,16 @@ def _write_atomic(path: Path, text: str) -> None:
 
 class HandlerBootFailureLedger:
     """Counts consecutive failing runtime exits and records each as an event."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """INFRA_HANDLER: a file-backed ledger on the runtime data volume."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """EFFECT: every failing exit is written to disk."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelBootAttemptOutcome) -> ModelRuntimeBootFailedEvent:
         """Record one failing exit and return its event.

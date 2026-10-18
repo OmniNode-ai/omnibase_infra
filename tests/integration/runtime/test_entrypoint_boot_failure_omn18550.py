@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -24,13 +25,19 @@ import pytest
 
 pytestmark = [pytest.mark.integration]
 
+_REPO_SRC = Path(__file__).resolve().parents[3] / "src"
 _BOUND = 3
 _RUN_TIMEOUT_SECONDS = 120.0
 
 
 def _env(state_dir: Path, contracts_dir: Path) -> dict[str, str]:
+    # CI resolves omnibase_infra through the inherited PYTHONPATH (the package
+    # is not installed in the shared CI env), so the child keeps it, with the
+    # repo's own src first.
+    inherited = os.environ.get("PYTHONPATH", "")
     return {
         "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": os.pathsep.join(p for p in (str(_REPO_SRC), inherited) if p),
         "HOME": os.environ.get("HOME", str(state_dir)),
         "ONEX_STATE_DIR": str(state_dir),
         "ONEX_CONTRACTS_DIR": str(contracts_dir),
@@ -53,7 +60,21 @@ def _launch(env: dict[str, str]) -> subprocess.Popen[str]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
+
+
+def _stop(proc: subprocess.Popen[str]) -> None:
+    """Terminate the entrypoint's whole process group, then reap it."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
 
 
 def test_a_malformed_contract_is_counted_then_the_entrypoint_stops_booting(
@@ -91,8 +112,7 @@ def test_a_malformed_contract_is_counted_then_the_entrypoint_stops_booting(
         assert any("RETRIES EXHAUSTED" in x for x in seen), seen
         assert parked.poll() is None, "an exhausted entrypoint must idle, not exit"
     finally:
-        parked.terminate()
-        parked.wait(timeout=30)
+        _stop(parked)
 
     # A relaunch by the restart policy neither boots nor counts again.
     relaunched = _launch(env)
@@ -101,8 +121,7 @@ def test_a_malformed_contract_is_counted_then_the_entrypoint_stops_booting(
         line = relaunched.stderr.readline()
         assert "RETRIES EXHAUSTED" in line, line
     finally:
-        relaunched.terminate()
-        relaunched.wait(timeout=30)
+        _stop(relaunched)
 
     events = [
         json.loads(x)
