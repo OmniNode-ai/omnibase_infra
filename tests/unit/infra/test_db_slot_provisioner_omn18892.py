@@ -326,6 +326,30 @@ class TestDirectiveDatabasesAreProvisionedForTheSlot:
         assert "REVOKE CONNECT ON DATABASE" in apply_section
 
 
+class TestTenantProjectionWriterReachesTheSlotOmnidashDatabase:
+    """Migration 103 needs the CONNECT grant and says the provisioning seam owns it.
+
+    Live slot bring-up (OMN-19064): 103 refused because role_omnibase_prepr1
+    holds no grant option on omnidash_analytics_prepr1, so the slot provisioner
+    grants CONNECT to the slot's own tenant_projection_writer.
+    """
+
+    def test_apply_grants_connect_on_the_slot_omnidash_database_to_the_slot_writer(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omnidash_analytics)"' in text
+        assert 'derive tenant_projection_writer)"' in text
+        assert (
+            'GRANT CONNECT ON DATABASE \\"${_tpw_db}\\" TO \\"${_tpw_role}\\";' in text
+        )
+
+    def test_both_names_are_inside_the_slot_fence(self) -> None:
+        result = _run_scope("prepr1")
+        assert "omnidash_analytics_prepr1" in _scope_values(result.stdout, "database")
+        assert "tenant_projection_writer_prepr1" in _scope_values(result.stdout, "role")
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 

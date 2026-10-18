@@ -752,6 +752,19 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${_role}";
 EOSQL
     done
 
+    # Migration 103 requires tenant_projection_writer to hold CONNECT on
+    # omnidash_analytics and refuses to continue when it cannot grant it: the
+    # migration principal holds no grant option on a database it does not own,
+    # and the migration's own hint says to grant it at the provisioning seam
+    # (OMN-17301). Under a slot that seam is this tool, and the grant is on the
+    # slot's own omnidash database to the slot's own principal (OMN-19064).
+    _tpw_db="$(derive omnidash_analytics)"
+    _tpw_role="$(derive tenant_projection_writer)"
+    assert_in_fence "$_tpw_db" "database"
+    assert_in_fence "$_tpw_role" "role"
+    echo "[provision-db-slot]   granting ${_tpw_role} CONNECT on ${_tpw_db}"
+    psql_admin -c "GRANT CONNECT ON DATABASE \"${_tpw_db}\" TO \"${_tpw_role}\";"
+
     # omninode_cloud's corpus opens with CREATE EXTENSION pgcrypto, and
     # `trusted = t` waives the SUPERUSER requirement, never the PRIVILEGE
     # requirement -- CREATE on the DATABASE is a different privilege from CREATE
