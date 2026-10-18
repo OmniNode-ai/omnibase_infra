@@ -626,7 +626,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC32
-  - id: dod-omn-17427-ac33-ci-summary-registration-selector
+  - id: dod-omn-17427-ac33-ci-summary-registration
     description: The selector runs the five dod-verify required-context tests and they pass; before the rename it deselected all five and exited 5.
     source: manual
     checks:
