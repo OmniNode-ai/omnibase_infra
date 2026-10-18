@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21110"
+title: "Keep the core fallback compatibility proof independent of the SPI release pin"
+summary: "The core fallback tests inject SPI 0.23.5, causing an unrelated SPI error when the required SPI floor rises to 0.23.7. Read the installed SPI distribution version while retaining both core boundary assertions."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21110-core-fallback-check"
+    statement: "Core fallback compatibility proofs use the installed SPI version and preserve the previous-core rejection and release-core acceptance assertions."
+    acceptance:
+      - id: "AC-core-fallback"
+        statement: "Both core fallback tests use the installed SPI distribution version, reject core 0.47.30 and accept core 0.47.31 without an unrelated SPI failure."
+evidence_requirements:
+  - kind: "tests"
+    description: "Focused core fallback proofs retain their core boundary assertions."
+    command: "uv run --frozen pytest tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21110-core-fallback-check"
+    description: "AC-core-fallback: exercise both core boundary assertions with the installed SPI version."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "python3 -c 'from pathlib import Path; s = Path(\"tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py\").read_text(); assert s.count(\"version(\\\"omnibase-spi\\\")\") == 2'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC-core-fallback"]
+  - id: "dod-omn21110-deploy-probe-core-fallback-check"
+    description: "Hosted-runner readback of the test-only change: require both core fallback proofs to read the installed SPI distribution version. Fails on the base's fixed SPI 0.23.5 fixtures; no runtime deployment is claimed."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python3 -c 'from pathlib import Path; s = Path(\"tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py\").read_text(); assert s.count(\"version(\\\"omnibase-spi\\\")\") == 2'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC-core-fallback"]
