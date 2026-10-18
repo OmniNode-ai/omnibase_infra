@@ -184,6 +184,11 @@ requirements:
         statement: 'AC40: the sweep checks out product contracts, binds a product offer through its changed contract, dispatches the owning repository contract explicitly, and refuses an unreadable contract -- falsifier: uv run pytest tests/ci/test_occ_retirement_live_reads_omn17427.py -q'
       - id: AC41
         statement: 'AC41: compose and deployment attribution resolve grants from omnibase_infra main, accept a valid approved grant, and refuse missing, expired or mismatched grants -- falsifier: uv run pytest tests/unit/scripts/test_apply_governed_compose_config_omn20260.py tests/scripts/test_preflight_lane_deploy_attribution.py tests/ci/test_occ_retirement_live_reads_omn17427.py -q'
+  - id: req-omn17427-prepr-pool-rerun-by-one-holder
+    statement: A second pre-merge pool run by the same holder on the same host builds, because the first run's pinned source-tree cache is dropped with its work directory and before the next clone.
+    acceptance:
+      - id: AC42
+        statement: 'AC42: the prove script removes only its own run key under the deploy source-tree cache, before the clone and before each teardown removes the work directory -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "source_tree_cache or drops_the_cache"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -838,3 +843,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC41
+  - id: dod-omn-17427-ac39-deploy-pool-source-tree-cache
+    description: Hosted-runner deploy smoke -- the prove script's cache-drop function removes the run's own key and leaves another run's key, and every removal of the work directory and the clone phase call it. A temporary home and work directory, no containers, credentials or private lab config.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "source_tree_cache or drops_the_cache"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC42

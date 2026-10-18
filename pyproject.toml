@@ -277,7 +277,7 @@ override-dependencies = [
     # OMN-17427: 0.47.44 -> 0.47.46, the floor omnimarket dev declares; its
     # claude_code_binding models import omnibase_core.enums.enum_binding_kind,
     # first released in 0.47.46 (core#2019).
-    "omnibase-core==0.47.46",
+    "omnibase-core==0.47.48",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
