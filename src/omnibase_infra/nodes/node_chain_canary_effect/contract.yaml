@@ -133,6 +133,12 @@ node_type: "EFFECT_GENERIC"
 # another verdict, no deploy in the window, an unreadable agent, a deploy that
 # never converged, a retry that is itself RED -- leaves the RED
 # standing. No verdict member is added or removed.
+#
+# OMN-17427: no declared surface changes. The window a deploy must overlap to
+# earn the retry now opens at the pre-fire read when that read found the agent
+# busy, so a deploy the canary waited out and that completed seconds before
+# the fire still explains the attempt (run 39141887464, 2026-10-18T15:45Z). An
+# agent idle at the pre-fire read widens nothing.
 contract_version:
   major: 1
   minor: 7
