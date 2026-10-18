@@ -142,6 +142,11 @@ requirements:
     acceptance:
       - id: AC32
         statement: 'AC32: render_ledger_row emits an actor cell with kind launchd and mechanism name lab-alarm -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -k test_lab_alarm_ledger_row_names_the_mechanism_as_actor -q'
+  - id: req-omn17427-ci-summary-registration-selector
+    statement: The tests that hold repo-evidence / dod-verify in CI Summary's expected contexts are selectable by the name ci_summary_registration.
+    acceptance:
+      - id: AC33
+        statement: 'AC33: selecting tests by ci_summary_registration in the dod-verify required-context file runs five tests and they pass -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration exits 5 with every test deselected'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -227,6 +232,9 @@ evidence_requirements:
   - kind: tests
     description: The hook push rehearsal caller workflow matches the omnibase_core reusable at its pin.
     command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+  - kind: tests
+    description: The dod-verify required-context tests are selected by the name ci_summary_registration.
+    command: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration
 emergency_bypass:
   enabled: false
   justification: ''
@@ -618,3 +626,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC32
+  - id: dod-omn-17427-ac33-ci-summary-registration
+    description: The selector runs the five dod-verify required-context tests and they pass; before the rename it deselected all five and exited 5.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC33
