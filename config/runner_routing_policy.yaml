@@ -1133,6 +1133,9 @@ route:
         - exposure-reader-coverage
         - Fingerprint Check
         - Governed helper primitive gate
+        # OMN-20413: the hook push rehearsal, enforced by the CI Summary poller
+        # via EXPECTED_EXTERNAL_CONTEXTS and absent from branch protection.
+        - hook-push-rehearsal / rehearse
         - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)
