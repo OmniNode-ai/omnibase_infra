@@ -194,6 +194,11 @@ requirements:
     acceptance:
       - id: AC43
         statement: 'AC43: the developer-principal bindings grant READ and DESCRIBE on onex.evt.omnimarket.projection-delegation-applied.v1 and no write, the derived grants file is the node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q'
+  - id: req-omn17427-chain-canary-prefire-deploy-window
+    statement: A chain-canary red that follows a deploy the canary waited out before firing earns the one retry, and an agent idle at the pre-fire read widens nothing.
+    acceptance:
+      - id: AC45
+        statement: 'AC45: with the deploy agent deploying through the pre-fire read and two wait polls and idle with the job completed 16 s before the fire, a TERMINAL_MISSING first attempt names that job, retries once and ends GREEN; with the agent idle at the pre-fire read the red stands with no retry -- falsifier: uv run pytest tests/integration/chain_canary/test_chain_canary_deploy_agent_window_omn19811.py -q -k "waited_out or idle_agent_before_the_fire"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -869,3 +874,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC43
+  - id: dod-omn-17427-ac45-canary-prefire-window
+    description: The real handler runs against a loopback deploy agent serving the real /health shape, deploying through the pre-fire read and two wait polls, then idle with the job completed 16 s before the fire; the first attempt ends TERMINAL_MISSING, the run retries once and ends GREEN with the deploy job named. The control agent idle at the pre-fire read gets no retry. Fakes stand in for the ingress, broker, projection and ledger; no credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/chain_canary/test_chain_canary_deploy_agent_window_omn19811.py -q -k "waited_out or idle_agent_before_the_fire"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC45
