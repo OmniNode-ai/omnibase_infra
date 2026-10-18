@@ -11,12 +11,14 @@ post-rollback snapshot).
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1166,6 +1168,208 @@ def test_lane_sync_finding_makes_stability_receipt_failed(kind):
     assert receipt["result"] == "FAILED"
     assert receipt["health_gate"]["lane_sync"]["ok"] is False
     assert kind in receipt["health_gate"]["lane_sync"]["evidence"]
+
+
+# ─── desired-state comparison on a rolled-back lane [OMN-19427] ──────────────
+
+_DESIRED_STATE_ENV = "LANE_CENSUS_DESIRED_STATE"
+
+
+def _default_lane() -> str:
+    """The lane the verifier grades when ``--lane`` is not passed."""
+    captured: dict[str, object] = {}
+
+    def capture(**kwargs: object) -> HealthGateReport:
+        captured.update(kwargs)
+        return HealthGateReport(lane=str(kwargs["lane"]))
+
+    with (
+        patch.object(_mod, "run_health_gate", capture),
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        _mod.main(["--expected-revision", "abc", "--pre-image-ids", "{}"])
+    return str(captured["lane"])
+
+
+_LANE = _default_lane()
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _revision_mismatch_plan() -> dict:
+    return {
+        "host": "census-host",
+        "lanes_checked": [_LANE],
+        "findings": [
+            {
+                "kind": "revision_mismatch",
+                "lane": _LANE,
+                "container": "omninode-runtime",
+                "detail": "container revision differs from the desired state",
+                "severity": "critical",
+            }
+        ],
+        "has_drift": True,
+    }
+
+
+def _desired_state_runner(census_envs: list[dict[str, str]]):
+    """A healthy lane whose census finds revision_mismatch only when the census
+    is handed a desired state, as the real planner does: with the variable
+    unset the desired-state kinds are not graded at all."""
+    healthy_runner = _full_pass_runner()
+
+    def runner(cmd, **kwargs):
+        if cmd[0] == "bash":
+            env = dict(kwargs.get("env") or {})
+            census_envs.append(env)
+            if _DESIRED_STATE_ENV in env:
+                return subprocess.CompletedProcess(
+                    cmd, 30, json.dumps(_revision_mismatch_plan()), ""
+                )
+        return healthy_runner(cmd, **kwargs)
+
+    return runner
+
+
+def _gate_opener(url, timeout=10):
+    body = (
+        _manifest_payload(DEFAULT_MIN_CONTRACTS)
+        if "manifest" in url
+        else {
+            "status": "healthy",
+            "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+        }
+    )
+    return _FakeHTTPResponse(json.dumps(body).encode())
+
+
+def _run_gate_with_desired_state(runner, **kwargs):
+    return run_health_gate(
+        lane=_LANE,
+        pre_image_ids=dict.fromkeys(CORE_SERVICES, "sha256:old-image"),
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        runner=runner,
+        opener=_gate_opener,
+        sleep_fn=lambda _: None,
+        **kwargs,
+    )
+
+
+def test_rollback_gate_records_revision_mismatch_against_the_desired_state(tmp_path):
+    """A rollback restores health, so the rollback gate passes on health; the
+    desired state is the NEW release, so the receipt must still read lane_sync
+    FAIL with revision_mismatch instead of a clean census."""
+    desired = tmp_path / "desired-state.json"
+    envs: list[dict[str, str]] = []
+    rollback_gate = _run_gate_with_desired_state(
+        _desired_state_runner(envs),
+        desired_state=desired,
+        desired_state_gates=False,
+    )
+
+    assert rollback_gate.overall == "PASS", "the rolled-back lane is healthy"
+    assert rollback_gate.lane_sync is not None and rollback_gate.lane_sync.ok
+    assert rollback_gate.desired_state_sync is not None
+    assert rollback_gate.desired_state_sync.ok is False
+    assert "revision_mismatch" in rollback_gate.desired_state_sync.evidence
+    assert [_DESIRED_STATE_ENV in env for env in envs] == [False, True]
+    assert envs[1][_DESIRED_STATE_ENV] == str(desired)
+
+    receipt = build_receipt(
+        lane=_LANE,
+        prior_refs={"omnibase_infra": "aaa"},
+        new_refs={"omnibase_infra": "bbb"},
+        ancestry_ok=True,
+        ancestry_commands=[],
+        build_scope=["omninode-runtime"],
+        gate=HealthGateReport(lane=_LANE),
+        rollback_triggered=True,
+        rollback_gate=rollback_gate,
+    )
+    assert receipt["result"] == "FAILED_ROLLED_BACK"
+    recorded = receipt["rollback"]["gate"]["desired_state_sync"]
+    assert recorded["ok"] is False
+    assert "revision_mismatch" in recorded["evidence"]
+
+
+def test_forward_gate_fails_on_revision_mismatch_against_the_desired_state(tmp_path):
+    """The forward gate is graded against the desired state it was handed: a
+    lane that does not serve the desired release is not a PASS."""
+    envs: list[dict[str, str]] = []
+    gate = _run_gate_with_desired_state(
+        _desired_state_runner(envs), desired_state=tmp_path / "desired-state.json"
+    )
+
+    assert gate.overall == "FAIL"
+    assert gate.lane_sync is not None and gate.lane_sync.ok is False
+    assert "revision_mismatch" in gate.lane_sync.evidence
+    assert gate.desired_state_sync is None
+
+
+def test_gate_without_a_desired_state_hands_the_census_none(tmp_path):
+    envs: list[dict[str, str]] = []
+    gate = _run_gate_with_desired_state(_desired_state_runner(envs))
+
+    assert gate.overall == "PASS"
+    assert all(_DESIRED_STATE_ENV not in env for env in envs)
+    assert gate.desired_state_sync is None
+    assert gate.to_dict()["desired_state_sync"] is None
+
+
+def test_rollback_record_only_without_a_desired_state_is_a_usage_error(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        _mod.main(
+            [
+                "--expected-revision",
+                "abc",
+                "--pre-image-ids",
+                "{}",
+                "--desired-state-record-only",
+            ]
+        )
+
+    assert exit_info.value.code == 2
+    assert "requires --desired-state" in capsys.readouterr().err
+
+
+def test_refresh_script_hands_the_desired_state_to_the_gate_and_the_rollback_regate():
+    """The refresh script grades the forward gate against the desired state and
+    records it on the rollback re-verify, which must not turn a healthy
+    rolled-back lane into a STOP-AND-REPORT."""
+    text = (
+        _REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
+    ).read_text(encoding="utf-8")
+    setup = text.split('log "=== Health-gate ==="', 1)[1].split(
+        "PRE_IMAGE_IDS_JSON=", 1
+    )[0]
+    gate1 = text.split("GATE1_JSON=", 1)[1].split("GATE1_OVERALL=", 1)[0]
+    rollback = text.split("=== Re-verifying health after rollback ===", 1)[1].split(
+        "GATE2_OVERALL=", 1
+    )[0]
+    gate1_definition = next(
+        line
+        for line in setup.splitlines()
+        if line.strip().startswith("GATE1_DESIRED_STATE_ARGS=(--")
+    )
+
+    assert (
+        'GATE1_DESIRED_STATE_ARGS=(--desired-state "${STABILITY_DESIRED_STATE}")'
+        in gate1_definition
+    )
+    assert "--desired-state-record-only" not in gate1_definition
+    assert (
+        "GATE2_DESIRED_STATE_ARGS=(--desired-state "
+        '"${STABILITY_DESIRED_STATE}" --desired-state-record-only)' in setup
+    )
+    assert "GATE1_DESIRED_STATE_ARGS[@]" in gate1
+    assert "GATE2_DESIRED_STATE_ARGS" not in gate1
+    assert "GATE2_DESIRED_STATE_ARGS[@]" in rollback
+    assert "GATE1_DESIRED_STATE_ARGS" not in rollback
 
 
 if __name__ == "__main__":

@@ -232,7 +232,8 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # (OMN-20275) adds write on its append command only: the ledger host's serve
     # process alone writes the append terminals. Literal names, no prefix or
     # wildcard grant. The memory lifecycle proof (OMN-21045) adds write on the
-    # expire-memory command only.
+    # expire-memory command only. The pr-polish proof (OMN-21034) adds write on the
+    # start command only: the lab runtime writes the two result topics.
     writable = [g for g in declaration.grants if "write" in g.operations]
     assert {g.name for g in writable} == {
         "onex.cmd.omnimarket.delegate-skill.v1",
@@ -242,6 +243,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.pr-handoff-requested.v1",
         "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
         "onex.cmd.omnimemory.expire-memory.v1",
+        "onex.cmd.omnimarket.pr-polish-start.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
