@@ -162,6 +162,11 @@ requirements:
     acceptance:
       - id: AC36
         statement: 'AC36: each agent-owned topic is created before its first publish, an existing topic is created once and still published, an admin failure is retried on the next publish, and a topic another node declares is not created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q'
+  - id: req-omn17427-remove-repo-documentation
+    statement: Human documentation lives in the public knowledge base; this repository keeps a short entry point, agent instructions, the release changelog, and machine-read inputs.
+    acceptance:
+      - id: AC37
+        statement: 'AC37: README has three to five lines and links to knowledge_base, unused prose and evidence text are removed -- falsifier: the documentation surface check below fails'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -719,3 +724,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC36
+  - id: dod-omn17427-documentation-surface
+    description: The root README links to the knowledge base and unused documentation paths are absent.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c "from pathlib import Path; t=Path('README.md').read_text(); assert 3 <= len(t.splitlines()) <= 5; assert 'https://github.com/OmniNode-ai/knowledge_base' in t; assert not any(Path('docs/evidence').rglob('*.txt')); assert not any(Path('tests/fixtures').rglob('README.md')); assert not any(Path(p).exists() for p in ['SECURITY.md', '.github/CONTRIBUTING.md', '.github/CODE_OF_CONDUCT.md']); print('Documentation surface check passed')"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC37

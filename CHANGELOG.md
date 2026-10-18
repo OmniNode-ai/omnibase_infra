@@ -2070,7 +2070,7 @@ The codebase has migrated from "handler" to "dispatcher" terminology for message
 
 ## Contributing
 
-See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
+See the [knowledge base](https://github.com/OmniNode-ai/knowledge_base) for guidelines.
 
 ## License
 
