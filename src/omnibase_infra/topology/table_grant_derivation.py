@@ -56,6 +56,7 @@ __all__ = [
     "UnmappableDeclaration",
     "READ_PRIVILEGES",
     "WRITE_PRIVILEGES",
+    "PRUNE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
     "LEGACY_MIGRATION_TABLE_DECLARATIONS",
@@ -77,6 +78,17 @@ WRITE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
         EnumDatabasePrivilege.SELECT,
         EnumDatabasePrivilege.INSERT,
         EnumDatabasePrivilege.UPDATE,
+    }
+)
+# A retention prune's ``DELETE ... WHERE <column> < ...`` reads the rows it
+# removes, so DELETE rides with SELECT and nothing else: no INSERT or UPDATE,
+# and never TRUNCATE. No contract derives it; a principal that prunes declares
+# it by hand on the one relation it prunes (OMN-17427,
+# node_projection_consumer_flow/0006 for omninode_internal.consumer_flow_windows).
+PRUNE_PRIVILEGES: frozenset[EnumDatabasePrivilege] = frozenset(
+    {
+        EnumDatabasePrivilege.SELECT,
+        EnumDatabasePrivilege.DELETE,
     }
 )
 
@@ -376,6 +388,33 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
+        ),
+    ),
+    # OMN-19988: the same infra-first window; this repo vendors
+    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
+    # contract that declares the relation, which lands after this release (the
+    # node's wiring check refuses a contract whose table no release grants). The
+    # source declares access read_write, role local_environment in omnimarket's
+    # scripts/application-relation-ownership.yaml; 0001 grants
+    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
+    # node_projection_local_environment contract merges and the pin advances
+    # past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:local_environment",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_local_environment/"
+            "0000_create_local_environment.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="local_environment",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_local_environment/"
+                "0000_create_local_environment.sql"
+            ),
+            access="read_write",
+            role="local_environment",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

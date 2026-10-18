@@ -121,7 +121,19 @@ requirements:
     acceptance:
       - id: AC22
         statement: 'AC22: no workflow line outside the two carve-outs carries the self-hosted fleet fallback, performance-tests and dev-merge-tag run on ubuntu-latest, the Public Runner Placement job is unconditional, hosted, carries a positive control and the same core pin as the hook, and CI Summary registers it -- falsifier: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0 fails at the merge base, where 178 fallback lines name the fleet and neither the job nor the hook exists'
+  - id: req-omn19998-routing-audit-quota-isolation
+    statement: The routing audit must retain its live organization and private-repository assertions without GraphQL reads or a REST read per workflow file. Same-repository content uses the run token, while organization variable metadata and private sibling content retain the existing privileged reader. Unread state must fail separately from drift.
+    acceptance:
+      - id: AC24
+        statement: 'AC24: repository discovery paginates REST across every visibility class and excludes archived repositories; workflow content comes from the default branch through sparse Git reads, including an empty directory positive control, with no GraphQL or per-file REST requests.'
+      - id: AC25
+        statement: 'AC25: the workflow binds GH_TOKEN and checkout to github.token, binds RUNNER_AUDIT_ORG_TOKEN to the existing org reader, and selects the run token for same-repository content while variable metadata and sibling content use the privileged reader.'
+      - id: AC26
+        statement: 'AC26: quota, transport and malformed-response failures produce a named infrastructure refusal and nonzero audit result; CI Summary reports the failed infrastructure marker separately and still fails, while real drift findings remain visible.'
 evidence_requirements:
+  - kind: tests
+    description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov
   - kind: tests
     description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
     command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"
@@ -187,6 +199,36 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19998-ac24-routing-audit-git-rest
+    description: AC24 exercises the production sparse Git reader against a local repository default branch, the empty-workflows positive control and the paginated REST inventory.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'repository_inventory or sparse_default_branch or every_private_repository'
+        cwd: .
+    binds_ac:
+      - AC24
+  - id: dod-omn19998-ac25-routing-audit-token-scope
+    description: AC25 checks the workflow token bindings and the run-token versus privileged-reader selection.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'workflow_uses_run_token or variable_reads_use_org_token'
+        cwd: .
+    binds_ac:
+      - AC25
+  - id: dod-omn19998-ac26-routing-audit-infrastructure
+    description: AC26 exercises quota, transport and response refusals, retains drift findings and checks that CI Summary reports infrastructure separately while failing closed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -n 0 --no-cov -k 'rate_limit or transport or infrastructure or unread_repository'
+        cwd: .
+      - check_type: command
+        check_value: uv run python scripts/audit-runner-routing.py --local-workflows
+        cwd: .
+    binds_ac:
+      - AC26
   - id: dod-omn19998-ac1-run-conclusion-filter
     description: AC1 tests count job-list requests, retain wedge detection for candidate runs and replay the recorded 100-run list.
     source: manual
