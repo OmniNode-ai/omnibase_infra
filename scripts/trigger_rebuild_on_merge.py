@@ -96,7 +96,7 @@ from pydantic import (
 TOPIC = "onex.cmd.omnimarket.redeploy-start.v1"
 
 # Lane-declared transport vocabulary (OMN-18012). The overlay
-# (omnimarket config/ci_bus_lanes.yaml) declares `security_protocol` and, for a
+# (the CI overlay lane table config/lab/ci_bus_lanes.yaml) declares `security_protocol` and, for a
 # SASL protocol, `sasl_mechanism` beside each lane's broker. This publisher READS
 # them; it never derives them from the shape of the environment. Credential
 # PRESENCE is not a statement about transport -- inferring SASL_SSL from injected
@@ -133,7 +133,7 @@ class ModelCiBusLaneDsnReference(BaseModel):
     """One lane's declared DSN *reference* — a NAME, never a value.
 
     The shape of both ``projection_readback`` (OMN-18060) and
-    ``ledger_readback`` (OMN-16964). omnimarket ``config/ci_bus_lanes.yaml``
+    ``ledger_readback`` (OMN-16964). the CI overlay lane table ``config/lab/ci_bus_lanes.yaml``
     is committed, diffable, CODEOWNERS-reviewed config, which is what makes it
     the right home for a variable name and the wrong home for a credential;
     the value is injected into the job env from the lab store and is read by
@@ -231,7 +231,7 @@ class ModelCiBusLane(BaseModel):
 
     Carries the lane's broker AND its transport. The transport half is the
     OMN-18012 contract, documented in the overlay itself
-    (omnimarket ``config/ci_bus_lanes.yaml``) and enforced field-for-field here:
+    (the CI overlay lane table ``config/lab/ci_bus_lanes.yaml``) and enforced field-for-field here:
 
     * ``security_protocol`` -- one of PLAINTEXT | SSL | SASL_PLAINTEXT |
       SASL_SSL, spelled as librdkafka spells it. REQUIRED on any lane whose

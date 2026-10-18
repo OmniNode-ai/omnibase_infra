@@ -347,11 +347,11 @@ class ServiceTimeoutScanner:
 
         Queries for nodes where:
         - liveness_deadline < now
-        - liveness_timeout_emitted_at IS NULL
         - current_state = ACTIVE
 
-        This query leverages the idx_registration_liveness_timeout_scan
-        partial index for efficient scanning.
+        The emission marker is not a filter: the emitter moves an expired row out
+        of ACTIVE, so rows stamped before it did so (OMN-21028) are found again
+        and expired.
 
         Args:
             now: The current time from RuntimeTick (injected, not system clock).

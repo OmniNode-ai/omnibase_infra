@@ -669,6 +669,179 @@ def test_read_onex_lane_credential_refuses_a_missing_store(tmp_path: Path) -> No
         read_onex_lane_credential(tmp_path / "does-not-exist", "dev")
 
 
+@pytest.mark.unit
+def test_the_lag_path_makes_no_subprocess_ssh_or_docker_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC1 falsifier: reading lag escapes the process to ssh, docker, or a shell."""
+    import asyncio
+
+    from aiokafka.structs import OffsetAndMetadata, TopicPartition
+
+    from scripts.lab_alarm import make_kafka_lag_reader
+
+    partition = TopicPartition("savings", 0)
+    guarded_calls: list[tuple[object, ...]] = []
+
+    def refuse_process(*args: object, **kwargs: object) -> None:
+        guarded_calls.append(args)
+        raise AssertionError("lag reading must stay in-process")
+
+    class FakeAdmin:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            pass
+
+        async def list_consumer_group_offsets(
+            self, group: str
+        ) -> dict[TopicPartition, OffsetAndMetadata]:
+            assert group == "savings"
+            return {partition: OffsetAndMetadata(5, "")}
+
+        async def close(self) -> None:
+            pass
+
+    class FakeConsumer:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def start(self) -> None:
+            pass
+
+        async def end_offsets(
+            self, partitions: list[TopicPartition]
+        ) -> dict[TopicPartition, int]:
+            assert partitions == [partition]
+            return {partition: 12}
+
+        async def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr("aiokafka.admin.AIOKafkaAdminClient", FakeAdmin)
+    monkeypatch.setattr("aiokafka.AIOKafkaConsumer", FakeConsumer)
+    monkeypatch.setattr(subprocess, "run", refuse_process)
+    monkeypatch.setattr(subprocess, "Popen", refuse_process)
+    monkeypatch.setattr(os, "system", refuse_process)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse_process)
+
+    reader = make_kafka_lag_reader(
+        bootstrap_servers="unused:9092",
+        sasl_username="dev-cli-test",
+        sasl_password="in-process-test-password",
+    )
+    report, sample = evaluate_consumer_group_lag(
+        reader, ["savings"], previous={"savings": 7}
+    )
+    assert report.outcome is EnumConditionOutcome.OK
+    assert sample == {"savings": 7}
+    assert guarded_calls == []
+
+    # Positive control: the installed guard really refuses a process call.
+    with pytest.raises(AssertionError, match="must stay in-process"):
+        subprocess.run(["true"], check=True)
+    assert len(guarded_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "failure", ["connection", "authorization", "runtime", "insecure-store"]
+)
+def test_the_resolved_password_never_reaches_evidence_or_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    """AC2 falsifier: a credential or client failure exposes the resolved password."""
+    from aiokafka.errors import (
+        GroupAuthorizationFailedError,
+        KafkaConnectionError,
+    )
+    from aiokafka.structs import OffsetAndMetadata, TopicPartition
+
+    from scripts.lab_alarm import (
+        _build_lag_reader,
+        _resolve_onex_credential_or_reason,
+    )
+
+    password = "AC2-distinctive-resolved-password-omn19091"
+    _write_onex_store(
+        tmp_path,
+        password=password,
+        mode=0o644 if failure == "insecure-store" else 0o600,
+    )
+    directory_before = sorted(tmp_path.rglob("*"))
+    credential = _resolve_onex_credential_or_reason(tmp_path)
+    if failure == "insecure-store":
+        assert isinstance(credential, str)
+        assert "0600" in credential
+        assert password not in credential
+    else:
+        assert credential == ("dev-cli-test", password)
+
+    error_type = {
+        "connection": KafkaConnectionError,
+        "authorization": GroupAuthorizationFailedError,
+        "runtime": RuntimeError,
+        "insecure-store": RuntimeError,
+    }[failure]
+    partition = TopicPartition("savings", 0)
+    client_kwargs: list[dict[str, object]] = []
+
+    class FakeAdmin:
+        def __init__(self, **kwargs: object) -> None:
+            client_kwargs.append(kwargs)
+
+        async def start(self) -> None:
+            raise error_type(f"client failed with password {password}")
+
+        async def list_consumer_group_offsets(
+            self, group: str
+        ) -> dict[TopicPartition, OffsetAndMetadata]:
+            return {partition: OffsetAndMetadata(5, "")}
+
+        async def close(self) -> None:
+            pass
+
+    class FakeConsumer:
+        def __init__(self, **kwargs: object) -> None:
+            client_kwargs.append(kwargs)
+
+        async def start(self) -> None:
+            pass
+
+        async def end_offsets(
+            self, partitions: list[TopicPartition]
+        ) -> dict[TopicPartition, int]:
+            return {partition: 12}
+
+        async def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr("aiokafka.admin.AIOKafkaAdminClient", FakeAdmin)
+    monkeypatch.setattr("aiokafka.AIOKafkaConsumer", FakeConsumer)
+    reader = _build_lag_reader(credential, bootstrap_servers="unused:9092")
+    report, _ = evaluate_consumer_group_lag(
+        reader, ["savings"], previous={"savings": 7}
+    )
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert password not in report.evidence
+    assert password not in repr(report)
+    captured = capsys.readouterr()
+    assert password not in captured.out
+    assert password not in captured.err
+    assert sorted(tmp_path.rglob("*")) == directory_before
+    if failure == "insecure-store":
+        assert client_kwargs == []
+    else:
+        assert error_type.__name__ in report.evidence
+        # Positive control: the secret reached the real reader's client kwargs.
+        assert len(client_kwargs) == 1
+        assert client_kwargs[0]["sasl_plain_password"] == password
+
+
 # ---------------------------------------------------------------------------
 # Edge-triggering, and the whole-run record
 # ---------------------------------------------------------------------------
@@ -2522,6 +2695,33 @@ def test_lab_alarm_ledger_row_cells_cannot_break_the_row(tmp_path: Path) -> None
     assert "\n" not in row
     assert row.count(" | ") == len(_ledger_cells(row)) + 1 + 1  # stamp, type, cells
     assert _ledger_cells(row)["lane"] == "lab-alarm"
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_row_names_the_mechanism_as_actor() -> None:
+    """The ruling audit counts a mechanism as acting only by its ``actor=`` cell.
+
+    ``ruling_mechanisms.py`` (queue-status) credits a ledger row to a mechanism
+    when its ``actor=`` is ``<kind>:<name>`` with a mechanism kind and a name
+    derived from the mechanism path. The alarm wrote ``lane=lab-alarm`` alone, so
+    the rulings it carries read NOT-ACTING while it raised rows every day.
+    """
+    from scripts.lab_alarm import render_ledger_row
+
+    row = render_ledger_row(
+        ModelAlarm(
+            condition=EnumAlarmCondition.CONTAINER_RESTARTS,
+            subject="omninode-runtime",
+            detail="restarted",
+        ),
+        evidence="e",
+        stamp="2026-10-17T09:55:27Z",
+        raised_at="2026-10-17T09:55:27+00:00",
+        ticket="OMN-20769",
+    )
+    kind, _, name = _ledger_cells(row)["actor"].partition(":")
+    assert kind == "launchd"
+    assert name in {"lab-alarm", "lab_alarm"}
 
 
 @pytest.mark.unit

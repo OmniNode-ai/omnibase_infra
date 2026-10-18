@@ -65,7 +65,7 @@ jobs:
     name: Post lab-proof-receipt
     runs-on: >-
       ${{
-        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     timeout-minutes: 15
     steps:
@@ -199,15 +199,12 @@ jobs:
       # the check run as it is.
       - name: Fetch the bus overlay
         if: ${{ !cancelled() && steps.live.outcome == 'success' }}
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          ref: dev
-          path: omnimarket-bus-lanes
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: omnimarket-bus-lanes/config/ci_bus_lanes.yaml
 
       - name: Build the bus event
         if: ${{ !cancelled() && steps.live.outcome == 'success' }}

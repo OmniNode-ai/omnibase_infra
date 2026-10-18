@@ -59,13 +59,13 @@ env:
 jobs:
   slow-tests:
     name: Slow & Chaos Tests
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     timeout-minutes: 60  # Extended timeout for slow tests
 
@@ -127,12 +127,11 @@ jobs:
   # deselects and which no other workflow selected. See the header.
   performance-tests:
     name: Performance Microbenchmarks
-    # Pinned to the lab fleet rather than read from the routing seam. These
-    # assert wall-clock thresholds and the seam currently resolves to a hosted
-    # runner; the fleet was measured at 88 online with 2 busy, which is the
-    # steadier of the two. This is a deliberate placement for timing
-    # sensitivity, not a general routing change -- the job above is untouched.
-    runs-on: [self-hosted, omnibase-ci]
+    # Pinned to a GitHub-hosted label rather than read from the routing seam,
+    # so a seam flip cannot relocate these wall-clock benchmarks without review.
+    # This is a public repository: CI runners are for private repositories only
+    # (RULING 2026-10-16T07:07:09Z, OMN-19998), so the pin is hosted.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
@@ -187,13 +186,13 @@ jobs:
   nightly-summary:
     timeout-minutes: 30
     name: Nightly Summary
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     needs: [slow-tests, performance-tests]
     if: always()

@@ -204,6 +204,30 @@ local:
     - OMNINODE_RUNTIME_PASSWORD
     - TENANT_PROJECTION_WRITER_PASSWORD
     - REDPANDA_SUPERUSER_PASSWORD
+# OMN-19983: the laptop profile plus a mirror-only forwarder that republishes the
+# delegation topics the operator's overlay declares onto the lab lane the overlay
+# names. Opt-in: `local` alone never reaches a lab broker. The lanes, the lab
+# address and the principal that writes it are in two operator files outside this
+# repo (templates: docker/lane-overlays/local.lane-mirror.example.yaml and
+# local.lane-credentials.example.yaml), named by ONEX_LOCAL_LANE_MIRROR_OVERLAY
+# and ONEX_LOCAL_LANE_CREDENTIAL_MAP in the env file. It names the same compose
+# project as `local` (one stack is one project) and takes its publish host from it.
+local-lane-mirror:
+  description: "Laptop profile plus a mirror-only forwarder to the lab lane your overlay names (OMN-19983). `make up-local-mirror`."
+  project: omnibase-infra-local
+  services:
+    - lane-mirror-forwarder
+  extra_depends_on:
+    # The forwarder authenticates to the laptop broker with the SCRAM user the
+    # one-shot creates; before it, the broker accepts an anonymous client.
+    lane-mirror-forwarder:
+      redpanda-local-sasl: service_completed_successfully
+  includes:
+    - local
+  inject_env: {}
+  inject_required_env:
+    - ONEX_LOCAL_LANE_MIRROR_OVERLAY
+    - ONEX_LOCAL_LANE_CREDENTIAL_MAP
 runtime-integrations:
   description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
   services:

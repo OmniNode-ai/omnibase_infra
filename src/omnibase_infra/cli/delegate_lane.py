@@ -21,12 +21,14 @@ the missing selection.
 
 WHERE THE MAPPING COMES FROM, AND WHY NOT A NEW FILE
 ----------------------------------------------------
-``omnimarket``'s checked-in ``config/ci_bus_lanes.yaml`` already is the
+The CI overlay's ``config/lab/ci_bus_lanes.yaml`` already is the
 lane -> broker authority. It was created for exactly this failure one level up
 (OMN-14800: a repo secret silently repointed dev -> stability and the
 publisher stayed green while emitting to the wrong lane), it already declares
 ``dev``, ``stability-test`` and the in-memory lanes, and it already carries
-the transport beside the address (OMN-18012). ``omnibase_infra`` already
+the transport beside the address (OMN-18012). It is private deployment config,
+so it lives in the workspace config owner's repository and not in a public
+package (OMN-20935). ``omnibase_infra`` already
 SHIPS the one reader for it --
 ``nodes/node_chain_canary_effect/lane_transport.py::load_lane_transport`` --
 with the refusals this path needs: an undeclared lane, an in-memory lane, a
@@ -40,15 +42,17 @@ says. The reader is imported lazily inside the function that needs it,
 because its package ``__init__`` constructs the chain-canary node and the CLI
 must not pay that at import time.
 
-The declaration is located under the workspace root -- resolved from the
-``--omnibase-path`` flag (``$OMNIBASE_PATH``) that ``onex delegate`` binds for
-the omnimarket drift guard, so no new environment read enters the CLI. When it
-cannot be located the command is refused with the path it looked for. A
-released wheel carries no copy of the overlay (``omnimarket``'s packaging
-ships ``src/omnimarket/**/*.yaml`` only, and this file lives at the repo
-root), so on such an install every kafka delegation refuses by name instead of
-silently addressing whatever the shell exported. Refusing loudly is the point;
-packaging the declaration onto the release path is tracked separately.
+The declaration is located under the workspace config root, the same root
+every other private-config reader resolves
+(``service_kernel.workspace_runtime_config_root``: ``$ONEX_WORKSPACE_CONFIG_ROOT``,
+else the sibling operator repository, else the developer workspace's
+``.onex/workspace-config``). The workspace root it resolves against comes from
+the ``--omnibase-path`` flag (``$OMNIBASE_PATH``) that ``onex delegate`` binds
+for the omnimarket drift guard, so no new environment read enters the CLI. When
+the declaration cannot be located the command is refused with the path it
+looked for. A released wheel carries no copy of the declaration, so on such an
+install every kafka delegation refuses by name instead of silently addressing
+whatever the shell exported. Refusing loudly is the point.
 """
 
 from __future__ import annotations
@@ -66,11 +70,11 @@ __all__ = [
     "resolve_lane_selection",
 ]
 
-#: Where the lane -> broker declaration sits inside the canonical workspace.
-#: A relative path, joined onto ``$OMNI_HOME``: rule 6 forbids an absolute one,
-#: and the canonical-clone convention this rides on is the same one
-#: ``omnimarket_drift_guard`` already resolves against.
-LANE_DECLARATION_RELATIVE_PATH = Path("omnimarket") / "config" / "ci_bus_lanes.yaml"
+#: Where the lane -> broker declaration sits inside the workspace config root
+#: (OMN-20935). A relative path, joined onto the root that
+#: ``service_kernel.workspace_runtime_config_root`` resolves for the workspace:
+#: rule 6 forbids an absolute one.
+LANE_DECLARATION_RELATIVE_PATH = Path("config") / "lab" / "ci_bus_lanes.yaml"
 
 #: The transport this module governs. Every other bus is in-process, so it has
 #: no address to resolve and a lane selection against it is a contradiction.
@@ -87,15 +91,15 @@ class DelegateLaneSelectionError(Exception):
     """
 
 
-def resolve_lane_declaration_path(omni_home: Path | None) -> Path:
-    """Locate the lane declaration under ``omni_home``.
+def resolve_lane_declaration_path(workspace_root: Path | None) -> Path:
+    """Locate the lane declaration under the workspace config root.
 
     Raises:
-        DelegateLaneSelectionError: ``omni_home`` is unset, or the declaration
+        DelegateLaneSelectionError: ``workspace_root`` is unset, or the declaration
             is not there. Both name what was looked for, because a lane target
             that cannot be read is refused rather than guessed.
     """
-    if omni_home is None:
+    if workspace_root is None:
         message = (
             "cannot locate the lane declaration: no workspace root is set. "
             "Pass --omnibase-path <workspace root> (or export "
@@ -106,7 +110,10 @@ def resolve_lane_declaration_path(omni_home: Path | None) -> Path:
         )
         raise DelegateLaneSelectionError(message)
 
-    declaration = omni_home / LANE_DECLARATION_RELATIVE_PATH
+    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+
+    config_root = workspace_runtime_config_root(workspace_root)
+    declaration = config_root / LANE_DECLARATION_RELATIVE_PATH
     if not declaration.is_file():
         message = (
             f"the lane declaration {declaration} does not exist. It is the "

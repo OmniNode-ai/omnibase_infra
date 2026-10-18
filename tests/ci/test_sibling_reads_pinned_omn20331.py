@@ -28,8 +28,9 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PINS = yaml.safe_load((REPO_ROOT / ".github" / "sibling-pins.yaml").read_text())["pins"]
 
 # Deliberately live, not in PINNED_WORKFLOWS (measured red when pinned, PR #4449):
-# ci-bus-overlay-binding.yml binds the overlay to the branch the publisher reads at
-# merge time (its own test requires omnimarket ``dev``). The validate-boundaries
+# The overlay binding workflow binds the lane table in the CI overlay repository
+# (read unpinned from its default branch, OMN-20935), not a sibling. The
+# validate-boundaries
 # action ci.yml calls is omnibase_core's copy at a full sha (OMN-20963): it
 # runs the handlers from its own checkout and never reads ``github.action_ref``,
 # which is what made the change-control copy unpinnable (run 36942428614).

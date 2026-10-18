@@ -52,7 +52,7 @@ lanes:
 
 def _workspace(root: Path, *, tier1_lane: str | None = None) -> Path:
     """A workspace root with a lane declaration and, optionally, a tier-1 config."""
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(_LANES, encoding="utf-8")
     if tier1_lane is not None:

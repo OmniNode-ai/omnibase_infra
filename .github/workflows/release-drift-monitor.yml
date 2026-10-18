@@ -49,7 +49,7 @@ jobs:
     name: Release / Deploy Drift Monitor
     runs-on: >-
       ${{
-        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     timeout-minutes: 15
 

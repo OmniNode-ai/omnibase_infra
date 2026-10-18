@@ -1943,7 +1943,7 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument(
         "--bus-overlay",
         type=Path,
-        help="omnimarket config/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
+        help="the CI overlay lane table config/lab/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
     )
     rn.add_argument(
         "--no-dispatch-check-run",

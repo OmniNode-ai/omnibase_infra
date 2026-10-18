@@ -433,13 +433,13 @@ jobs:
     # be a string that reads as a fact and is not one.
     name: Evidence Autoclose Sweep (${{ github.event_name == 'schedule' && 'SCHEDULE - contract decides' || (github.event.inputs.apply == 'true' && 'DISPATCH APPLY' || 'DISPATCH DRY-RUN') }})
     # Trusted runner required: needs LINEAR_API_KEY and an authenticated gh.
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     # Raised from 20 (OMN-16736): with the co-install wired, `onex skill
     # dod_verify` now actually RUNS per bound ticket instead of aborting in
@@ -1900,10 +1900,11 @@ jobs:
 
           # Probes capability, never the credential itself — no token value is
           # printed, derived, or written anywhere in this step.
+          # OMN-17427: the list holds the repositories a pull request is read
+          # from; the change-control repository is not probed.
           echo "== credential capability =="
           for repo in \
             OmniNode-ai/omnibase_infra \
-            OmniNode-ai/onex_change_control \
             OmniNode-ai/omninode_infra \
             OmniNode-ai/omnimarket \
             OmniNode-ai/omnibase_core

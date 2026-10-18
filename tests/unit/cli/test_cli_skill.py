@@ -1806,3 +1806,38 @@ def test_authorize_payload_matches_request_model_fields() -> None:
     assert defaulted["tools"] == ["Edit", "Write"]
     assert defaulted["ttl_seconds"] == 14400
     assert set(defaulted) == {"scope", "tools", "ttl_seconds"}
+
+
+def test_claude_code_binding_install_entry_resolves() -> None:
+    """OMN-21093: the claude_code_binding_install skill maps to the merged node.
+
+    The node moved into omnimarket as omnimarket#3946
+    (node_claude_code_binding_install_effect); this pins the mapping entry and
+    resolves its node_name against the same canonical catalog the whole-table
+    test uses, so a stale mapping cannot survive a node rename.
+    """
+    registry = load_skill_registry()
+    entry = registry.get("claude_code_binding_install")
+    assert entry is not None, (
+        "claude_code_binding_install missing from skill_mapping.yaml"
+    )
+    assert entry.node_name == "node_claude_code_binding_install_effect"
+    assert entry.result_model == (
+        "omnibase_core.models.claude_code_binding.ModelBindingInstallResult"
+    )
+
+    # The catalog leg runs wherever the sibling omnimarket checkout is
+    # resolvable (CI wires OMNIMARKET_SRC for the catalog job; the whole-table
+    # test in this file covers the same source). Without the sibling the test
+    # still runs — the entry assertions above are the always-on part — so it
+    # never joins the skip-count ratchet's set.
+    omnimarket_root = _resolve_omnimarket_src()
+    if omnimarket_root is not None:
+        declared_nodes = (
+            _omnimarket_declared_nodes(omnimarket_root) | _infra_declared_nodes()
+        )
+        assert entry.node_name in declared_nodes, (
+            f"{entry.node_name} absent from the canonical onex.nodes catalog — "
+            "`onex skill claude_code_binding_install` would fail with "
+            "`Unknown node ...` at dispatch time"
+        )

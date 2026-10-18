@@ -1,38 +1,39 @@
 schema_version: "1.0.0"
 ticket_id: OMN-18596
-title: "The runtime image pins omninode-memory 0.18.5 from the plugin pin cascade"
-summary: The plugin pin cascade raised the omninode-memory floor in docker/Dockerfile.runtime from 0.18.4 to 0.18.5 after omnimemory released v0.18.5. A unit test reads the shipped pin and fails while the floor is below 0.18.5.
+title: "The runtime image pins omninode-memory at v0.18.6 from the plugin pin cascade"
+summary: The plugin pin cascade moved the omninode-memory pin in docker/Dockerfile.runtime to omninode-memory>=0.18.6,<1.0.0, a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn18596-memory-pin
-    statement: The runtime image installs omninode-memory 0.18.5 or later, below the 1.0.0 ceiling.
+  - id: req-plugin-pin-cascade
+    statement: docker/Dockerfile.runtime carries the plugin pins this cascade produced.
     acceptance:
       - id: AC1
-        statement: 'AC1: docker/Dockerfile.runtime pins omninode-memory with a floor of at least 0.18.5 -- falsifier: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q'
+        statement: "AC1: docker/Dockerfile.runtime pins omninode-memory as omninode-memory>=0.18.6,<1.0.0 and every plugin at or above its recorded floor -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
 evidence_requirements:
   - kind: tests
-    description: The unit test parses the single omninode-memory pin in docker/Dockerfile.runtime and asserts its floor is at least 0.18.5 and below its ceiling.
-    command: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q
+    description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for omninode-memory v0.18.6.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn-18596-memory-pin-0-18-4
-    description: The runtime image's omninode-memory floor is at least 0.18.5.
+  - id: dod-plugin-pin-cascade-floors
+    description: The runtime image pins every plugin at or above the floor this cascade recorded, including omninode-memory omninode-memory>=0.18.6,<1.0.0.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-18596-memory-pin-deploy-probe
-    description: Deploy probe. The runtime Dockerfile at the checked-out commit pins omninode-memory with a floor of at least 0.18.5; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails on a tree that pins 0.18.3 and passes on any later cascade bump. The readout after the deploy agent rolls the image is omninode-memory 0.18.5 or later installed in the runtime container.
+  - id: dod-plugin-pin-cascade-deploy-probe
+    description: Deploy probe. The runtime Dockerfile at the checked-out commit carries omninode-memory>=0.18.6,<1.0.0; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
     source: manual
     checks:
       - check_type: command
-        check_value: floor="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -oE '"omninode-memory>=[0-9]+\.[0-9]+\.[0-9]+,<1\.0\.0"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"; [ -n "$floor" ] && [ "$(printf '%s\n' 0.18.5 "$floor" | sort -V | head -1)" = 0.18.5 ]
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"omninode-memory>=0.18.6,<1.0.0"'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]

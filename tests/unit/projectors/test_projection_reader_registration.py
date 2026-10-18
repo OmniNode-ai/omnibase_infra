@@ -512,6 +512,28 @@ class TestProjectionReaderOverdueQueries:
         assert len(result) == 1
         assert result[0].current_state == EnumRegistrationState.ACTIVE
 
+    async def test_get_overdue_liveness_query_selects_rows_carrying_a_marker(
+        self,
+        reader: ProjectionReaderRegistration,
+        mock_pool: MagicMock,
+        mock_connection: AsyncMock,
+    ) -> None:
+        """An ACTIVE row past its deadline is selected whether or not it is stamped.
+
+        Rows stamped by the pre-OMN-21028 emitter are still ACTIVE; the query must
+        reach them so the timeout path moves them to liveness_expired.
+        """
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_connection
+        mock_pool.acquire.return_value.__aexit__.return_value = None
+        mock_connection.fetch.return_value = []
+
+        await reader.get_overdue_liveness_registrations(now=datetime.now(UTC))
+
+        query_sql = mock_connection.fetch.call_args[0][0]
+        assert "liveness_deadline < $2" in query_sql
+        assert "current_state = $3" in query_sql
+        assert "liveness_timeout_emitted_at" not in query_sql
+
     async def test_get_overdue_liveness_registrations_empty(
         self,
         reader: ProjectionReaderRegistration,

@@ -1,0 +1,67 @@
+# OMN-19983: a laptop mirrors its declared delegation topics to a lab lane.
+# The mirror-only gateway forwarder (OMN-20867) consumes the laptop broker and
+# republishes the topic set the operator's overlay selects onto the lab lane
+# the overlay names, bytes and headers unchanged, so the developer's tenant id
+# rides to the lab. Listed ONLY in the `local-lane-mirror` bundle: a laptop with
+# no lab lane never runs it.
+#
+# Which lab lane, its address and the principal that writes it are the
+# operator's, in two files outside this repo and named by env vars (templates:
+# docker/lane-overlays/local.lane-mirror.example.yaml and
+# local.lane-credentials.example.yaml). No value of either is rendered here.
+#
+# Its readiness file is written only after every lane transport has started and
+# is removed on exit; a mirror loop that stops without a shutdown signal ends
+# the process, so the restart policy brings it back loudly. The two-leg canary
+# probe refuses a config with no cloud leg, so this check cannot be it.
+name: lane-mirror-forwarder
+description: Mirror-only gateway forwarder that republishes the laptop's declared delegation topics onto the lab lane its overlay names
+image: runtime:latest
+layer: infrastructure
+container_name: omnibase-infra-local-lane-mirror-forwarder
+required_env: []
+hardcoded_env: {}
+operational_defaults:
+  ONEX_LOG_LEVEL: INFO
+  ONEX_ENVIRONMENT: local
+ports: null
+healthcheck:
+  test:
+    - test
+    - -f
+    - /tmp/lane-mirror-ready
+  interval_s: 15
+  timeout_s: 5
+  retries: 4
+  start_period_s: 60
+volumes:
+  - lane-mirror-forwarder-state:/app/data
+  - "${ONEX_LOCAL_LANE_MIRROR_OVERLAY:?ONEX_LOCAL_LANE_MIRROR_OVERLAY must name your lane-mirror overlay file (template: docker/lane-overlays/local.lane-mirror.example.yaml)}:/app/config/lane-mirror.yaml:ro"
+  - "${ONEX_LOCAL_LANE_CREDENTIAL_MAP:?ONEX_LOCAL_LANE_CREDENTIAL_MAP must name your lane-credential map file (template: docker/lane-overlays/local.lane-credentials.example.yaml)}:/run/gateway/lane-credentials.yaml:ro"
+depends_on:
+  - service: redpanda
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: '0.5'
+  memory: 256M
+  cpus_reservation: '0.1'
+  memory_reservation: 128M
+stop_grace_period: 30s
+command:
+  - onex-gateway-forwarder
+  - --config
+  - /app/config/lane-mirror.yaml
+  - --lane-credential-map
+  - /run/gateway/lane-credentials.yaml
+  - --ready-file
+  - /tmp/lane-mirror-ready
+  - --egress-health-file
+  - /tmp/gateway-egress-health.json
+  - --lane-mirror-health-file
+  - /tmp/gateway-lane-mirror-health.json
+labels:
+  com.omninode.service: lane-mirror-forwarder
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-19983
+  com.omninode.version: ${RUNTIME_VERSION:-0.1.0}

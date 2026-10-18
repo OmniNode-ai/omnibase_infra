@@ -48,6 +48,7 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bound_lane_client_transport,
 )
+from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
 
 pytestmark = pytest.mark.unit
 
@@ -62,6 +63,9 @@ DECLARED_DEV_BROKER = "declared-dev.example:19092"
 #: OMNI_HOME per test to keep the drift guard hermetic; the positive control
 #: below still needs to know whether this host has the workspace.
 _OMNI_HOME_AT_IMPORT = os.environ.get("OMNI_HOME", "").strip()
+# Same reason: the suite-wide conftest deletes the config root from every test
+# (OMN-20935), so the positive control reads the host's own at import time.
+_CONFIG_ROOT_AT_IMPORT = os.environ.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
 
 _DECLARATION = f"""
 lanes:
@@ -79,7 +83,7 @@ lanes:
 
 def _workspace(root: Path, body: str = _DECLARATION) -> Path:
     """A workspace root carrying a lane declaration where the CLI looks."""
-    declaration = root / LANE_DECLARATION_RELATIVE_PATH
+    declaration = root / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
     declaration.parent.mkdir(parents=True, exist_ok=True)
     declaration.write_text(body, encoding="utf-8")
     return root
@@ -108,8 +112,29 @@ class TestLaneDeclarationLookup:
     ) -> None:
         root = _workspace(tmp_path)
         assert resolve_lane_declaration_path(root) == (
-            root / "omnimarket" / "config" / "ci_bus_lanes.yaml"
+            root / ".onex" / "workspace-config" / "config" / "lab" / "ci_bus_lanes.yaml"
         )
+
+    def test_declaration_follows_the_workspace_config_root_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OMN-20935: the private config root, not the workspace, owns the file."""
+        owner = tmp_path / "owner"
+        declaration = owner / LANE_DECLARATION_RELATIVE_PATH
+        declaration.parent.mkdir(parents=True)
+        declaration.write_text(_DECLARATION, encoding="utf-8")
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(owner))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        assert resolve_lane_declaration_path(workspace) == declaration.resolve()
+
+    def test_the_omnimarket_copy_is_no_longer_read(self, tmp_path: Path) -> None:
+        """A declaration left at the old omnimarket path answers nothing."""
+        legacy = tmp_path / "omnimarket" / "config" / "ci_bus_lanes.yaml"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(_DECLARATION, encoding="utf-8")
+        with pytest.raises(DelegateLaneSelectionError):
+            resolve_lane_declaration_path(tmp_path)
 
     def test_no_workspace_root_is_refused_naming_the_flag(self) -> None:
         with pytest.raises(DelegateLaneSelectionError) as exc:
@@ -121,7 +146,8 @@ class TestLaneDeclarationLookup:
     ) -> None:
         with pytest.raises(DelegateLaneSelectionError) as exc:
             resolve_lane_declaration_path(tmp_path)
-        assert str(tmp_path / LANE_DECLARATION_RELATIVE_PATH) in str(exc.value)
+        expected = workspace_runtime_config_root(tmp_path)
+        assert str(expected / LANE_DECLARATION_RELATIVE_PATH) in str(exc.value)
 
     def test_declared_lane_ids_are_listed(self, tmp_path: Path) -> None:
         declaration = resolve_lane_declaration_path(_workspace(tmp_path))
@@ -426,18 +452,24 @@ class TestShippedDeclarationPositiveControl:
                 "no $OMNI_HOME workspace on this host, so the shipped lane "
                 "declaration cannot be read -- UNKNOWN, not a pass"
             )
-        declaration = Path(omni_home) / LANE_DECLARATION_RELATIVE_PATH
+        config_root = (
+            Path(_CONFIG_ROOT_AT_IMPORT)
+            if _CONFIG_ROOT_AT_IMPORT
+            else workspace_runtime_config_root(Path(_OMNI_HOME_AT_IMPORT))
+        )
+        declaration = config_root / LANE_DECLARATION_RELATIVE_PATH
         if not declaration.is_file():
             pytest.skip(
-                f"{declaration} is absent on this host (no omnimarket clone) "
+                f"{declaration} is absent on this host (no CI overlay clone) "
                 "-- UNKNOWN, not a pass"
             )
         return declaration
 
     def test_the_shipped_declaration_binds_dev_away_from_the_governed_lane(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         declaration = self._shipped()
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(declaration.parents[2]))
         omni_home = declaration.parents[2]
         dev = resolve_lane_selection(lane="dev", omni_home=omni_home)
         stability = resolve_lane_selection(lane="stability-test", omni_home=omni_home)

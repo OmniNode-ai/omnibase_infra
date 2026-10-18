@@ -1489,7 +1489,7 @@ jobs:
     # group above, must leave the dispatch unfired. An `always()` here would
     # announce a bundle that does not exist.
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     steps:
       # OMN-16373 retired CROSS_REPO_PAT in favour of the onexbot-occ-writer

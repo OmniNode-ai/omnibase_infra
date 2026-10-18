@@ -510,7 +510,9 @@ class TestTheDocumentedLaneProbeIsRunnable:
         """A workspace root whose lane declaration binds the lanes the docs may name."""
         from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
 
-        declaration = tmp_path / LANE_DECLARATION_RELATIVE_PATH
+        declaration = (
+            tmp_path / ".onex" / "workspace-config" / LANE_DECLARATION_RELATIVE_PATH
+        )
         declaration.parent.mkdir(parents=True, exist_ok=True)
         declaration.write_text(
             yaml.safe_dump(

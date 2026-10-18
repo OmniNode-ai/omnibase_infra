@@ -82,7 +82,7 @@ jobs:
     # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
     # must not rely on one machine). Any runner of the overlay's pool
     # (vars.LAB_PROBE_RUNS_ON_JSON): this job reads the lane over the network
-    # only (the broker declared in omnimarket config/ci_bus_lanes.yaml), and a
+    # only (the broker declared in the CI overlay lane table config/lab/ci_bus_lanes.yaml), and a
     # runner on any lab host reaches it. No host label is written here.
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
@@ -109,19 +109,32 @@ jobs:
         id: install_dependencies
         run: uv sync --locked --all-extras
 
-      # The pinned omnimarket: the task-class contract provider AND the owner of
-      # the lane declaration the CLI resolves `--lane dev` from. Laid out as a
-      # workspace root (`<root>/omnimarket/config/ci_bus_lanes.yaml`) because
-      # that is the path the CLI reads (OMNIBASE_PATH, below).
-      - name: Checkout omnimarket (pinned provider and lane declaration)
+      # The pinned omnimarket: the task-class contract provider and the clone
+      # the CLI's drift guard resolves under the workspace root (OMNIBASE_PATH,
+      # below). It no longer owns the lane declaration: the CLI reads that from
+      # the workspace config root (OMN-20935), fetched in the next step.
+      - name: Checkout omnimarket (pinned provider)
         id: checkout_provider
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 0f01c0195de7dbe2b71b04bc4638c8d20486cf68 # .github/sibling-pins.yaml
+          ref: 59ac8efbe015cc079ff78a63b05e12c012ff5df1 # .github/sibling-pins.yaml
           path: .probe-workspace/omnimarket
           persist-credentials: false
           fetch-depth: 1
+
+      # The CLI resolves `--lane dev` from `<config root>/config/lab/ci_bus_lanes.yaml`.
+      # The workspace root is `.probe-workspace`, whose developer config root is
+      # `.onex/workspace-config` (service_kernel.workspace_runtime_config_root),
+      # so the lane table from the CI overlay is placed there.
+      - name: Fetch the declared CI bus lanes from the CI overlay
+        id: lane_table
+        uses: ./.github/actions/fetch-lane-table
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .probe-workspace/.onex/workspace-config/config/lab/ci_bus_lanes.yaml
 
       # Layered on top of the synced venv, never resolved into it (omnibase-*
       # is the layer beneath infra and infra's lock owns it; omninode-* siblings
@@ -195,7 +208,7 @@ jobs:
           )
           from scripts.ci.r1_front_door_probe import PROBE_LANE
           transport = load_lane_transport(
-              pathlib.Path('.probe-workspace/omnimarket/config/ci_bus_lanes.yaml'),
+              pathlib.Path('.probe-workspace/.onex/workspace-config/config/lab/ci_bus_lanes.yaml'),
               PROBE_LANE,
           )
           print(f'lane {PROBE_LANE!r} declares {transport.bootstrap_servers} '
@@ -216,9 +229,11 @@ jobs:
              "install_dependencies": "${{ steps.install_dependencies.outcome }}",
              "checkout_provider": "${{ steps.checkout_provider.outcome }}",
              "coinstall_provider": "${{ steps.coinstall_provider.outcome }}",
+             "lane_table": "${{ steps.lane_table.outcome }}",
              "lane_transport": "${{ steps.lane_transport.outcome }}"}
-          # The workspace root the CLI reads `omnimarket/config/ci_bus_lanes.yaml`
-          # under (the sanctioned wrapper binds the same variable on a lab host).
+          # The workspace root whose config root the CLI reads
+          # `config/lab/ci_bus_lanes.yaml` from (the sanctioned wrapper binds
+          # the same variable on a lab host).
           OMNIBASE_PATH: ${{ github.workspace }}/.probe-workspace
           # The org-wide dev-lane SCRAM secrets chain-canary.yml already uses,
           # as ENVIRONMENT so no credential reaches argv or this log.
@@ -256,7 +271,7 @@ jobs:
               ((step, outcome) for step, outcome in incomplete if outcome == "failure"),
               incomplete[0],
           )
-          leg = "lane-declaration" if step == "lane_transport" else "runner-env"
+          leg = "lane-declaration" if step in ("lane_table", "lane_transport") else "runner-env"
           cause = f"setup step {step} ended with {outcome}; probe not run"
           record = {
               "argv": [], "lane": "dev", "exit_code": 2, "ok": False,

@@ -153,17 +153,24 @@ jobs:
         with:
           separator: ","
 
-      - name: Fetch authoritative CI bus lane overlay
+      - name: Fetch the redeploy-start consumer model
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 0f01c0195de7dbe2b71b04bc4638c8d20486cf68 # .github/sibling-pins.yaml
+          ref: 59ac8efbe015cc079ff78a63b05e12c012ff5df1 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
-            config/ci_bus_lanes.yaml
             src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py
           sparse-checkout-cone-mode: false
+
+      - name: Fetch the declared CI bus lanes from the CI overlay
+        uses: ./.github/actions/fetch-lane-table
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       - name: Fetch canonical deploy-path classifier
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -217,7 +224,7 @@ jobs:
             --base-branch "$PR_BASE_BRANCH" \
             --source-sha "$PR_MERGE_SHA" \
             --bus-lane "dev" \
-            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml" \
+            --bus-overlay ".lane-table/config/ci_bus_lanes.yaml" \
             --consumer-model ".ci-bus-overlay/src/omnimarket/nodes/node_redeploy_orchestrator/models/model_redeploy_start_command.py" \
             --runtime-path-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
             --runner-environment "$CI_RUNNER_ENVIRONMENT" \
@@ -709,15 +716,12 @@ jobs:
         if: always()
         # advisory-ok: OMN-18866 overlay fetch shared by the delegation dispatch and the OMN-18769 verdict publish; neither may fail the lab pass on it
         continue-on-error: true
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          ref: 0f01c0195de7dbe2b71b04bc4638c8d20486cf68 # .github/sibling-pins.yaml
-          path: .ci-bus-overlay
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       # THE CHAIN-CANARY DISPATCH THAT STOOD HERE HAS BEEN REMOVED (OMN-18866
       # follow-up), and this comment is the record of why, because the next
@@ -1073,16 +1077,15 @@ jobs:
       # job here would turn an observability publish into a delivery outage.
       # The failure is loud in the log and the artifact — the authority — is
       # unaffected either way.
-      # The overlay is the DECLARED transport for the lane, and this publish
-      # reads it rather than inferring one. `trigger-rebuild` above already
-      # sparse-checks the same file out for the same reason; this job is a
+      # The lane table is the DECLARED transport for the lane, and this publish
+      # reads it rather than inferring one. `trigger-rebuild` above fetches the
+      # same file from the CI overlay for the same reason; this job is a
       # separate job with a separate checkout, so it takes its own copy.
       # OMN-18769's own overlay checkout stood here and has been REMOVED, not
-      # disabled: it was byte-identical to the one earlier in this job, same
-      # repository, same ref, same path, same sparse-checkout. Its reason for
+      # disabled: it duplicated the one earlier in this job. Its reason for
       # continue-on-error ("a failed overlay fetch must not fail the lab pass")
       # was the better of the two and now governs the single remaining fetch.
-      # The publish below is unchanged and still reads `.ci-bus-overlay`.
+      # The publish below reads the table at `.lane-table` (OMN-20935).
       - name: Publish the compose-dev lab-pass verdict to the bus
         if: always()
         # A broker that is down is not a lab pass that failed; failing here would
@@ -1114,7 +1117,7 @@ jobs:
             --event "${LAB_PASS_DIR}/event.json" \
             --event "${LAB_PASS_DIR}/post-merge-event.json" \
             --bus-lane "dev" \
-            --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
+            --bus-overlay ".lane-table/config/ci_bus_lanes.yaml"
 
       # OMN-19338 AC1. Suppressing the three steps below leaves a GREEN job that
       # says nothing about why no receipt exists, which reads exactly like a

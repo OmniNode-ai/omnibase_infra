@@ -583,12 +583,17 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
         limit: int = 100,
         correlation_id: UUID | None = None,
     ) -> list[ModelRegistrationProjection]:
-        """Get registrations with overdue liveness deadlines (not yet emitted).
+        """Get registrations with overdue liveness deadlines (not yet expired).
 
         Per C2: Returns entities where:
         - liveness_deadline < now
-        - liveness_timeout_emitted_at IS NULL
         - current_state = ACTIVE
+
+        ``liveness_timeout_emitted_at`` is deliberately not a filter: the timeout
+        path moves an expired row out of ACTIVE, so state is what keeps a row from
+        being expired twice. Rows stamped by the emitter before it wrote
+        ``current_state`` (OMN-21028) are still ACTIVE and are expired by the
+        next tick instead of needing a hand backfill.
 
         Used by orchestrators during RuntimeTick processing to find
         active registrations that have missed their liveness deadline.
@@ -625,7 +630,6 @@ class ProjectionReaderRegistration(MixinAsyncCircuitBreaker):
             SELECT * FROM registration_projections
             WHERE domain = $1
               AND liveness_deadline < $2
-              AND liveness_timeout_emitted_at IS NULL
               AND current_state = $3
             ORDER BY liveness_deadline ASC
             LIMIT $4

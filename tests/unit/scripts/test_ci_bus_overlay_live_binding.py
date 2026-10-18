@@ -52,10 +52,13 @@ BINDING_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-bus-overlay-binding
 #: everywhere else, which is what makes the local run hermetic.
 LIVE_OVERLAY_ENV_VAR = "CI_BUS_OVERLAY_LIVE_PATH"
 
-#: The producer-side path this gate is bound to, spelled once.
-OVERLAY_REPO = "OmniNode-ai/omnimarket"
-OVERLAY_REF = "dev"
-OVERLAY_PATH_IN_REPO = "config/ci_bus_lanes.yaml"
+#: The producer-side file this gate is bound to, spelled once: the lane table
+#: in the CI overlay repository, placed by the composite action at the path the
+#: publishers read (OMN-20935).
+OVERLAY_FETCH_ACTION = "./.github/actions/fetch-lane-table"
+OVERLAY_PATH_IN_REPO = "config/lab/ci_bus_lanes.yaml"
+OVERLAY_DEST = ".lane-table/config/ci_bus_lanes.yaml"
+OMNIMARKET_REPO = "OmniNode-ai/omnimarket"
 
 
 def _import_trigger_module():
@@ -79,8 +82,8 @@ class TestLiveOverlayBinding:
         if not declared:
             pytest.skip(
                 f"{LIVE_OVERLAY_ENV_VAR} is unset: this case runs in "
-                "ci-bus-overlay-binding.yml, which checks out "
-                f"{OVERLAY_REPO}@{OVERLAY_REF}:{OVERLAY_PATH_IN_REPO} and "
+                "the overlay binding workflow, which reads "
+                f"{OVERLAY_PATH_IN_REPO} from the CI overlay repository and "
                 "exports the path. Local runs are deliberately hermetic."
             )
 
@@ -133,24 +136,23 @@ class TestBindingWorkflowIsWired:
             f"{LIVE_OVERLAY_ENV_VAR}; without it the cross-repo binding never runs."
         )
 
-    def test_binding_workflow_checks_out_the_producer_side_file(self) -> None:
+    def test_binding_workflow_reads_the_file_from_the_ci_overlay(self) -> None:
+        """OMN-20935: the lane table is private config, read from the CI overlay."""
         workflow = yaml.safe_load(BINDING_WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["ci-bus-overlay-binding"]["steps"]
 
-        checkouts = [
+        assert not [
             step
             for step in steps
-            if str(step.get("uses", "")).startswith("actions/checkout")
-            and step.get("with", {}).get("repository") == OVERLAY_REPO
-        ]
-        assert checkouts, f"no checkout of {OVERLAY_REPO} in {BINDING_WORKFLOW.name}"
+            if step.get("with", {}).get("repository") == OMNIMARKET_REPO
+        ], f"{BINDING_WORKFLOW.name} still checks out {OMNIMARKET_REPO}"
 
-        with_block = checkouts[0]["with"]
-        assert with_block["ref"] == OVERLAY_REF, (
-            "the binding must read the branch the publisher reads at merge "
-            f"time ({OVERLAY_REF}), not a pinned or stale ref"
-        )
-        assert OVERLAY_PATH_IN_REPO in str(with_block.get("sparse-checkout", ""))
+        fetches = [step for step in steps if step.get("uses") == OVERLAY_FETCH_ACTION]
+        assert fetches, f"no {OVERLAY_FETCH_ACTION} step in {BINDING_WORKFLOW.name}"
+
+        with_block = fetches[0]["with"]
+        assert with_block["overlay-repo"] == "${{ vars.OMNI_CI_OVERLAY_REPO }}"
+        assert with_block["dest"] == OVERLAY_DEST
 
     def test_binding_workflow_exports_the_env_var_to_pytest(self) -> None:
         text = BINDING_WORKFLOW.read_text(encoding="utf-8")

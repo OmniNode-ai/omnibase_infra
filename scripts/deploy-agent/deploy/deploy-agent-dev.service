@@ -46,7 +46,7 @@
 # ~16:40Z on 2026-09-07 (OMN-18012 Phase B): SCRAM-SHA-256 over PLAINTEXT —
 # authenticated, NOT encrypted, there is no TLS on that port. This unit
 # DECLARES that transport beside the broker it already declares, exactly as
-# omnimarket config/ci_bus_lanes.yaml declares `security_protocol` /
+# the CI overlay lane table config/lab/ci_bus_lanes.yaml declares `security_protocol` /
 # `sasl_mechanism` beside each CI lane's broker and as
 # docker/docker-compose.dev-lane.yml binds the same two names onto every
 # dev-lane client. deploy_agent.kafka_config refuses to start on an undeclared

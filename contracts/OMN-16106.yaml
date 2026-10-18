@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-16106
+title: The evidence closer's forward window reads a cut-over product repository's merged PRs
+summary: The evidence autoclose sweep's forward window enumerated merged change-control PRs only. A repository cut over from change control keeps a ticket's contract in its own contracts/<ticket>.yaml and mints no companion, so its tickets were never asked. The request gains product_repos; each named repository's merged PRs in the same window are candidates, bound only through their changed files (exactly one contracts/OMN-<n>.yaml), with their files read from that repository. A recurring bot PR is dropped, an unreadable repository is ERROR_GITHUB_API while change control still runs, and an empty list reads change control only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn16106-product-repo-forward-window
+    statement: The forward window reads the merged PRs of each named product repository and binds them through their contract files.
+    acceptance:
+      - id: AC1
+        statement: "AC1: with product_repos naming a repository, a merged PR there that carries one contracts/<ticket>.yaml reaches dod_verify with its own URL, its files read from that repository; with product_repos empty the same PR is not read -- falsifier: the product-repo forward tests fail against the merge-base handler, which never reads the product repository"
+      - id: AC2
+        statement: "AC2: a product PR with no contract file or with two is never verified, a recurring bot PR is dropped before its files are read, and an unreadable product repository is ERROR_GITHUB_API while change control is still swept -- falsifier: the negative-control tests in the same file"
+evidence_requirements:
+  - kind: tests
+    description: The product-repo forward-window tests drive the handler with a gh double serving each repository's merged PRs and file lists.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_product_repo_forward_arm.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn16106-ac1-product-repo-forward-window
+    description: A merged product PR carrying its ticket's contract reaches the verifier when its repository is named, and is not read when none is.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_product_repo_forward_arm.py -q --no-cov -k "reaches_the_verifier or change_control_only"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_omn16106_product_repo_cli_sweep.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn16106-ac2-product-repo-refusals
+    description: Unbound, ambiguous and recurring-bot product PRs are not verified, and an unreadable product repository is an error that leaves change control swept.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16106_product_repo_forward_arm.py -q --no-cov -k "no_contract_file or two_contracts or recurring_bot or unreadable_product_repo"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn16106-deploy-product-repo-forward-window
+    description: The handler at the merged head reads each named product repository's changed files from that repository through the evidence-repo tag; the deployed surface is the source at the merged head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/handlers/handler_evidence_autoclose_sweep.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'pr.get(_EVIDENCE_REPO_KEY) or request.occ_repo'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

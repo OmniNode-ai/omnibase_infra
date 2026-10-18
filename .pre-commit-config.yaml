@@ -157,6 +157,17 @@ repos:
     hooks:
       - id: canonical-file-shape
         require_serial: true
+  # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
+  # "Ci runners should be for private repos only"). Refuses a staged workflow job
+  # whose runs-on is, or can resolve to, a self-hosted label unless omnibase_core's
+  # shrink-only baseline records it. CI twin job public-runner-placement in
+  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: c880801d4deeaa1627535c8622ab6c4ab8cfbecd
+    hooks:
+      - id: check-public-runner-placement
+        args: [--repo, omnibase_infra, --visibility, public]
+        require_serial: true
   # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
   # OMN-17427). Refuses any new import crossing a node boundary. Shrink-only
   # baseline .onex_ratchets/node_boundary_import_baseline.yaml; no allowlist,

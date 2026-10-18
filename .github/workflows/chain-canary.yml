@@ -142,7 +142,7 @@ on:
         required: false
         default: '120000'
       bus_lane:
-        description: 'CI bus lane whose DECLARED broker + transport both readback legs use (omnimarket config/ci_bus_lanes.yaml).'
+        description: 'CI bus lane whose DECLARED broker + transport both readback legs use (the CI overlay lane table config/lab/ci_bus_lanes.yaml).'
         required: false
         default: 'dev'
       quarantine_bootstrap_servers:
@@ -222,15 +222,12 @@ jobs:
       # client of this bus, is the whole point: an address that lives in two
       # places drifts in one of them silently (OMN-14800).
       - name: Fetch the declared CI bus lanes
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: ./.github/actions/fetch-lane-table
         with:
-          repository: OmniNode-ai/omnimarket
-          ref: dev
-          path: .ci-bus-overlay
-          persist-credentials: false
-          sparse-checkout: |
-            config/ci_bus_lanes.yaml
-          sparse-checkout-cone-mode: false
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          dest: .lane-table/config/ci_bus_lanes.yaml
 
       - name: Resolve the declared lane transport
         id: transport
@@ -254,7 +251,7 @@ jobs:
           )
           lane = os.environ['BUS_LANE']
           transport = load_lane_transport(
-              pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+              pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), lane
           )
           print(f'lane {lane!r} declares {transport.bootstrap_servers} '
                 f'({transport.security_protocol}/{transport.sasl_mechanism})')
@@ -290,7 +287,7 @@ jobs:
           lane = os.environ['BUS_LANE']
           try:
               declaration = load_lane_projection_readback(
-                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+                  pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), lane
               )
           except ValueError as exc:
               print(f'::warning::no projection readback declared for lane {lane!r}: {exc}')
@@ -331,7 +328,7 @@ jobs:
           lane = os.environ['BUS_LANE']
           try:
               declaration = load_lane_ledger_readback(
-                  pathlib.Path('.ci-bus-overlay/config/ci_bus_lanes.yaml'), lane
+                  pathlib.Path('.lane-table/config/ci_bus_lanes.yaml'), lane
               )
           except ValueError as exc:
               print(f'::warning::no ledger readback declared for lane {lane!r}: {exc}')

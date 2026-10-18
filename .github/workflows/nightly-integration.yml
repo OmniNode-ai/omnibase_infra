@@ -73,7 +73,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     steps:
       - name: Reject if ANY host variable targets a live lab host
@@ -104,7 +104,7 @@ jobs:
   integration-tests:
     name: Integration Test Suite (e2e stack)
     needs: guard-live-host
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest; public forks default to ubuntu-latest
     # OMN-18205: this job executes docker, so its placement is governed by
     # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
     # precedence chain the seven docker-executing jobs in docker-build.yml,
@@ -118,7 +118,7 @@ jobs:
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
     # OMN-15567: was 60. The single `pytest tests/integration/` step now has
     # up to three independent full-Dockerfile.runtime build invocations that
@@ -647,10 +647,10 @@ jobs:
     name: Failure Alert
     needs: [guard-live-host, integration-tests]
     if: failure()
-    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci.
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to ubuntu-latest.
     runs-on: >-
       ${{
-        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]')
       }}
 
     steps:

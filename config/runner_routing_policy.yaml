@@ -819,6 +819,10 @@ hosted_runner_allowlist:
     reason: "OMN-16555: the hosted half of the shared-env two-runner-class parity gate must be pinned to a literal ubuntu-latest -- routing it through OMNI_RUNNER_SELECTOR_V1 would let a var change move it back onto the fleet and void the ephemeral-runner proof. Its self-hosted half does use the standard selector."
   - path: .github/workflows/runner-pool-spread.yml
     reason: "OMN-19895: the hourly runner-pool single-host-of-fate probe must not share fate with the self-hosted fleet it watches -- the same isolation rationale as runner-fleet-canary.yml above. Routing it through OMNI_RUNNER_SELECTOR_V1 could place it on the very fleet it is checking for single-host concentration, silencing the probe exactly when the fleet is unhealthy."
+  - path: .github/workflows/nightly-tests.yml
+    reason: "OMN-19998: the performance-tests job asserts wall-clock thresholds, so it is pinned by literal rather than routed, so that a seam flip cannot relocate it without review. It was pinned to the lab fleet; this is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so the pin is GitHub-hosted."
+  - path: .github/workflows/dev-merge-tag.yml
+    reason: "OMN-19998: the dev merge tag job creates a git tag and touches no lab service. It is pinned to a literal GitHub-hosted label because this is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
@@ -1150,6 +1154,7 @@ route:
         # OMN-20703: the node-boundary import gate, registered STRICT in
         # STRICT_GATE_JOBS and enforced by the CI Summary poller.
         - Node Boundary Imports (OMN-20703)
+        - Public Runner Placement (OMN-19998)
         - Node Migration Declaration Check
         - node-migration-sync / node-migration-sync
         # OMN-19677: the five shared shrink-only callers are strict CI Summary
