@@ -1,0 +1,35 @@
+schema_version: 1.0.0
+ticket_id: OMN-19802
+title: The lab-pass node_inventory check reads the introspection manifest after the settle wait
+summary: |-
+  Evidence for OMN-19802 in the repository that carries the fix (omnibase_infra#4175, squash 04eb6d41d). AC1 binds to the probe-lane ordering test. AC2 is not bound here, and the criteria are not transcribed because the public-repo hygiene gate refuses AC2's lane name.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The probe-lane node_inventory ordering test passes.
+    command: uv run pytest tests/ci/test_lab_pass_receipt_node_inventory_omn18708.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19802-ac1-manifest-after-settle-wait
+    description: AC1 binding (accepted 2026-10-18T1445Z, proposed by lane=dod-closeout-bind-2026-10-18T1445Z-c0, accepted by lane=dod-closeout-accept-2026-10-18T1445Z-c0). probe-lane against a lane that refuses every connection until the settle wait runs issues exactly one introspection-manifest GET, after the wait, and the node_inventory check and the --node-inventory-out triples both come from that read. With scripts/ci/lab_pass_receipt.py restored from the parent of 04eb6d41d the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_pass_receipt_node_inventory_omn18708.py -q -k "TestTheManifestIsReadAfterTheSettleWait and test_probe_lane_reads_the_manifest_after_the_settle_wait"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19802-ac1-timed-out-wait-one-read
+    description: AC1 binding, coverage-only (the fix merged in omnibase_infra#4175, and its product file changed afterwards, so a Binds-Merged-Fix control cannot revert it). When the settle wait times out and the lane never answers, probe-lane still issues exactly one introspection-manifest GET, after the wait, and the node_inventory check reports not ok.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_pass_receipt_node_inventory_omn18708.py -q -k "TestTheManifestIsReadAfterTheSettleWait and test_probe_lane_reads_the_manifest_once_after_a_settle_wait_that_timed_out"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
