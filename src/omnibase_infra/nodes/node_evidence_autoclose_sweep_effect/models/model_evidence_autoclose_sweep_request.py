@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,16 +13,20 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evide
     EnumEvidenceAutocloseTrigger,
 )
 
+TypeRepositorySlug = Annotated[
+    str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$")
+]
+
 
 class ModelEvidenceAutocloseSweepRequest(BaseModel):
-    """Request to sweep recently-merged OCC companions for governed Done flips."""
+    """Request to sweep recently merged repository evidence for governed Done flips."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     correlation_id: UUID = Field(..., description="Sweep run correlation ID.")
-    occ_repo: str = Field(
-        default="OmniNode-ai/onex_change_control",
-        description="owner/repo of the evidence-companion repository to scan.",
+    evidence_repo: TypeRepositorySlug = Field(
+        default="OmniNode-ai/omnibase_infra",
+        description="owner/repo whose merged PRs and contracts provide the primary evidence.",
     )
     lookback_hours: int = Field(
         default=24,
@@ -348,7 +353,8 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "node_dod_verify is decided by how the sweep was composed rather "
             "than by where it stands -- which is what lets the product clone "
             "the behaviour checks run pytest in stay lock-exact. This field "
-            "now only sets the cwd the verifier process inherits."
+            "sets the cwd when clone_root is absent. A clone_root selects the "
+            "candidate repository and its explicit contract path instead."
         ),
     )
     clone_root: str = Field(
@@ -356,10 +362,10 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
         description=(
             "OMN-21146. Directory holding the canonical clones, one per "
             "repository name. --offer reads an offered ticket's merged "
-            "change-control companion from the change-control clone's default "
-            "branch here (git log --grep, with the commit's changed files), "
-            "and the product repository's contracts/<ticket>.yaml from the "
-            "other clones, so neither read touches GitHub. Empty means no "
+            "merged PR from the evidence repository's default branch here "
+            "(git log --grep, with the commit's changed files), and each "
+            "product repository's contracts/<ticket>.yaml. The owning clone "
+            "also supplies the explicit verifier contract path. Empty means no "
             "clone is read: the PR watcher's state (if named) and the gateway "
             "node are then the only sources."
         ),
@@ -368,7 +374,7 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
         default="",
         description=(
             "OMN-21146. The PR watcher's state file, read for merged "
-            "change-control PRs. Empty means "
+            "product PRs. Empty means "
             "<clone_root>/.claude_scratch/pr-watcher/state.json when clone_root "
             "is set, else no watcher state is read."
         ),
@@ -500,7 +506,7 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "over an offer, before any GitHub or Linear I/O about it."
         ),
     )
-    product_repos: tuple[str, ...] = Field(
+    product_repos: tuple[TypeRepositorySlug, ...] = Field(
         default=(),
         description=(
             "owner/repo of each product repository whose own merged PRs the "
@@ -511,7 +517,7 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "here is a candidate only through its changed files: exactly one "
             "contracts/OMN-<n>.yaml binds it, none leaves it unbound, more than "
             "one refuses it. A recurring bot PR is dropped before any read. "
-            "Empty (the default) reads change control only."
+            "Empty (the default) reads the primary evidence repository only."
         ),
     )
     # OMN-18489. The In Progress demotion leg. The window is declared here, in

@@ -297,7 +297,7 @@ def _make_dod_verify_fake(responses: dict[str, tuple[dict | None, int, str]]):
 def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
     defaults: dict[str, object] = {
         "correlation_id": uuid4(),
-        "occ_repo": _OCC_REPO,
+        "evidence_repo": _OCC_REPO,
         "lookback_hours": 24,
         "apply": False,
     }
@@ -1456,15 +1456,15 @@ class TestRealSubprocessCreationFailure:
         assert self._MISSING_BINARY in error
 
     async def test_dod_verify_runner_returns_error_tuple_on_missing_cwd(self):
-        # A cwd that does not exist makes process creation itself raise
-        # FileNotFoundError, same failure class as a missing executable.
+        # A missing product checkout is refused before spawning a verifier
+        # that could otherwise read another repository's contract.
         handler = HandlerEvidenceAutocloseSweep(linear_client=FakeLinearClient())
         result, exit_code, error = await handler._run_dod_verify_command_real(
             "OMN-9999", cwd="/definitely/does/not/exist/omn-16106", timeout=1.0
         )
         assert result is None
         assert exit_code == -1
-        assert "OS error" in error
+        assert "Product contract is unreadable" in error
 
 
 @pytest.mark.unit

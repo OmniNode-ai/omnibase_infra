@@ -51,8 +51,7 @@ _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "evidence-autoclose-sweep.yml
 _BEGIN_MARKER = "# ---8<--- OMN-16902 BEGIN cwd-repo-derivation"
 _END_MARKER = "# ---8<--- OMN-16902 END cwd-repo-derivation"
 
-_MATERIALISE_STEP = "Derive and materialise the cwd repo set the OCC contracts name"
-_OCC_PYTEST_PROOF_STEP = "Prove an OCC governance worktree can spawn pytest"
+_MATERIALISE_STEP = "Derive and materialise the cwd repo set the product contracts name"
 _POST_SWEEP_PURITY_STEP = "Assert the gate venv is still pure after the sweep"
 
 
@@ -256,29 +255,6 @@ def test_materialise_step_targets_omni_home_and_guards_the_gate_checkout(
         "the step must refresh each dest destructively AND refuse any dest "
         "that resolves to GITHUB_WORKSPACE or OMNI_HOME itself."
     )
-
-
-def test_occ_worktree_can_spawn_pytest_is_proven_before_the_sweep(
-    steps: list[dict[str, object]],
-) -> None:
-    """AC3/D2 as an executable precondition, not a comment.
-
-    The OCC-homed check does NOT run in `.occ-src`: `_infer_occ_cwd` returns
-    `_occ_dev_root`, an ephemeral `git worktree` of the governance ref that
-    the collector materialises mid-run. No step can pre-provision that path,
-    so the proof has to be "a worktree made the same way can spawn pytest".
-    """
-    step = _step_by_name(steps, _OCC_PYTEST_PROOF_STEP)
-    run = str(step["run"])
-    assert "git" in run and "worktree" in run and "origin/dev" in run, (
-        "the proof must build a worktree of the governance ref the collector "
-        "actually uses, not test `.occ-src` in place."
-    )
-    assert "pytest" in run, "the proof must spawn pytest, which is what failed"
-    names = [str(s.get("name", "")) for s in steps]
-    assert names.index(step["name"]) < names.index(  # type: ignore[arg-type]
-        next(n for n in names if "Run evidence autoclose sweep" in n)
-    ), "the D2 proof must run BEFORE the sweep so a sweep timeout cannot swallow it"
 
 
 def test_uv_no_sync_is_not_forced_onto_the_check_subprocesses(

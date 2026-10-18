@@ -190,7 +190,7 @@ def _default_request() -> ModelEvidenceAutocloseSweepRequest:
     """
     return ModelEvidenceAutocloseSweepRequest(
         correlation_id=uuid4(),
-        occ_repo="OmniNode-ai/onex_change_control",
+        evidence_repo="OmniNode-ai/onex_change_control",
     )
 
 

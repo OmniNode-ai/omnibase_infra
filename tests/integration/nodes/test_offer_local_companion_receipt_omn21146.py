@@ -90,7 +90,7 @@ async def test_local_offer_provenance_survives_the_receipt(
     request = ModelEvidenceAutocloseSweepRequest.model_validate_json(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
-            occ_repo=_OCC_REPO,
+            evidence_repo=_OCC_REPO,
             apply=True,
             offer_tickets=(_TICKET,),
             clone_root=str(clones),
@@ -122,9 +122,8 @@ async def test_local_offer_provenance_survives_the_receipt(
     assert verified == [_TICKET, _TICKET]
     assert linear.state_updates == [(f"issue-{_TICKET}", "state-done-id")]
     assert gh.paths == []
-    assert [call[2] for call in gateway.calls] == (
-        [] if source == "companion" else ["pr-heads", "pr-heads"]
-    )
+    # Both local PR evidence and a product contract are read before the gateway.
+    assert gateway.calls == []
 
 
 async def test_local_changed_file_conflict_is_refused_in_the_receipt(
@@ -139,7 +138,7 @@ async def test_local_changed_file_conflict_is_refused_in_the_receipt(
     )
     request = ModelEvidenceAutocloseSweepRequest(
         correlation_id=uuid4(),
-        occ_repo=_OCC_REPO,
+        evidence_repo=_OCC_REPO,
         apply=True,
         offer_tickets=(_TICKET,),
         clone_root=str(clones),

@@ -122,7 +122,7 @@ _SANDBOX: dict[str, str] = {}
 def _request(**overrides: Any) -> ModelEvidenceAutocloseSweepRequest:
     defaults: dict[str, Any] = {
         "correlation_id": uuid4(),
-        "occ_repo": _OCC_REPO,
+        "evidence_repo": _OCC_REPO,
         "apply": True,
         "offer_tickets": (_TICKET,),
         "clone_root": _SANDBOX["clone_root"],
@@ -566,3 +566,19 @@ def test_a_missing_clone_and_a_missing_watcher_are_unanswered_not_empty(
     assert sources.read_watcher_candidates(
         tmp_path / "absent.json", _OCC_REPO, _TICKET
     ) == ([], False)
+
+
+async def test_product_contract_is_read_before_an_unavailable_gateway(
+    clone_root: Path,
+) -> None:
+    _make_clone(clone_root, "onex_change_control")
+    product = _make_clone(clone_root, "omnibase_infra")
+    _land(
+        product, "chore: product evidence (#77)", [f"contracts/{_PRODUCT_TICKET}.yaml"]
+    )
+    gateway = _Gateway(error="bus: no broker")
+    handler, verified = _handler(_RecordingLinear(), _Gh(), gateway)
+    result = await _two_ticks(handler, _request(offer_tickets=(_PRODUCT_TICKET,)))
+    assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.FLIPPED
+    assert verified == [_PRODUCT_TICKET, _PRODUCT_TICKET]
+    assert gateway.calls == []
