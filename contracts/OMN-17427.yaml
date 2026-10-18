@@ -157,6 +157,11 @@ requirements:
     acceptance:
       - id: AC35
         statement: 'AC35: PublisherContractCorpus resolves topics declared by event_bus.publish success and failure topics, produced_events, publications, topics.produces and runtime_dispatch.command_topic, still refuses a topic no contract publishes, and agrees with the topic graph parser -- falsifier: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q'
+  - id: req-omn17427-deploy-agent-topic-ensure
+    statement: The deploy agent creates the topics only it publishes (dev-tag heartbeat and dev-lane drift) before its first publish to each, once per process, and leaves topics another node declares alone.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: each agent-owned topic is created before its first publish, an existing topic is created once and still published, an admin failure is retried on the next publish, and a topic another node declares is not created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -248,6 +253,9 @@ evidence_requirements:
   - kind: tests
     description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads.
     command: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+  - kind: tests
+    description: The deploy agent creates its own topics before the first publish.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -693,3 +701,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC35
+  - id: dod-omn-17427-ac36
+    description: The topic-creation tests fail on the merge base, whose publisher has no AGENT_OWNED_TOPICS and never creates a missing topic, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
+  - id: dod-omn-17427-ac36-deploy-topic-ensure
+    description: Hosted-runner smoke -- the publisher creates each agent-owned topic through a stand-in admin client before its first send and retries after an admin failure, with no broker, deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
