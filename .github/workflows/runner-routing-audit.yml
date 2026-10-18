@@ -40,6 +40,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          token: ${{ github.token }}
           persist-credentials: false
 
       - name: Setup Python and uv
@@ -65,13 +66,26 @@ jobs:
         id: github_vars
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+          # OMN-19998: same-repository content uses the run token. Org variable
+          # metadata and private siblings still need the existing org reader.
+          GH_TOKEN: ${{ github.token }}
+          RUNNER_AUDIT_ORG_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
         run: |
-          if [ -z "${GH_TOKEN:-}" ]; then
+          if [ -z "${RUNNER_AUDIT_ORG_TOKEN:-}" ]; then
+            echo "findings=0" >> "$GITHUB_OUTPUT"
+            echo "unreadable=1" >> "$GITHUB_OUTPUT"
             echo "::error title=Runner audit unreadable::CROSS_REPO_PAT is required for the live routing assertions"
-            exit 1
+            exit 3
           fi
           uv run python scripts/audit-runner-routing.py --github-vars
+
+      # OMN-19998: the jobs REST response carries this failed step to the
+      # no-needs CI Summary poller, which reports infrastructure separately.
+      - name: Runner audit infrastructure error
+        if: always() && steps.github_vars.outputs.unreadable != '' && steps.github_vars.outputs.unreadable != '0'
+        run: |
+          echo "::error title=RUNNER_AUDIT_INFRASTRUCTURE::GitHub routing state could not be read; see the live audit step"
+          exit 3
 
       # OMN-18780: require actual success from both passes, including after a
       # setup failure. Missing/skipped outcomes cannot stand in for a read.
@@ -89,7 +103,7 @@ jobs:
               echo "::error title=Runner routing drift::at least one audit pass reported findings; see the step logs above for every surface, not just the first"
             fi
             if [ "${live_unreadable:-0}" != "0" ]; then
-              echo "::error title=Runner audit unreadable::the live pass could not read GitHub (a GitHub API rate limit, named in the step log above with its reset time when GitHub reports one); rerun after the limit resets"
+              echo "::error title=Runner audit unreadable::the live pass could not read GitHub (quota, transport or response refusal, named in the step log above with its reset time when GitHub reports one); retry after infrastructure recovers"
             fi
             if [ "${{ steps.github_vars.outcome }}" != "success" ] && [ -z "${live_findings}" ]; then
               echo "::error title=Runner audit incomplete::the live pass ended without a verdict; see its step log above"

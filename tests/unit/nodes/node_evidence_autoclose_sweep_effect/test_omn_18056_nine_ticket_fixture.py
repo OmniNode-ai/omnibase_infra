@@ -10,10 +10,9 @@ regression: every one of the nine is driven through the real handler against
 its real `dod_verify` verdict and its real acceptance-criteria section, and
 every one must be HELD.
 
-Fixtures and their provenance — including the one AC text that is reconstructed
-rather than read — are documented in `tests/fixtures/omn18056/README.md`. The
-verdicts are verbatim captures; `binds_ac` is empty on all 88 checks across the
-nine because no contract in the corpus declares one.
+The acceptance criteria include one reconstructed fixture. The verdicts are
+verbatim captures; `binds_ac` is empty on all 88 checks across the nine because
+no contract in the corpus declares one.
 
 The holds are NOT all the same hold, and the table below is the point: the
 closer now has three distinct reasons to refuse this population, each naming
