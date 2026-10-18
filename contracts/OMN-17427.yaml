@@ -177,6 +177,11 @@ requirements:
     acceptance:
       - id: AC39
         statement: 'AC39: README has three to five lines and links to knowledge_base, unused prose and evidence text are removed -- falsifier: the documentation surface check below fails'
+  - id: req-omn17427-prepr-pool-rerun-by-one-holder
+    statement: A second pre-merge pool run by the same holder on the same host builds, because the first run's pinned source-tree cache is dropped with its work directory and before the next clone.
+    acceptance:
+      - id: AC40
+        statement: 'AC40: the prove script removes only its own run key under the deploy source-tree cache, before the clone and before each teardown removes the work directory -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "source_tree_cache or drops_the_cache"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -795,3 +800,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC39
+  - id: dod-omn-17427-ac39-deploy-pool-source-tree-cache
+    description: Hosted-runner deploy smoke -- the prove script's cache-drop function removes the run's own key and leaves another run's key, and every removal of the work directory and the clone phase call it. A temporary home and work directory, no containers, credentials or private lab config.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "source_tree_cache or drops_the_cache"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC40
