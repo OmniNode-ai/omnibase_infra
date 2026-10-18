@@ -825,6 +825,12 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # anything. Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail
     # for the reason the `Governed helper primitive gate` entry states.
     "Lab-overlay parity tests (OMN-20934)",
+    # OMN-20413: the inline rehearsal is a verification job, so its retained
+    # display name must be enforced by dev's required CI Summary. Admission:
+    # the latest sixteen merged dev PRs recorded by the watcher on 2026-10-18
+    # all reported this context successful before merge. Recorded rows and
+    # failure/skip/absence controls live in test_hook_push_rehearsal_caller_omn17427.py.
+    "hook-push-rehearsal / rehearse",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -847,6 +853,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-20413: October rehearsal rows postdate the July/August fixtures.
+        # Its separate sixteen-PR admission replay retains the recorded rows.
+        "hook-push-rehearsal / rehearse",
         # OMN-20074: the repo-owned caller's October merged-head runs postdate
         # both historical fixture windows (#2546...#2567, #2705...#2720).
         # Historical recording metadata only; live absence/red still blocks.

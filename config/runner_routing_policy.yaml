@@ -823,6 +823,8 @@ hosted_runner_allowlist:
     reason: "OMN-19998: the performance-tests job asserts wall-clock thresholds, so it is pinned by literal rather than routed, so that a seam flip cannot relocate it without review. It was pinned to the lab fleet; this is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z), so the pin is GitHub-hosted."
   - path: .github/workflows/dev-merge-tag.yml
     reason: "OMN-19998: the dev merge tag job creates a git tag and touches no lab service. It is pinned to a literal GitHub-hosted label because this is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline."
+  - path: .github/workflows/hook-push-rehearsal.yml
+    reason: "OMN-20413: the hook push rehearsal runs the pre-push set on a GitHub-hosted runner, as the omnibase_core reusable it replaced did. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline, so the pin is a literal hosted label."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
 #
 # The route job (scripts/ci/runner_route_decision.py) decides, once per run,
@@ -1131,6 +1133,9 @@ route:
         - exposure-reader-coverage
         - Fingerprint Check
         - Governed helper primitive gate
+        # OMN-20413: the hook push rehearsal, enforced by the CI Summary poller
+        # via EXPECTED_EXTERNAL_CONTEXTS and absent from branch protection.
+        - hook-push-rehearsal / rehearse
         - imperative-contract-guard / Imperative Contract Guard
         - Infra Node Handler Ownership
         - Integration Silent-Skip Guard (OMN-14172)

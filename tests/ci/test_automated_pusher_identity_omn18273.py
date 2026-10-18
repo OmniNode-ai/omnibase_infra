@@ -114,6 +114,13 @@ EXEMPT: dict[str, str] = {
         "tests/ci/test_dev_merge_tag_workflow_omn19998.py pins its trigger, "
         "name and idempotency."
     ),
+    "hook-push-rehearsal.yml": (
+        "Pushes only to a throwaway local bare repository under $RUNNER_TEMP "
+        "(OMN-20413): the push exists to run this repository's pre-push hook set "
+        "on a sample commit the way a controller worker's push does. No GitHub "
+        "ref is written and no token is used, so no push identity or trailer "
+        "applies. tests/ci/test_hook_push_rehearsal_caller_omn17427.py pins it."
+    ),
 }
 
 TRAILER_WORKFLOW = "Onex-Workflow:"
