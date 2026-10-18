@@ -49,7 +49,7 @@ dependencies = [
     # `omnibase_core.models.ticket.model_done_write_decision`, first released in
     # omnibase-core 0.47.31 (core#1852). A resolve below it fails at import.
     "omnibase-core>=0.47.31,<0.48.0",
-    "omnibase-spi==0.23.5",
+    "omnibase-spi==0.23.7",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
     # ============================================================================
@@ -276,7 +276,7 @@ override-dependencies = [
     # temporary git-rev override below is removed in the same change.
     # OMN-21146: 0.47.39 -> 0.47.44, the floor omnimarket dev declares since omnimarket#3974.
     "omnibase-core==0.47.46",
-    "omnibase-spi==0.23.5",
+    "omnibase-spi==0.23.7",
     "omnibase-compat==0.5.7",
 ]
 
