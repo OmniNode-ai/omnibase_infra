@@ -147,11 +147,16 @@ requirements:
     acceptance:
       - id: AC33
         statement: 'AC33: selecting tests by ci_summary_registration in the dod-verify required-context file runs five tests and they pass -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration exits 5 with every test deselected'
+  - id: req-omn17427-prepr-pool-overlay-exercise
+    statement: A pre-merge pool run can mount a named Bifrost overlay on its stack and run one command against the live stack, so a proof that needs a changed model endpoint is a pool run and not a hand-built slot.
+    acceptance:
+      - id: AC34
+        statement: 'AC34: a pool run given an overlay copies it to the host and the build mounts it as the stack Bifrost overlay (a slot reads it as <project>.bifrost.yaml), and a post-up command runs once after the probe and fails the proof unless it printed exit code 0 -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_an_overlay_and_a_post_up_command_reach_the_host_and_run_after_probe tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_exits_non_zero_fails_the_proof tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_printed_no_exit_line_is_not_a_pass tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_run_without_a_post_up_command_runs_no_exercise_phase tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_missing_overlay_file_is_a_usage_error_before_any_host_is_touched tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_params_file_cannot_set_the_overlay_or_the_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_cli_takes_an_overlay_and_a_post_up_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q'
   - id: req-omn17427-publisher-fixture-shapes
     statement: The publisher contract fixture resolves a topic through every publisher declaration shape the contract topic graph reads, so a golden chain over a topic published by a result topic, a produced event or a publication list is not refused as unpublished.
     acceptance:
-      - id: AC34
-        statement: 'AC34: PublisherContractCorpus resolves topics declared by event_bus.publish success and failure topics, produced_events, publications, topics.produces and runtime_dispatch.command_topic, still refuses a topic no contract publishes, and agrees with the topic graph parser -- falsifier: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q'
+      - id: AC35
+        statement: 'AC35: PublisherContractCorpus resolves topics declared by event_bus.publish success and failure topics, produced_events, publications, topics.produces and runtime_dispatch.command_topic, still refuses a topic no contract publishes, and agrees with the topic graph parser -- falsifier: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -643,6 +648,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC33
+  - id: dod-omn-17427-ac32-pool-overlay-exercise
+    description: The pool driver passes an overlay and a post-up command to the host, the prove script mounts the overlay for both stack kinds and runs the command in the exercise phase, and the proof fails on a non-zero or missing exit line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_an_overlay_and_a_post_up_command_reach_the_host_and_run_after_probe tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_exits_non_zero_fails_the_proof tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_printed_no_exit_line_is_not_a_pass tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_run_without_a_post_up_command_runs_no_exercise_phase tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_missing_overlay_file_is_a_usage_error_before_any_host_is_touched tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_params_file_cannot_set_the_overlay_or_the_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_cli_takes_an_overlay_and_a_post_up_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC34
+  - id: dod-omn-17427-ac33-deploy-pool-overlay-exercise
+    description: Hosted-runner deploy smoke -- the build script mounts the supplied Bifrost overlay before stack generation for both stack kinds, and its exercise phase executes the supplied command with the stack ports and project and reports a non-zero exit. Uses a temporary build tree without containers, credentials or private lab config.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC34
   - id: dod-omn-17427-ac34
     description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads; the shape cases fail before the product change.
     source: manual
@@ -651,7 +674,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC34
+      - AC35
   - id: dod-omn-17427-ac34-deploy-publisher-fixture-shapes
     description: Hosted-runner deploy smoke -- the fixture indexes a synthetic contract through each declared publisher shape. Test fixture code only, no deployed container or credentials.
     source: manual
@@ -660,7 +683,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC34
+      - AC35
   - id: dod-omn-17427-ac34-deploy-publisher-envelope
     description: Hosted-runner integration smoke -- seven independent publisher declarations build envelopes that cross the in-memory bus serialization and real consume callback into an alias-only runtime dispatcher, preserving payload and correlation ID. Undeclared topics are refused. No deployed container or credentials are required.
     source: manual
@@ -669,4 +692,4 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_publisher_contract_envelope_dispatch_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC34
+      - AC35

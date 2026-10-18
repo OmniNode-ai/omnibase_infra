@@ -59,6 +59,14 @@
 # `local.omnibase_core.runtime_local_` group prefix it already holds. The lab runtime
 # consumes the start command and publishes both result topics, so a developer
 # principal gets no write on them.
+#
+# DOD CLOSEOUT PROOF (OMN-21048): a machine proves the DoD closeout sweep by publishing
+# `dod-closeout-sweep-decide-requested` and reading the one `dod-closeout-sweep-decided`
+# event the node's contract declares as its terminal event, by correlation id. The
+# caller reads under `local.omnimarket.dod_closeout_probe.consume.v1.` plus a per-call
+# suffix; the node's own group, `<env>.omnimarket.node_dod_closeout_sweep_compute...`,
+# does not start with that prefix, so a developer principal cannot join it and take
+# commands.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -83,11 +91,14 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimemory.expire-memory.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimemory.memory-expired.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimemory.lifecycle-transition-failed.v1, direction: consume, consumer_group: local.omnimemory.memory_lifecycle_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
   - {broker: dev, prefix: pr-handoff-request.}
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
+  - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
 described_groups:
   - {broker: dev, group: "*"}

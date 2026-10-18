@@ -128,6 +128,8 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 # lifecycle proof publishes expire-memory and reads the two outcomes under its own
 # group prefix. The pr-polish start command and its two result topics (OMN-21034): the
 # group they are read under is the `local.omnibase_core.runtime_local_` prefix above.
+# The DoD closeout proof (OMN-21048) publishes the decide command and reads
+# its decided event under its own group prefix.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "topic",
@@ -168,6 +170,24 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "group",
         "local.omnimemory.memory_lifecycle_probe.consume.v1.",
+        "prefixed",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
+        "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.dod-closeout-sweep-decided.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "group",
+        "local.omnimarket.dod_closeout_probe.consume.v1.",
         "prefixed",
         ("read", "describe"),
     ),
@@ -238,6 +258,30 @@ def test_the_pr_polish_grants_start_it_and_read_both_phases_and_nothing_more() -
         resource_type == "GROUP" and "polish" in resource
         for _, resource_type, resource, _, _ in rows
     )
+
+
+def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
+    """The proof may publish the decide command and read the decided event only."""
+    rows = derive(shipped_bindings())
+    closeout = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource_type == "TOPIC" and "dod-closeout" in resource
+    }
+    assert closeout == {
+        (
+            "TOPIC",
+            "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+            "WRITE",
+        ),
+        (
+            "TOPIC",
+            "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
+            "DESCRIBE",
+        ),
+        ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "READ"),
+        ("TOPIC", "onex.evt.omnimarket.dod-closeout-sweep-decided.v1", "DESCRIBE"),
+    }
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:

@@ -66,6 +66,7 @@ Note:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import math
 import os
@@ -88,6 +89,7 @@ if TYPE_CHECKING:
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
+    from omnibase_core.models.dispatch import ModelHandlerOutput
     from omnibase_infra.dlq.service_dlq_tracking import ServiceDlqTracking
     from omnibase_infra.event_bus.model_runtime_attach_readiness import (
         ModelRuntimeAttachReadiness as ModelRuntimeAttachReadinessType,
@@ -479,6 +481,67 @@ async def publish_contract_registrations(
         skipped,
         correlation_id,
     )
+    return published
+
+
+async def publish_triage_escalations(
+    *,
+    event_bus: ProtocolEventBusLike,
+    output: ModelHandlerOutput[None],
+    topics_by_event: Mapping[str, str],
+) -> int:
+    """Publish the escalation events the runtime error triage handler returned.
+
+    ``HandlerRuntimeErrorTriage.handle`` claims an incident (``open`` to
+    ``escalated``, once) and returns the one ``ModelRuntimeErrorEscalatedEvent``
+    in its output. The kernel's triage consumer awaited ``handle`` and dropped
+    that output, so the claim was made and nothing reached the bus (OMN-21029).
+    Each returned event is wrapped in a ``ModelEventEnvelope`` and published to
+    the topic the node contract's ``published_events`` declares for its class.
+
+    The incident is already ``escalated`` when this runs, so an event whose
+    class has no declared topic, or whose publish fails, is logged at error
+    level with its fingerprint and skipped rather than dropped silently.
+
+    Returns:
+        The number of events published.
+    """
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+
+    published = 0
+    for event in output.events:
+        event_type = type(event).__name__
+        topic = topics_by_event.get(event_type)
+        fingerprint = getattr(event, "fingerprint", "")
+        if topic is None:
+            logger.error(
+                "Triage escalation not published: contract declares no topic for %s "
+                "(fingerprint=%s)",
+                event_type,
+                fingerprint,
+            )
+            continue
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event.model_dump(mode="json"),
+            correlation_id=event.correlation_id,
+            event_type=event_type,
+            source_tool="onex-kernel-runtime-error-triage",
+            tenant_id=None,
+        )
+        try:
+            await event_bus.publish_envelope(
+                envelope,
+                topic=topic,
+                key=str(fingerprint).encode("utf-8"),
+            )
+        except (InfraConnectionError, InfraTimeoutError, InfraUnavailableError):
+            logger.exception(
+                "Triage escalation publish failed for fingerprint=%s on %s",
+                fingerprint,
+                topic,
+            )
+            continue
+        published += 1
     return published
 
 
@@ -5072,8 +5135,17 @@ async def bootstrap() -> int:
                 from omnibase_infra.nodes.node_runtime_error_triage_effect.handlers.handler_runtime_error_triage import (
                     HandlerRuntimeErrorTriage,
                 )
+                from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+                    load_published_events_map,
+                )
 
                 triage_handler = HandlerRuntimeErrorTriage(db_pool=postgres_pool)
+                # The escalation topic comes from the node contract, never a literal.
+                triage_published_events = load_published_events_map(
+                    Path(inspect.getfile(HandlerRuntimeErrorTriage)).parents[1]
+                    / "contract.yaml",
+                    logger,
+                )
 
                 triage_topic_resolver = create_topic_resolver()
                 runtime_error_topic = triage_topic_resolver.resolve(
@@ -5100,7 +5172,12 @@ async def bootstrap() -> int:
                     try:
                         payload = _json.loads(message.value)
                         event = ModelRuntimeErrorEvent.model_validate(payload)
-                        await triage_handler.handle(event)
+                        triage_output = await triage_handler.handle(event)
+                        await publish_triage_escalations(
+                            event_bus=event_bus,
+                            output=triage_output,
+                            topics_by_event=triage_published_events,
+                        )
                     except Exception:  # noqa: BLE001 — boundary: consumer must not crash
                         logger.warning(
                             "Failed to process runtime error triage event",
