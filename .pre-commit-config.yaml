@@ -62,6 +62,14 @@ repos:
         files: ^(\.github/workflows/[^/]+\.ya?ml|tests/ci/test_hostile_reviewer_voters_overlay_omn20910\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20910: keep pin evidence and API/lab compatibility in sync with CI.
+      - id: review-voter-pin-compatibility
+        name: Review voter pin compatibility (OMN-20910)
+        entry: uv run --frozen pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(\.github/sibling-pins\.yaml|\.github/workflows/[^/]+\.ya?ml|tests/ci/test_hostile_reviewer_(omniintelligence_pin_omn20947|retry_budget_pin_omn17427)\.py|tests/ci/fixtures/hostile_reviewer_overlay_schema_pin_omn20947\.json|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov

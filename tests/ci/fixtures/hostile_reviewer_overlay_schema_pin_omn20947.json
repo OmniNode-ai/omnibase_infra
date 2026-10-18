@@ -1,14 +1,18 @@
 {
   "_provenance": {
-    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below; cli_review --help of each listed revision; and the substitute-vote classifier of the pinned and previous revisions over the lost-voter error texts below; and the review voter adapter's _DEFAULT_MAX_TOKENS and _RETRY_MAX_TOKENS (retry_budget) at the pinned revision and the one before it",
-    "captured_utc": "2026-10-14T12:36:00Z",
+    "source": "At pinned_revision, executed the overlay schema, load_review_voters over the synthetic overlays, CLI parser head flag, lost-voter classifier and adapter retry constants on h202. Imported the canonical omniintelligence source at dev=origin/dev=pinned_revision using the omnibase_infra locked environment supplemented with scipy and tiktoken. No HTTP or credentials used for this recording. Historical observations and their original source description are retained separately.",
+    "captured_utc": "2026-10-18T06:19:40+00:00",
     "control_captured_utc": "2026-10-11T04:46:31Z",
-    "ticket": "OMN-20947",
-    "pinned_revision": "3fcbf795087a79081c0ceeb676216bf64c5d49ae",
+    "ticket": "OMN-20910",
+    "pinned_revision": "7f686d4bbca251dd3db49c1222ff8d6f738abd6c",
     "control_revision": "8782c0507035e2cec20ccacbc404d32f894161b5",
     "previous_pinned_revision": "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070",
     "note": "voter hosts and reviewer logins are synthetic; each overlay is written with schema_version review_voters_overlay.v1 before loading",
-    "retry_budget_previous_revision": "64b950973a5686d33e0b439fb80749d66362d06d"
+    "retry_budget_previous_revision": "64b950973a5686d33e0b439fb80749d66362d06d",
+    "historical_pinned_revision": "3fcbf795087a79081c0ceeb676216bf64c5d49ae",
+    "historical_captured_utc": "2026-10-14T12:36:00Z",
+    "pin_capture_command": "python capture-pin.py (h202); imports from the canonical omniintelligence source whose dev and origin/dev both name pinned_revision; schemas, loader, CLI parser, substitute classifier and adapter constants executed; historical records retained unchanged",
+    "historical_source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below; cli_review --help of each listed revision; and the substitute-vote classifier of the pinned and previous revisions over the lost-voter error texts below; and the review voter adapter's _DEFAULT_MAX_TOKENS and _RETRY_MAX_TOKENS (retry_budget) at the pinned revision and the one before it"
   },
   "overlays": {
     "voters_only": {
@@ -263,6 +267,94 @@
           "substitute_reviewer_ids": []
         }
       }
+    },
+    "7f686d4bbca251dd3db49c1222ff8d6f738abd6c": {
+      "schema": {
+        "overlay_properties": [
+          "backend_overlay",
+          "provider_endpoints",
+          "schema_version",
+          "substitute_votes",
+          "voters"
+        ],
+        "voter_properties": [
+          "api_key_env",
+          "api_model_id",
+          "backend_id",
+          "constrain_findings_schema",
+          "context_window_tokens",
+          "enable_thinking",
+          "endpoint_url",
+          "excluded_repositories",
+          "max_retries",
+          "model",
+          "model_id_source",
+          "overflow_after_seconds",
+          "overflow_endpoint_urls",
+          "provider",
+          "reasoning_effort",
+          "required",
+          "review_focus",
+          "temperature",
+          "timeout_seconds",
+          "top_p",
+          "voter_id"
+        ],
+        "substitute_vote_policy_properties": [
+          "receipt_max_age_seconds",
+          "receipts_per_vote",
+          "reviewers",
+          "signing_key_env"
+        ]
+      },
+      "loaded": {
+        "voters_only": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": [
+            "offci-reviewer-a",
+            "offci-reviewer-b"
+          ]
+        },
+        "overflow_endpoints": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 1,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes_and_overflow": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 1,
+          "substitute_reviewer_ids": [
+            "offci-reviewer-a",
+            "offci-reviewer-b"
+          ]
+        }
+      }
     }
   },
   "cli_review": {
@@ -271,6 +363,9 @@
     },
     "8782c0507035e2cec20ccacbc404d32f894161b5": {
       "accepts_head_sha": false
+    },
+    "7f686d4bbca251dd3db49c1222ff8d6f738abd6c": {
+      "accepts_head_sha": true
     }
   },
   "substitution": {
@@ -317,6 +412,28 @@
         "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (500) from voter-b",
         "substitutable_as": null
       }
+    },
+    "7f686d4bbca251dd3db49c1222ff8d6f738abd6c": {
+      "call_timed_out": {
+        "error": "[ONEX_CORE_092_TIMEOUT_ERROR] Request to voter-b timed out after 300.0s (2 attempts)",
+        "substitutable_as": "timed out"
+      },
+      "call_503": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (503) from voter-b",
+        "substitutable_as": "was unavailable"
+      },
+      "call_connection_refused": {
+        "error": "[ONEX_CORE_090_NETWORK_ERROR] Connection to voter-b failed after 3 attempts: [Errno 111] Connection refused",
+        "substitutable_as": "was unavailable"
+      },
+      "models_read_503": {
+        "error": "could not read the served model id from http://voter-b.example.invalid:8000/v1/models: HTTP Error 503: Service Unavailable. The review cannot choose a model id without it, and guessing is what OMN-16407/OMN-17786/OMN-18623 each cost a day to undo.",
+        "substitutable_as": "was unavailable"
+      },
+      "call_500": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (500) from voter-b",
+        "substitutable_as": null
+      }
     }
   },
   "retry_budget": {
@@ -327,6 +444,38 @@
     "64b950973a5686d33e0b439fb80749d66362d06d": {
       "default_max_tokens": 4096,
       "retry_max_tokens": null
+    },
+    "7f686d4bbca251dd3db49c1222ff8d6f738abd6c": {
+      "default_max_tokens": 4096,
+      "retry_max_tokens": 8192
     }
+  },
+  "anthropic": {
+    "7f686d4bbca251dd3db49c1222ff8d6f738abd6c": {
+      "ok": true,
+      "voter_ids": [
+        "security-contracts"
+      ],
+      "provider": "anthropic",
+      "api_model_id": "claude-sonnet-5-5",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "base_url": "https://api.example.invalid"
+    }
+  },
+  "anthropic_overlay": {
+    "schema_version": "review_voters_overlay.v1",
+    "provider_endpoints": {
+      "anthropic": "https://api.example.invalid"
+    },
+    "voters": [
+      {
+        "voter_id": "security-contracts",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "required": true,
+        "timeout_seconds": 120
+      }
+    ]
   }
 }

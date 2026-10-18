@@ -11,7 +11,8 @@ the gate fails closed on every pull request the moment such an overlay lands.
 The recording is the pinned revision's own overlay schema and its loader's
 result over synthetic overlays, with the previous pin as the control that
 refuses them. Every workflow site that clones omniintelligence must name the
-recorded revision.
+recorded revision. The current pin also accepts Claude API voters declared in
+the overlay (OMN-20910), while retaining the OpenAI lab roster.
 
 The pinned gate also lets clean signed off-CI receipts stand in for a voter
 lost to a timeout or an unavailable endpoint (a 503, a refused connection, an
@@ -82,7 +83,10 @@ def test_pinned_omniintelligence_accepts_substitute_votes_and_overflow(
     )
 
     schema = cast("dict[str, list[str]]", revisions[pinned]["schema"])
-    assert "substitute_votes" in schema["overlay_properties"]
+    assert {"substitute_votes", "provider_endpoints"} <= set(
+        schema["overlay_properties"]
+    )
+    assert {"provider", "model", "api_key_env"} <= set(schema["voter_properties"])
     assert {"overflow_endpoint_urls", "overflow_after_seconds"} <= set(
         schema["voter_properties"]
     )
@@ -107,6 +111,20 @@ def test_pinned_omniintelligence_accepts_substitute_votes_and_overflow(
         "offci-reviewer-a",
         "offci-reviewer-b",
     ]
+    anthropic = cast("dict[str, dict[str, object]]", recorded_response["anthropic"])
+    assert anthropic[pinned] == {
+        "ok": True,
+        "voter_ids": ["security-contracts"],
+        "provider": "anthropic",
+        "api_model_id": "claude-sonnet-5-5",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "base_url": "https://api.example.invalid",
+    }
+    # Positive control: the historical resolver schema lacks these API fields.
+    before_schema = cast("dict[str, list[str]]", revisions[control]["schema"])
+    assert {"provider", "model", "api_key_env"}.isdisjoint(
+        before_schema["voter_properties"]
+    )
 
 
 _HEAD_SHA_EXPR = "${{ github.event.pull_request.head.sha }}"

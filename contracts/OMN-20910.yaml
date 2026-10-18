@@ -64,3 +64,14 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay_ratchet_is_wired"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
+  - id: "dod-omn20910-claude-api-reviewer-pin"
+    description: "The omniintelligence pin names the merged Claude API voter revision; its recorded loader accepts Anthropic voters and the existing OpenAI overlay shapes, and its retry budget remains 4096/8192 tokens."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

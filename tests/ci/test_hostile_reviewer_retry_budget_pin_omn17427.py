@@ -22,8 +22,8 @@ import yaml
 pytestmark = [pytest.mark.unit]
 
 _SIBLING_PINS = Path(__file__).resolve().parents[2] / ".github" / "sibling-pins.yaml"
-# The merge commit of omniintelligence#1072 on its dev branch.
-RETRY_BUDGET_PIN = "3fcbf795087a79081c0ceeb676216bf64c5d49ae"
+# OMN-20910: the Claude API voter merge retains the larger retry budget.
+RETRY_BUDGET_PIN = "7f686d4bbca251dd3db49c1222ff8d6f738abd6c"
 # The pin before this change, which retries at the same 4096-token cap.
 PRE_RETRY_BUDGET_PIN = "64b950973a5686d33e0b439fb80749d66362d06d"
 
