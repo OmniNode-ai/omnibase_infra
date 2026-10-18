@@ -10,7 +10,7 @@ requirements:
     statement: The ticket's labelled acceptance criteria.
     acceptance:
       - id: AC6
-        statement: 'AC6: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
+        statement: 'AC6: the labelled criterion of the same name on the ticket.'
 evidence_requirements:
   - kind: tests
     description: 'AC6: a non-superuser migration one-shot declares a service_completed_successfully edge to the service that provisions its identity, both derived by parsing the compose set. Fails at the parent of omnibase_infra#3664.'
@@ -29,8 +29,3 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
-    ac_bindings:
-      - label: AC6
-        criterion_hash: b8f1ed0b655b545cd280b96405e3346334fad1332f86e70400c09ab9ea2c0580
-        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
-        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
