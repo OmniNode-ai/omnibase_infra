@@ -1,0 +1,60 @@
+schema_version: 1.0.0
+ticket_id: OMN-19817
+title: The dispatch protocol declares no_escalation and the consumer-kwarg-parity hook passes against the omnimarket consumer
+summary: |-
+  Evidence for OMN-19817 in the repository that carries the fix (omnibase_infra#4192, squash 15ec305f7). AC1 and AC2 bind to the parity suite's keyword and splat cases; AC3 binds to the hook's own pytest file run against the omnimarket consumer source.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: omnibase_infra ProtocolDelegationDispatchPort.dispatch declares no_escalation with a False default, matching RuntimeDelegationDispatchPort.dispatch -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -k accepts_every_keyword
+      - id: AC2
+        statement: |-
+          AC2: the call-site reader resolves a splat of a same-module helper whose return annotation is a same-module TypedDict, checks those keys against the runtime port, never counts them as guaranteed-passed, and still fails closed on any other splat -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -k splat
+      - id: AC3
+        statement: |-
+          AC3: the hook onex-delegation-dispatch-consumer-kwarg-parity passes against the omnimarket origin/dev consumer source on a clean omnibase_infra worktree -- falsifier: ONEX_DELEGATION_CONSUMER_SOURCE=<omnimarket dev handler> uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q
+evidence_requirements:
+  - kind: tests
+    description: The consumer keyword parity suite passes.
+    command: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19817-ac1-accepts-every-keyword
+    description: AC1 binding. Run against the omnimarket consumer source read at omnimarket 66b3323b9 through the contents API (the read the hosted runner can make, the protocol's dispatch accepts every keyword the consumer's dispatch() call site can send, no_escalation included, and the runtime port accepts them too. With src/omnibase_infra/runtime/protocols/protocol_delegation_dispatch_port.py restored from the parent of 15ec305f7 two of the four fail, naming attribution, named_tests and no_escalation as not accepted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: |-
+          bash -c 'set -euo pipefail; T=$(mktemp --suffix=.py); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=66b3323b9eef5dfd9320996a8dafcabb442527be" --jq .content | base64 -d > "$T"; ONEX_DELEGATION_CONSUMER_SOURCE="$T" uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider -k accepts_every_keyword'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19817-ac2-splat-reader
+    description: AC2 binding. Run against the same omnimarket 66b3323b9 consumer source, the call-site reader's splat cases pass, including the protocol and runtime-port keyword checks that consume the TypedDict-resolved splat keys. With the protocol file restored from the parent of 15ec305f7 the protocol splat case fails (1 failed, 13 passed).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: |-
+          bash -c 'set -euo pipefail; T=$(mktemp --suffix=.py); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=66b3323b9eef5dfd9320996a8dafcabb442527be" --jq .content | base64 -d > "$T"; ONEX_DELEGATION_CONSUMER_SOURCE="$T" uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider -k splat'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19817-ac3-hook-vs-omnimarket-consumer
+    description: AC3 binding (accepted 2026-10-18T1445Z, proposed by lane=dod-closeout-bind-2026-10-18T1445Z-c0, accepted by lane=dod-closeout-accept-2026-10-18T1445Z-c0). The hook's entry (this pytest file) passes with ONEX_DELEGATION_CONSUMER_SOURCE pointing at the omnimarket delegate-skill handler, which splats _no_escalation_dispatch_kwargs; 19 passed at omnimarket 66b3323b9. With the protocol file restored from the parent of 15ec305f7 the same run reports 2 failed. The consumer source is read at the pinned omnimarket commit through the contents API, the read the hosted runner can make, so the item runs at the default scope; the hosted check cannot run a local_done_gate item at the head or at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c 'set -euo pipefail; T=$(mktemp --suffix=.py); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=66b3323b9eef5dfd9320996a8dafcabb442527be" --jq .content | base64 -d > "$T"; ONEX_DELEGATION_CONSUMER_SOURCE="$T" uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

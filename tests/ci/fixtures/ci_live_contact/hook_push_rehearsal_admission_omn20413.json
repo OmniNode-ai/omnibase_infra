@@ -1,0 +1,281 @@
+{
+  "_provenance": {
+    "source": "PR watcher snapshot: latest sixteen merged omnibase_infra dev PRs, retaining facts.head_sha, facts.merged_at, ci.runs and ci.detail for the rehearsal context",
+    "captured_utc": "2026-10-18T14:50:57Z",
+    "selection": "facts.repo == omnibase_infra, facts.state == MERGED, facts.base == dev; newest sixteen facts.merged_at"
+  },
+  "pull_requests": {
+    "omnibase_infra#5120": {
+      "head_sha": "421ada72fa1c1b1cf27e4d689839245bd59397db",
+      "merged_at": "2026-10-18T13:40:34Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T12:59:07Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117681696652",
+          "2026-10-18T12:58:49Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5119": {
+      "head_sha": "8d514f4e46433939c986ddd0f5c08185e68c4f2d",
+      "merged_at": "2026-10-18T13:35:12Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T12:39:08Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117677524419",
+          "2026-10-18T12:38:55Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5117": {
+      "head_sha": "b66bce836ac4ceadfcb14396ca67662498dfb8fe",
+      "merged_at": "2026-10-18T12:47:07Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T12:03:34Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117670244411",
+          "2026-10-18T12:03:19Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5110": {
+      "head_sha": "f03eb6030052eccc39f1517215b47b1cd6dd3ccb",
+      "merged_at": "2026-10-18T12:38:12Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T11:21:26Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117661911027",
+          "2026-10-18T11:21:14Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5118": {
+      "head_sha": "3a9b10b8f3894c01f11c29dfa49e461603ab4114",
+      "merged_at": "2026-10-18T11:38:56Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T10:46:04Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117655035965",
+          "2026-10-18T10:45:48Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5113": {
+      "head_sha": "71115980afc3fa4bd9928e6a77ac08d62395eef8",
+      "merged_at": "2026-10-18T10:35:36Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T09:31:13Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117640737357",
+          "2026-10-18T09:30:59Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5105": {
+      "head_sha": "d5ce2a5d578dd2c89ae2a30c3f7a760cee96c376",
+      "merged_at": "2026-10-18T10:35:36Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T09:44:20Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117643247077",
+          "2026-10-18T09:44:04Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5114": {
+      "head_sha": "2a351d8825af558a2fd556ccb481f1318bca00e6",
+      "merged_at": "2026-10-18T10:10:53Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T09:26:14Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117639778994",
+          "2026-10-18T09:25:58Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5067": {
+      "head_sha": "01cad7fed47e2fbe20b0c02b9f7b31d0b14df61b",
+      "merged_at": "2026-10-18T09:53:11Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T08:26:55Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117628288993",
+          "2026-10-18T08:26:38Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5112": {
+      "head_sha": "62a29b59ade162f5d235aa3d313bdc3cfda17519",
+      "merged_at": "2026-10-18T09:37:43Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T08:55:55Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117633894807",
+          "2026-10-18T08:55:38Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5096": {
+      "head_sha": "bd4312aea07a8e2603e344a3ad1439ec192863b0",
+      "merged_at": "2026-10-18T09:05:29Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T08:18:16Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117626637738",
+          "2026-10-18T08:17:59Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5111": {
+      "head_sha": "16ab4c3f76e0dd96167c8fa57d52afd247faa909",
+      "merged_at": "2026-10-18T08:46:34Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T08:05:45Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117624206949",
+          "2026-10-18T08:05:29Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5109": {
+      "head_sha": "c262540428ff37e5e3b0b5abb7121ce17f5a1407",
+      "merged_at": "2026-10-18T08:42:33Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T07:23:59Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117616407618",
+          "2026-10-18T07:23:46Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5107": {
+      "head_sha": "1f1433644e4a630981e34909423e68c715a61e5c",
+      "merged_at": "2026-10-18T07:36:15Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T06:43:57Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117609006103",
+          "2026-10-18T06:43:44Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5070": {
+      "head_sha": "47908fb104ddabb287196930cd140215e3664c44",
+      "merged_at": "2026-10-18T07:25:34Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T06:22:25Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117605256296",
+          "2026-10-18T06:22:11Z"
+        ]
+      ]
+    },
+    "omnibase_infra#5069": {
+      "head_sha": "5b27c9c4268349c658480b0053524670e336c667",
+      "merged_at": "2026-10-18T06:01:36Z",
+      "check_run": [
+        "hook-push-rehearsal / rehearse",
+        "completed",
+        "success",
+        "2026-10-18T05:13:15Z"
+      ],
+      "detail": [
+        [
+          "hook-push-rehearsal / rehearse",
+          "117593499934",
+          "2026-10-18T05:13:00Z"
+        ]
+      ]
+    }
+  }
+}

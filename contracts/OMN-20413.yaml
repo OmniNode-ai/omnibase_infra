@@ -26,6 +26,16 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: check_lane_census_age.py --stale-advisory exits 0 with a warning on a stale snapshot and 1 on a missing or malformed one, exits 1 on a stale snapshot without the flag, and the staleness workflow passes the flag only when github.event_name is pull_request -- falsifier: uv run pytest tests/unit/scripts/test_check_lane_census_age.py tests/ci/test_lane_census_staleness_pr_advisory_omn20413.py -q'
+  - id: req-omn20413-hook-push-rehearsal-siblings
+    statement: The hook-push-rehearsal / rehearse check clones the omnibase_core and omniclaude siblings a worker's OMNI_HOME holds before it pushes the sample commit, so the architecture-layer and deploy-scope DoD pre-push hooks stop refusing every hook-changing pull request on a hosted runner.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the rehearsal job keeps the hook-push-rehearsal / rehearse context, clones exactly the siblings the two pre-push hooks read and exports OMNI_HOME before the push step, and the deploy-scope hook resolves its validator from the OMNI_HOME the clone step lays out -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn20413-hook-push-rehearsal-enforcement
+    statement: The retained rehearsal context is enforced by CI Summary after its sixteen-PR admission replay, so the inline verification job can block landing.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: CI Summary admits a successful rehearsal, refuses failure, skipped and neutral rehearsals, and waits on a missing rehearsal; the recorded watcher rows show the context reported before merge on sixteen recent dev PRs -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -39,6 +49,9 @@ evidence_requirements:
   - kind: tests
     description: The age checker's advisory flag and the workflow's pull_request-only use of it.
     command: uv run pytest tests/unit/scripts/test_check_lane_census_age.py tests/ci/test_lane_census_staleness_pr_advisory_omn20413.py -q
+  - kind: tests
+    description: The rehearsal workflow's sibling clone step is read from the workflow and run in bash with a stub git, and the deploy-scope resolver is run against the OMNI_HOME it exports.
+    command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -80,3 +93,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn20413-ac5-hook-push-rehearsal-siblings
+    description: AC5 tests read hook-push-rehearsal.yml and run its sibling clone step; they fail at the merge base, where the job called the omnibase_core reusable with no sibling clone step.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn20413-ac6-hook-push-rehearsal-enforcement
+    description: AC6 controls fail before the rehearsal context is registered in CI Summary.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q -k 'ci_summary_requires or sixteen_recent'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
