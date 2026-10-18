@@ -40,3 +40,18 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn-19064-budget-refusal-order
+    description: Every slot principal needs a connection budget before the migration corpus is scanned. The missing-budget regression and the provisioner scope checks pass on the lab host.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/infra/test_db_slot_connection_budget.py tests/unit/infra/test_db_slot_provisioner_omn18892.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-19064-deploy-provisioner-budget-order
+    description: Hosted-runner deploy probe of the provisioner source at the evaluated commit. Refuses if budget validation follows the migration corpus scan; the dispatch head has that order. This checks the shipped provisioning script and does not claim end-to-end runtime readiness.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/provision_db_slot.sh" | python3 -c 'import sys; source = sys.stdin.read(); assert source.index("SLOT_ROLE_LIMITS=") < source.index("DIRECTIVE_MIGRATIONS_DIR=")'
+        cwd: ${OMNI_HOME}/omnibase_infra

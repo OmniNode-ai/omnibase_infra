@@ -392,6 +392,18 @@ for _role in $LOGIN_ONLY_ROLES; do
 "
 done
 
+# Every slot role's budget, resolved before the migration corpus is scanned or
+# any connection is opened. An unbudgeted principal must be refused even when
+# the migration corpus is unavailable.
+SLOT_ROLE_LIMITS=""
+SLOT_CONNECTION_BUDGET=0
+for _role in $SLOT_ROLES; do
+    _limit="$(connection_limit_for "$_role")"
+    SLOT_ROLE_LIMITS="${SLOT_ROLE_LIMITS}${_role}:${_limit}
+"
+    SLOT_CONNECTION_BUDGET=$((SLOT_CONNECTION_BUDGET + _limit))
+done
+
 # Databases a forward migration creates through an `onex-create-database`
 # directive (`keycloak`). The migration runner asks the slot's migration
 # principal to create them, and that principal is NOCREATEDB by design, so the
@@ -424,17 +436,6 @@ ${_sdb}
     esac
     SLOT_DIRECTIVE_DATABASES="${SLOT_DIRECTIVE_DATABASES}${_sdb}
 "
-done
-
-# Every slot role's budget, resolved before any connection so that a missing
-# entry refuses in --print-scope exactly as it would in --apply.
-SLOT_ROLE_LIMITS=""
-SLOT_CONNECTION_BUDGET=0
-for _role in $SLOT_ROLES; do
-    _limit="$(connection_limit_for "$_role")"
-    SLOT_ROLE_LIMITS="${SLOT_ROLE_LIMITS}${_role}:${_limit}
-"
-    SLOT_CONNECTION_BUDGET=$((SLOT_CONNECTION_BUDGET + _limit))
 done
 
 if [ "$MODE" = "--print-scope" ]; then
