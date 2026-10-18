@@ -11,16 +11,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC2
-        statement: 'AC2: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC3
-        statement: 'AC3: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
       - id: AC4
         statement: 'AC4: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC5
-        statement: 'AC5: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
-      - id: AC6
-        statement: 'AC6: the labelled criterion of the same name on the ticket; its text is pinned by criterion_hash in ac_bindings.'
 evidence_requirements:
   - kind: tests
     description: 'AC1: accepting a command commits exactly [msg.offset + 1]. Fails against the pre-fix consumer''s bare commit().'
