@@ -9,7 +9,7 @@ requirements:
   - id: "req-omn21110-core-fallback-check"
     statement: "Core fallback compatibility proofs use the installed SPI version and preserve the previous-core rejection and release-core acceptance assertions."
     acceptance:
-      - id: "AC-core-fallback"
+      - id: "AC1"
         statement: "Both core fallback tests use the installed SPI distribution version, reject core 0.47.30 and accept core 0.47.31 without an unrelated SPI failure."
 evidence_requirements:
   - kind: "tests"
@@ -21,7 +21,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn21110-core-fallback-check"
-    description: "AC-core-fallback: exercise both core boundary assertions with the installed SPI version."
+    description: "AC1: exercise both core boundary assertions with the installed SPI version."
     source: "manual"
     checks:
       - check_type: "test_passes"
@@ -30,7 +30,7 @@ dod_evidence:
       - check_type: "command"
         check_value: "python3 -c 'from pathlib import Path; s = Path(\"tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py\").read_text(); assert s.count(\"version(\\\"omnibase-spi\\\")\") == 2'"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC-core-fallback"]
+    binds_ac: ["AC1"]
   - id: "dod-omn21110-deploy-probe-core-fallback-check"
     description: "Hosted-runner readback of the test-only change: require both core fallback proofs to read the installed SPI distribution version. Fails on the base's fixed SPI 0.23.5 fixtures; no runtime deployment is claimed."
     source: "manual"
@@ -38,4 +38,4 @@ dod_evidence:
       - check_type: "command"
         check_value: "python3 -c 'from pathlib import Path; s = Path(\"tests/integration/runtime/test_omn17802_core_pin_fallback_matrix.py\").read_text(); assert s.count(\"version(\\\"omnibase-spi\\\")\") == 2'"
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: ["AC-core-fallback"]
+    binds_ac: ["AC1"]
