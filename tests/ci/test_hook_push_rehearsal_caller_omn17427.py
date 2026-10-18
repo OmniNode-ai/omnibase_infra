@@ -29,6 +29,10 @@ from scripts.ci.check_deploy_scope_dod import (
     _CANONICAL_VALIDATOR_RELPATH,
     resolve_omni_home,
 )
+from scripts.ci.ci_summary_gate import (
+    EXPECTED_EXTERNAL_CONTEXTS,
+    evaluate_external_contexts,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -75,6 +79,56 @@ def test_the_job_keeps_the_check_context_and_reads_contents_only() -> None:
     assert job["permissions"] == {"contents": "read"}
     assert job["runs-on"] == "ubuntu-latest"
     assert job["env"]["PUSH_TIMEOUT_S"] == "1800"
+
+
+def test_the_uv_installer_is_pinned_to_an_immutable_commit() -> None:
+    assert re.fullmatch(r"astral-sh/setup-uv@[0-9a-f]{40}", _step("Install uv")["uses"])
+
+
+@pytest.mark.parametrize(
+    "conclusion", ["success", "failure", "skipped", "neutral", None]
+)
+def test_ci_summary_requires_a_successful_rehearsal(conclusion: str | None) -> None:
+    """A missing or skipped rehearsal must not retire the push proof silently."""
+    context = _job()["name"]
+    assert context in EXPECTED_EXTERNAL_CONTEXTS
+    payload = [
+        {"name": name, "status": "completed", "conclusion": "success"}
+        for name in EXPECTED_EXTERNAL_CONTEXTS
+        if name != context
+    ]
+    if conclusion is not None:
+        payload.append(
+            {"name": context, "status": "completed", "conclusion": conclusion}
+        )
+    failures, pending = evaluate_external_contexts(payload, EXPECTED_EXTERNAL_CONTEXTS)
+    if conclusion == "success":
+        assert (failures, pending) == ([], [])
+    elif conclusion is None:
+        assert failures == []
+        assert pending == [context]
+    else:
+        assert failures == [context]
+        assert pending == []
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/hook_push_rehearsal_admission_omn20413.json"
+)
+def test_the_rehearsal_reported_before_merge_on_sixteen_recent_dev_prs(
+    recorded_response: dict[str, Any],
+) -> None:
+    """Replay the watcher rows used to admit the existing external context."""
+    pull_requests = recorded_response["pull_requests"]
+    assert len(pull_requests) == 16
+    for pr, entry in pull_requests.items():
+        assert re.fullmatch(r"[0-9a-f]{40}", entry["head_sha"]), pr
+        context, status, conclusion, reported_at = entry["check_run"]
+        assert context == _job()["name"], pr
+        assert (status, conclusion) == ("completed", "success"), pr
+        assert reported_at <= entry["merged_at"], pr
+        assert entry["detail"][0][0] == context, pr
+        assert entry["detail"][0][2] <= entry["merged_at"], pr
 
 
 def test_the_path_regex_matches_hook_paths_and_the_rehearsal_itself() -> None:

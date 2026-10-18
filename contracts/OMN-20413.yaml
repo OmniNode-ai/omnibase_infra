@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: 'AC5: the rehearsal job keeps the hook-push-rehearsal / rehearse context, clones exactly the siblings the two pre-push hooks read and exports OMNI_HOME before the push step, and the deploy-scope hook resolves its validator from the OMNI_HOME the clone step lays out -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn20413-hook-push-rehearsal-enforcement
+    statement: The retained rehearsal context is enforced by CI Summary after its sixteen-PR admission replay, so the inline verification job can block landing.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: CI Summary admits a successful rehearsal, refuses failure, skipped and neutral rehearsals, and waits on a missing rehearsal; the recorded watcher rows show the context reported before merge on sixteen recent dev PRs -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -97,3 +102,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn20413-ac6-hook-push-rehearsal-enforcement
+    description: AC6 controls fail before the rehearsal context is registered in CI Summary.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q -k 'ci_summary_requires or sixteen_recent'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
