@@ -363,7 +363,7 @@ def _handler(
 def _request(**overrides: Any) -> ModelEvidenceAutocloseSweepRequest:
     defaults: dict[str, Any] = {
         "correlation_id": uuid4(),
-        "occ_repo": _OCC_REPO,
+        "evidence_repo": _OCC_REPO,
         "lookback_hours": 6,
         # The pool is deliberately tiny so the aged companion is provably
         # outside the current rotation slice as well as outside the window.

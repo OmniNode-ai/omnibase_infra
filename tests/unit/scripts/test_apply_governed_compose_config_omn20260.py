@@ -3,7 +3,7 @@
 """The governed-lane compose-config apply refuses without a matched grant (OMN-20260).
 
 Faithful substitution, not mocks: a real git checkout, a real bare
-``onex_change_control`` origin whose ``main`` carries the anchor, and a ``docker``
+``omnibase_infra`` origin whose ``main`` carries the anchor, and a ``docker``
 executable on PATH that renders a fixed config and records every ``up`` it is
 asked for. Each refusal is paired with the matched-grant control.
 """
@@ -241,7 +241,15 @@ def test_execute_reads_main_and_recreates_only_granted_services(
     occ = _occ_origin(lab, [_entry(lab)])
     monkeypatch.setenv("ONEX_DEPLOY_REASON", "OMN-20260 loopback admin bind test")
     argv = ["--repo-root", str(lab["checkout"]), "apply", "--lane", "judge"]
-    argv += ["--grant-id", GRANT_ID, "--occ-repo", str(occ), "--now", NOW, "--execute"]
+    argv += [
+        "--grant-id",
+        GRANT_ID,
+        "--grants-repo",
+        str(occ),
+        "--now",
+        NOW,
+        "--execute",
+    ]
     assert main(argv) == 0
     calls = lab["up_log"].read_text().splitlines()
     assert len(calls) == 1
@@ -256,7 +264,15 @@ def test_execute_without_a_grant_on_main_recreates_nothing(
     occ = _occ_origin(lab, [])
     monkeypatch.setenv("ONEX_DEPLOY_REASON", "OMN-20260 loopback admin bind test")
     argv = ["--repo-root", str(lab["checkout"]), "apply", "--lane", "judge"]
-    argv += ["--grant-id", GRANT_ID, "--occ-repo", str(occ), "--now", NOW, "--execute"]
+    argv += [
+        "--grant-id",
+        GRANT_ID,
+        "--grants-repo",
+        str(occ),
+        "--now",
+        NOW,
+        "--execute",
+    ]
     assert main(argv) == 1
     assert not lab["up_log"].exists()
 
@@ -268,7 +284,15 @@ def test_execute_is_also_gated_by_the_attribution_preflight(
     occ = _occ_origin(lab, [_entry(lab)])
     monkeypatch.delenv("ONEX_DEPLOY_REASON", raising=False)
     argv = ["--repo-root", str(lab["checkout"]), "apply", "--lane", "judge"]
-    argv += ["--grant-id", GRANT_ID, "--occ-repo", str(occ), "--now", NOW, "--execute"]
+    argv += [
+        "--grant-id",
+        GRANT_ID,
+        "--grants-repo",
+        str(occ),
+        "--now",
+        NOW,
+        "--execute",
+    ]
     assert main(argv) == 1
     assert not lab["up_log"].exists()
 

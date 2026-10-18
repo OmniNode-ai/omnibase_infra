@@ -309,7 +309,7 @@ async def test_handle_binds_the_contract_declared_policy_to_the_real_client() ->
     await handler.handle(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
-            occ_repo="OmniNode-ai/onex_change_control",
+            evidence_repo="OmniNode-ai/onex_change_control",
             linear_retry_max_attempts=6,
             linear_retry_base_delay_seconds=0.0,
         )

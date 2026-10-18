@@ -232,7 +232,7 @@ def _handler(
 def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
     defaults: dict[str, object] = {
         "correlation_id": uuid4(),
-        "occ_repo": _OCC_REPO,
+        "evidence_repo": _OCC_REPO,
         "lookback_hours": 24,
         "apply": False,
     }

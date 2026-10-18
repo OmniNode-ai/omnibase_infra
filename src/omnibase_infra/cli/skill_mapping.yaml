@@ -206,7 +206,7 @@ skills:
     node_name: node_evidence_autoclose_sweep_effect
     result_model: omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result.ModelEvidenceAutocloseSweepResult
     args:
-      - {name: occ-repo, payload_field: occ_repo, arg_type: string}
+      - {name: evidence-repo, payload_field: evidence_repo, arg_type: string}
       - {name: lookback-hours, payload_field: lookback_hours, arg_type: integer}
       - {name: apply, payload_field: apply, arg_type: boolean, default: false}
       - {name: max-companions, payload_field: max_companions, arg_type: integer}

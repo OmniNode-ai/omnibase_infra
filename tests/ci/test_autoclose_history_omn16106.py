@@ -139,7 +139,7 @@ def test_shallow_source_reproduces_control_checkout_failure(
 
 @pytest.mark.parametrize(
     "repository",
-    ["omnibase_infra", "omnimarket", "onex_change_control"],
+    ["omnibase_infra", "omnimarket"],
 )
 def test_checkout_history_can_execute_the_pre_change_control(
     repository: str, history: tuple[Path, str], tmp_path: Path

@@ -22,11 +22,13 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 
@@ -90,7 +92,11 @@ class Finding:
     message: str
 
 
-class GitHubRateLimitError(RuntimeError):
+class GitHubReadError(RuntimeError):
+    """Infrastructure prevented a complete live read; never a drift finding."""
+
+
+class GitHubRateLimitError(GitHubReadError):
     """A live read refused by a GitHub API rate limit: the state was not read."""
 
 
@@ -132,47 +138,83 @@ def _require_override_activation_gate(repo_name: str, override: dict[str, Any]) 
             )
 
 
+def _github_env(repository: str | None = None) -> dict[str, str]:
+    """Keep the run token for same-repo content; privilege org reads explicitly.
+
+    Variable metadata, including repo shadows, requires Variables:read, which
+    Actions' GITHUB_TOKEN permissions cannot grant. Those reads and private
+    sibling content retain the existing org credential; no credential is minted.
+    """
+    env = os.environ.copy()
+    if (
+        repository is None
+        or repository.lower() != env.get("GITHUB_REPOSITORY", "").lower()
+    ):
+        if token := env.get("RUNNER_AUDIT_ORG_TOKEN"):
+            env["GH_TOKEN"] = token
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    return env
+
+
 def _run_gh(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["gh", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        return subprocess.run(
+            ["gh", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_github_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Do not stringify an exception carrying argv or environment secrets.
+        raise GitHubReadError(
+            f"RUNNER_AUDIT_TRANSPORT: gh read {type(exc).__name__}"
+        ) from None
 
 
 def _rate_limit_reset_note() -> str:
     """Name when the exhausted bucket resets; empty when GitHub does not say."""
-    result = _run_gh(["api", "rate_limit"])
+    try:
+        result = _run_gh(["api", "rate_limit"])
+    except GitHubReadError:
+        return ""
     if result.returncode != 0:
         return ""
     try:
         resources = json.loads(result.stdout or "{}").get("resources", {})
     except (json.JSONDecodeError, AttributeError):
         return ""
-    resets = [
-        int(bucket["reset"])
-        for bucket in resources.values()
-        if isinstance(bucket, dict)
-        and bucket.get("remaining") == 0
-        and "reset" in bucket
-    ]
-    if not resets:
+    if not isinstance(resources, dict):
         return ""
-    reset = datetime.fromtimestamp(max(resets), tz=UTC)
+    try:
+        resets = [
+            int(bucket["reset"])
+            for bucket in resources.values()
+            if isinstance(bucket, dict)
+            and bucket.get("remaining") == 0
+            and "reset" in bucket
+        ]
+        if not resets:
+            return ""
+        reset = datetime.fromtimestamp(max(resets), tz=UTC)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
     return f" (resets {reset:%Y-%m-%dT%H:%M:%SZ}; a rerun after that reads it)"
 
 
-def _read_failed(what: str, result: subprocess.CompletedProcess[str]) -> RuntimeError:
-    """OMN-20864: a rate limit raises its own error, every other failure stays as is."""
+def _read_failed(
+    what: str, result: subprocess.CompletedProcess[str]
+) -> GitHubReadError:
+    """Keep rate limits distinct within the named infrastructure failures."""
     detail = result.stderr.strip()
     if RATE_LIMIT_RE.search(detail):
         return GitHubRateLimitError(
-            f"{what} was refused by a GitHub API rate limit"
+            f"RUNNER_AUDIT_QUOTA: {what} was refused by a GitHub API rate limit"
             f"{_rate_limit_reset_note()}: {detail}"
         )
-    return RuntimeError(f"{what} failed: {detail}")
+    return GitHubReadError(f"RUNNER_AUDIT_TRANSPORT: {what} failed: {detail}")
 
 
 # OMN-20864: the seam audit and the scoped-variable audit read the same org and
@@ -199,9 +241,25 @@ def _read_variables(args: list[str]) -> list[dict[str, Any]]:
     )
     if result.returncode != 0:
         raise _read_failed("gh variable list", result)
-    values = json.loads(result.stdout or "[]")
+    try:
+        values = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubReadError(
+            "RUNNER_AUDIT_RESPONSE: gh variable list returned invalid JSON"
+        ) from exc
     if not isinstance(values, list):
-        raise RuntimeError("gh variable list returned a non-list payload")
+        raise GitHubReadError(
+            "RUNNER_AUDIT_RESPONSE: gh variable list returned a non-list payload"
+        )
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("name"), str)
+        or not isinstance(item.get("value"), str)
+        for item in values
+    ):
+        raise GitHubReadError(
+            "RUNNER_AUDIT_RESPONSE: gh variable list returned an incomplete variable"
+        )
     return values
 
 
@@ -537,177 +595,137 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
     repository new to the org must be in scope for the hosted-placement check
     from the moment it exists, with no policy edit required.
     """
-    # No --visibility filter: `gh repo list` accepts only public/private/internal
-    # (not "all"), and omitting the flag already returns every repository the
-    # token can see, of any visibility -- exactly the universe this check needs
-    # since it filters on the returned `isPrivate` field itself.
-    # OMN-18780: --no-archived, because GitHub runs no workflows in an archived
-    # repository, so its stale ubuntu-latest pins can never place a job. With
-    # this pass now a merge gate, counting them reddened every PR on 95 dead
-    # pins across nine archived repositories nobody can push a fix to.
+    # OMN-19998: gh repo list spends GraphQL even for a metadata-only read.
+    # REST pagination has no 500-repository ceiling and retains all visibility
+    # classes. The existing org credential is required to enumerate private repos.
     result = _run_gh(
         [
-            "repo",
-            "list",
-            org,
-            "--no-archived",
-            "--limit",
-            "500",
-            "--json",
-            "name,isPrivate",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"orgs/{quote(org, safe='')}/repos?type=all&per_page=100",
         ]
     )
     if result.returncode != 0:
-        raise _read_failed("gh repo list", result)
-    values = json.loads(result.stdout or "[]")
-    if not isinstance(values, list):
-        raise RuntimeError("gh repo list returned a non-list payload")
-    return [(str(item["name"]), bool(item["isPrivate"])) for item in values]
+        raise _read_failed("REST repository inventory", result)
+    try:
+        pages = json.loads(result.stdout)
+        if not isinstance(pages, list) or not pages:
+            raise ValueError("missing pages")
+        values = []
+        for page in pages:
+            if not isinstance(page, list):
+                raise ValueError("non-list page")
+            for item in page:
+                if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                    raise ValueError("missing repository name")
+                if not isinstance(item.get("private"), bool) or not isinstance(
+                    item.get("archived"), bool
+                ):
+                    raise ValueError("missing visibility or archive state")
+                if not item["archived"]:
+                    values.append((item["name"], item["private"]))
+        return values
+    except (ValueError, TypeError) as exc:
+        raise GitHubReadError(
+            "RUNNER_AUDIT_RESPONSE: invalid REST repository inventory"
+        ) from exc
 
 
-# OMN-20864: one GraphQL read returns every file of a repository's default-branch
-# workflows directory with its text, so the per-repository cost is one call however
-# many workflows it has. The contents API needed one call per file (the largest
-# private repository has about a hundred), and this pass runs inside every omnibase_infra CI run
-# on CROSS_REPO_PAT, the operator's token: on 2026-10-11 it spent the operator's
-# shared hourly core quota, and the landing controller stopped with QUOTA.
-# OMN-20413: amortize the shared token's GraphQL cost across private repos.
-WORKFLOW_READ_BATCH_SIZE = 20
-# A batch returns up to twenty repositories' workflow texts in one response.
-WORKFLOW_READ_BATCH_TIMEOUT_SECONDS = 60
-# OMN-19998: GitHub answers a GraphQL query whose response it cannot build in time
-# with a gateway error (CI run 38758500873: ``gh: HTTP 504`` for seventeen private
-# repositories at once, read clean by the next scheduled run). Such a batch is read
-# again in halves; one repository still refused after this many retries raises.
-GATEWAY_ERROR_RE = re.compile(r"\bHTTP 50[234]\b")
-WORKFLOW_READ_GATEWAY_RETRIES = 1
-WORKFLOW_TREE_SELECTION = """
-    object(expression: "HEAD:.github/workflows") {
-      ... on Tree {
-        entries {
-          name
-          path
-          type
-          object {
-            ... on Blob {
-              text
-              isBinary
-              isTruncated
-            }
-          }
-        }
-      }
-    }
-"""
+def _repository_url(org: str, repo_name: str) -> str:
+    return f"https://github.com/{quote(org, safe='')}/{quote(repo_name, safe='')}.git"
 
 
 def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, str]:
-    """Fetch one repository through the shared default-branch batch reader."""
-    return _default_branch_workflow_texts_batch([repo_name], org)[repo_name]
+    """Read default-branch workflow blobs through a sparse Git checkout.
+
+    OMN-19998: smart Git reads spend neither the GraphQL nor the REST core
+    bucket. A depth-one, blob-filtered fetch followed by a sparse checkout
+    retrieves workflow blobs together, rather than one REST request per file.
+    FETCH_HEAD pins the default branch for the whole read. No workflow runs.
+    """
+    repository = f"{org}/{repo_name}"
+    env = _github_env(repository=repository)
+    with tempfile.TemporaryDirectory(prefix="runner-routing-audit-") as temporary:
+        root = Path(temporary)
+        command = [
+            "git",
+            f"--git-dir={root / '.git'}",
+            f"--work-tree={root}",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "credential.helper=!gh auth git-credential",
+        ]
+
+        def git(*args: str) -> str:
+            try:
+                result = subprocess.run(
+                    [*command, *args],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=60,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise GitHubReadError(
+                    f"RUNNER_AUDIT_TRANSPORT: Git workflow read for {repository} {type(exc).__name__}"
+                ) from None
+            if result.returncode != 0:
+                raise _read_failed(f"Git workflow read for {repository}", result)
+            return result.stdout
+
+        git("init", str(root))
+        git("remote", "add", "origin", _repository_url(org, repo_name))
+        git("config", "remote.origin.promisor", "true")
+        git("config", "remote.origin.partialclonefilter", "blob:none")
+        head_rows = git("ls-remote", "--symref", "origin", "HEAD").splitlines()
+        heads = [
+            row.split("\t")[0]
+            for row in head_rows
+            if re.fullmatch(r"[0-9a-f]{40}\tHEAD", row)
+        ]
+        if not heads:
+            # Empty repositories have no HEAD and cannot contain workflows.
+            # Confirm the remote answered with no branches before reading clean.
+            if not head_rows and not git("ls-remote", "--heads", "origin").strip():
+                return {}
+            raise GitHubReadError(
+                f"RUNNER_AUDIT_RESPONSE: default branch unreadable for {repository}"
+            )
+        git("fetch", "--depth=1", "--filter=blob:none", "origin", heads[0])
+        # A successful tree read is the positive control for absent workflows.
+        if not git("ls-tree", "FETCH_HEAD", "--", ".github/workflows").strip():
+            return {}
+        git("sparse-checkout", "set", "--no-cone", "/.github/workflows/")
+        git("checkout", "--detach", "FETCH_HEAD")
+        texts = {}
+        try:
+            for path in sorted((root / ".github/workflows").iterdir()):
+                if path.suffix not in {".yml", ".yaml"}:
+                    continue
+                if path.is_dir() and not path.is_symlink():
+                    continue
+                if path.is_symlink() or not path.is_file():
+                    raise GitHubReadError(
+                        f"RUNNER_AUDIT_RESPONSE: {repository}:{path.name} is not a workflow blob"
+                    )
+                texts[path.relative_to(root).as_posix()] = path.read_text(
+                    encoding="utf-8"
+                )
+        except (OSError, UnicodeError) as exc:
+            raise GitHubReadError(
+                f"RUNNER_AUDIT_RESPONSE: incomplete workflows for {repository}"
+            ) from exc
+        return texts
 
 
 def _default_branch_workflow_texts_batch(
     repo_names: list[str], org: str = ORG
 ) -> dict[str, dict[str, str]]:
-    """Fetch every default-branch ``.github/workflows/*.yml``/``.yaml`` file's text.
-
-    OMN-18365 AC3: reads live content from GitHub rather than a local checkout,
-    because the private-repo hosted-placement check runs against every private
-    repository in the org. A repository with no workflows directory returns ``{}``.
-
-    OMN-20413: one GraphQL query reads up to ``WORKFLOW_READ_BATCH_SIZE``
-    repositories under aliases, so a CI run spends a few points of
-    CROSS_REPO_PAT's hourly GraphQL budget instead of one per private
-    repository. A failed, partial or errored read still raises: an unread
-    workflow is not a passing one.
-    """
-    texts: dict[str, dict[str, str]] = {}
-    for offset in range(0, len(repo_names), WORKFLOW_READ_BATCH_SIZE):
-        chunk = repo_names[offset : offset + WORKFLOW_READ_BATCH_SIZE]
-        texts.update(_workflow_texts_chunk(chunk, org))
-    return texts
-
-
-def _workflow_texts_chunk(
-    chunk: list[str], org: str, retries: int = WORKFLOW_READ_GATEWAY_RETRIES
-) -> dict[str, dict[str, str]]:
-    """Read one batch; OMN-19998: a gateway error reads it again in halves."""
-    declarations = ["$owner: String!"]
-    selections: list[str] = []
-    variables = ["-f", f"owner={org}"]
-    for index, repo_name in enumerate(chunk):
-        declarations.append(f"$n{index}: String!")
-        selections.append(
-            f"r{index}: repository(owner: $owner, name: $n{index}) {{"
-            f"{WORKFLOW_TREE_SELECTION}"
-            "}"
-        )
-        variables.extend(["-f", f"n{index}={repo_name}"])
-    query = "query(" + ", ".join(declarations) + ") {" + "\n".join(selections) + "}"
-    result = _run_gh(
-        ["api", "graphql", "-f", f"query={query}", *variables],
-        timeout=WORKFLOW_READ_BATCH_TIMEOUT_SECONDS,
-    )
-    if result.returncode != 0:
-        gateway = not RATE_LIMIT_RE.search(result.stderr) and GATEWAY_ERROR_RE.search(
-            result.stderr
-        )
-        if gateway and len(chunk) > 1:
-            half = len(chunk) // 2
-            return {
-                **_workflow_texts_chunk(chunk[:half], org),
-                **_workflow_texts_chunk(chunk[half:], org),
-            }
-        if gateway and retries > 0:
-            return _workflow_texts_chunk(chunk, org, retries - 1)
-        raise _read_failed(
-            f"gh api graphql workflow read for {', '.join(chunk)}", result
-        )
-    payload = json.loads(result.stdout or "{}")
-    data = payload.get("data")
-    texts: dict[str, dict[str, str]] = {}
-    for index, repo_name in enumerate(chunk):
-        repository = data.get(f"r{index}") if isinstance(data, dict) else None
-        # OMN-20413: errors without a usable tree must not read as clean.
-        if payload.get("errors") and isinstance(repository, dict):
-            if repository.get("object") is None:
-                raise RuntimeError(
-                    f"gh api graphql workflow read for {repo_name} "
-                    "returned no usable workflow data"
-                )
-        texts[repo_name] = _parse_workflow_tree(repo_name, repository)
-    return texts
-
-
-def _parse_workflow_tree(repo_name: str, repository: Any) -> dict[str, str]:
-    """Parse a repository tree; unread workflows raise instead of reading clean."""
-    if not isinstance(repository, dict):
-        raise RuntimeError(
-            f"gh api graphql workflow read for {repo_name} returned no repository"
-        )
-    tree = repository.get("object")
-    if tree is None:
-        return {}
-    entries = tree.get("entries") if isinstance(tree, dict) else None
-    if not isinstance(entries, list):
-        raise RuntimeError(
-            f"gh api graphql workflow read for {repo_name} returned a non-list payload"
-        )
-    texts: dict[str, str] = {}
-    for entry in entries:
-        name = str(entry.get("name", ""))
-        if entry.get("type") != "blob" or not name.endswith((".yml", ".yaml")):
-            continue
-        path = str(entry.get("path") or f".github/workflows/{name}")
-        blob = entry.get("object") or {}
-        text = blob.get("text")
-        if blob.get("isBinary") or blob.get("isTruncated") or not isinstance(text, str):
-            raise RuntimeError(
-                f"gh api graphql workflow read for {repo_name}:{path} returned no "
-                "complete text"
-            )
-        texts[path] = text
-    return texts
+    """Retain every repository assertion without sharing an API quota bucket."""
+    return {name: _default_branch_workflow_texts(name, org) for name in repo_names}
 
 
 def audit_private_repo_hosted_placement(
@@ -742,7 +760,7 @@ def audit_private_repo_hosted_placement(
     layer only reports; it cannot itself stop a job from starting).
     """
     findings: list[Finding] = []
-    # OMN-20413: production reads all private repos in bounded GraphQL batches.
+    # OMN-19998: workflow content comes from sparse default-branch Git reads.
     private_repos = [name for name, is_private in visibility_fn(org) if is_private]
     batch_texts = (
         workflow_batch_fetch_fn(private_repos, org) if workflow_fetch_fn is None else {}
@@ -1267,11 +1285,11 @@ def main() -> int:
             audit_private_repo_hosted_placement,
         ]
         for live_pass in live_passes:
-            # OMN-20864: a rate limit in one pass is reported as unreadable and
+            # OMN-19998: a failed live read is reported as infrastructure and
             # neither stops the remaining passes nor counts as a finding.
             try:
                 findings.extend(live_pass())
-            except GitHubRateLimitError as exc:
+            except GitHubReadError as exc:
                 unreadable.append(str(exc))
         _write_step_outputs(findings=len(findings), unreadable=len(unreadable))
 
@@ -1280,7 +1298,7 @@ def main() -> int:
     for reason in unreadable:
         print(
             "::error title=Runner audit unreadable::"
-            f"{reason}; the routing state was not read, which is not a finding"
+            f"RUNNER_AUDIT_INFRASTRUCTURE: {reason}; the routing state was not read, which is not a finding"
         )
     if findings:
         return EXIT_FINDINGS

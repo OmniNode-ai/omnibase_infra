@@ -3,8 +3,7 @@
 """Node: NodeEvidenceAutocloseSweepEffect — companion-merge -> dod_verify -> governed Done flip.
 
 First slice of OMN-16106: a scheduled sweep that enumerates recently-merged
-``onex_change_control`` evidence companions, extracts each companion's
-Evidence-Ticket binding, re-runs the EXISTING ``onex skill dod_verify``
+product repository PRs, extracts each PR's contract binding, re-runs the EXISTING ``onex skill dod_verify``
 verifier exactly as the controller does for governed flips, and either
 flips the bound Linear ticket Done (all ACs receipt-proven) or posts the
 honest gap as a comment (never flips on any gap). DRY-RUN by default;
