@@ -661,7 +661,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC34
-  - id: dod-omn-17427-ac34-deploy-publisher-envelope-dispatch
+  - id: dod-omn-17427-ac34-deploy-publisher-envelope
     description: Hosted-runner integration smoke -- seven independent publisher declarations build envelopes that cross the in-memory bus serialization and real consume callback into an alias-only runtime dispatcher, preserving payload and correlation ID. Undeclared topics are refused. No deployed container or credentials are required.
     source: manual
     checks:
