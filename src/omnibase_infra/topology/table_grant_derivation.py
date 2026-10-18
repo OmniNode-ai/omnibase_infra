@@ -390,6 +390,33 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
+    # OMN-19988: the same infra-first window; this repo vendors
+    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
+    # contract that declares the relation, which lands after this release (the
+    # node's wiring check refuses a contract whose table no release grants). The
+    # source declares access read_write, role local_environment in omnimarket's
+    # scripts/application-relation-ownership.yaml; 0001 grants
+    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
+    # node_projection_local_environment contract merges and the pin advances
+    # past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:local_environment",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_local_environment/"
+            "0000_create_local_environment.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="local_environment",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_local_environment/"
+                "0000_create_local_environment.sql"
+            ),
+            access="read_write",
+            role="local_environment",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
