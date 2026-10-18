@@ -386,6 +386,31 @@ if [ "$SLOT_ACTIVE" -eq 1 ]; then
 fi
 # ---- END slot migration connections (OMN-18892) ----
 
+# ---- BEGIN slot undeliverable flat migrations (OMN-19064) ----
+# A flat migration whose first `\connect` names another database is declared in
+# cross-database-flat-migrations.yaml. Those declared `undeliverable` (083, 096,
+# 097, 098, 099) are never delivered to a managed lane either, and a slot's
+# migration principal cannot apply them: it is NOSUPERUSER, has no CONNECT on
+# the other slot database and cannot CREATE ROLE or GRANT CONNECT, so the first
+# live slot bring-up of the confined principals died on 083 with "permission
+# denied for database omnidash_analytics_prepr1". The slot skips them and prints
+# it, and records no ledger row: a false "applied" row is the OMN-15819 defect.
+slot_flat_migration_undeliverable() {
+  _sfmu_yaml="${MIGRATIONS_DIR}/cross-database-flat-migrations.yaml"
+  [ -f "$_sfmu_yaml" ] || return 1
+  awk -v want="$1" '
+    /^[[:space:]]*-[[:space:]]+file:[[:space:]]*/ {
+      cur = $0
+      sub(/^[[:space:]]*-[[:space:]]+file:[[:space:]]*/, "", cur)
+      sub(/[[:space:]]+$/, "", cur)
+      next
+    }
+    /^[[:space:]]+disposition:[[:space:]]*undeliverable[[:space:]]*$/ { if (cur == want) found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$_sfmu_yaml"
+}
+# ---- END slot undeliverable flat migrations (OMN-19064) ----
+
 # ---- END pre-PR verify slot fence (OMN-18892) ----
 PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 LEDGER_BOOTSTRAP="${MIGRATIONS_DIR}/_ledger/bootstrap.sql"
@@ -1889,6 +1914,12 @@ for migration_file in $(ls "${MIGRATIONS_DIR}"/*.sql | sort); do
 
   if [ "$already_applied" = "1" ]; then
     echo "[forward-migration]   skip  ${filename} (already applied)"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  if [ "$SLOT_ACTIVE" -eq 1 ] && slot_flat_migration_undeliverable "$filename"; then
+    echo "[forward-migration]   skip  ${filename} (UNDELIVERABLE in cross-database-flat-migrations.yaml; a slot's confined principals cannot apply it and no managed lane does)"
     SKIPPED=$((SKIPPED + 1))
     continue
   fi
