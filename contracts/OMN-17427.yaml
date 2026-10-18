@@ -152,11 +152,21 @@ requirements:
     acceptance:
       - id: AC34
         statement: 'AC34: a pool run given an overlay copies it to the host and the build mounts it as the stack Bifrost overlay (a slot reads it as <project>.bifrost.yaml), and a post-up command runs once after the probe and fails the proof unless it printed exit code 0 -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_an_overlay_and_a_post_up_command_reach_the_host_and_run_after_probe tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_exits_non_zero_fails_the_proof tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_post_up_command_that_printed_no_exit_line_is_not_a_pass tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_run_without_a_post_up_command_runs_no_exercise_phase tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_missing_overlay_file_is_a_usage_error_before_any_host_is_touched tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_a_params_file_cannot_set_the_overlay_or_the_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_cli_takes_an_overlay_and_a_post_up_command tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack tests/unit/scripts/test_prepr_runtime_pool_omn18893.py::test_the_exercise_phase_runs_the_command_and_reports_its_exit_code -q'
+  - id: req-omn17427-publisher-fixture-shapes
+    statement: The publisher contract fixture resolves a topic through every publisher declaration shape the contract topic graph reads, so a golden chain over a topic published by a result topic, a produced event or a publication list is not refused as unpublished.
+    acceptance:
+      - id: AC35
+        statement: 'AC35: PublisherContractCorpus resolves topics declared by event_bus.publish success and failure topics, produced_events, publications, topics.produces and runtime_dispatch.command_topic, still refuses a topic no contract publishes, and agrees with the topic graph parser -- falsifier: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q'
+  - id: req-omn17427-deploy-agent-topic-ensure
+    statement: The deploy agent creates the topics only it publishes (dev-tag heartbeat and dev-lane drift) before its first publish to each, once per process, and leaves topics another node declares alone.
+    acceptance:
+      - id: AC36
+        statement: 'AC36: each agent-owned topic is created before its first publish, an existing topic is created once and still published, an admin failure is retried on the next publish, and a topic another node declares is not created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q'
   - id: req-omn17427-morning-ground-state-grants
     statement: A developer principal holds the grants the scheduled morning ground-state run needs on the dev broker, declared as bindings and derived, and nothing wider.
     acceptance:
-      - id: AC35
-        statement: 'AC35: the shipped bindings derive write on the morning start command, read and write on its two terminals, write on the delegation request, read on the two delegation replies and read on the local.rr.morning_phase. group prefix, and no other morning or delegation grant -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k morning_grants'
+      - id: AC37
+        statement: 'AC37: the shipped bindings derive write on the morning start command, read and write on its two terminals, write on the delegation request, read on the two delegation replies and read on the local.rr.morning_phase. group prefix, and no other morning or delegation grant -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k morning_grants'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -245,6 +255,12 @@ evidence_requirements:
   - kind: tests
     description: The dod-verify required-context tests are selected by the name ci_summary_registration.
     command: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q -k ci_summary_registration
+  - kind: tests
+    description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads.
+    command: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+  - kind: tests
+    description: The deploy agent creates its own topics before the first publish.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
   - kind: tests
     description: The shipped developer-principal bindings derive the morning ground-state grants and the committed derived file is the node's output.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
@@ -666,7 +682,52 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC34
-  - id: dod-omn-17427-ac34-morning-ground-state-grants
+  - id: dod-omn-17427-ac34
+    description: The publisher contract fixture resolves every publisher declaration shape the contract topic graph reads; the shape cases fail before the product change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac34-deploy-publisher-fixture-shapes
+    description: Hosted-runner deploy smoke -- the fixture indexes a synthetic contract through each declared publisher shape. Test fixture code only, no deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/testing/test_publisher_contract_fixture_shapes.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac34-deploy-publisher-envelope
+    description: Hosted-runner integration smoke -- seven independent publisher declarations build envelopes that cross the in-memory bus serialization and real consume callback into an alias-only runtime dispatcher, preserving payload and correlation ID. Undeclared topics are refused. No deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_publisher_contract_envelope_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC35
+  - id: dod-omn-17427-ac36
+    description: The topic-creation tests fail on the merge base, whose publisher has no AGENT_OWNED_TOPICS and never creates a missing topic, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
+  - id: dod-omn-17427-ac36-deploy-topic-ensure
+    description: Hosted-runner smoke -- the publisher creates each agent-owned topic through a stand-in admin client before its first send and retries after an admin failure, with no broker, deployed container or credentials.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_publisher_creates_agent_topics_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC36
+  - id: dod-omn-17427-ac37-morning-grants
     description: The derivation reproduces exactly the declared morning grants, the committed derived file equals the node's output, and the issuer's writable set lists the four new write topics.
     source: manual
     checks:
@@ -674,8 +735,8 @@ dod_evidence:
         check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC35
-  - id: dod-omn-17427-ac35-deploy-morning-ground-state-grants
+      - AC37
+  - id: dod-omn-17427-ac37-deploy-morning-grants
     description: Hosted-runner grant artifact check -- the shipped bindings derive exactly the morning grants and the committed derived file matches the node output. No broker, containers or credentials are required.
     source: manual
     checks:
@@ -683,4 +744,4 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k "morning_grants or committed_derived_grants"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC35
+      - AC37

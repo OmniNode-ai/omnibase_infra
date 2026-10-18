@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19064
+title: A pre-PR slot reaches a ready runtime on a live bring-up
+summary: The first live bring-up of pre-PR slot 1 stopped at three points in the forward migration, each a conflict between the confined slot principals and the flat migration corpus. The slot provisioner now creates the databases that migration directives name and grants the slot's tenant projection writer CONNECT on the slot omnidash database, and the runner skips under a slot the flat migrations the corpus declares undeliverable. The lab readback of the bring-up is quoted in the PR body.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19064-slot-migration
+    statement: The forward migration completes against a pre-PR slot's fresh databases under the slot's confined principals.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the provisioner scope names keycloak_prepr1 as a directive database, and the runner skips the five flat migrations the corpus declares undeliverable under a slot -- falsifier: drop the directive scan or the skip and the new tests fail'
+      - id: AC2
+        statement: 'AC2: the provisioner grants the slot tenant projection writer CONNECT on the slot omnidash database -- falsifier: remove the grant and the pin test fails'
+evidence_requirements:
+  - kind: tests
+    description: The provisioner scope and apply pins and the runner skip helper hold at this head.
+    command: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py tests/unit/infra/test_forward_migration_slot_undeliverable_omn19064.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19064-ac1-directive-database-and-skip
+    description: The directive database and skip tests pass at this head and fail against origin/dev. The live bring-up readback is quoted in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py tests/unit/infra/test_forward_migration_slot_undeliverable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19064-ac2-writer-connect
+    description: The writer CONNECT grant pin passes at this head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k TenantProjectionWriter
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19064-budget-refusal-order
+    description: Every slot principal needs a connection budget before the migration corpus is scanned. The missing-budget regression and the provisioner scope checks pass on the lab host.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/infra/test_db_slot_connection_budget.py tests/unit/infra/test_db_slot_provisioner_omn18892.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-19064-deploy-provisioner-budget-order
+    description: Hosted-runner deploy probe of the provisioner source at the evaluated commit. Refuses if budget validation follows the migration corpus scan; the dispatch head has that order. This checks the shipped provisioning script and does not claim end-to-end runtime readiness.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/scripts/provision_db_slot.sh" | python3 -c 'import sys; source = sys.stdin.read(); assert source.index("SLOT_ROLE_LIMITS=") < source.index("DIRECTIVE_MIGRATIONS_DIR=")'
+        cwd: ${OMNI_HOME}/omnibase_infra

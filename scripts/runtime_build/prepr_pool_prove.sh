@@ -10,7 +10,7 @@
 # merge) as one parameterised file, the method the prove-* lanes ran by hand.
 #
 # usage: bash prepr_pool_prove.sh <params.env> <phase>
-#   phases: snap-pre clone build probe tests teardown snap-post
+#   phases: snap-pre clone build probe post-bringup tests teardown snap-post
 #
 # It only ever touches its own compose project and the work directory named by W
 # in the params file. Every other project on the host (a dogfood lane, a runner,
@@ -27,7 +27,7 @@
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE]]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
-#   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND]
+#   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
 # The id and file lists below ($C $V $N $IMGS $FILES and the like) are word-split
 # ON PURPOSE, and the macOS hosts run bash 3.2, which has no mapfile; hence:
@@ -498,6 +498,27 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
   if [ "$KIND" != prepr-slot ] && [ -n "${GROUP_GREP:-}" ]; then echo "== consumer groups"; RP=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 'redpanda$')
     docker exec "$RP" rpk group list 2>&1 | grep -E "$GROUP_GREP" | head -10; echo "groups matching: $(docker exec "$RP" rpk group list 2>&1 | grep -cE "$GROUP_GREP") of $(docker exec "$RP" rpk group list 2>&1 | wc -l)"; fi
   uptime
+  ;;
+post-bringup)
+  # OMN-20117: one command the caller names, run on the host once the stack is up
+  # and probed, from the test-merge tree. It is how a proof restarts a runtime
+  # during a live call on a pre-PR slot. The command gets the member's own names
+  # and ports and nothing else of the host's; its exit status is printed on a
+  # line of its own for the judge, and this phase itself exits 0 so teardown
+  # reads the same either way. The driver's phase budget bounds its run time.
+  if [ -z "${POST_BRINGUP_CMD:-}" ]; then
+    echo "no-post-bringup: the params name no POST_BRINGUP_CMD"
+    exit 0
+  fi
+  cd "$R/omnibase_infra" || exit 1
+  echo "post-bringup start $(ts) project=$P main=$M effects=$E ports=$MAIN,$EFF"
+  echo "post-bringup cmd: $POST_BRINGUP_CMD"
+  PROJECT=$P MAIN_RUNTIME=$M EFFECTS_RUNTIME=$E MAIN_PORT=$MAIN EFFECTS_PORT=$EFF \
+    bash -c "$POST_BRINGUP_CMD" > "$W/post-bringup.out" 2>&1
+  prc=$?
+  tail -40 "$W/post-bringup.out"
+  echo "post-bringup rc=$prc $(ts)"
+  exit 0
   ;;
 tests)
   if [ -z "${TESTS:-}" ]; then

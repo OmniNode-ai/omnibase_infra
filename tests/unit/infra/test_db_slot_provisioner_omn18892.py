@@ -260,6 +260,112 @@ class TestDerivedScope:
         assert result.returncode == EXIT_IDENTIFIER_TOO_LONG, result.stderr
 
 
+class TestDirectiveDatabasesAreProvisionedForTheSlot:
+    """A database an ``onex-create-database`` directive names exists before the runner asks for it.
+
+    The runner asks the slot's migration principal, which is NOCREATEDB, to create the
+    directive's database, and the first live slot bring-up died on 042_create_keycloak_db.sql
+    with "permission denied to create database" (OMN-19064). The provisioner holds the admin
+    connection, so it creates the slot-suffixed database itself.
+    """
+
+    @staticmethod
+    def _scope_over(migrations_dir: Path) -> subprocess.CompletedProcess[str]:
+        env = {
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "ONEX_DB_SLOT": "prepr1",
+            "MIGRATIONS_DIR": str(migrations_dir),
+        }
+        return subprocess.run(
+            ["bash", str(PROVISIONER), "--print-scope"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+            check=False,
+        )
+
+    def test_the_keycloak_directive_database_is_in_the_slot_scope(self) -> None:
+        result = _run_scope("prepr1")
+        assert result.returncode == EXIT_OK, result.stderr
+        assert "keycloak_prepr1" in _scope_values(result.stdout, "directive_database")
+
+    def test_a_database_the_maps_already_derive_is_not_listed_twice(self) -> None:
+        # omnidash_analytics carries the directive and is also in the service map.
+        result = _run_scope("prepr1")
+        directive = _scope_values(result.stdout, "directive_database")
+        managed = _scope_values(result.stdout, "database")
+        assert "omnidash_analytics_prepr1" in managed
+        assert directive, "positive control: the directive scan found nothing"
+        assert set(directive).isdisjoint(managed)
+
+    def test_the_list_is_read_from_the_corpus_not_named_in_the_script(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "001_a.sql").write_text(
+            "-- onex-create-database: widgetdb\nSELECT 1;\n", encoding="utf-8"
+        )
+        result = self._scope_over(tmp_path)
+        assert result.returncode == EXIT_OK, result.stderr
+        assert _scope_values(result.stdout, "directive_database") == ["widgetdb_prepr1"]
+
+    def test_an_empty_corpus_is_a_broken_scan_and_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._scope_over(tmp_path)
+        assert result.returncode == EXIT_DERIVED_NAME_OUT_OF_FENCE, result.stderr
+
+    def test_apply_creates_each_directive_database_and_closes_it_to_public(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        apply_section = text.split("directive-created databases (OMN-19064)", 1)[1]
+        apply_section = apply_section.split("grants, slot's own set only", 1)[0]
+        assert "for _db in $SLOT_DIRECTIVE_DATABASES" in apply_section
+        assert "CREATE DATABASE" in apply_section
+        assert "REVOKE CONNECT ON DATABASE" in apply_section
+
+
+class TestTenantProjectionWriterReachesTheSlotOmnidashDatabase:
+    """Migration 103 needs the CONNECT grant and says the provisioning seam owns it.
+
+    Live slot bring-up (OMN-19064): 103 refused because role_omnibase_prepr1
+    holds no grant option on omnidash_analytics_prepr1, so the slot provisioner
+    grants CONNECT to the slot's own tenant_projection_writer.
+    """
+
+    def test_apply_grants_connect_on_the_slot_omnidash_database_to_the_slot_writer(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omnidash_analytics)"' in text
+        assert 'derive tenant_projection_writer)"' in text
+        assert (
+            'GRANT CONNECT ON DATABASE \\"${_tpw_db}\\" TO \\"${_tpw_role}\\";' in text
+        )
+
+    def test_both_names_are_inside_the_slot_fence(self) -> None:
+        result = _run_scope("prepr1")
+        assert "omnidash_analytics_prepr1" in _scope_values(result.stdout, "database")
+        assert "tenant_projection_writer_prepr1" in _scope_values(result.stdout, "role")
+
+
+class TestOmnidashPrincipalCanCreateTheLedgerSchema:
+    """The ledger convergence opens with CREATE SCHEMA, which needs CREATE on the database (OMN-19064)."""
+
+    def test_apply_grants_create_on_the_slot_omnidash_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive role_omnidash)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_dash_db}\\" TO \\"${_dash_role}\\";' in text
+        )
+        assert (
+            "has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')" in text
+        )
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 
