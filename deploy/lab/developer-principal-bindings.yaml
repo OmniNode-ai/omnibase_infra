@@ -76,6 +76,14 @@
 # suffix; the node's own group, `<env>.omnimarket.node_dod_closeout_sweep_compute...`,
 # does not start with that prefix, so a developer principal cannot join it and take
 # commands.
+# DELEGATION TERMINAL READBACK (OMN-11187): a machine proves the projection reducer's
+# terminal by running one lane delegation and reading the `projection-delegation-applied`
+# event it emits after the delegation's projection write
+# (tests/integration/projectors/test_projection_terminal_event_emission.py, selected with
+# PROJECTION_TERMINAL_READBACK_BOOTSTRAP_SERVERS). The reader assigns partitions and seeks without a
+# group; the binding names the terminal group the other terminals use, which the
+# `local.omnibase_core.runtime_local_` prefix already covers. The projector publishes the
+# topic, so a developer principal gets no write on it.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -110,6 +118,7 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.projection-delegation-applied.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
