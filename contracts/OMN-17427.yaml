@@ -199,6 +199,11 @@ requirements:
     acceptance:
       - id: AC45
         statement: 'AC45: with the deploy agent deploying through the pre-fire read and two wait polls and idle with the job completed 16 s before the fire, a TERMINAL_MISSING first attempt names that job, retries once and ends GREEN; with the agent idle at the pre-fire read the red stands with no retry -- falsifier: uv run pytest tests/integration/chain_canary/test_chain_canary_deploy_agent_window_omn19811.py -q -k "waited_out or idle_agent_before_the_fire"'
+  - id: req-omn17427-lab-principal-issuer-client-request
+    statement: The lab principal issuer's module documentation gives a client the exact request it issues and the response it gets, and the documented request is the one the issuer accepts.
+    acceptance:
+      - id: AC44
+        statement: 'AC44: scripts/lab_principal_issuer.py documents the POST /v1/principals request with its content type and fields, and a request built from the documentation is issued with exactly the documented fields and answers the documented response, rotated on the second ask -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "client_section or documented_request"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -883,3 +888,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC45
+  - id: dod-omn-17427-ac44-issuer-client-request
+    description: The issuer's documented client request section names the route, content type and login header, and the documented request is issued with exactly the documented fields and answered as documented, then rotated on the second ask. Runs against a local issuer and a fake broker; no credential, broker or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "client_section or documented_request"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC44
