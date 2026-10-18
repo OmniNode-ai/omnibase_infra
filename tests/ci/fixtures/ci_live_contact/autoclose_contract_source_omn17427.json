@@ -1,0 +1,28 @@
+{
+  "_provenance": {
+    "source": "git show origin/dev:.github/workflows/evidence-autoclose-sweep.yml; repository, ref, path and fetch-depth projected from checkout inputs on the canonical default branch",
+    "captured_utc": "2026-10-18T04:20:22Z",
+    "source_sha256": "7ba02bebf59930a69a5816c730d7ad5669eba312395f87b2459ae85d540df4fe",
+    "ticket": "OMN-17427"
+  },
+  "response": {
+    "head": "efd3d19296f577e33f5f0aec080af1f1337beb3e",
+    "checkouts": [
+      {
+        "fetch-depth": 0
+      },
+      {
+        "repository": "OmniNode-ai/omnimarket",
+        "ref": "${{ steps.omnimarket-ref.outputs.sha }}",
+        "path": ".omnimarket-src",
+        "fetch-depth": 0
+      },
+      {
+        "repository": "OmniNode-ai/onex_change_control",
+        "ref": "dev",
+        "path": ".occ-src",
+        "fetch-depth": 0
+      }
+    ]
+  }
+}

@@ -257,7 +257,7 @@ def _handler(
 def _request(*, apply: bool) -> ModelEvidenceAutocloseSweepRequest:
     return ModelEvidenceAutocloseSweepRequest(
         correlation_id=uuid4(),
-        occ_repo=_OCC_REPO,
+        evidence_repo=_OCC_REPO,
         lookback_hours=2,
         apply=apply,
     )
