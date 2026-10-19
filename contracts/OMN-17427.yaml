@@ -219,6 +219,11 @@ requirements:
     acceptance:
       - id: AC48
         statement: 'AC48: with a failing cloud-migration fixture the preflight records the failure and stops onex-api, the runtime up names omninode-runtime and not onex-api, a lane-agnostic migration failure stays fatal, and the agent fails the job after verify with the repair build and no overlay apply -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q'
+  - id: req-omn17427-prepr-verify-lease-renew
+    statement: The pre-PR verify driver renews its slot lease before every phase in the same remote command that starts the phase, stops without teardown when the lease is no longer its own, and the TLA+ model of the slot lease (OMN-20085 AC3 formal half) is committed with its TLC results.
+    acceptance:
+      - id: AC49
+        statement: 'AC49: every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k, a peer taking the lease stops the run with no teardown and exit 2, a renewal racing seven breakers of its expired lease leaves one holder in 25 rounds, and the committed TLC results pass the model and fail every mutation -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q -k "renew or model or mutation"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -949,3 +954,12 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q -k "bash_array or exclude_cloud_consumer"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac48-prepr-lease-renew
+    description: 'The verify driver prefixes every phase, teardown and snap-post included, with a guarded renewal of its own lease and a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown; release takes the same guard. Real-shell tests run the renewal and release commands, and one races a renewal against seven breakers of its expired lease for 25 rounds with exactly one holder each round. 15 of the renew and budget tests fail against the merge-base driver. The model test binds the committed TLC output (Model passes about 1.9 million distinct states; nine mutations each fail) to the spec and cfg digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q -k "renew or model or mutation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC49

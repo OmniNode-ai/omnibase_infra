@@ -46,6 +46,9 @@ is read, never written: a live ``HOLD`` naming the host's surface, placed by
 another lane, makes the host busy. The HOLD and RELEASE rows themselves are
 the calling lane's to write through ``/omni:ledger-msg``; this file prints the
 text for them.
+The verify driver renews the lease before every phase inside the same remote
+command that starts it, and stops without teardown when the lease is no longer
+its own. Each phase is killed on the host when its budget ends.
 
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
@@ -121,6 +124,10 @@ EXIT_INCONCLUSIVE = 2
 EXIT_NO_FREE_HOST = 3
 EXIT_LEASE_REFUSED = 4
 EXIT_USAGE = 5
+LEASE_LOST = "LEASE-LOST"
+EXIT_LEASE_LOST_REMOTE = 97
+RENEW_MARGIN_S = 300
+HOST_KILL_GRACE_S = 30
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
@@ -660,14 +667,47 @@ def acquire_lease(
     return False, f"held by {held.get('holder', '?')} until {held.get('until', '?')}"
 
 
+def renew_lease_command(
+    host: PoolHost, holder: str, until: dt.datetime, now: dt.datetime
+) -> str:
+    """Renew only our lease under the break guard, before starting a phase."""
+    lease = f"$HOME/{host.lease_dir}"
+    guard = f"{lease}.break"
+    body = json.dumps(
+        {
+            "holder": holder,
+            "until": until.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "taken": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
+    return (
+        f"(i=0; until mkdir {guard} 2>/dev/null; do "
+        'i=$((i + 1)); if [ "$i" -ge 20 ]; then '
+        f"echo '{LEASE_LOST} guard busy'; exit {EXIT_LEASE_LOST_REMOTE}; "
+        "fi; sleep 0.5; done; "
+        f"H=$(cat {lease}/lease.json 2>/dev/null); "
+        f'case "$H" in *\'"holder": "{holder}"\'*) '
+        f"printf '%s' {shlex.quote(body)} > {lease}/lease.json.tmp && "
+        f"mv {lease}/lease.json.tmp {lease}/lease.json; "
+        f'R=$?; rmdir {guard}; exit "$R";; '
+        f"*) rmdir {guard}; printf '%s %s\\n' {LEASE_LOST} \"$H\"; "
+        f"exit {EXIT_LEASE_LOST_REMOTE};; esac)"
+    )
+
+
 def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
     lease = f"$HOME/{host.lease_dir}"
+    guard = f"{lease}.break"
     cmd = (
+        f"mkdir -p $(dirname {lease}); "
+        f"i=0; until mkdir {guard} 2>/dev/null; do "
+        'i=$((i + 1)); if [ "$i" -ge 20 ]; then '
+        "echo FOREIGN GUARD-BUSY; exit 0; fi; sleep 0.5; done; "
         f"H=$(cat {lease}/lease.json 2>/dev/null); "
         f'case "$H" in *\'"holder": "{holder}"\'*) rm -rf {lease} && echo RELEASED;; '
-        "'') echo ABSENT;; *) echo FOREIGN;; esac"
+        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}"
     )
     rc, out = transport.run(host, cmd, timeout=30)
     if "RELEASED" in out:
@@ -1879,8 +1919,9 @@ def _run_stack(
     post_up_command: str | None = None,
     tests_budget: float = 2400,
     outputs_sink: dict[str, str] | None = None,
+    renew: Callable[[float], str] | None = None,
 ) -> dict[str, str]:
-    """One stack on the leased host: every phase, then ALWAYS teardown.
+    """One stack on the leased host: every phase, then teardown unless lease lost.
 
     ``overlay`` replaces the stack's Bifrost overlay; ``post_up_command`` runs
     once against the live stack after the probe (the ``exercise`` phase).
@@ -1936,13 +1977,25 @@ def _run_stack(
     outputs: dict[str, str] = outputs_sink if outputs_sink is not None else {}
 
     def phase_run(phase: str, timeout: float) -> int:
+        command = f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}"
+        if renew is not None:
+            command = (
+                f"{renew(timeout)} && timeout -k {HOST_KILL_GRACE_S} "
+                f"{int(timeout)} {command}"
+            )
+            timeout += 2 * HOST_KILL_GRACE_S
         rc, out = transport.run(
             host,
-            f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}",
+            command,
             timeout=timeout,
         )
         outputs[phase] = out
         log(f"[{host.name} {tag} {phase} rc={rc}]\n{out.rstrip()}")
+        if LEASE_LOST in out:
+            outputs["lease-lost"] = phase
+            log(
+                f"lease lost before {phase}: the slot was left to its new holder, not torn down"
+            )
         return rc
 
     try:
@@ -1956,16 +2009,16 @@ def _run_stack(
         ):
             raise RuntimeError("copy of the overlay to host failed")
         for phase in phases:
-            if phase_run(phase, budget.get(phase, 120)) != 0 and phase in (
-                "clone",
-                "build",
-            ):
+            rc = phase_run(phase, budget.get(phase, 120))
+            if "lease-lost" in outputs or (rc != 0 and phase in ("clone", "build")):
                 break
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         # teardown below must run whatever failed above
         log(f"run aborted before teardown: {exc}")
     finally:
         for phase in ("teardown", "snap-post"):
+            if "lease-lost" in outputs:
+                break
             phase_run(phase, 600)
         transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
     return outputs
@@ -2297,6 +2350,12 @@ def _verify_steps(
                 log=log,
                 tests_budget=suite_budget_s if facts.suite else 2400,
                 outputs_sink=outputs,
+                renew=lambda budget: renew_lease_command(
+                    host,
+                    facts.holder,
+                    now_fn() + dt.timedelta(seconds=budget + RENEW_MARGIN_S),
+                    now_fn(),
+                ),
             )
         except VerifyInterrupted:
             # the stack's own finally has torn the slot down; keep its readback
@@ -2307,17 +2366,24 @@ def _verify_steps(
             log(f"lease {host.name}: {rwhy}")
         rb = judge(outputs, None, ports)
         facts.readback = rb
+        outcome = "INCONCLUSIVE" if "lease-lost" in outputs else rb.outcome
         if not released:
             rb.notes.append(f"lease not released: {rwhy}")
         finished = _utc_text(now_fn())
         text = render_readback(rb, host, params, facts.started, finished)
-        release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
+        if "lease-lost" in outputs:
+            text = text.replace(f"LAB PROOF {rb.outcome}:", f"LAB PROOF {outcome}:", 1)
+            text += (
+                f"\n  lease lost before {outputs['lease-lost']}: "
+                "the slot was left to its new holder, not torn down"
+            )
+        release_result = outcome if outcome in ("PASS", "FAIL") else "ABORTED"
         text += (
             f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
             f"result={release_result} restored={'yes' if rb.restored else 'no'}"
         )
-        code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
-        return rb.outcome, code, text
+        code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(outcome, EXIT_INCONCLUSIVE)
+        return outcome, code, text
     finally:
         if own_dir:
             shutil.rmtree(work, ignore_errors=True)
