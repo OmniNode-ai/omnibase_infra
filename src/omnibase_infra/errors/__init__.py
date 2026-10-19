@@ -29,6 +29,7 @@ Exports:
     EventBusRegistryError: Event bus registry operation errors
     DispatchDeadlineExceededError: A consumed record's handler outlived its per-dispatch deadline
     DlqDependencyLifecycleTimeoutError: A DLQ replay dependency start() exceeded its bound
+    DlqPersistenceUnconfirmedError: A DLQ write was not confirmed durable — offset must not advance (OMN-14936)
     DlqTopicFixedPointError: A DLQ topic was offered as an ORIGINAL topic
     LaneMirrorRecordRefusedError: Lane-mirror record carries no usable identity
     LaneMirrorLoopDetectedError: Lane-mirror destination IS its own source lane
@@ -145,7 +146,10 @@ from omnibase_infra.errors.error_dispatch_deadline import (
 from omnibase_infra.errors.error_dlq_dependency_lifecycle import (
     DlqDependencyLifecycleTimeoutError,
 )
-from omnibase_infra.errors.error_dlq_topic import DlqTopicFixedPointError
+from omnibase_infra.errors.error_dlq_topic import (
+    DlqPersistenceUnconfirmedError,
+    DlqTopicFixedPointError,
+)
 from omnibase_infra.errors.error_event_bus_registry import EventBusRegistryError
 from omnibase_infra.errors.error_event_registry_fingerprint import (
     EventRegistryFingerprintMismatchError,
@@ -232,6 +236,8 @@ __all__: list[str] = [
     "DispatchDeadlineExceededError",
     # DLQ topic resolution refusal (OMN-18084)
     "DlqDependencyLifecycleTimeoutError",
+    # Unconfirmed DLQ write — offset withheld (OMN-14936)
+    "DlqPersistenceUnconfirmedError",
     "DlqTopicFixedPointError",
     "EnvelopeValidationError",
     # Error catalog (OMN-518)
