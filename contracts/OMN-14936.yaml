@@ -1,0 +1,52 @@
+schema_version: 1.0.0
+ticket_id: OMN-14936
+title: 'service_kernel no_dispatcher path commits offsets past dropped envelopes with no DLQ record'
+summary: An unroutable envelope leaves a durable DLQ record before its offset advances, and an unconfirmed DLQ write rewinds the partition because declining to commit withholds nothing under the bus default of enable_auto_commit.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn14936-dlq-before-advance
+    statement: A no_dispatcher outcome leaves a durable DLQ record, or the offset does not advance.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: an envelope no dispatcher handles leaves a readable DLQ record carrying the topic, the payload and failure_class, and the consumer fetch position is left alone only after that write -- falsifier: uv run pytest tests/unit/event_bus/test_omn14936_no_dispatcher_offset_withheld.py -k durable_dlq_record -q -n 0 --no-cov fails.'
+      - id: AC2
+        statement: 'AC2: with the DLQ write blocked the consumer rewinds to the failed record and the offset is not committed past it -- falsifier: uv run pytest tests/unit/event_bus/test_omn14936_no_dispatcher_offset_withheld.py -k blocked_dlq_write -q -n 0 --no-cov fails.'
+      - id: AC3
+        statement: 'AC3: the runtime that serves the OMN-12912 P1 harness carries the rewind, so the un-routed envelope is no longer a silent drop -- falsifier: docker exec omninode-runtime python -c "from omnibase_infra.errors import DlqPersistenceUnconfirmedError" exits non-zero.'
+evidence_requirements:
+  - kind: tests
+    description: The no_dispatcher offset tests and the wiring suite.
+    command: uv run pytest tests/unit/event_bus/test_omn14936_no_dispatcher_offset_withheld.py tests/unit/runtime/test_event_bus_subcontract_wiring.py -q -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn14936-durable-dlq-record
+    description: The real dispatch engine, wiring callback, consume loop and DLQ writer retry the same record through an outage, then leave exactly one persisted category-DLQ record readable by the replay model. The transport uses a file-backed producer and a redelivering consumer; no live broker or rollout is claimed. Requiring recovery after refusal makes this fail without the rewind fix, unlike the success-only test.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_omn14936_no_dispatcher_dlq_recovery.py -q -n 0 --no-cov
+    binds_ac:
+      - AC1
+  - id: dod-omn14936-blocked-dlq-rewind
+    description: A blocked DLQ write rewinds the fetch position to the failed record under the production default of enable_auto_commit, and the wiring callbacks raise instead of returning.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_omn14936_no_dispatcher_offset_withheld.py tests/unit/runtime/test_event_bus_subcontract_wiring.py -q -n 0 --no-cov
+    binds_ac:
+      - AC2
+  - id: dod-omn14936-deployed-runtime
+    description: Hosted-runner artifact and runtime-path probe for AC3. Read the Kafka consumer source at the checked-out commit from the public repository and require the offset-withholding exception arm, then execute outage and recovery through the real runtime components. This proves the candidate code carries and exercises the rewind; it does not claim that the deployed P1 harness has rolled to this image.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/event_bus/event_bus_kafka.py" | grep -F 'except DlqPersistenceUnconfirmedError:' &&
+          uv run pytest tests/integration/runtime/test_omn14936_no_dispatcher_dlq_recovery.py -q -n 0 --no-cov
+    binds_ac:
+      - AC3

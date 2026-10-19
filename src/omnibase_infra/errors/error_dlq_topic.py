@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""DLQ topic resolution refusal (OMN-18084).
+"""DLQ topic resolution refusal (OMN-18084) and unconfirmed DLQ write (OMN-14936).
 
 ``get_dlq_topic_for_original`` resolves a message category from a topic's own
 segments. On a DLQ topic that is a FIXED POINT: ``onex.dlq.omnibase-infra.events.v1``
@@ -16,6 +16,16 @@ A per-call-site guard closes one hole; refusing at the resolver closes the class
 The refusal is a typed error rather than ``None`` on purpose: ``None`` is already
 this resolver's answer for "category could not be determined", and a caller that
 falls back on ``None`` would treat a loop as an unremarkable miss.
+
+``DlqPersistenceUnconfirmedError`` is the other side of the same sink: a DLQ write
+for a consumed record that was not confirmed durable. ``EventBusSubcontractWiring``
+raises it so the offset does not advance. Declining to call ``commit_offset`` does
+not withhold it: ``EventBusKafka`` has no ``commit_offset`` and its consumers run
+with ``enable_auto_commit=True`` (the config default), so the client commits the
+fetch position on its own cadence, and a callback that returns normally IS an ACK.
+Raising is what makes ``EventBusKafka._dispatch_to_subscriber`` rewind the fetch
+position to the failed record's own offset, the only action that withholds under
+auto-commit.
 """
 
 from __future__ import annotations
@@ -58,6 +68,43 @@ class DlqTopicFixedPointError(RuntimeHostError):
         super().__init__(
             message=message,
             error_code=EnumCoreErrorCode.INVALID_INPUT,
+            context=context,
+            **extra_context,
+        )
+
+
+class DlqPersistenceUnconfirmedError(RuntimeHostError):
+    """A DLQ write for a consumed record was not confirmed durable.
+
+    Offset-unsafe unconditionally: the consume loop rewinds the partition to
+    the failed record so Kafka redelivers it and the DLQ write is retried. The
+    feed stalls with visible lag until the DLQ is writable, which is the
+    intended outcome: a stalled feed is detectable, a committed drop is not.
+
+    Example:
+        >>> raise DlqPersistenceUnconfirmedError(
+        ...     "no_dispatcher DLQ write not confirmed",
+        ...     topic="onex.cmd.omnibase-infra.delegation-inference-request.v1",
+        ...     dlq_topic="onex.dlq.omnibase-infra.delegation-inference-request.v1",
+        ... )
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize DlqPersistenceUnconfirmedError.
+
+        Args:
+            message: Human-readable message naming the record and the failure
+            context: Bundled infrastructure context
+            **extra_context: Additional context (topic, dlq_topic, failure_class, ...)
+        """
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.OPERATION_FAILED,
             context=context,
             **extra_context,
         )

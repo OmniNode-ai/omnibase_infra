@@ -28,7 +28,7 @@ import pytest
 from omnibase_core.models.contracts.subcontracts import ModelEventBusSubcontract
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumDispatchStatus
-from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.errors import DlqPersistenceUnconfirmedError, RuntimeHostError
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
 from omnibase_infra.models.dispatch import ModelDispatchResult
 from omnibase_infra.protocols import ProtocolEventBusLike
@@ -596,8 +596,10 @@ class TestDispatchCallback:
             ),
         )
 
-        # Should NOT raise -- failure surfaces via logging, not exception.
-        await callback(invalid_message)
+        # Raises so the consume loop rewinds the partition: returning would be
+        # an ACK and auto-commit would advance past the un-persisted record.
+        with pytest.raises(DlqPersistenceUnconfirmedError):
+            await callback(invalid_message)
 
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         mock_event_bus.commit_offset.assert_not_called()
@@ -696,9 +698,10 @@ class TestDispatchCallback:
             "onex.evt.test.v1", "dev.test-handler"
         )
 
-        # Should NOT raise -- the failure is surfaced via logging, not an
-        # exception -- but the offset must NOT be committed.
-        await callback(sample_event_message)
+        # The callback raises so the consume loop rewinds the partition; the
+        # offset must NOT be committed.
+        with pytest.raises(DlqPersistenceUnconfirmedError):
+            await callback(sample_event_message)
 
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         mock_event_bus.commit_offset.assert_not_called()
@@ -1817,8 +1820,11 @@ class TestErrorClassification:
 
         # First attempt exhausts the retry budget (max_attempts=1) and
         # attempts DLQ + commit -- DLQ write fails, so commit must be
-        # withheld and the retry count must NOT be cleared.
-        await callback(valid_message)  # Should NOT raise
+        # withheld and the retry count must NOT be cleared. The callback RAISES
+        # (OMN-14936): returning would be an ACK and auto-commit would advance
+        # past the un-persisted record.
+        with pytest.raises(DlqPersistenceUnconfirmedError):
+            await callback(valid_message)
 
         mock_event_bus._publish_raw_to_dlq.assert_called_once()
         mock_event_bus.commit_offset.assert_not_called()
