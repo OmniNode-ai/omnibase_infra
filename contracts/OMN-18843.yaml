@@ -28,6 +28,14 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/cli/test_delegate_locus_rebind_wait_omn18843.py -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
+  - id: "dod-omn18843-ac2-cli-measured-rebind-window"
+    description: "AC2. Run the CLI entry through locus resolution and the dispatch gate into receipt mode after the 228.9 s measured rebind window. Assert one dispatched call with the bound consumer group and recorded wait. A fake clock and broker listing reproduce the window without a live broker or a deployed rollout; this fails with the old 180 s bound."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -k longest_measured_rebind_window -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
   - id: "dod-omn18843-deploy-probe-rebind-bound"
     description: "Deploy probe for the bound change: the delegate locus module read from GitHub at the evaluated checkout's commit declares the 300 s bound. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base module, which declares 180 s."
     source: "manual"

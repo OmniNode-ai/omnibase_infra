@@ -140,3 +140,33 @@ def test_a_lane_still_unbound_at_the_bound_dispatches_nothing(
 
     assert harness["dispatched"] == []
     assert harness["clock"]["slept"] <= delegate_locus._REBIND_WAIT_SECONDS
+
+
+def test_the_longest_measured_rebind_window_reaches_receipt_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: dict[str, Any]
+) -> None:
+    """The 228.9 s rebuild observed on 2026-10-19 survives the CLI gate."""
+    measured_window_seconds = 228.9
+    unbound_probes = (
+        int(measured_window_seconds // delegate_locus._REBIND_POLL_SECONDS) + 1
+    )
+    _answer(monkeypatch, [()] * unbound_probes + [(_GROUP,)])
+
+    assert _delegate(harness["state"], tmp_path) == 0
+
+    assert len(harness["dispatched"]) == 1
+    call = harness["dispatched"][0]
+    assert call["host_handlers"] is False
+    decision = call["locus_decision"]
+    assert decision.locus is EnumDelegateLocus.DEPLOYED_LANE
+    assert decision.lane_consumer_groups == (_GROUP,)
+    assert decision.consumer_bind_wait_seconds == pytest.approx(
+        unbound_probes * delegate_locus._REBIND_POLL_SECONDS
+    )
+    assert measured_window_seconds < decision.consumer_bind_wait_seconds
+    assert decision.consumer_bind_wait_seconds <= (
+        measured_window_seconds + delegate_locus._REBIND_POLL_SECONDS
+    )
+    assert harness["clock"]["slept"] == pytest.approx(
+        decision.consumer_bind_wait_seconds
+    )
