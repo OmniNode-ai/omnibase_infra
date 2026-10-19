@@ -25,13 +25,13 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn-20999-ac1-smtp-username-reaches-the-container
+  - id: dod-omn-20999-ac1-smtp-username-reaches-container
     description: 'AC1 mechanical half. The compose service passes SMTP_USERNAME, the spelling the running v0.146 image reads, as opposed to the SMTP_USER the Keycloak reconciler uses for the same SES sender -- so the variable actually reaches the container instead of being silently ignored. Read hermetically through the GitHub API at commit 6385c8808, which is immutable, so the bytes the check reads cannot change under it, and the commit is the parent of this one rather than part of its own diff. The live half of AC1 is the status read against the running instance, which CI cannot reach from a hosted runner; the operator records that reading on the ticket. Unbound corroboration (no binds_ac): it cannot fail at a merge base, so AC1 and AC4 are bound by dod-omn-20999-red-first-smtp-env-regression, which does.'
     source: generated
     checks:
       - check_type: command
         check_value: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -qE '^      SMTP_USERNAME: [$][{]INFISICAL_SMTP_USERNAME:-[}]$'"
-  - id: dod-omn-20999-ac4-every-smtp-line-is-override-backed
+  - id: dod-omn-20999-ac4-smtp-lines-override-backed
     description: 'AC4. The change is inert on a lane that sets nothing only if EVERY SMTP line resolves from an INFISICAL_SMTP_ override -- a single hardcoded value would turn mail on for every machine running onex up core. Asserts the count of override-backed SMTP lines is exactly seven, so a missing variable and an added hardcoded one both go RED. Same immutable ref, same reason. Unbound corroboration (no binds_ac): it cannot fail at a merge base, so AC1 and AC4 are bound by dod-omn-20999-red-first-smtp-env-regression, which does.'
     source: generated
     checks:
