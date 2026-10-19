@@ -223,6 +223,11 @@ requirements:
         statement: 'AC50: snap-pre and snap-post of a pre-PR slot read every container of the declared lanes by id, start time and restart count, and snap-post prints the count of changed lines over the count read and names each changed container; the slot''s own containers are not read -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "neighbour or declared_lane"'
       - id: AC51
         statement: 'AC51: a pre-PR slot run with no --overlay ships the slot''s own Bifrost overlay, read from ONEX_LANE_OVERLAY_DIR or else the lane-overlays directory beside the pool table, and an isolated member or a slot with no overlay file ships none -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "lane_overlay or overlay_is_read"'
+  - id: req-omn17427-slot-runtime-connect
+    statement: The pre-PR slot provisioner grants the slot's runtime principal CONNECT on the slot's own omnidash database and reads it back, so the slot runtime's savings-correlation pool opens and the runtime boots.
+    acceptance:
+      - id: AC97
+        statement: 'AC97: provision_db_slot.sh grants omninode_runtime_<slot> CONNECT on omnidash_analytics_<slot> and reads it back with has_database_privilege, and the only flat migration granting omninode_runtime CONNECT is undeliverable under a slot -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase'
   - id: req-omn17427-cloud-migration-nonfatal
     statement: A failing dev-lane omninode_cloud migration one-shot in the deploy agent gates only onex-api, the runtime family still restarts and is verified, and the job then ends failed with the one-shot's error.
     acceptance:
@@ -363,6 +368,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac97-slot-runtime-connect
+    description: The provisioner test asserts the slot runtime principal CONNECT grant and its readback on the slot omnidash database; it fails at the merge base and passes after the change. Reads repository files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
+  - id: dod-omn-17427-ac97-deploy-slot-runtime-connect
+    description: Hosted-runner deploy check -- the slot provisioner test file over the committed script, scope derivation run under bash with no Postgres; does not claim a live slot bring-up.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
   - id: dod-omn-17427-core-pin-incident
     description: The recorded incident pair is refused and its recorded lock agrees with its pin.
     source: manual
