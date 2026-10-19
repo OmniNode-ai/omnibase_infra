@@ -466,6 +466,10 @@ readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
 readonly DEV_LANE_CLOUD_DB_SERVICES=(
     onex-api
 )
+# OMN-18496: exit code of a deploy that completed with the cloud one-shot
+# failed -- runtime recreated and registry written, DEV_LANE_CLOUD_DB_SERVICES
+# stopped. Distinct so a caller never reads a degraded deploy as clean.
+readonly DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED=3
 # Broker readiness services brought up (and waited on) before the runtime
 # restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
 # 1300+-topic provisioning burst on first boot does not exhaust the default
@@ -519,6 +523,8 @@ RESTART=false
 # Per-invocation readiness, set by the migration preflight. Never an operator
 # override: a failed cloud one-shot stops only its declared consumers.
 DEV_LANE_CLOUD_MIGRATIONS_READY=true
+# OMN-18496: the one-shot that failed, named in the closing error.
+DEV_LANE_CLOUD_MIGRATION_FAILED_SERVICE=""
 # OMN-15218: the raw argv this invocation was called with, captured before
 # parse_args consumes it, so the attribution record names the exact command that
 # mutated the lane instead of a reconstruction.
@@ -3449,6 +3455,7 @@ run_runtime_migration_preflight() {
 
     log_step "Runtime Migration Preflight"
     DEV_LANE_CLOUD_MIGRATIONS_READY=true
+    DEV_LANE_CLOUD_MIGRATION_FAILED_SERVICE=""
 
     # The lane-agnostic set first. migration-gate is a long-running healthcheck
     # keepalive, NOT a one-shot, so it is deliberately excluded from the wait set
@@ -3529,6 +3536,7 @@ run_runtime_migration_preflight() {
         if ! refresh_one_migration_service \
             "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"; then
             DEV_LANE_CLOUD_MIGRATIONS_READY=false
+            DEV_LANE_CLOUD_MIGRATION_FAILED_SERVICE="${service}"
             log_warn "Cloud migration '${service}' failed; gating only: ${DEV_LANE_CLOUD_DB_SERVICES[*]}. Runtime migrations remain required."
             # A warm consumer must also stop. Merely omitting its recreate
             # would leave an old API serving against a failed migration.
@@ -3599,6 +3607,14 @@ exclude_cloud_database_services() {
         log_error "Cloud migration failed; all requested services require omninode_cloud. Refusing an empty service scope."
         return 1
     fi
+}
+
+report_cloud_migration_gate() {
+    if [[ "${DEV_LANE_CLOUD_MIGRATIONS_READY}" == true ]]; then
+        return 0
+    fi
+    log_error "CLOUD_MIGRATION_DEGRADED: one-shot '${DEV_LANE_CLOUD_MIGRATION_FAILED_SERVICE:-unknown}' failed; runtime deployed; stopped=${DEV_LANE_CLOUD_DB_SERVICES[*]}; exit ${DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED}"
+    return "${DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED}"
 }
 
 bringup_full_stack() {
@@ -4780,4 +4796,7 @@ main() {
 
     # Phase 14: Prune old deployments (non-fatal -- must not trigger rollback)
     prune_old_deployments || log_warn "Pruning old deployments failed (non-fatal)"
+
+    # OMN-18496: report degradation after completion so cleanup restores nothing.
+    report_cloud_migration_gate
 }

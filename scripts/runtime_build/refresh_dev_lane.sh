@@ -58,6 +58,8 @@
 #      (FAILED_ROLLED_BACK) or no rollback was needed because the only failing
 #      dimensions were build provenance on an otherwise healthy lane
 #      (FAILED_BUILD_PROVENANCE; the lane was left exactly as it was)
+#      or FAILED_CLOUD_MIGRATION (deploy exited 3: the omninode_cloud one-shot
+#      failed; runtime deployed and serving, onex-api stopped; no rollback)
 #   2  refresh FAILED and could not be confirmed healthy (warm-rollback also
 #      unhealthy, OR cold-aware path failed with nothing to roll back to) --
 #      STOP AND REPORT, do not retry-until-green
@@ -299,6 +301,8 @@ CENSUS_ONLY=false
 # hang. The lock is never stolen at any timeout value.
 LANE_LOCK_TIMEOUT_SECONDS="${LANE_LOCK_TIMEOUT_SECONDS:-900}"
 TRIGGERING_TAG=""
+# OMN-18496: must equal handler_runtime_deploy.sh's constant, pinned by test.
+readonly DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED=3
 
 usage() {
     sed -n '4,69p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -454,6 +458,19 @@ lane_census_close() {
     fi
     rm -rf "${scratch}"
     return "${rc}"
+}
+
+apply_cloud_migration_deploy_exit() {
+    # OMN-18496: a serving runtime must still report the failed cloud one-shot.
+    if [[ "${RESULT}" == "SUCCESS" && "${DEPLOY_EXIT}" -eq "${DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED}" ]]; then
+        RESULT="FAILED_CLOUD_MIGRATION"
+        err "=============================================================="
+        err "STOP AND REPORT: the health gate passed and the runtime is serving,"
+        err "but the omninode_cloud migration one-shot failed so onex-api is stopped."
+        err "The lane is not rolled back."
+        err "=============================================================="
+    fi
+    return 0
 }
 
 if [[ "${CENSUS_ONLY}" == true ]]; then
@@ -1196,6 +1213,7 @@ else
     err "=============================================================="
 fi
 
+apply_cloud_migration_deploy_exit
 # --- close with the lane census (OMN-20876) ----------------------------------
 # A refresh that landed is only done when the lane it landed on matches its
 # manifest: the census is read last, and its exit code is the refresh's.
@@ -1301,7 +1319,8 @@ case "${RESULT}" in
     SUCCESS) exit 0 ;;
     # 1 == refresh failed, lane HEALTHY. FAILED_ROLLED_BACK got there by being
     # restored; FAILED_BUILD_PROVENANCE got there by never being touched.
-    FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE) exit 1 ;;
+    # OMN-18496: FAILED_CLOUD_MIGRATION leaves runtime serving, onex-api stopped.
+    FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE|FAILED_CLOUD_MIGRATION) exit 1 ;;
     # The lane is serving and the refresh landed; the census disagrees with the
     # manifest. The census's own code, so a caller can tell drift (30) from an
     # unreadable census (4, 5).

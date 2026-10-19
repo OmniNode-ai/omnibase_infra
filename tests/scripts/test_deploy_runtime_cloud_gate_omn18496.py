@@ -34,6 +34,12 @@ def _array(source: str, name: str) -> str:
     return match[0]
 
 
+def _scalar(source: str, name: str) -> str:
+    match = re.search(rf"^readonly {name}=.*$", source, re.M)
+    assert match is not None, name
+    return match[0]
+
+
 def _invoke(
     *,
     failed_service: str = "",
@@ -70,6 +76,11 @@ def _invoke(
     if "exclude_cloud_database_services() {" in source:
         extras = _array(source, "DEV_LANE_CLOUD_DB_SERVICES") + "\n"
         extras += _function(source, "exclude_cloud_database_services")
+    gate_report = "echo CLOUD_GATE_RC=absent"
+    if "report_cloud_migration_gate() {" in source:
+        extras += "\n" + _scalar(source, "DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED")
+        extras += "\n" + _function(source, "report_cloud_migration_gate")
+        gate_report = 'gate_rc=0; report_cloud_migration_gate || gate_rc=$?; echo "CLOUD_GATE_RC=${gate_rc}"'
     shell = "\n".join(
         [
             "set -euo pipefail",
@@ -107,6 +118,7 @@ def _invoke(
             'run_runtime_migration_preflight /proof "$PROJECT"',
             'if [[ "$FULL_STACK" == true ]]; then bringup_full_stack /proof "$PROJECT"; else restart_services /proof "$PROJECT"; fi',
             "echo RUNTIME_REFRESH_COMPLETED",
+            gate_report,
         ]
     )
     env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME"}}
@@ -129,6 +141,56 @@ def _invoke(
         timeout=15,
         check=False,
     )
+
+
+@pytest.mark.parametrize("service", ["cloud-migration-files", "cloud-migration"])
+@pytest.mark.parametrize("phase", ["wait", "up"])
+def test_cloud_failure_fails_loud_with_distinct_exit_after_runtime_restart(
+    service: str, phase: str
+) -> None:
+    result = _invoke(failed_service=service, failure_phase=phase)
+    assert "CLOUD_GATE_RC=3" in result.stdout
+    assert f"CLOUD_MIGRATION_DEGRADED: one-shot '{service}' failed" in result.stderr
+    assert "stopped=onex-api; exit 3" in result.stderr
+    recreate = re.search(
+        r": up: -d: --no-deps: --force-recreate[^\n]*: runtime-effects", result.stderr
+    )
+    assert recreate is not None, result.stderr
+    assert recreate.start() < result.stderr.index("CLOUD_MIGRATION_DEGRADED")
+
+
+def test_clean_cloud_migration_reports_no_degradation() -> None:
+    result = _invoke()
+    assert "CLOUD_GATE_RC=0" in result.stdout
+    assert "CLOUD_MIGRATION_DEGRADED" not in result.stderr
+
+
+def test_full_stack_cloud_failure_also_fails_loud() -> None:
+    result = _invoke(failed_service="cloud-migration", full_stack=True)
+    assert "CLOUD_GATE_RC=3" in result.stdout
+
+
+def test_main_reports_the_cloud_gate_after_the_deploy_completes() -> None:
+    body = _function(SCRIPT.read_text(), "main")
+    report = body.index("report_cloud_migration_gate")
+    for statement in ("DEPLOYMENT_COMPLETE=true", 'write_registry "', 'show_summary "'):
+        assert body.index(statement) < report
+    statements = [
+        line
+        for line in body.splitlines()[:-1]
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert statements[-1] == "    report_cloud_migration_gate"
+
+
+def test_degraded_exit_code_is_distinct() -> None:
+    code = int(
+        _scalar(SCRIPT.read_text(), "DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED").split(
+            "=", 1
+        )[1]
+    )
+    assert code == 3
+    assert code not in (0, 1, 2, 64)
 
 
 @pytest.mark.parametrize("service", ["cloud-migration-files", "cloud-migration"])
@@ -159,7 +221,8 @@ def test_successful_cloud_migration_restores_api_to_refresh_set() -> None:
 def test_full_profile_failure_still_starts_effects_without_retrying_cloud() -> None:
     result = _invoke(failed_service="cloud-migration", full_stack=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    startup = result.stderr.split(": up: -d:")[-1]
+    # The up argv alone: the closing CLOUD_MIGRATION_DEGRADED line names the one-shot.
+    startup = result.stderr.split(": up: -d:")[-1].split("\n", 1)[0]
     assert ": runtime-effects" in startup
     assert ": onex-api" not in startup
     assert "cloud-migration" not in startup

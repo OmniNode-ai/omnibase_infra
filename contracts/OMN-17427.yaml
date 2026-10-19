@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-bash-cloud-gate-fails-loud
+    statement: The bash dev-lane runtime deploy that finishes with a failed omninode_cloud migration one-shot still recreates the runtime family and writes its registry, then exits 3 with an error naming the one-shot and the stopped onex-api, and refresh_dev_lane.sh records that exit as FAILED_CLOUD_MIGRATION (exit 1) with no rollback instead of SUCCESS.
+    acceptance:
+      - id: AC52
+        statement: 'AC52: with a failing cloud-migration-files or cloud-migration fixture the deploy recreates runtime-effects before it reports CLOUD_MIGRATION_DEGRADED and returns 3, a clean migration returns 0, main reports the gate as its last statement after DEPLOYMENT_COMPLETE, and a refresh whose deploy exited 3 on a passing health gate ends FAILED_CLOUD_MIGRATION with exit 1 -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_gate_omn18496.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -353,6 +358,9 @@ evidence_requirements:
   - kind: tests
     description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+  - kind: tests
+    description: The bash dev-lane deploy exits 3 after a completed deploy whose cloud one-shot failed, and the dev-lane refresh records it as FAILED_CLOUD_MIGRATION with exit 1.
+    command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_gate_omn18496.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1041,3 +1049,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac52-bash-cloud-gate-fails-loud
+    description: Unit tests that run the deploy's own preflight, restart, bring-up and report functions with only the docker boundary replaced, and the refresh's own result function; a negative control against the pre-change scripts fails all 15 new cases. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_gate_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
+  - id: dod-omn-17427-ac52-cloud-gate-deploy-check
+    description: Hosted-runner deploy check -- the same unit tests over the repository's scripts with the docker boundary replaced; no deployment surface is touched.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_gate_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
