@@ -121,6 +121,14 @@ x-runtime-base: &runtime-base
     - omnibase-infra-network
   logging: *logging-defaults
   restart: unless-stopped
+  # OMN-19812: declared, not inherited. The dev-lane host daemon's default soft
+  # RLIMIT_NOFILE is 1024; omninode-runtime holds ~2 broker connections per
+  # consumer group (437 groups on 2026-10-19), crossed 1024 minutes after boot,
+  # failed every connect with EMFILE and restarted in a loop.
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
   deploy:
     resources:
       limits:
