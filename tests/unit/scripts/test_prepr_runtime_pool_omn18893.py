@@ -15,8 +15,11 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -27,6 +30,9 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from tests.helpers.lane_census_fixtures import NEUTRAL_MANIFEST
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -117,6 +123,13 @@ class FakeTransport:
                 f"CORES={h.cores}\nLOAD={h.load}\nSLOT={h.slot}\nLISTEN={h.listen}\n"
                 f"PROJECTS=omnibase-infra-dogfood:7,\nLEASE={h.lease or ''}\n"
             )
+        if ".break" in command:  # break an expired lease, guarded and compared
+            body = re.search(r"printf '%s' '(\{.*?\})'", command)
+            assert body is not None
+            if h.lease is not None and shlex.quote(h.lease) in command:
+                h.lease = body.group(1)
+                return 0, "ACQUIRED"
+            return 0, "HELD\n" + (h.lease or "")
         if "then printf" in command:  # acquire
             if h.lease is None:
                 body = re.search(r"printf '%s' '(\{.*?\})'", command)
@@ -1583,8 +1596,8 @@ def test_prove_script_fetches_market_groups_and_probes_them_as_subjects() -> Non
         '"${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}"' in clone
     )
     assert (
-        '[ -n "${MARKET_PR:-}${MARKET_GROUP:-}" ] && SUBJECTS="$SUBJECTS omnimarket"'
-        in text
+        '[ -n "${MARKET_PR:-}${MARKET_GROUP:-}${MARKET_REF_SHA:-}" ] '
+        '&& SUBJECTS="$SUBJECTS omnimarket"' in text
     )
 
 
@@ -2016,3 +2029,507 @@ def test_the_prove_script_drops_the_cache_before_a_clone_and_before_each_teardow
         assert "drop_source_trees" in lines[i - 1], lines[i - 1 : i + 1]
     start = lines.index("clone)")
     assert "drop_source_trees" in lines[start + 1], lines[start : start + 3]
+
+
+# ------------------------------------------------------------------ verify (OMN-20085)
+
+SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+SHA2 = "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334"
+
+
+def _resolver(known: dict[str, str] | None = None) -> Any:
+    table = {"feature-x": SHA, SHA: SHA} if known is None else known
+
+    def resolve(repo: str, ref: str) -> str:
+        if ref not in table:
+            raise pool.RefUnresolvedError(f"{ref!r} is not in the test clone of {repo}")
+        return table[ref]
+
+    return resolve
+
+
+class TimedTransport(FakeTransport):
+    """Remembers the timeout each remote command was given."""
+
+    def __init__(self, hosts: dict[str, FakeHost]) -> None:
+        super().__init__(hosts)
+        self.timed: list[tuple[str, float]] = []
+
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        self.timed.append((command, timeout))
+        return super().run(host, command, timeout)
+
+    def tests_budgets(self) -> list[float]:
+        return [t for c, t in self.timed if c.endswith(" tests")]
+
+
+def _slot_hosts(*, slot1_busy: bool = False) -> dict[str, FakeHost]:
+    one = FakeHost(cores=32, load=10.0, slot=12 if slot1_busy else 0)
+    two = FakeHost(cores=32, load=10.0)
+    one.phases = dict(SLOT_GOOD)
+    # slot 2 serves its own ports
+    two.phases = {
+        k: v.replace("28085", "38085").replace("28086", "38086")
+        for k, v in SLOT_GOOD.items()
+    }
+    return {"pool-c-slot-1": one, "pool-c-slot-2": two}
+
+
+def _verify(tp: Any, tmp_path: Path, **over: Any) -> tuple[int, str]:
+    args: dict[str, Any] = {
+        "repo": "omnibase_infra",
+        "ref": "feature-x",
+        "holder": "me",
+        "tests": ("omnibase_infra:tests/unit/test_x.py",),
+        "suite": False,
+        "resolver": _resolver(),
+        "ledger_lines": [],
+        "workdir": tmp_path / "work",
+        "now_fn": lambda: NOW,
+        "log": lambda s: None,
+    }
+    args.update(over)
+    return pool.run_verify(CFG, tp, **args)
+
+
+def test_verify_ref_builds_the_slot_from_a_branch_with_no_pr(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+    code, text = _verify(FakeTransport(hosts), tmp_path)
+    assert code == pool.EXIT_PASS, text
+    assert text.startswith(f"LAB PROOF PASS: omnibase_infra@{SHA[:10]} (ref feature-x)")
+    env = (tmp_path / "work" / "verify.resolved.env").read_text(encoding="utf-8")
+    assert f"INFRA_REF_SHA={SHA}" in env.splitlines()
+    assert "INFRA_PR" not in env and "MARKET_REF_SHA" not in env
+    assert "TESTS='omnibase_infra:tests/unit/test_x.py'" in env.splitlines() or (
+        "TESTS=omnibase_infra:tests/unit/test_x.py" in env.splitlines()
+    )
+    assert hosts["pool-c-slot-1"].ran == list(pool.PHASES)
+    assert hosts["pool-c-slot-1"].lease is None
+
+
+def test_verify_ref_names_the_market_param_for_omnimarket(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+    code, text = _verify(
+        FakeTransport(hosts),
+        tmp_path,
+        repo="omnimarket",
+        tests=("omnimarket:tests/unit/test_y.py",),
+    )
+    assert code == pool.EXIT_PASS, text
+    env = (tmp_path / "work" / "verify.resolved.env").read_text(encoding="utf-8")
+    assert f"MARKET_REF_SHA={SHA}" in env.splitlines()
+    assert "INFRA_REF_SHA" not in env
+
+
+def test_verify_ref_that_does_not_resolve_exits_5_before_any_lease(
+    tmp_path: Path,
+) -> None:
+    code, text = _verify(NoHostTransport(), tmp_path, ref="no-such-branch")
+    assert code == pool.EXIT_USAGE
+    assert "ref does not resolve, nothing leased" in text
+
+
+def _git(*args: str, cwd: Path) -> str:
+    done = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    return done.stdout.strip()
+
+
+def test_verify_ref_resolves_a_branch_and_a_sha_in_the_canonical_clone(
+    tmp_path: Path,
+) -> None:
+    origin, clone = tmp_path / "origin", tmp_path / "omnibase_infra"
+    origin.mkdir()
+    _git("init", "-q", "-b", "dev", cwd=origin)
+    _git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@lab.invalid",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "c",
+        cwd=origin,
+    )
+    _git("branch", "feature-x", cwd=origin)
+    head = _git("rev-parse", "HEAD", cwd=origin)
+    _git("clone", "-q", str(origin), str(clone), cwd=tmp_path)
+    assert pool.resolve_ref_in_clone(clone, "feature-x") == head
+    assert pool.resolve_ref_in_clone(clone, head) == head
+    for bad in ("nope", "0" * 40, "-x", "a..b", "feature-x/", ""):
+        with pytest.raises(pool.RefUnresolvedError):
+            pool.resolve_ref_in_clone(clone, bad)
+    with pytest.raises(pool.RefUnresolvedError):
+        pool.resolve_ref_in_clone(tmp_path / "missing", "feature-x")
+
+
+def test_verify_first_free_slot_takes_only_prepr_slots_in_slot_order(
+    tmp_path: Path,
+) -> None:
+    hosts = {
+        **_slot_hosts(),
+        "pool-a": FakeHost(load=0.1),
+        "pool-d": FakeHost(load=0.1),
+    }
+    hosts["pool-a"].phases = dict(GOOD)
+    code, _ = _verify(FakeTransport(hosts), tmp_path)
+    assert code == pool.EXIT_PASS
+    assert hosts["pool-c-slot-1"].ran == list(pool.PHASES)
+    assert hosts["pool-c-slot-2"].ran == []
+    assert hosts["pool-a"].ran == [] and hosts["pool-d"].ran == []
+
+
+def test_verify_first_free_slot_skips_a_busy_slot(tmp_path: Path) -> None:
+    hosts = _slot_hosts(slot1_busy=True)
+    code, _ = _verify(FakeTransport(hosts), tmp_path)
+    assert code == pool.EXIT_PASS
+    assert hosts["pool-c-slot-1"].ran == []
+    assert hosts["pool-c-slot-2"].ran == list(pool.PHASES)
+
+
+def test_verify_first_free_slot_tries_the_next_when_the_first_is_lost_to_a_peer(
+    tmp_path: Path,
+) -> None:
+    hosts = _slot_hosts()
+
+    class PeerTakesSlotOne(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            rc, out = super().run(host, command, timeout)
+            if "CORES=$(getconf" in command and host.name == "pool-c-slot-1":
+                # the peer leases it right after this survey read it as free
+                self.hosts["pool-c-slot-1"].lease = _lease(
+                    "peer", NOW + dt.timedelta(hours=1)
+                )
+            return rc, out
+
+    code, _ = _verify(PeerTakesSlotOne(hosts), tmp_path)
+    assert code == pool.EXIT_PASS
+    assert hosts["pool-c-slot-1"].ran == []
+    assert json.loads(hosts["pool-c-slot-1"].lease)["holder"] == "peer"
+    assert hosts["pool-c-slot-2"].ran == list(pool.PHASES)
+    assert hosts["pool-c-slot-2"].lease is None
+
+
+def test_verify_first_free_slot_exits_3_when_no_slot_is_free(tmp_path: Path) -> None:
+    hosts = _slot_hosts(slot1_busy=True)
+    hosts["pool-c-slot-2"].slot = 12
+    hosts["pool-a"] = FakeHost(load=0.1)  # a free isolated member is not offered
+    code, text = _verify(FakeTransport(hosts), tmp_path)
+    assert code == pool.EXIT_NO_FREE_HOST
+    assert "no free pre-PR slot" in text
+    assert hosts["pool-a"].ran == []
+
+
+def test_verify_first_free_slot_exits_3_when_every_free_slot_is_lost(
+    tmp_path: Path,
+) -> None:
+    hosts = _slot_hosts()
+
+    class PeersTakeBoth(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            rc, out = super().run(host, command, timeout)
+            if "CORES=$(getconf" in command and host.name.startswith("pool-c-slot"):
+                self.hosts[host.name].lease = _lease(
+                    "peer", NOW + dt.timedelta(hours=1)
+                )
+            return rc, out
+
+    code, text = _verify(PeersTakeBoth(hosts), tmp_path)
+    assert code == pool.EXIT_NO_FREE_HOST
+    assert "taken before its lease" in text
+
+
+def test_verify_suite_refuses_a_call_with_no_tests_and_no_suite(tmp_path: Path) -> None:
+    code, text = _verify(NoHostTransport(), tmp_path, tests=(), suite=False)
+    assert code == pool.EXIT_USAGE
+    assert "names no tests" in text
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "tests/unit/x.py",
+        "other_repo:tests/x.py",
+        "omnibase_infra:a b",
+        "omnibase_infra:$(x)",
+    ],
+)
+def test_verify_suite_refuses_a_malformed_test_spec(tmp_path: Path, spec: str) -> None:
+    code, _ = _verify(NoHostTransport(), tmp_path, tests=(spec,))
+    assert code == pool.EXIT_USAGE
+
+
+def test_verify_suite_runs_the_unit_suite_under_its_own_budget(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+    hosts["pool-c-slot-1"].phases["tests"] = (
+        "omnibase_infra suite rc=0 2026-10-19T01:00:00Z"
+    )
+    tp = TimedTransport(hosts)
+    code, text = _verify(
+        tp, tmp_path, tests=(), suite=True, suite_budget_s=5400, suite_workers=6
+    )
+    assert code == pool.EXIT_PASS, text
+    env = (
+        (tmp_path / "work" / "verify.resolved.env")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    assert "SUITE_REPO=omnibase_infra" in env and "SUITE_WORKERS=6" in env
+    assert not any(line.startswith("TESTS=") for line in env)
+    assert tp.tests_budgets() == [5400]
+
+
+def test_a_focused_run_keeps_the_default_tests_budget(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+    tp = TimedTransport(hosts)
+    assert _verify(tp, tmp_path)[0] == pool.EXIT_PASS
+    assert tp.tests_budgets() == [2400]
+
+
+def test_verify_suite_judges_a_failing_suite_and_bounds_the_dev_control() -> None:
+    failing = (
+        "FAILED tests/unit/a.py::t1\nomnibase_infra suite rc=1 t\n"
+        "dev-control omnibase_infra tests/unit/a.py::t1 rc=1 at abc\n"
+        "dev-control-bound omnibase_infra skipped=3 bound=1"
+    )
+    rb = pool.judge({**SLOT_GOOD, "tests": failing}, ports=(28085, 28086))
+    assert rb.checks["focused_tests"] is True
+    rb = pool.judge(
+        {
+            **SLOT_GOOD,
+            "tests": "FAILED tests/unit/b.py::t2\nomnibase_infra suite rc=1 t",
+        },
+        ports=(28085, 28086),
+    )
+    assert rb.checks["focused_tests"] is False
+
+
+def test_the_prove_script_runs_a_suite_and_bounds_its_dev_control() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    assert "SUITE_REPO" in text and "tests/unit" in text
+    assert "DEV_CONTROL_MAX:-25" in text
+    assert (
+        "fetch_ref()" in text and "INFRA_REF_SHA" in text and "MARKET_REF_SHA" in text
+    )
+    assert 'git -C "$d" fetch -q origin "$sha"' in text
+    done = subprocess.run(
+        ["bash", "-n", str(PROVE_SH)], capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stderr
+
+
+def test_verify_result_is_written_for_every_outcome_with_the_exit_code(
+    tmp_path: Path,
+) -> None:
+    def check(name: str, tp: Any, **over: Any) -> dict[str, Any]:
+        out = tmp_path / name / "result.json"
+        code, _ = _verify(tp, tmp_path / name, result_out=out, **over)
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["schema"] == "onex.prepr.verify-result.v1"
+        assert data["exit_code"] == code
+        assert data["repo"] == "omnibase_infra" and data["holder"] == "me"
+        return data
+
+    ok = check("pass", FakeTransport(_slot_hosts()))
+    assert ok["outcome"] == "PASS" and ok["exit_code"] == 0
+    assert ok["sha"] == SHA and ok["slot"] == "pool-c-slot-1" and ok["restored"] is True
+    assert ok["checks"]["focused_tests"] is True
+
+    bad = _slot_hosts()
+    bad["pool-c-slot-1"].phases["tests"] = (
+        "FAILED tests/unit/x.py::t\nomnibase_infra focused rc=1 t"
+    )
+    failed = check("fail", FakeTransport(bad))
+    assert failed["outcome"] == "FAIL" and failed["exit_code"] == 1
+
+    inconclusive = _slot_hosts()
+    inconclusive["pool-c-slot-1"].phases["build"] = "build rc=1"
+    assert check("inconclusive", FakeTransport(inconclusive))["exit_code"] == 2
+
+    full = _slot_hosts(slot1_busy=True)
+    full["pool-c-slot-2"].slot = 12
+    nofree = check("nofree", FakeTransport(full))
+    assert nofree["outcome"] == "NO_FREE_SLOT" and nofree["exit_code"] == 3
+    assert nofree["slot"] == ""
+
+    usage = check("usage", NoHostTransport(), tests=())
+    assert usage["outcome"] == "USAGE" and usage["exit_code"] == 5
+    unresolved = check("unresolved", NoHostTransport(), ref="nope")
+    assert unresolved["exit_code"] == 5
+
+
+def _canonical_clone(root: Path) -> str:
+    """A registry root holding a clone of omnibase_infra with a feature-x branch; its head sha."""
+    origin = root / "origin"
+    origin.mkdir(parents=True)
+    _git("init", "-q", "-b", "dev", cwd=origin)
+    _git(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@lab.invalid",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "c",
+        cwd=origin,
+    )
+    _git("branch", "feature-x", cwd=origin)
+    _git("clone", "-q", str(origin), str(root / "omnibase_infra"), cwd=root)
+    return _git("rev-parse", "HEAD", cwd=origin)
+
+
+def _verify_argv(tmp_path: Path, out: Path, ref: str) -> list[str]:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("", encoding="utf-8")
+    return [
+        "--config",
+        str(POOL_FIXTURE),
+        "--ledger",
+        str(ledger),
+        "verify",
+        "--repo",
+        "omnibase_infra",
+        "--ref",
+        ref,
+        "--holder",
+        "me",
+        "--tests",
+        "omnibase_infra:tests/unit/test_x.py",
+        "--result-out",
+        str(out),
+        "--clone-root",
+        str(tmp_path / "root"),
+    ]
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_verify_result_exit_code_equals_the_process_exit_code(
+    tmp_path: Path, busy: bool
+) -> None:
+    head = _canonical_clone(tmp_path / "root")
+    out = tmp_path / "result.json"
+    hosts = _slot_hosts(slot1_busy=busy)
+    if busy:
+        hosts["pool-c-slot-2"].slot = 12
+    code = pool.main(
+        _verify_argv(tmp_path, out, "feature-x"), transport=FakeTransport(hosts)
+    )
+    assert code == (pool.EXIT_NO_FREE_HOST if busy else pool.EXIT_PASS)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["exit_code"] == code and data["sha"] == head
+    code = pool.main(
+        _verify_argv(tmp_path, out, "no-such"), transport=NoHostTransport()
+    )
+    assert code == pool.EXIT_USAGE
+    assert json.loads(out.read_text(encoding="utf-8"))["exit_code"] == code
+
+
+def test_verify_result_for_an_unreadable_ledger_is_still_written(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "result.json"
+    argv = _verify_argv(tmp_path, out, "x")
+    argv[argv.index("--ledger") + 1] = str(tmp_path / "absent.md")
+    assert pool.main(argv, transport=NoHostTransport()) == pool.EXIT_USAGE
+    assert json.loads(out.read_text(encoding="utf-8"))["exit_code"] == pool.EXIT_USAGE
+
+
+def test_verify_result_for_a_config_error_is_still_written(tmp_path: Path) -> None:
+    out = tmp_path / "result.json"
+    code = pool.main(
+        [
+            "--config",
+            str(tmp_path / "missing.yaml"),
+            "verify",
+            "--repo",
+            "omnibase_infra",
+            "--ref",
+            "x",
+            "--holder",
+            "me",
+            "--suite",
+            "--result-out",
+            str(out),
+        ],
+        transport=NoHostTransport(),
+    )
+    assert code == pool.EXIT_USAGE
+    assert json.loads(out.read_text(encoding="utf-8"))["exit_code"] == pool.EXIT_USAGE
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP, signal.SIGINT])
+def test_verify_signal_tears_the_slot_down_releases_the_lease_and_says_interrupted(
+    tmp_path: Path, sig: signal.Signals
+) -> None:
+    hosts = _slot_hosts()
+
+    class SignalledMidBuild(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if command.endswith(" build"):
+                os.kill(os.getpid(), sig)
+                time.sleep(5)  # the handler raises before this returns
+            return super().run(host, command, timeout)
+
+    before = {s: signal.getsignal(s) for s in pool.VERIFY_SIGNALS}
+    out = tmp_path / "result.json"
+    code, text = _verify(
+        SignalledMidBuild(hosts), tmp_path, result_out=out, handle_signals=True
+    )
+    assert code == 128 + sig.value
+    assert "INTERRUPTED" in text
+    one = hosts["pool-c-slot-1"]
+    assert one.ran[-2:] == ["teardown", "snap-post"], one.ran
+    assert one.lease is None
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["outcome"] == "INTERRUPTED" and data["exit_code"] == code
+    assert data["restored"] is True
+    assert {s: signal.getsignal(s) for s in pool.VERIFY_SIGNALS} == before
+
+
+def test_verify_signal_during_the_survey_leaves_nothing_leased(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+
+    class SignalledInSurvey(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if "CORES=$(getconf" in command:
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(5)
+            return super().run(host, command, timeout)
+
+    out = tmp_path / "result.json"
+    code, _ = _verify(
+        SignalledInSurvey(hosts), tmp_path, result_out=out, handle_signals=True
+    )
+    assert code == 128 + signal.SIGTERM.value
+    assert all(h.lease is None and h.ran == [] for h in hosts.values())
+    assert json.loads(out.read_text(encoding="utf-8"))["outcome"] == "INTERRUPTED"
+
+
+def test_verify_signal_a_second_signal_during_cleanup_does_not_cut_it_short(
+    tmp_path: Path,
+) -> None:
+    hosts = _slot_hosts()
+
+    class TwiceSignalled(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if command.endswith(" build"):
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(5)
+            if command.endswith(" teardown"):
+                os.kill(os.getpid(), signal.SIGINT)  # ignored: cleanup is running
+            return super().run(host, command, timeout)
+
+    code, _ = _verify(TwiceSignalled(hosts), tmp_path, handle_signals=True)
+    assert code == 128 + signal.SIGTERM.value
+    assert hosts["pool-c-slot-1"].ran[-2:] == ["teardown", "snap-post"]
+    assert hosts["pool-c-slot-1"].lease is None
