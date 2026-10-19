@@ -50,6 +50,21 @@ text for them.
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
 5 usage or configuration error.
+
+``verify`` (OMN-20085)
+----------------------
+One call proves a branch or a sha, with no pull request, on the first free
+pre-PR slot: ``verify --repo <omnibase_infra|omnimarket> --ref <branch
+or 40-hex sha> --holder <lane> (--tests <repo>:<path> ... | --suite)
+[--result-out <file>]``. It resolves the ref against the lane's canonical clone
+before anything is leased (an unresolved ref exits 5), takes only prepr-slot
+members, leases the first free one and tries the next when a peer took it
+between the survey and the lease (exit 3 when none is free), builds the slot
+from the ref's test merge into dev, runs the named tests or the repo's unit
+suite, and tears down. ``--result-out`` gets one ``onex.prepr.verify-result.v1``
+JSON file for every outcome, whose ``exit_code`` equals the process exit code.
+A SIGTERM, SIGHUP or SIGINT tears the slot down, releases the lease and exits
+128+signal with outcome INTERRUPTED; a hard kill is OMN-18896's reaper.
 """
 
 from __future__ import annotations
@@ -57,6 +72,7 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import contextlib
 import datetime as dt
 import gzip
 import hashlib
@@ -65,9 +81,12 @@ import json
 import os
 import re
 import shlex
+import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -609,14 +628,35 @@ def acquire_lease(
     if held.get("holder") == holder:
         return True, "already held by this holder"
     if held_until is not None and held_until <= now:
-        # Expired: break it and try once more, still atomically.
-        transport.run(host, f"rm -rf {lease}", timeout=30)
-        rc, out = transport.run(host, cmd, timeout=30)
+        # Expired: break it and take it in one step that admits one breaker at a
+        # time. The breaker holds a guard directory (mkdir is atomic), re-reads the
+        # lease inside it and breaks only the exact lease it judged expired, so two
+        # acquirers that read the same expired lease cannot both break and both
+        # hold it: the second finds the first's fresh lease, or the guard, and is
+        # refused (OMN-20085).
+        guard = f"{lease}.break"
+        held_now = f"echo HELD; cat {lease}/lease.json 2>/dev/null"
+        break_cmd = (
+            f"if mkdir {guard} 2>/dev/null; then "
+            f'if [ "$(cat {lease}/lease.json 2>/dev/null)" = {shlex.quote(held_raw)} ]; then '
+            f"{{ rm -rf {lease} && mkdir {lease} && "
+            f"printf '%s' {shlex.quote(body)} > {lease}/lease.json && echo ACQUIRED; }} "
+            f"|| {{ {held_now}; }}; "
+            f"else {held_now}; fi; rmdir {guard}; "
+            f"else {held_now}; fi"
+        )
+        rc, out = transport.run(host, break_cmd, timeout=30)
         if rc == 0 and "ACQUIRED" in out:
             return (
                 True,
                 f"acquired after breaking the lease {held.get('holder')} let expire at {held.get('until')}",
             )
+        if "HELD" in out:
+            again = out.split("HELD", 1)[1].strip()
+            try:
+                held = json.loads(again) if again else held
+            except json.JSONDecodeError:
+                pass
     return False, f"held by {held.get('holder', '?')} until {held.get('until', '?')}"
 
 
@@ -939,7 +979,7 @@ def judge(
             "changed path not applicable, runs in no runtime (no topics, no runtime "
             "profile): " + ", ".join(not_applicable)
         )
-    rcs = re.findall(r"^(\S+) focused rc=(\d+)", tests, re.M)
+    rcs = re.findall(r"^(\S+) (?:focused|suite) rc=(\d+)", tests, re.M)
     failed_ids = re.findall(r"^FAILED (\S+)", tests, re.M)
     # pytest rc 1 = tests failed; a dev control at rc 1 means the test fails at
     # dev too. rc 4/5 (no such test at dev) means the PR introduced it.
@@ -1064,6 +1104,14 @@ def render_readback(
             f"omnimarket#{n} head {h[:10]}"
             for n, h in group_members(params["MARKET_GROUP"], name="MARKET_GROUP")
         )
+    for key, repo in (
+        ("INFRA_REF_SHA", "omnibase_infra"),
+        ("MARKET_REF_SHA", "omnimarket"),
+    ):
+        if params.get(key):
+            subject.append(
+                f"{repo}@{params[key][:10]} (ref {params.get('VERIFY_REF', '?')})"
+            )
     if params.get("INFRA_PR"):
         subject.append(
             f"omnibase_infra#{params['INFRA_PR']} head {params.get('INFRA_HEAD', '?')[:10]}"
@@ -1829,6 +1877,8 @@ def _run_stack(
     log: Callable[[str], None],
     overlay: Path | None = None,
     post_up_command: str | None = None,
+    tests_budget: float = 2400,
+    outputs_sink: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """One stack on the leased host: every phase, then ALWAYS teardown.
 
@@ -1881,9 +1931,9 @@ def _run_stack(
         "probe": 1800,
         "exercise": 1800,
         "post-bringup": 1800,
-        "tests": 2400,
+        "tests": tests_budget,
     }
-    outputs: dict[str, str] = {}
+    outputs: dict[str, str] = outputs_sink if outputs_sink is not None else {}
 
     def phase_run(phase: str, timeout: float) -> int:
         rc, out = transport.run(
@@ -1919,6 +1969,358 @@ def _run_stack(
             phase_run(phase, 600)
         transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
     return outputs
+
+
+# --------------------------------------------------------------------------- verify
+
+VERIFY_SCHEMA = "onex.prepr.verify-result.v1"
+#: the subject repositories a ref can be verified in, and the prove.sh param that names each
+VERIFY_REPOS = {"omnibase_infra": "INFRA_REF_SHA", "omnimarket": "MARKET_REF_SHA"}
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+TEST_SPEC_RE = re.compile(r"^(omnibase_infra|omnimarket):[A-Za-z0-9_./:\[\]-]+$")
+HOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+VERIFY_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+EXIT_SIGNAL_BASE = 128
+DEFAULT_VERIFY_TTL_MINUTES = 150
+DEFAULT_SUITE_BUDGET_S = 3600
+DEFAULT_SUITE_WORKERS = 4
+
+
+class RefUnresolvedError(ValueError):
+    """The ref names no commit the canonical clone holds."""
+
+
+class VerifyInterrupted(BaseException):
+    """A catchable termination signal reached a verify run.
+
+    A BaseException on purpose: nothing between the signal and the run's own
+    cleanup may swallow it, and the cleanup (teardown, lease release) is in
+    ``finally`` blocks that run as it passes.
+    """
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+@contextlib.contextmanager
+def interrupt_guard() -> Any:
+    """Turn the first SIGTERM, SIGHUP or SIGINT into ``VerifyInterrupted``.
+
+    Later signals are ignored so the cleanup the first one starts runs to its
+    end. The previous handlers come back on exit.
+    """
+
+    def handler(signum: int, frame: Any) -> None:
+        for sig in VERIFY_SIGNALS:
+            signal.signal(sig, signal.SIG_IGN)
+        raise VerifyInterrupted(signum)
+
+    previous = {sig: signal.signal(sig, handler) for sig in VERIFY_SIGNALS}
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
+
+def resolve_ref_in_clone(clone: Path, ref: str) -> str:
+    """The full sha ``ref`` names in a canonical clone, read locally.
+
+    A 40-hex ref must be a commit the clone holds; anything else is a branch
+    read as ``origin/<ref>``, which the canonical-clone sync keeps current.
+    Nothing is fetched here, so a branch pushed in the last minutes needs the
+    sync's refresh first.
+    """
+    if SHA_RE.match(ref):
+        spec, remote = f"{ref}^{{commit}}", False
+    elif REF_RE.match(ref) and ".." not in ref and not ref.endswith((".lock", "/")):
+        spec, remote = f"refs/remotes/origin/{ref}^{{commit}}", True
+    else:
+        raise RefUnresolvedError(f"{ref!r} is neither a 40-hex sha nor a branch name")
+    if not (clone / ".git").exists() and not (clone / "HEAD").exists():
+        raise RefUnresolvedError(f"{clone} is not a git clone")
+    proc = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "--verify", "--quiet", spec],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        # a git hook's GIT_DIR would override -C and read some other repository
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    )
+    sha = proc.stdout.strip()
+    if proc.returncode != 0 or not SHA_RE.match(sha):
+        where = "origin branch" if remote else "commit"
+        raise RefUnresolvedError(f"{ref!r} is not a {where} in {clone}")
+    return sha
+
+
+def validate_verify_request(
+    repo: str, holder: str, tests: Sequence[str], suite: bool
+) -> str | None:
+    """The reason a verify call is refused before it touches anything, or None."""
+    if repo not in VERIFY_REPOS:
+        return f"--repo {repo!r} is not one of {', '.join(sorted(VERIFY_REPOS))}"
+    if not HOLDER_RE.match(holder):
+        return f"--holder {holder!r} is not a lane name"
+    if not tests and not suite:
+        return (
+            "verify names no tests: pass --tests <repo>:<path> (repeatable) "
+            "or --suite; a run with no tests cannot pass its focused_tests check"
+        )
+    for spec in tests:
+        if not TEST_SPEC_RE.match(spec):
+            return f"--tests {spec!r} is not <omnibase_infra|omnimarket>:<test path>"
+    return None
+
+
+@dataclass
+class _VerifyFacts:
+    """What a verify run knows so far; the result file is built from it at any exit."""
+
+    repo: str
+    ref: str
+    holder: str
+    tests: tuple[str, ...]
+    suite: bool
+    sha: str = ""
+    host: PoolHost | None = None
+    started: str = ""
+    readback: Readback | None = None
+    lease_note: str = ""
+    refused: list[str] = field(default_factory=list)
+
+
+def verify_result(
+    facts: _VerifyFacts, outcome: str, code: int, finished: str, text: str
+) -> dict[str, Any]:
+    rb = facts.readback
+    return {
+        "schema": VERIFY_SCHEMA,
+        "repo": facts.repo,
+        "ref": facts.ref,
+        "sha": facts.sha,
+        "holder": facts.holder,
+        "tests": list(facts.tests),
+        "suite": facts.suite,
+        "outcome": outcome,
+        "exit_code": code,
+        "slot": facts.host.name if facts.host else "",
+        "surface": facts.host.surface if facts.host else "",
+        "project": facts.host.compose_project if facts.host else "",
+        "started": facts.started,
+        "finished": finished,
+        "checks": dict(rb.checks) if rb else {},
+        "notes": list(rb.notes) if rb else [],
+        "restored": bool(rb.restored) if rb else False,
+        "residue": rb.residue if rb else "",
+        "slots_refused": list(facts.refused),
+        "summary": text.splitlines()[0] if text else "",
+    }
+
+
+def write_verify_result(path: Path, result: Mapping[str, Any]) -> None:
+    """Write the result file whole or not at all."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    tmp.replace(path)
+
+
+def _utc_text(moment: dt.datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def run_verify(
+    cfg: PoolConfig,
+    transport: Transport,
+    *,
+    repo: str,
+    ref: str,
+    holder: str,
+    tests: Sequence[str],
+    suite: bool,
+    resolver: Callable[[str, str], str],
+    ledger_lines: Sequence[str],
+    ttl_minutes: int = DEFAULT_VERIFY_TTL_MINUTES,
+    suite_budget_s: float = DEFAULT_SUITE_BUDGET_S,
+    suite_workers: int = DEFAULT_SUITE_WORKERS,
+    result_out: Path | None = None,
+    workdir: Path | None = None,
+    now_fn: Callable[[], dt.datetime] = _utcnow,
+    log: Callable[[str], None] = lambda s: print(s, file=sys.stderr),
+    handle_signals: bool = False,
+) -> tuple[int, str]:
+    """Verify a branch or sha on the first free pre-PR slot (OMN-20085).
+
+    Returns the exit code and the readback text; when ``result_out`` is given
+    the typed result file is written for every outcome, whose ``exit_code`` is
+    the code returned here.
+    """
+    facts = _VerifyFacts(repo, ref, holder, tuple(tests), suite)
+    facts.started = _utc_text(now_fn())
+    outcome, code, text = "USAGE", EXIT_USAGE, ""
+    guard = interrupt_guard() if handle_signals else contextlib.nullcontext()
+    with guard:
+        try:
+            outcome, code, text = _verify_steps(
+                cfg,
+                transport,
+                facts,
+                resolver=resolver,
+                ledger_lines=ledger_lines,
+                ttl_minutes=ttl_minutes,
+                suite_budget_s=suite_budget_s,
+                suite_workers=suite_workers,
+                workdir=workdir,
+                now_fn=now_fn,
+                log=log,
+            )
+        except VerifyInterrupted as exc:
+            name = signal.Signals(exc.signum).name
+            outcome, code = "INTERRUPTED", EXIT_SIGNAL_BASE + exc.signum
+            where = f" on {facts.host.name}" if facts.host else ""
+            text = (
+                f"VERIFY INTERRUPTED: {name} stopped {repo}@{ref}{where}; "
+                "the slot was torn down and the lease released before exit"
+            )
+            if facts.host is not None and facts.readback is not None:
+                text += f"\n  restored={'yes' if facts.readback.restored else 'no'} ({facts.readback.residue})"
+                text += (
+                    f"\n  ledger: RELEASE re=<your HOLD id> surface={facts.host.surface} "
+                    f"result=ABORTED restored={'yes' if facts.readback.restored else 'no'}"
+                )
+    if result_out is not None:
+        write_verify_result(
+            result_out, verify_result(facts, outcome, code, _utc_text(now_fn()), text)
+        )
+    return code, text
+
+
+def _verify_steps(
+    cfg: PoolConfig,
+    transport: Transport,
+    facts: _VerifyFacts,
+    *,
+    resolver: Callable[[str, str], str],
+    ledger_lines: Sequence[str],
+    ttl_minutes: int,
+    suite_budget_s: float,
+    suite_workers: int,
+    workdir: Path | None,
+    now_fn: Callable[[], dt.datetime],
+    log: Callable[[str], None],
+) -> tuple[str, int, str]:
+    refusal = validate_verify_request(
+        facts.repo, facts.holder, facts.tests, facts.suite
+    )
+    if refusal:
+        return "USAGE", EXIT_USAGE, refusal
+    try:
+        facts.sha = resolver(facts.repo, facts.ref)
+    except RefUnresolvedError as exc:
+        return "USAGE", EXIT_USAGE, f"ref does not resolve, nothing leased: {exc}"
+    now = now_fn()
+    holds = live_surface_holds(ledger_lines, now)
+    states = survey(cfg, transport, holds, now, me=facts.holder)
+    slots = sorted(
+        (s for s in states if s.host.kind == "prepr-slot"),
+        key=lambda s: (s.host.slot, s.host.name),
+    )
+    free = [s for s in slots if s.verdict == "FREE"]
+    if not free:
+        return (
+            "NO_FREE_SLOT",
+            EXIT_NO_FREE_HOST,
+            "no free pre-PR slot: "
+            + "; ".join(f"{s.host.name} {s.verdict} {s.detail}" for s in slots)
+            if slots
+            else "the pool has no pre-PR slot member",
+        )
+    until = now + dt.timedelta(minutes=ttl_minutes)
+    host: PoolHost | None = None
+    for candidate in free:
+        ok, why = acquire_lease(
+            cfg, transport, candidate.host, facts.holder, until, now
+        )
+        if ok:
+            host, facts.lease_note = candidate.host, why
+            break
+        facts.refused.append(f"{candidate.host.name}: {why}")
+        log(f"lease {candidate.host.name} refused ({why}); trying the next free slot")
+    if host is None:
+        return (
+            "NO_FREE_SLOT",
+            EXIT_NO_FREE_HOST,
+            "no free pre-PR slot: every free slot was taken before its lease: "
+            + "; ".join(facts.refused),
+        )
+    facts.host = host
+    log(f"lease {host.name}: {facts.lease_note}; until {_utc_text(until)}")
+    log(
+        f"ledger: write HOLD surface={host.surface} until={_utc_text(until)} through /omni:ledger-msg now"
+    )
+    own_dir = workdir is None
+    work = workdir or Path(tempfile.mkdtemp(prefix="prepr-verify-"))
+    work.mkdir(parents=True, exist_ok=True)
+    params = {
+        VERIFY_REPOS[facts.repo]: facts.sha,
+        "VERIFY_REF": facts.ref,
+    }
+    if facts.tests:
+        params["TESTS"] = " ".join(facts.tests)
+    if facts.suite:
+        params["SUITE_REPO"] = facts.repo
+        params["SUITE_WORKERS"] = str(suite_workers)
+    params_path = work / "verify.env"
+    params_path.write_text(
+        "".join(f"{k}={v}\n" for k, v in params.items()), encoding="utf-8"
+    )
+    outputs: dict[str, str] = {}
+    ports = (host.main_port, host.effects_port)
+    released, rwhy = False, "not attempted"
+    try:
+        try:
+            _run_stack(
+                cfg,
+                transport,
+                host,
+                params,
+                params_path,
+                f"verify-{facts.holder}-{now:%H%M%S}",
+                facts.holder,
+                with_tests=True,
+                log=log,
+                tests_budget=suite_budget_s if facts.suite else 2400,
+                outputs_sink=outputs,
+            )
+        except VerifyInterrupted:
+            # the stack's own finally has torn the slot down; keep its readback
+            facts.readback = judge(outputs, None, ports)
+            raise
+        finally:
+            released, rwhy = release_lease(cfg, transport, host, facts.holder)
+            log(f"lease {host.name}: {rwhy}")
+        rb = judge(outputs, None, ports)
+        facts.readback = rb
+        if not released:
+            rb.notes.append(f"lease not released: {rwhy}")
+        finished = _utc_text(now_fn())
+        text = render_readback(rb, host, params, facts.started, finished)
+        release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
+        text += (
+            f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
+            f"result={release_result} restored={'yes' if rb.restored else 'no'}"
+        )
+        code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
+        return rb.outcome, code, text
+    finally:
+        if own_dir:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- cli
@@ -2045,6 +2447,48 @@ def build_parser() -> argparse.ArgumentParser:
         "--post-up-command",
         help="a shell command run once against the live stack after the probe, from the build tree, with MAIN_PORT, EFFECTS_PORT and PROJECT exported; the proof fails unless it exits 0",
     )
+    vf = sub.add_parser(
+        "verify",
+        help="verify a branch or sha, with no PR, on the first free pre-PR slot",
+    )
+    vf.add_argument("--repo", required=True, choices=sorted(VERIFY_REPOS))
+    vf.add_argument(
+        "--ref",
+        required=True,
+        help="a branch of the canonical clone's origin, or a 40-hex sha",
+    )
+    vf.add_argument("--holder", required=True, help="your ledger lane name")
+    vf.add_argument(
+        "--tests",
+        action="append",
+        default=[],
+        metavar="REPO:PATH",
+        help="a focused test path on the slot host, repeatable (omnibase_infra:tests/unit/x.py)",
+    )
+    vf.add_argument(
+        "--suite",
+        action="store_true",
+        help="run the repo's whole unit suite (tests/unit) under its own budget, with a bounded dev control",
+    )
+    vf.add_argument("--suite-budget-s", type=float, default=DEFAULT_SUITE_BUDGET_S)
+    vf.add_argument("--suite-workers", type=int, default=DEFAULT_SUITE_WORKERS)
+    vf.add_argument("--ttl-minutes", type=int, default=DEFAULT_VERIFY_TTL_MINUTES)
+    vf.add_argument(
+        "--result-out",
+        type=Path,
+        help=f"write one {VERIFY_SCHEMA} JSON file for every outcome; its exit_code is this process's exit code",
+    )
+    vf.add_argument(
+        "--clone-root",
+        type=Path,
+        default=Path(os.environ["OMNI_HOME"]) if os.environ.get("OMNI_HOME") else None,
+        help="the registry root holding the canonical clones the ref is resolved in (default $OMNI_HOME)",
+    )
+    vf.add_argument(
+        "--workdir",
+        type=Path,
+        help="where the run's params files go (default a temporary directory)",
+    )
     rl = sub.add_parser("release", help="release a lease this holder left behind")
     rl.add_argument("--host", required=True)
     rl.add_argument("--holder", required=True)
@@ -2058,6 +2502,21 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         cfg = load_pool_config(args.config)
     except (OSError, ValueError, KeyError) as exc:
         print(f"config error: {exc}", file=sys.stderr)
+        if args.cmd == "verify" and args.result_out is not None:
+            refused = _VerifyFacts(
+                args.repo, args.ref, args.holder, tuple(args.tests), args.suite
+            )
+            refused.started = _utc_text(_utcnow())
+            write_verify_result(
+                args.result_out,
+                verify_result(
+                    refused,
+                    "USAGE",
+                    EXIT_USAGE,
+                    refused.started,
+                    f"config error: {exc}",
+                ),
+            )
         return EXIT_USAGE
     tp = transport or SshTransport()
     now = _utcnow()
@@ -2092,6 +2551,56 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         else:
             print(_status_table(states))
         return EXIT_PASS
+    if args.cmd == "verify":
+        clone_root: Path | None = args.clone_root
+
+        def resolver(repo: str, ref: str) -> str:
+            if clone_root is None:
+                raise RefUnresolvedError(
+                    "no clone root: pass --clone-root or set OMNI_HOME"
+                )
+            return resolve_ref_in_clone(clone_root / repo, ref)
+
+        try:
+            ledger_lines = _ledger_lines(args.ledger)
+        except OSError as exc:
+            # a ledger that cannot be read cannot show a peer's HOLD: refuse, and say so in the file
+            print(f"ledger error: {exc}", file=sys.stderr)
+            if args.result_out is not None:
+                refused = _VerifyFacts(
+                    args.repo, args.ref, args.holder, tuple(args.tests), args.suite
+                )
+                refused.started = _utc_text(now)
+                write_verify_result(
+                    args.result_out,
+                    verify_result(
+                        refused,
+                        "USAGE",
+                        EXIT_USAGE,
+                        refused.started,
+                        f"ledger error: {exc}",
+                    ),
+                )
+            return EXIT_USAGE
+        code, text = run_verify(
+            cfg,
+            tp,
+            repo=args.repo,
+            ref=args.ref,
+            holder=args.holder,
+            tests=args.tests,
+            suite=args.suite,
+            resolver=resolver,
+            ledger_lines=ledger_lines,
+            ttl_minutes=args.ttl_minutes,
+            suite_budget_s=args.suite_budget_s,
+            suite_workers=args.suite_workers,
+            result_out=args.result_out,
+            workdir=args.workdir,
+            handle_signals=True,
+        )
+        print(text)
+        return code
     if args.cmd == "release":
         ok, why = release_lease(cfg, tp, cfg.host(args.host), args.holder)
         print(why)
