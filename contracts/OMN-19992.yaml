@@ -22,7 +22,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn19992-ac2-inmemory-kernel-runtime-error-event
+  - id: dod-omn19992-ac2-inmemory-runtime-error
     description: The test passes at this head and fails with the bridge gated back to the Kafka transport only (no runtime-error event within 10.0 s).
     source: manual
     checks:
