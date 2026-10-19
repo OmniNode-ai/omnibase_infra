@@ -12,7 +12,7 @@ evidence_requirements:
     command: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
   - kind: manual
     description: "Deploy check: the compose file the dev lane deploys from carries the raised limit at this head."
-    command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'OMN-19513: the container default is 1024 open files'"
+    command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'OMN-19513: the container default is 1024 open files' | grep -qx 1"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -30,5 +30,5 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'OMN-19513: the container default is 1024 open files'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'OMN-19513: the container default is 1024 open files' | grep -qx 1"
         cwd: "${OMNI_HOME}/omnibase_infra"
