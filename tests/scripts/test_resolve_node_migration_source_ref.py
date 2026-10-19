@@ -573,6 +573,26 @@ def test_merge_group_reads_the_queued_pr_body_and_its_paired_source(
     assert calls[0].endswith("/repos/OmniNode-ai/omnibase_infra/pulls/4165")
 
 
+def test_merge_group_reads_the_queued_pr_when_the_base_branch_name_has_slashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = "\n".join(
+        [
+            "Node-Migration-Source-PR: omnimarket#2953",
+            f"Node-Migration-Source-SHA: {_SOURCE_SHA}",
+        ]
+    )
+    api_get, calls = _paired_api(body)
+    head_ref = f"refs/heads/gh-readonly-queue/release/1.x/pr-4165-{_QUEUE_SHA}"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(_merge_group_event(tmp_path, head_ref)))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == _SOURCE_SHA
+    assert calls[0].endswith("/repos/OmniNode-ai/omnibase_infra/pulls/4165")
+
+
 def test_merge_group_without_trailers_still_resolves_dev(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
