@@ -37,6 +37,7 @@ the null it replaced — a reader would believe it.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -242,3 +243,19 @@ def test_the_correlation_id_is_dereferenced_never_interpolated(
     """The same script-injection rule the evidence string already follows."""
     for job_name, step in _emit_steps(workflow).items():
         assert "${{" not in step["run"], f"{workflow.name}:{job_name}"
+
+
+@pytest.mark.parametrize("workflow", sorted(EMITTING_JOBS), ids=lambda p: p.name)
+def test_the_flag_takes_the_dereferenced_correlation_id_and_nothing_else(
+    workflow: Path,
+) -> None:
+    """The argument right after the flag is the job's own correlation id.
+
+    ``"--agent-command-id" in run`` is satisfied by a flag handed a literal, an
+    empty string or another job's variable; the receipt would then carry a value
+    that joins to no agent job. The value must be the quoted ``CORRELATION_ID``
+    env reference the step takes from ``needs.trigger-rebuild``.
+    """
+    pattern = re.compile(r'--agent-command-id\s+"\$\{?CORRELATION_ID\}?"')
+    for job_name, step in _emit_steps(workflow).items():
+        assert len(pattern.findall(step["run"])) == 1, f"{workflow.name}:{job_name}"
