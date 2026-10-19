@@ -491,9 +491,14 @@ class TestHostWithNoLabRow:
         )
         assert TestRunDelegate._sent_payload(captured)["tenant_id"] == _MINTED
 
-    def test_declared_lab_host_still_resolves_its_lab_tenant(
+    def test_declared_lab_host_on_the_inmemory_bus_records_under_the_install_identity(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # OMN-17427 (board criterion C30): an in-memory run records only into
+        # this install's local store, whose tenant mirror confirms only the
+        # install's own identity. A lab tenant stamped here is refused by that
+        # mirror and the run's delegation_events row is dropped while the run
+        # still reports success, so the lab tenant is never stamped on it.
         self._table(tmp_path, monkeypatch, self._row("h201"), self._row("h202"))
         monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "h202")
         captured = TestRunDelegate._run(
@@ -502,7 +507,63 @@ class TestHostWithNoLabRow:
             bus="inmemory",
             locus=EnumDelegateLocus.IN_PROCESS,
         )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == _MINTED
+
+    def test_declared_lab_host_on_the_inmemory_bus_leaves_a_first_run_unstamped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A fresh install on a declared lab host (a CI runner container) has no
+        # identity yet: the request carries no stamp and the local port mints.
+        monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: None)
+        self._table(tmp_path, monkeypatch, self._row("h202"))
+        monkeypatch.setenv("ONEX_LANE_HOST", "h202")
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+        )
+        assert "tenant_id" not in TestRunDelegate._sent_payload(captured)
+
+    def test_declared_lab_host_on_the_shared_bus_still_resolves_its_lab_tenant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._table(tmp_path, monkeypatch, self._row("h201"), self._row("h202"))
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "h202")
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="kafka",
+            locus=EnumDelegateLocus.IN_PROCESS,
+        )
         assert TestRunDelegate._sent_payload(captured)["tenant_id"] == self._HOUSE
+
+    def test_inmemory_run_still_refuses_a_lane_host_absent_from_the_table(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._table(tmp_path, monkeypatch, self._row("h201"))
+        monkeypatch.setenv("ONEX_LANE_HOST", "h999")
+        with pytest.raises(click.ClickException, match="found 0"):
+            TestRunDelegate._run(
+                tmp_path,
+                monkeypatch,
+                bus="inmemory",
+                locus=EnumDelegateLocus.IN_PROCESS,
+            )
+
+    def test_inmemory_run_on_a_lab_host_keeps_a_declared_overlay(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._table(tmp_path, monkeypatch, self._row("h202"))
+        monkeypatch.setenv("ONEX_LANE_HOST", "h202")
+        monkeypatch.setenv(TENANT_OVERLAY_ENV, _OVERLAY)
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="inmemory",
+            locus=EnumDelegateLocus.IN_PROCESS,
+        )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == _OVERLAY
 
     def test_lane_host_declared_but_absent_from_the_table_still_refuses(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

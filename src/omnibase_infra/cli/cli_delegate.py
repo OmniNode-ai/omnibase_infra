@@ -2404,6 +2404,24 @@ def resolve_delegate_tenant(
     )
 
 
+def local_store_tenant(stamp: str | None, *, environ: Mapping[str, str]) -> str | None:
+    """The stamp for a run whose record is written only to this install's store.
+
+    OMN-17427 (board criterion C30). A run on the in-memory bus records only
+    into this install's local store, whose tenant mirror confirms only the
+    install's own identity. A lab host tenant stamped on such a run is refused
+    there and its ``delegation_events`` row is dropped while the run still
+    reports success, as on a CI runner that declares ``ONEX_LANE_HOST``. So a
+    declared overlay stands, and anything else becomes the install identity, or
+    no stamp on a fresh install for the local port to mint. The caller runs
+    :func:`resolve_delegate_tenant` first, so a declared lab host with no row
+    still refuses.
+    """
+    if environ.get(TENANT_OVERLAY_ENV, "").strip():
+        return stamp
+    return read_install_identity()
+
+
 def mint_delegate_trace_context() -> tuple[uuid.UUID | None, uuid.UUID | None]:
     """Mint this invocation's ``(trace_id, span_id)``, or ``(None, None)``.
 
@@ -4337,6 +4355,8 @@ def run_delegate(
                 environ=os.environ,
                 omni_home=omni_home,
             )
+            if bus != BUS_KAFKA:
+                tenant_id = local_store_tenant(tenant_id, environ=os.environ)
         except DelegateTenantRefusedError as exc:
             raise click.ClickException(str(exc)) from exc
         trace_id, span_id = mint_delegate_trace_context()
