@@ -209,7 +209,7 @@ requirements:
     acceptance:
       - id: AC46
         statement: 'AC46: a test_passes check naming tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_caller_workflow_shape binds with no violation, and a node id naming a missing file is refused with the existing-path message -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k "node_id"'
-  - id: req-omn17427-in-process-lab-host-install-tenant
+  - id: req-omn17427-inmem-install-tenant
     statement: An onex delegate run on the in-memory bus, on a host that declares a lab host row, stamps the install identity and not the lab tenant, so its delegation_events row is written to the local store; a run on the shared bus still stamps the lab tenant.
     acceptance:
       - id: AC47
@@ -916,7 +916,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC46
-  - id: dod-omn-17427-ac47-in-process-lab-host-install-tenant
+  - id: dod-omn-17427-ac47-inmem-install-tenant
     description: The in-memory run on a declared lab host is stamped with the install identity, or left unstamped on a fresh install, and the shared-bus run keeps the lab tenant. Unit tests with the receipt layer faked; no broker, credential or lab service is touched.
     source: manual
     checks:
