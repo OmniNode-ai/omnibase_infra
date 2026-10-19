@@ -29,6 +29,41 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn20834-postgres-null-readback
+    description: Apply the shipped generation migrations on an isolated PostgreSQL 16 container, then assert that unpriced and omitted costs are NULL while existing zero and priced costs retain their values. The hosted runner needs Docker only; no lane credentials or remote database is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          bash -eu -o pipefail <<'PROBE'
+          name="omn20834-readback-$$"
+          docker run --detach --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine
+          trap 'docker rm -f "$name" >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if docker exec "$name" pg_isready -U postgres >/dev/null; then break; fi
+            sleep 1
+          done
+          {
+            cat docker/migrations/forward/nodes/node_projection_delegation/0008_generation_events.sql
+            cat <<'SQL'
+          INSERT INTO generation_events (correlation_id, cost_inference_usd) VALUES ('existing-priced', 1.234567), ('existing-free', 0);
+          SQL
+            cat docker/migrations/forward/nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql
+            cat <<'SQL'
+          INSERT INTO generation_events (correlation_id, cost_inference_usd) VALUES ('unpriced', NULL), ('priced', 2.345678);
+          INSERT INTO generation_events (correlation_id) VALUES ('omitted');
+          DO $$ BEGIN
+            IF (SELECT count(*) FROM generation_events WHERE correlation_id IN ('unpriced', 'omitted') AND cost_inference_usd IS NULL) <> 2 THEN RAISE EXCEPTION 'unpriced cost is not NULL'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'existing-priced') IS DISTINCT FROM 1.234567::numeric THEN RAISE EXCEPTION 'existing priced cost changed'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'existing-free') IS DISTINCT FROM 0::numeric THEN RAISE EXCEPTION 'existing zero changed'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'priced') IS DISTINCT FROM 2.345678::numeric THEN RAISE EXCEPTION 'priced cost changed'; END IF;
+          END $$;
+          SELECT correlation_id, cost_inference_usd FROM generation_events ORDER BY correlation_id;
+          SQL
+          } | docker exec -i "$name" psql -X -U postgres -v ON_ERROR_STOP=1
+          PROBE
+    binds_ac:
+      - AC2
   - id: dod-omn20834-infra-manifest-and-class
     description: The application migration manifest binds the vendored 0063 to the omnimarket source's checksum, and the migration class check declares it forward-only.
     source: manual
