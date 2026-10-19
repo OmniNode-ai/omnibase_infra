@@ -104,6 +104,23 @@ slot_ports_readback() {
 }
 # --- slot-ports-readback end ---
 
+# OMN-19064: a slot migration failure names its own error. The build log goes
+# with the work directory at teardown, and the entrypoint's own lines say only
+# which migration failed, so print the migration one-shot's last lines: the
+# non-entrypoint lines before the entrypoint's refusal (its text runs on in
+# unprefixed lines and is left out).
+# --- slot-migration-output begin ---
+slot_migration_output() {
+  [ -f "$1" ] || { echo "migration-output none: no build log"; return 0; }
+  awk -v n="${2:-15}" '
+    /^\[prepr-verify-lane\] REFUSED\/FAILED/ { exit }
+    /^\[prepr-verify-lane\]/ || /^[[:space:]]*$/ { next }
+    { buf[c++ % n] = $0 }
+    END { for (i = (c > n ? c - n : 0); i < c; i++) print "migration-output " buf[i % n] }
+  ' "$1"
+}
+# --- slot-migration-output end ---
+
 # Image identity is proven from content, never from the revision label (a label
 # is evidence of intent, not of what was built; OMN-18893). For each repository
 # under test the probe lists every file of its installed package inside the
@@ -426,7 +443,8 @@ build)
       8) # another holder owns the slot: never tear down what this run did not start
          : > "$W/foreign-slot"; echo "build rc=8 slot lock held by another process" ;;
       9) if grep -q 'migration failed' "$W/build.log"; then
-           echo "build rc=0"; echo "slot-migration FAILED"; echo "up rc=9"
+           echo "build rc=0"; echo "slot-migration FAILED"
+           slot_migration_output "$W/build.log"; echo "up rc=9"
          else echo "build rc=9 slot provisioning failed"; fi ;;
       11|12) echo "build rc=0"; echo "up rc=$src" ;;
       *) echo "build rc=$src" ;;
