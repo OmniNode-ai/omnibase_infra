@@ -234,3 +234,43 @@ async def test_readiness_is_confirmed_on_the_physical_topic_not_the_dev_lanes(
     assert after.is_ready
     assert f"prepr1.{_TOPICS[0]}" in broker.described
     assert _TOPICS[0] not in broker.described
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("no_partition_cap")
+async def test_two_slots_provision_and_confirm_independent_topic_sets(
+    contracts_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = _Broker(dict.fromkeys(_TOPICS, 1))
+    slot_topics: dict[str, set[str]] = {}
+    for namespace in ("prepr2", "prepr3"):
+        monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", namespace)
+        provisioner = TopicProvisioner(
+            bootstrap_servers="broker:9092", contracts_root=contracts_root
+        )
+        expected = {f"{namespace}.{name}" for name in _TOPICS}
+        with _patched_admin(broker):
+            before = await provisioner.confirm_topics_ready(
+                list(_TOPICS), config=ModelTopicReadinessConfig(max_attempts=1)
+            )
+            assert not before.is_ready
+            result = await provisioner.ensure_provisioned_topics_exist()
+            created = set(result["created"])
+            assert expected <= created
+            assert all(name.startswith(f"{namespace}.") for name in created)
+            slot_topics[namespace] = created
+            after = await provisioner.confirm_topics_ready(
+                list(_TOPICS), config=ModelTopicReadinessConfig(max_attempts=1)
+            )
+            assert after.is_ready
+            repeat = await provisioner.ensure_provisioned_topics_exist()
+            assert not repeat["created"]
+            assert set(repeat["existing"]) == created
+    assert {name.removeprefix("prepr2.") for name in slot_topics["prepr2"]} == {
+        name.removeprefix("prepr3.") for name in slot_topics["prepr3"]
+    }
+    assert slot_topics["prepr2"].isdisjoint(slot_topics["prepr3"])
+    expected_created = slot_topics["prepr2"] | slot_topics["prepr3"]
+    assert set(broker.created) == expected_created
+    assert len(broker.created) == len(expected_created)
+    assert set(broker.topics) == expected_created | set(_TOPICS)

@@ -34,6 +34,39 @@ TOKEN = re.compile(r"[A-Za-z0-9_]+")
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("slot", ["prepr2", "prepr3", "a", "abcdefghijkl"])
+def test_slot_rewrite_preserves_other_slots_principals(
+    tmp_path: Path, slot: str
+) -> None:
+    migration = tmp_path / "slot_isolation.sql"
+    migration.write_text(
+        "GRANT CONNECT ON DATABASE omnidash_analytics TO role_omnidash;\n"
+        "GRANT SELECT ON slot_data TO role_omnidash_prepr1;\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["sh", "-c", _helpers() + '\nslot_migration_file "$1"', "sh", str(migration)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin", "SLOT_ACTIVE": "1", "ONEX_DB_SLOT": slot},
+    )
+    assert proc.returncode == 0, proc.stderr
+    rewritten = Path(proc.stdout.strip())
+    try:
+        assert rewritten.read_text(encoding="utf-8") == (
+            f"GRANT CONNECT ON DATABASE omnidash_analytics_{slot} "
+            f"TO role_omnidash_{slot};\n"
+            "GRANT SELECT ON slot_data TO role_omnidash_prepr1;\n"
+        )
+        assert migration.read_text(encoding="utf-8").startswith(
+            "GRANT CONNECT ON DATABASE omnidash_analytics TO role_omnidash;\n"
+        )
+    finally:
+        if rewritten != migration:
+            rewritten.unlink(missing_ok=True)
+
+
 def _helpers() -> str:
     text = RUNNER.read_text(encoding="utf-8")
     start = text.index("# Asserts a name is inside the slot's fence")

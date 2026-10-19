@@ -106,6 +106,19 @@ def test_a_malformed_slot_token_is_refused(tmp_path: Path) -> None:
     assert targets == []
 
 
+@pytest.mark.parametrize("slot", ["prepr2", "prepr3", "a", "abcdefghijkl"])
+@pytest.mark.parametrize("db_exists", [False, True])
+def test_other_slots_never_migrate_or_create_a_shared_database(
+    tmp_path: Path, slot: str, db_exists: bool
+) -> None:
+    code, targets, out = _run(tmp_path, slot=slot, db_exists=db_exists)
+    assert code == (0 if db_exists else 4), out
+    assert targets, out
+    assert set(targets) == {f"omniintelligence_{slot}"}, out
+    if not db_exists:
+        assert "slot_fence_refusal" in out
+
+
 class _TagTolerantLoader(yaml.SafeLoader):
     """Load the overlay without resolving compose's ``!override`` tags."""
 
