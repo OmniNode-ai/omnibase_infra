@@ -84,6 +84,14 @@
 # group; the binding names the terminal group the other terminals use, which the
 # `local.omnibase_core.runtime_local_` prefix already covers. The projector publishes the
 # topic, so a developer principal gets no write on it.
+# LAPTOP LANE MIRROR (OMN-19983): the `local-lane-mirror` bundle's forwarder reads the
+# delegation topic set from the laptop broker and republishes it onto the dev lane as
+# the machine's issued principal (docker/lane-overlays/local.lane-credentials.example.yaml,
+# `lane.dev.kafka.scram`). It writes each topic of the set and reads none of them on the
+# lab lane, so the set is a `produce` binding per topic; the two delegate-skill
+# terminals are already produced above. The test pins these to the grants the shipped
+# laptop overlay derives through build_gateway_transports, so a topic the contract adds
+# to the set and this file does not produce fails there.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -119,6 +127,9 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.projection-delegation-applied.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniintelligence.llm-call-completed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
