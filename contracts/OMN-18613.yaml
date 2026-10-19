@@ -1,0 +1,66 @@
+schema_version: 1.0.0
+ticket_id: OMN-18613
+title: Deploy agent loses a rebuild command that shares a Kafka poll batch with an accepted one
+summary: A bare commit() on the deploy agent's accept path committed the consumer position, past records still buffered behind the accepted one, so a post_terminal re-exec lost offset 263 behind accepted offset 262. omnibase_infra#3707 bounds every offset commit to the record it processed. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18613-ac1-accepted-20261018t2045z:
+      - label: AC1
+        criterion_hash: eaa2e0f75b1b7fbeaf4dd2d2e0e63d6ccf06e87dbe2260a709668d2c668b4bf3
+        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
+    dod-omn18613-ac4-accepted-20261018t2045z:
+      - label: AC4
+        criterion_hash: 0560f66bdd13ace398c4d81c8d91463160f7621ecaba7a2853e7f5bc25e68610
+        proposed_by: lane=dod-closeout-bind-2026-10-18T2045Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-18T2045Z-c1
+requirements:
+  - id: req-omn-18613-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC4
+        statement: 'AC4: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: accepting a command commits exactly [msg.offset + 1]. Fails against the pre-fix consumer''s bare commit().'
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_consumer_batch_commit_loss_omn18613.py -q -k "test_accept_commits_through_the_accepted_record_only"
+  - kind: tests
+    description: 'AC4: the measured pair (b046ce97 at 262, 8ba320c4 at 263) leaves 263 uncommitted after 262 is accepted. Fails against the pre-fix consumer at the parent of omnibase_infra#3707.'
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_consumer_batch_commit_loss_omn18613.py -q -k "test_the_measured_loss_leaves_the_buffered_record_uncommitted"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18613-ac1-accepted-20261018t2045z
+    description: 'AC1: accepting a command commits exactly [msg.offset + 1]. Fails against the pre-fix consumer''s bare commit().'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_consumer_batch_commit_loss_omn18613.py -q -k "test_accept_commits_through_the_accepted_record_only"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn18613-ac4-accepted-20261018t2045z
+    description: 'AC4: the measured pair (b046ce97 at 262, 8ba320c4 at 263) leaves 263 uncommitted after 262 is accepted. Fails against the pre-fix consumer at the parent of omnibase_infra#3707.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_consumer_batch_commit_loss_omn18613.py -q -k "test_the_measured_loss_leaves_the_buffered_record_uncommitted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn18613-ac4-redelivered-record-20261018t2045z
+    description: 'AC4: after the post_terminal re-exec the buffered record 263 is re-delivered, accepted and committed through 263 only. Fails against the pre-fix consumer.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_consumer_batch_commit_loss_omn18613.py -q -k "test_the_redelivered_buffered_record_is_accepted_and_committed_on_its_own"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

@@ -1,0 +1,37 @@
+schema_version: 1.0.0
+ticket_id: OMN-18656
+title: deploy-runtime.sh RT-6 readback compares each service to its own source ref and never retags a healthy lane
+summary: |-
+  Evidence for OMN-18656 in the repository that carries the fix (omnibase_infra#3741, squash 2ad774da1). AC1 and AC2 bind to the RT-6 foreign-source-repo tests, which drive the extracted bash functions with only docker stubbed. AC3 and AC4 are not bound here: AC3's reproduction fails at the parent of 2ad774da1 only because the harness cannot extract OWN_SOURCE_REPO, not because the old RT-6 rejected the foreign service, and AC4's proposed readback exits 0 whether or not the two image ids match.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The RT-6 foreign-source-repo readback and rollback tests pass.
+    command: uv run pytest tests/scripts/test_deploy_runtime_rt6_foreign_source_repo_omn18656.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18656-ac1-foreign-sourced-service-own-ref
+    description: |-
+      AC1 binding (accepted 2026-10-18T2045Z, proposed by lane=dod-closeout-bind-2026-10-18T2045Z-c3, accepted by lane=dod-closeout-accept-2026-10-18T2045Z-c3). The RT-6 readback run against a service whose image carries a foreign source repo and that repo's revision passes and logs the foreign source repo, with no intended-ref mismatch. Re-run at origin/dev bab7815e9 PASSED; at the parent of 2ad774da1 the same test fails. Acceptance record: label=AC1, criterion_hash=331ecdc33e8eb320ceac8d9219e6e4c3f75280b8702a268ab5ebdda6f132278d, accepted_at=2026-10-18T21:18:56Z.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_rt6_foreign_source_repo_omn18656.py -q -k 'foreign_sourced_service_at_its_own_repo_ref_passes or foreign_source_labels_work_for_an_unlisted_service'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-18656-ac2-no-retag-when-health-passed
+    description: |-
+      AC2 binding (accepted 2026-10-18T2045Z, proposed by lane=dod-closeout-bind-2026-10-18T2045Z-c3, accepted by lane=dod-closeout-accept-2026-10-18T2045Z-c3). restore_latest_image_tags with HEALTH_PROBES_PASSED=true retags nothing. Re-run at origin/dev bab7815e9 PASSED; at the parent of 2ad774da1 the same test fails behaviourally, retagging omnibase-infra-omninode-runtime:latest and omnibase-infra-runtime-effects:latest. Acceptance record: label=AC2, criterion_hash=da17290150de46ef5a1b6e58accea59e1da8d7d5c3b864cc37a7b27ac87be854, accepted_at=2026-10-18T21:18:56Z.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_rt6_foreign_source_repo_omn18656.py -q -k 'no_retag_when_every_health_probe_passed or readback_failure_rolls_back_tags_only_when_health_failed'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

@@ -374,6 +374,39 @@ def test_mixed_scope_reproduces_the_incident_scope(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("explicit_label", [True, False], ids=["explicit", "oci"])
+def test_foreign_source_labels_work_for_an_unlisted_service(
+    tmp_path: Path, *, explicit_label: bool
+) -> None:
+    """AC1: provenance labels, rather than the service name, select its repo."""
+    service = "partner-worker"
+    source_repo = "partner_runtime"
+    container = {
+        "restart": "unless-stopped",
+        "state": "running",
+        "revision": FOREIGN_SHA,
+        "source_repo": source_repo if explicit_label else "<no value>",
+        # The explicit label takes precedence over an OCI URL naming this repo.
+        "source_url": (
+            OWN_SOURCE_URL
+            if explicit_label
+            else f"https://github.com/OmniNode-ai/{source_repo}"
+        ),
+    }
+    result = _run_readback(
+        tmp_path,
+        services=[CORE, service],
+        running={CORE: "core1", service: "partner1"},
+        all_containers={CORE: "core1", service: "partner1"},
+        inspect={"core1": _own_container(), "partner1": container},
+        expected_revisions=f"{service}={FOREIGN_SHA}",
+    )
+    assert result.returncode == 0, f"stderr={result.stderr!r}"
+    assert f"{CORE} (core1) revision == {GIT_SHA}" in result.stderr
+    assert f"revision == {FOREIGN_SHA} ({source_repo}" in result.stderr
+
+
+@pytest.mark.unit
 def test_foreign_sourced_service_with_no_revision_label_is_rejected(
     tmp_path: Path,
 ) -> None:
@@ -519,6 +552,34 @@ def test_no_retag_when_every_health_probe_passed(tmp_path: Path) -> None:
     )
     assert "NOT restoring :latest image tags" in result.stderr
     assert "cannot recall them" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("health_passed", [True, False], ids=["healthy", "unhealthy"])
+def test_readback_failure_rolls_back_tags_only_when_health_failed(
+    tmp_path: Path, *, health_passed: bool
+) -> None:
+    """AC2: the same stale foreign image preserves tags only on a healthy lane."""
+    readback = _run_readback(
+        tmp_path / "readback",
+        services=[FOREIGN],
+        running={FOREIGN: "onexapi1"},
+        all_containers={FOREIGN: "onexapi1"},
+        inspect={"onexapi1": _foreign_container(revision="0000000000000000")},
+        expected_revisions=f"{FOREIGN}={FOREIGN_SHA}",
+    )
+    assert readback.returncode != 0
+    assert "is not at the declared" in readback.stderr
+
+    restore = _run_restore(tmp_path / "restore", health_passed=health_passed)
+    assert restore.returncode == 0, f"stderr={restore.stderr!r}"
+    calls = (tmp_path / "restore" / "stubs" / "calls.log").read_text()
+    if health_passed:
+        assert calls == "", "healthy readback failures must issue no docker mutation"
+        assert "NOT restoring :latest image tags" in restore.stderr
+    else:
+        assert "tag sha256:94f6885b1b1e omnibase-infra-omninode-runtime:latest" in calls
+        assert "tag sha256:896c48c03760 omnibase-infra-runtime-effects:latest" in calls
 
 
 @pytest.mark.unit
