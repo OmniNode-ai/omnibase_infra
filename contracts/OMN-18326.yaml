@@ -14,7 +14,7 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn-18326-ac3-seam-injects-envelope-time
     description: >
-      AC3. The runtime kernel seam injects the producer's envelope event time as _envelope_timestamp and omits it when the producer recorded none; the delegation projection consumes it (omnimarket#2523, merged). RED first on both sides.
+      AC3. The runtime kernel seam injects the producer's envelope event time as _envelope_timestamp and omits it when the producer recorded none; the delegation projection consumes it (omnimarket#2523, merged). RED first on both sides. Also runs test_projection_envelope_timestamp_extractor_omn18326.py, added with this contract: the extractor reads the time from a mapping-shaped envelope, refuses a naive or untyped one, and keeps a non-UTC offset unchanged.
 
     source: manual
     checks:
@@ -22,5 +22,7 @@ dod_evidence:
         check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py -q -k envelope_timestamp'
       - check_type: test_passes
         check_value: 'uv run pytest tests/integration/runtime/test_projection_envelope_timestamp_authority_omn18326.py -q'
+      - check_type: test_passes
+        check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_projection_envelope_timestamp_extractor_omn18326.py -q'
     binds_ac:
       - AC3
