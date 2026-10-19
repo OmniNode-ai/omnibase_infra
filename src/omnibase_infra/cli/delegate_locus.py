@@ -101,14 +101,15 @@ REBIND_WINDOW_FAILURE_CLASS = "delegate-consumer-rebind-window"
 DOWNSTREAM_CHAIN_STAGE = "downstream-delegation-chain"
 
 # How long a dispatched run waits for a consumer group to bind before it
-# refuses. Measured on the .201 dev lane after omnibase_infra#3939 removed the
-# health-gated hold: container created 2026-09-23T17:58:02.183Z, delegate-skill
-# orchestrator group joined 17:59:40.214Z, 98.0 s. The pre-#3939 windows ran
-# 4 m 20 s to 7 m 52 s. 180 s covers the measured post-fix window with room for
-# a slow host and is still a hard bound: past it the run refuses exactly as it
-# did before, because a lane that is still unbound after three minutes is down,
-# not rebinding.
-_REBIND_WAIT_SECONDS = 180.0
+# refuses. Measured on the dev lane, created -> delegate-skill group
+# joined: 98.0 s on 2026-09-23 (after omnibase_infra#3939 removed the
+# health-gated hold; pre-#3939 windows ran 4 m 20 s to 7 m 52 s), 122.6 s to
+# 127.9 s on 2026-10-14 to 2026-10-17, and 228.9 s on 2026-10-19 (omninode-runtime
+# created 04:57:52Z, group joined 05:01:41Z). 300 s exceeds the longest sample
+# with room for a slower host and is still a hard bound: past it the run
+# refuses exactly as it did before, because a lane that is still unbound after
+# five minutes is down, not rebinding.
+_REBIND_WAIT_SECONDS = 300.0
 
 # Seconds between re-probes inside that window. Each admin request has the
 # ``_LIVENESS_TIMEOUT_SECONDS`` bound; transport failures also incur the

@@ -113,6 +113,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import (
+    DlqPersistenceUnconfirmedError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -190,6 +191,31 @@ def validate_topic(topic: str, deny_patterns: tuple[str, ...] = ()) -> None:
                 f"(matched deny pattern: {pattern})",
                 context=context,
             )
+
+
+def _dlq_unconfirmed_error(
+    topic: str,
+    correlation_id: UUID,
+    failure_stage: str,
+) -> DlqPersistenceUnconfirmedError:
+    """Build the offset-withholding error for an unconfirmed DLQ write (OMN-14936).
+
+    Raising it from the dispatch callback is what stops the offset: the
+    consume loop rewinds the partition to the failed record on this type,
+    whereas a callback that returns normally is an ACK and auto-commit
+    advances past the record.
+    """
+    return DlqPersistenceUnconfirmedError(
+        f"DLQ write for {failure_stage} on topic '{topic}' was not confirmed "
+        "durable; the offset must not advance",
+        context=ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="event_bus_dispatch.dlq_unconfirmed",
+            target_name=topic,
+        ),
+        failure_stage=failure_stage,
+    )
 
 
 class EventBusSubcontractWiring(MixinConsumptionCounter):
@@ -991,12 +1017,17 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     )
                     # OMN-14936: a no_dispatcher drop must leave a durable DLQ
                     # record before the offset advances. If the DLQ write was
-                    # not confirmed, withhold the commit entirely -- Kafka
-                    # will redeliver this message and we retry the DLQ write
-                    # rather than silently losing it. _publish_to_dlq already
-                    # logged the non-persistence loudly at ERROR level.
+                    # not confirmed, raise so the consume loop rewinds the
+                    # partition -- Kafka redelivers this message and we retry
+                    # the DLQ write rather than silently losing it. Returning
+                    # here would be an ACK: EventBusKafka runs with
+                    # enable_auto_commit, so declining to commit withholds
+                    # nothing. _publish_to_dlq already logged the
+                    # non-persistence loudly at ERROR level.
                     if not dlq_persisted:
-                        return
+                        raise _dlq_unconfirmed_error(
+                            topic, correlation_id, "no_dispatcher"
+                        )
                     if self._should_commit_after_handler():
                         await self._commit_offset(message, correlation_id)
                     self._clear_retry_count(correlation_id)
@@ -1021,6 +1052,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                 # Only called on SUCCESS - DLQ-routed messages are NOT counted
                 await self._record_consumption(topic)
 
+            except DlqPersistenceUnconfirmedError:
+                # OMN-14936: raised by the no_dispatcher branch above. It is a
+                # RuntimeHostError, so without this clause the infra-retry arm
+                # below would count it and could swallow it; the consume loop
+                # must see it to rewind the partition.
+                raise
+
             except (json.JSONDecodeError, ValidationError) as e:
                 # Content error: malformed JSON or schema validation failure
                 # These are non-retryable - the message will never parse correctly
@@ -1037,12 +1075,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     dlq_persisted = await self._publish_to_dlq(
                         topic, message, e, correlation_id, "content", consumer_group
                     )
-                    # OMN-14936: withhold the commit if the DLQ write was not
-                    # confirmed durable -- Kafka will redeliver rather than
-                    # silently dropping the message past an un-persisted
-                    # DLQ record.
+                    # OMN-14936: withhold the offset if the DLQ write was not
+                    # confirmed durable -- raising makes the consume loop
+                    # rewind, so Kafka redelivers rather than silently dropping
+                    # the message past an un-persisted DLQ record.
                     if not dlq_persisted:
-                        return
+                        raise _dlq_unconfirmed_error(
+                            topic, correlation_id, "content_error"
+                        ) from e
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
 
@@ -1069,12 +1109,14 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                     dlq_persisted = await self._publish_to_dlq(
                         topic, message, e, correlation_id, "content", consumer_group
                     )
-                    # OMN-14936: withhold the commit if the DLQ write was not
-                    # confirmed durable -- Kafka will redeliver rather than
-                    # silently dropping the message past an un-persisted
-                    # DLQ record.
+                    # OMN-14936: withhold the offset if the DLQ write was not
+                    # confirmed durable -- raising makes the consume loop
+                    # rewind, so Kafka redelivers rather than silently dropping
+                    # the message past an un-persisted DLQ record.
                     if not dlq_persisted:
-                        return
+                        raise _dlq_unconfirmed_error(
+                            topic, correlation_id, "content_error"
+                        ) from e
                     await self._commit_offset(message, correlation_id)
                     return  # Handled - don't re-raise
 
@@ -1111,9 +1153,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         # retry count in place means the next redelivery is
                         # still "exhausted" and retries the DLQ write instead
                         # of silently dropping the message past an
-                        # un-persisted DLQ record.
+                        # un-persisted DLQ record. Raise so the consume loop
+                        # rewinds: returning would be an ACK under
+                        # enable_auto_commit.
                         if not dlq_persisted:
-                            return
+                            raise _dlq_unconfirmed_error(
+                                topic, correlation_id, "infra_exhausted"
+                            ) from e
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
                         return  # Handled - don't re-raise
@@ -1148,7 +1194,9 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
                         # the DLQ write was not confirmed durable -- see the
                         # RuntimeHostError branch above for rationale.
                         if not dlq_persisted:
-                            return
+                            raise _dlq_unconfirmed_error(
+                                topic, correlation_id, "infra_exhausted"
+                            ) from e
                         await self._commit_offset(message, correlation_id)
                         self._clear_retry_count(correlation_id)
                         return

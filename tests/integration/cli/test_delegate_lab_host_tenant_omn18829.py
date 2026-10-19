@@ -16,6 +16,7 @@ import pytest
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
     DelegateTenantRefusedError,
+    local_store_tenant,
     resolve_delegate_tenant,
 )
 
@@ -106,3 +107,23 @@ def test_declared_lane_host_without_a_row_still_refuses(
             in_process=True,
             environ={"ONEX_LANE_HOST": "h999", "ONEX_LAB_RUN_HOSTS": str(table)},
         )
+
+
+def test_inmemory_run_on_a_declared_lab_host_records_under_the_install_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-17427 (board criterion C30): the local store's tenant mirror confirms
+    # only the install identity, so a run recorded only there is not stamped
+    # with the lab tenant the shared bus would carry.
+    monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+    table = _table(
+        tmp_path / "lab_run_hosts.yaml",
+        "hosts:\n"
+        "  - name: h202\n"
+        "    target: ssh://h202.invalid\n"
+        f"    tenant_id: {_HOST_TENANT}\n",
+    )
+    environ = {"ONEX_LANE_HOST": "h202", "ONEX_LAB_RUN_HOSTS": str(table)}
+    stamp = resolve_delegate_tenant(in_process=True, environ=environ)
+    assert stamp == _HOST_TENANT
+    assert local_store_tenant(stamp, environ=environ) == _MINTED

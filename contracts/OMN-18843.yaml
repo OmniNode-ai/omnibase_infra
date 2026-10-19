@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-18843"
+title: "The delegate rebind wait bound exceeds the longest measured dev-lane rebind window"
+summary: "The delegate dispatch gate re-probes for a bound delegate-skill consumer for up to a fixed bound before it refuses. The bound was 180 s, set when the longest post-fix sample was 98.0 s. On 2026-10-19 the dev lane measured 228.9 s from omninode-runtime created (04:57:52Z) to the delegate-skill group joined (05:01:41Z) on image a8ab64c1, so a client dispatched at the start of that rebuild would be refused 49 s before the group bound. The bound moves to 300 s, above that sample, and stays a hard bound. AC1 (created-to-joined under 60 s on two consecutive rebuilds) is not delivered here: the 2026-10-17 profile put the compose hold at 58.4 s and start-to-join at 64.2 s, and the 2026-10-19 sample is 191.7 s from effects created. AC3 is documented in the runbook entry for the named failure class."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn18843-rebind-bound-above-worst-case"
+    statement: "The acceptance criterion this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy. AC1 and AC3 are not transcribed because this change does not evidence them."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: Either the client-side delegate wrapper retries/re-listens across a rebuild window bounded by a documented timeout longer than the measured worst-case rebind time, or the runtime binds delegate-skill consumers earlier in its startup sequence -- falsifier: a live before/after measurement shows the gap materially reduced, or the client completes across a reproduced rebuild with zero missed correlations."
+evidence_requirements:
+  - kind: "tests"
+    description: "The rebind wait tests assert the bound exceeds the longest measured window and that a lane unbound for that whole window is still served."
+    command: "uv run pytest tests/unit/cli/test_delegate_locus_rebind_wait_omn18843.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn18843-ac2-bound-exceeds-measured-window"
+    description: "AC2. The rebind wait tests drive the gate with a fake clock: a lane unbound for the 228.9 s window measured on 2026-10-19 is served after that wait, and the bound is greater than the window. Both fail at the merge base, where the bound is 180 s."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/cli/test_delegate_locus_rebind_wait_omn18843.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn18843-ac2-cli-measured-rebind-window"
+    description: "AC2. Run the CLI entry through locus resolution and the dispatch gate into receipt mode after the 228.9 s measured rebind window. Assert one dispatched call with the bound consumer group and recorded wait. A fake clock and broker listing reproduce the window without a live broker or a deployed rollout; this fails with the old 180 s bound."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -k longest_measured_rebind_window -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn18843-deploy-probe-rebind-bound"
+    description: "Deploy probe for the bound change: the delegate locus module read from GitHub at the evaluated checkout's commit declares the 300 s bound. This does not deploy a service or claim that a runtime has been promoted. The probe fails on the merge-base module, which declares 180 s."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_locus.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F '_REBIND_WAIT_SECONDS = 300.0'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
