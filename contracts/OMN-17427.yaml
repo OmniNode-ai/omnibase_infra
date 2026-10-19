@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-bash-deploy-cloud-migration-fails-loud
+    statement: A failing dev-lane omninode_cloud migration one-shot in onex-runtime-deploy (src/omnibase_infra/handlers/handler_runtime_deploy.sh) still lets the runtime family deploy and verify, reports the one-shot's exit code and redacted log tail, and ends the deploy with exit 3 instead of 0; refresh_dev_lane.sh records that exit and ends FAILED_CLOUD_MIGRATION, exit 1, with no rollback.
+    acceptance:
+      - id: AC52
+        statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -353,6 +358,9 @@ evidence_requirements:
   - kind: tests
     description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+  - kind: tests
+    description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
+    command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1041,3 +1049,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac52-bash-cloud-fails-loud
+    description: Bash handler and dev refresh functions extracted from the real scripts and run under set -euo pipefail with docker mocked; a failing cloud-migration one-shot is logged with "exited 7" and a redacted URL, the runtime refresh completes, the report returns 3, and refresh_dev_lane.sh maps SUCCESS plus deploy exit 3 to FAILED_CLOUD_MIGRATION. A real-Docker run of the same handler functions in a throwaway compose project is recorded in the pull request body. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
+  - id: dod-omn-17427-ac52-bash-cloud-deploy-check
+    description: Hosted-runner deploy check -- the same tests over the repository's committed deploy scripts; docker is mocked, no deployment surface is touched, and no live deployment is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52

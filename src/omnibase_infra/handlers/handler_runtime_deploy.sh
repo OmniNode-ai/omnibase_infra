@@ -466,6 +466,10 @@ readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
 readonly DEV_LANE_CLOUD_DB_SERVICES=(
     onex-api
 )
+# OMN-18496: runtime family deployed and verified, but a dev-lane cloud migration
+# one-shot failed and DEV_LANE_CLOUD_DB_SERVICES were stopped. Distinct from
+# 1 (deploy failed/rolled back), 2 (lock), and 64 (precondition).
+readonly CLOUD_MIGRATION_FAILED_EXIT_CODE=3
 # Broker readiness services brought up (and waited on) before the runtime
 # restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
 # 1300+-topic provisioning burst on first boot does not exhaust the default
@@ -519,6 +523,10 @@ RESTART=false
 # Per-invocation readiness, set by the migration preflight. Never an operator
 # override: a failed cloud one-shot stops only its declared consumers.
 DEV_LANE_CLOUD_MIGRATIONS_READY=true
+# Per-invocation cloud migration failure text (OMN-18496).
+DEV_LANE_CLOUD_MIGRATION_FAILURE=""
+# Last failure written by refresh_one_migration_service (OMN-18496).
+MIGRATION_SERVICE_FAILURE=""
 # OMN-15218: the raw argv this invocation was called with, captured before
 # parse_args consumes it, so the attribution record names the exact command that
 # mutated the lane instead of a reconstruction.
@@ -3396,6 +3404,7 @@ warm_broker_topic_provisioning() {
 # healthcheck keepalive in the lane-agnostic set, and both members of the
 # dev-lane set are one-shots.
 refresh_one_migration_service() {
+    MIGRATION_SERVICE_FAILURE=""
     local compose_project="$1"
     local service="$2"
     local is_oneshot="$3"
@@ -3414,7 +3423,10 @@ refresh_one_migration_service() {
     log_cmd "${cmd[*]}"
     # OMN-15718: bounded (not guarded -- a real failure here must still abort
     # exactly as before; only the hang risk is closed).
-    compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}" || return 1
+    if ! compose_up_bounded "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" "${cmd[@]}"; then
+        MIGRATION_SERVICE_FAILURE="${service} did not start"
+        return 1
+    fi
 
     if [[ "${is_oneshot}" != true ]]; then
         return 0
@@ -3433,8 +3445,23 @@ refresh_one_migration_service() {
     if [[ "${migration_wait_result}" != "0" ]]; then
         if [[ -z "${migration_wait_result}" ]]; then
             log_error "COMPOSE_UP_TIMEOUT: 'docker wait ${migration_container}' did not complete within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s -- killed."
+            MIGRATION_SERVICE_FAILURE="${service} did not exit within ${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}s"
+            log_error "${service} did not complete successfully."
+        else
+            MIGRATION_SERVICE_FAILURE="${service} exited ${migration_wait_result}"
+            # OMN-18496: bounded diagnostics, with URL credentials redacted.
+            local logs_cmd=(timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}" docker logs --tail 5 "${migration_container}")
+            log_cmd "${logs_cmd[*]}"
+            local migration_log_tail
+            migration_log_tail="$("${logs_cmd[@]}" 2>&1 || true)"
+            migration_log_tail="$(printf '%s\n' "${migration_log_tail}" \
+                | sed -E 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]:@]+:[^@[:space:]]+@#\1***@#g' \
+                | awk 'NF { printf "%s%s", sep, $0; sep = " / " }' || true)"
+            if [[ -n "${migration_log_tail}" ]]; then
+                MIGRATION_SERVICE_FAILURE+=": ${migration_log_tail}"
+            fi
+            log_error "${MIGRATION_SERVICE_FAILURE}"
         fi
-        log_error "${service} did not complete successfully."
         return 1
     fi
     return 0
@@ -3449,6 +3476,7 @@ run_runtime_migration_preflight() {
 
     log_step "Runtime Migration Preflight"
     DEV_LANE_CLOUD_MIGRATIONS_READY=true
+    DEV_LANE_CLOUD_MIGRATION_FAILURE=""
 
     # The lane-agnostic set first. migration-gate is a long-running healthcheck
     # keepalive, NOT a one-shot, so it is deliberately excluded from the wait set
@@ -3529,7 +3557,8 @@ run_runtime_migration_preflight() {
         if ! refresh_one_migration_service \
             "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"; then
             DEV_LANE_CLOUD_MIGRATIONS_READY=false
-            log_warn "Cloud migration '${service}' failed; gating only: ${DEV_LANE_CLOUD_DB_SERVICES[*]}. Runtime migrations remain required."
+            DEV_LANE_CLOUD_MIGRATION_FAILURE="${MIGRATION_SERVICE_FAILURE:-${service} failed}"
+            log_error "Cloud migration failed: ${DEV_LANE_CLOUD_MIGRATION_FAILURE}; gating only: ${DEV_LANE_CLOUD_DB_SERVICES[*]}. Runtime migrations remain required."
             # A warm consumer must also stop. Merely omitting its recreate
             # would leave an old API serving against a failed migration.
             local stop_cmd=(
@@ -3599,6 +3628,18 @@ exclude_cloud_database_services() {
         log_error "Cloud migration failed; all requested services require omninode_cloud. Refusing an empty service scope."
         return 1
     fi
+}
+
+report_cloud_migration_failure() {
+    # OMN-18496: the one-shot is non-fatal to the runtime but must not end a deploy green.
+    if [[ "${DEV_LANE_CLOUD_MIGRATIONS_READY}" == true ]]; then
+        return 0
+    fi
+    log_error "CLOUD_MIGRATION_FAILED: ${DEV_LANE_CLOUD_MIGRATION_FAILURE}"
+    log_error "The runtime family was deployed and verified."
+    log_error "These services were stopped and not restarted: ${DEV_LANE_CLOUD_DB_SERVICES[*]}"
+    log_error "The deploy exits ${CLOUD_MIGRATION_FAILED_EXIT_CODE} so the caller sees the cloud migration failure."
+    return "${CLOUD_MIGRATION_FAILED_EXIT_CODE}"
 }
 
 bringup_full_stack() {
@@ -4780,4 +4821,8 @@ main() {
 
     # Phase 14: Prune old deployments (non-fatal -- must not trigger rollback)
     prune_old_deployments || log_warn "Pruning old deployments failed (non-fatal)"
+
+    # OMN-18496: after DEPLOYMENT_COMPLETE=true, so cleanup_on_exit neither rolls
+    # back nor restores tags; the exit status reports the cloud failure.
+    report_cloud_migration_failure
 }
