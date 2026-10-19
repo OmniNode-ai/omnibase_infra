@@ -145,6 +145,12 @@ x-dev-lane-logging: &dev_lane_logging
   options:
     max-size: "10m"
     max-file: "3"
+# OMN-17427: the runtime image's open-file limit, as x-runtime-base declares
+# it in the base file (anchors do not cross compose files).
+x-dev-lane-runtime-ulimits: &dev_lane_runtime_ulimits
+  nofile:
+    soft: 65536
+    hard: 65536
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
 # =============================================================================
@@ -1231,6 +1237,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1289,6 +1296,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1387,6 +1395,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1442,6 +1451,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1497,6 +1507,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1551,6 +1562,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:
@@ -1640,6 +1652,7 @@ services:
       retries: 3
       start_period: 60s
     logging: *dev_lane_logging
+    ulimits: *dev_lane_runtime_ulimits
     deploy:
       resources:
         limits:

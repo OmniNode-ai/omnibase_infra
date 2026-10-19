@@ -214,6 +214,11 @@ requirements:
     acceptance:
       - id: AC47
         statement: 'AC47: an in-memory run on a declared lab host carries the install identity (or no stamp on a fresh install), a shared-bus run on the same host carries the lab tenant, and a declared lane host with no row still refuses -- falsifier: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q -k "TestHostWithNoLabRow"'
+  - id: req-omn17427-runtime-nofile
+    statement: Every runtime-image container on the infra and dev-lane compose renders declares an open-file limit, so omninode-runtime does not exhaust the host daemon's default soft limit of 1024 while it binds its consumer groups and stop booting.
+    acceptance:
+      - id: AC48
+        statement: 'AC48: every Dockerfile.runtime service in the infra and dev-lane compose renders declares ulimits.nofile soft >= 65536 -- falsifier: uv run pytest tests/unit/infra/test_runtime_nofile_ulimit_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -925,3 +930,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC47
+  - id: dod-omn-17427-ac48-runtime-nofile
+    description: The compose render test passes at this head and fails at the merge base, naming omninode-runtime and every other runtime-image service on the infra and dev renders that inherited the daemon's soft 1024. Renders compose files only; no container, broker or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_runtime_nofile_ulimit_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC48
