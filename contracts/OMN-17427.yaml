@@ -366,6 +366,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac52-carrier-integration
+    description: Integration tests read the contract-declared bus terminal verdict from workflow_result.json in real temporary Git repositories, including staged-index, stale-carrier and committed-head PR-body controls, and run the unchanged clean-root validator.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
+  - id: dod-omn-17427-ac52-integration-deploy-check
+    description: Hosted-runner check reads admission results from the local runtime bus and checks clean-root in temporary Git repositories. The refused root carrier and unstaged, stale and working-copy-only exceptions are negative controls. No container, credential or external service is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
   - id: dod-omn-17427-ac52-live-contact-carrier
     description: Temporary Git repositories exercise the pre-commit bus node and clean-root validator with staged, absent, unstaged, stale and invalid local exceptions; committed-head controls continue to read the PR body. No external service or credential is used.
     source: manual
