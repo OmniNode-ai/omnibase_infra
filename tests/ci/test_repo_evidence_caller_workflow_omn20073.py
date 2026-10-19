@@ -246,53 +246,156 @@ def test_repo_evidence_replaces_the_companion_contract_compliance_job() -> None:
     assert _DOD_VERIFY in set(EXPECTED_EXTERNAL_CONTEXTS)
 
 
+def _pytest_evidence_path(check_value: str) -> str:
+    """The test file or tests directory a ``uv run pytest`` check names, or "".
+
+    A pytest node id (``tests/x/test_y.py::test_z``) names its file before the
+    first ``::``. The DoD closeout binder emits node ids, and omnimarket's copy
+    of this check reads them the same way.
+    """
+    return next(
+        (
+            path
+            for path in (token.split("::", 1)[0] for token in shlex.split(check_value))
+            if path.endswith((".py", "/tests"))
+        ),
+        "",
+    )
+
+
+def _names_repo_test(selector: str) -> bool:
+    return bool(
+        selector
+        and not Path(selector).is_absolute()
+        and (REPO_ROOT / selector).exists()
+        and (REPO_ROOT / selector).resolve().is_relative_to(REPO_ROOT)
+    )
+
+
+def _contract_binding_violations(name: str, contract: dict[str, Any]) -> list[str]:
+    criteria = {
+        ac["id"]
+        for requirement in contract.get("requirements", [])
+        for ac in requirement.get("acceptance", [])
+    }
+    violations: list[str] = []
+    bound: set[str] = set()
+    for item in contract.get("dod_evidence", []):
+        if "binds_ac" not in item:
+            continue
+        label = f"{name}:{item['id']}"
+        bound.update(item["binds_ac"])
+        if "ac_bindings" in item:
+            violations.append(f"{label}: use binds_ac, not ac_bindings")
+        checks = item.get("checks", [])
+        if not checks:
+            violations.append(f"{label}: binds_ac requires at least one check")
+        for check in checks:
+            if check.get("check_type") != "test_passes" or not check.get(
+                "check_value", ""
+            ).startswith("uv run pytest "):
+                continue
+            if not _names_repo_test(_pytest_evidence_path(check["check_value"])):
+                violations.append(
+                    f"{label}: pytest evidence must name an existing relative path inside the repo"
+                )
+    if not criteria <= bound:
+        violations.append(
+            f"{name}: acceptance criteria missing binds_ac: {sorted(criteria - bound)}"
+        )
+    return violations
+
+
 def test_every_repo_contract_binds_every_criterion() -> None:
     assert CALLER_PATH.is_file(), "repo-owned evidence requires the caller workflow"
     contract_paths = sorted((REPO_ROOT / "contracts").glob("OMN-*.yaml"))
     assert (REPO_ROOT / "contracts" / "OMN-20073.yaml") in contract_paths
     checked = 0
+    violations: list[str] = []
     for path in contract_paths:
         contract = yaml.safe_load(path.read_text(encoding="utf-8"))
-        items = [
-            item for item in contract.get("dod_evidence", []) if "binds_ac" in item
-        ]
-        if not items:
+        if not any("binds_ac" in item for item in contract.get("dod_evidence", [])):
             continue
         checked += 1
-        criteria = {
-            ac["id"]
-            for requirement in contract.get("requirements", [])
-            for ac in requirement.get("acceptance", [])
-        }
-        bound: set[str] = set()
-        for item in items:
-            label = f"{path.name}:{item['id']}"
-            bound.update(item["binds_ac"])
-            assert "ac_bindings" not in item, f"{label}: use binds_ac, not ac_bindings"
-            checks = item.get("checks", [])
-            assert checks, f"{label}: binds_ac requires at least one check"
-            for check in checks:
-                if check.get("check_type") != "test_passes" or not check.get(
-                    "check_value", ""
-                ).startswith("uv run pytest "):
-                    continue
-                selector = next(
-                    (
-                        token
-                        for token in shlex.split(check["check_value"])
-                        if token.endswith((".py", "/tests"))
-                    ),
-                    "",
-                )
-                assert (
-                    selector
-                    and not Path(selector).is_absolute()
-                    and (REPO_ROOT / selector).exists()
-                    and (REPO_ROOT / selector).resolve().is_relative_to(REPO_ROOT)
-                ), (
-                    f"{label}: pytest evidence must name an existing relative path inside the repo"
-                )
-        assert criteria <= bound, (
-            f"{path.name}: acceptance criteria missing binds_ac: {sorted(criteria - bound)}"
-        )
+        violations.extend(_contract_binding_violations(path.name, contract))
+    assert not violations, "\n".join(violations)
     assert checked >= 1, "no contract declares binds_ac"
+
+
+def _node_id_contract(check_value: str) -> dict[str, Any]:
+    return {
+        "requirements": [{"acceptance": [{"id": "AC1"}]}],
+        "dod_evidence": [
+            {
+                "id": "dod-node-id",
+                "binds_ac": ["AC1"],
+                "checks": [{"check_type": "test_passes", "check_value": check_value}],
+            }
+        ],
+    }
+
+
+def test_contract_binding_accepts_a_node_id_of_an_existing_test() -> None:
+    """omnibase_infra#5129 was refused in the merge queue for this shape."""
+    contract = _node_id_contract(
+        "uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_caller_workflow_shape -q"
+    )
+    assert _contract_binding_violations("OMN-0.yaml", contract) == []
+
+
+def test_contract_binding_refuses_a_node_id_of_a_missing_test() -> None:
+    contract = _node_id_contract(
+        "uv run pytest tests/ci/test_no_such_file_omn17427.py::test_x -q"
+    )
+    assert _contract_binding_violations("OMN-0.yaml", contract) == [
+        "OMN-0.yaml:dod-node-id: pytest evidence must name an existing relative path inside the repo"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("check_value", "expected"),
+    [
+        pytest.param(
+            "uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q",
+            "tests/ci/test_repo_evidence_caller_workflow_omn20073.py",
+            id="plain-file",
+        ),
+        pytest.param(
+            "uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_caller_workflow_shape -q",
+            "tests/ci/test_repo_evidence_caller_workflow_omn20073.py",
+            id="node-id",
+        ),
+        pytest.param(
+            "uv run pytest 'tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_ci_summary_sweep_judges_the_base_branch_trigger_rows[green]' -q",
+            "tests/ci/test_repo_evidence_caller_workflow_omn20073.py",
+            id="parametrized-node-id",
+        ),
+        pytest.param(
+            'uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k "shape"',
+            "tests/ci/test_repo_evidence_caller_workflow_omn20073.py",
+            id="keyword",
+        ),
+        pytest.param("uv run pytest -q -m unit", "", id="no-selector"),
+    ],
+)
+def test_pytest_evidence_path_reads_the_file_a_node_id_names(
+    check_value: str, expected: str
+) -> None:
+    """A pytest node id binds its file: the part before the first ``::``."""
+    assert _pytest_evidence_path(check_value) == expected
+
+
+def test_a_node_id_still_needs_an_existing_repo_test_file() -> None:
+    """Reading a node id's file widens nothing: the file must exist in the repo."""
+    assert _names_repo_test(
+        _pytest_evidence_path(
+            "uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_caller_workflow_shape -q"
+        )
+    )
+    for missing in (
+        "uv run pytest tests/ci/test_no_such_file_omn17427.py::test_x -q",
+        "uv run pytest /etc/test_abs.py::test_x -q",
+        "uv run pytest ../outside/test_x.py::test_x -q",
+        "uv run pytest -q -m unit",
+    ):
+        assert not _names_repo_test(_pytest_evidence_path(missing)), missing

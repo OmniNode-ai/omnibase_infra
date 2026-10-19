@@ -204,6 +204,11 @@ requirements:
     acceptance:
       - id: AC44
         statement: 'AC44: scripts/lab_principal_issuer.py documents the POST /v1/principals request with its content type and fields, and a request built from the documentation is issued with exactly the documented fields and answers the documented response, rotated on the second ask -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "client_section or documented_request"'
+  - id: req-omn17427-repo-evidence-node-id-binding
+    statement: The repository's binds-every-criterion check reads a pytest node id's file as the bound test, and still refuses a node id whose file is not an existing test inside the repository.
+    acceptance:
+      - id: AC46
+        statement: 'AC46: a test_passes check naming tests/ci/test_repo_evidence_caller_workflow_omn20073.py::test_caller_workflow_shape binds with no violation, and a node id naming a missing file is refused with the existing-path message -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k "node_id"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -897,3 +902,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC44
+  - id: dod-omn-17427-ac46-node-id-binding
+    description: 'The binds-every-criterion check reads the file before the first :: of a pytest node id, as omnimarket''s copy of the check does; a node id of an existing repository test binds with no violation and a node id of a missing file is refused with the existing-path message. The accept case fails under the previous selector logic, where a node id yields no selector.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k "node_id"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC46
