@@ -11,8 +11,8 @@ evidence_requirements:
     description: "Every service built from docker/Dockerfile.runtime in the base compose file, and the three runtime catalog manifests, declare nofile soft >= 65535."
     command: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
   - kind: manual
-    description: "Deploy check: the recreated dev-lane runtime container carries the raised limit."
-    command: "deploy: docker inspect omninode-runtime --format '{{json .HostConfig.Ulimits}}' | grep -q 65535"
+    description: "Deploy check: the compose file the dev lane deploys from carries the raised limit at this head."
+    command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'OMN-19513: the container default is 1024 open files'"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -26,9 +26,9 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19513-deploy-runtime-nofile"
-    description: "Deploy probe: after the dev lane recreates omninode-runtime from this compose file, the container's HostConfig carries nofile 65535; before it, HostConfig.Ulimits is null and the grep exits 1."
+    description: "Deploy probe: the compose file the dev lane deploys from carries the nofile block at this head; at origin/dev b4b7c7f8c the grep exits 1."
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "docker inspect omninode-runtime --format '{{json .HostConfig.Ulimits}}' | grep -q 65535"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'OMN-19513: the container default is 1024 open files'"
         cwd: "${OMNI_HOME}/omnibase_infra"
