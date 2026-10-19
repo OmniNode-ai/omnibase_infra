@@ -33,6 +33,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_bifrost_lane_overlay_placement_omn19215.py -q -p no:randomly -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn19215-ac1-env-ladder
+    description: The render driven by environment variables alone, as the runtime entrypoint runs it, reads the routing ladder named by DELEGATION_ROUTING_TIERS_PATH and refuses a placement that ladder does not hold with a ProtocolConfigurationError naming the backend.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_render_placement_ladder_omn19215.py -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn19215-ac2
     description: Lab pair on a lab host, three closed-port runs answered by the placed sibling host after the rung host failed, three controls answered by the rung host and never by the sibling, committed with the receipts' attempts.
     source: manual
