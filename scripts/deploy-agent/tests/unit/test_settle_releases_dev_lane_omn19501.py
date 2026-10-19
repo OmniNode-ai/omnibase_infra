@@ -63,6 +63,7 @@ class _Executor:
         self.recreate_supervision: list[object] = []
         self.verify_recreate: list[object] = []
         self.oneshot_reruns: list[object] = []
+        self.cloud_migration_failure: str = ""
         self.deps_convergence: list[object] = []
         self.compose_invocations: list[object] = []
         self.health_checks: list[object] = []

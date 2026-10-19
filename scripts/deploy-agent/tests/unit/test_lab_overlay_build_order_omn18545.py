@@ -125,6 +125,7 @@ class _FakeExecutor:
         # recreated, so a fake executor has to declare it.
         self.verify_recreate: list[object] = []
         self.oneshot_reruns: list[object] = []
+        self.cloud_migration_failure: str = ""
         # OMN-18640: the terminal event now also carries what the deps leg
         # found before it acted, and the argv of every compose call, so a
         # fake executor has to declare both.
