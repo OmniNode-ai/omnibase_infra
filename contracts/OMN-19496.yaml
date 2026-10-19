@@ -1,0 +1,39 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19496"
+title: "Laptop runtime profile in the bundle catalog: one command, one env template, no lab or ops secret"
+summary: "Evidence-only contract for OMN-19496, carrying the acceptance-criterion bindings proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3 and accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3 after a re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203. Implementing change: omnibase_infra#4089 (squash ba401935b). Bound here: AC1. Every other criterion carries no binding and stays unproven."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn-19496-ac1-laptop-env-no-lab-secret:
+      - label: "AC1"
+        criterion_hash: "ef3d08947e0a6c72e6b2a48a4e576ab4d2c1ef85ac34696d619ed81c52f51216"
+        proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c3"
+        accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c3"
+        accepted_at: "2026-10-19T05:12:13Z"
+requirements:
+  - id: "req-transcribed-acceptance-criteria"
+    statement: "The acceptance criteria declared on the ticket body, transcribed verbatim. The ticket body is the source; each id is the label a binds_ac entry claims. Only bound criteria are transcribed."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: The laptop bundle's required env list names no lab or ops secret (deploy agent, GitHub, Linear, Slack, CI, secret-store identity, lab model URL) -- falsifier: uv run pytest tests/unit/docker/catalog -k laptop_required_env fails"
+evidence_requirements:
+  - kind: "tests"
+    description: "AC1: laptop required env no lab secret"
+    command: "env -u PYTHONPATH uv run pytest tests/unit/infra/test_catalog_local_profile.py::test_laptop_required_env_names_no_lab_or_ops_secret tests/unit/infra/test_catalog_local_profile.py::test_laptop_required_env_check_can_fail tests/unit/infra/test_catalog_local_profile.py::test_laptop_render_requires_no_lab_or_ops_secret tests/unit/infra/test_catalog_local_profile.py::test_laptop_render_required_secret_check_can_fail -q -p no:randomly -o addopts="
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn-19496-ac1-laptop-env-no-lab-secret"
+    description: "AC1 binding proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3, accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3. Re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203: 2 passed, exit 0. The suite is absent at the parent of the implementing merge. Also runs test_laptop_render_requires_no_lab_or_ops_secret and its positive control, added with this contract: no service of the rendered laptop profile requires a lab or ops secret through a ${NAME:?} reference."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run pytest tests/unit/infra/test_catalog_local_profile.py::test_laptop_required_env_names_no_lab_or_ops_secret tests/unit/infra/test_catalog_local_profile.py::test_laptop_required_env_check_can_fail tests/unit/infra/test_catalog_local_profile.py::test_laptop_render_requires_no_lab_or_ops_secret tests/unit/infra/test_catalog_local_profile.py::test_laptop_render_required_secret_check_can_fail -q -p no:randomly -o addopts="
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac:
+      - "AC1"
