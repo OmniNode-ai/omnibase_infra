@@ -25,11 +25,11 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn14936-durable-dlq-record
-    description: The real consume loop, the real wiring callback and the real DLQ publisher leave a durable record on the category DLQ topic when the named topic was never provisioned.
+    description: The real dispatch engine, wiring callback, consume loop and DLQ writer retry the same record through an outage, then leave exactly one persisted category-DLQ record readable by the replay model. The transport uses a file-backed producer and a redelivering consumer; no live broker or rollout is claimed. Requiring recovery after refusal makes this fail without the rewind fix, unlike the success-only test.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/event_bus/test_omn14936_no_dispatcher_offset_withheld.py -k durable_dlq_record -q -n 0 --no-cov
+        check_value: uv run pytest tests/integration/runtime/test_omn14936_no_dispatcher_dlq_recovery.py -q -n 0 --no-cov
     binds_ac:
       - AC1
   - id: dod-omn14936-blocked-dlq-rewind
@@ -41,11 +41,12 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn14936-deployed-runtime
-    description: The deployed runtime image carries the offset-withholding error. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it.
+    description: Hosted-runner artifact and runtime-path probe for AC3. Read the Kafka consumer source at the checked-out commit from the public repository and require the offset-withholding exception arm, then execute outage and recovery through the real runtime components. This proves the candidate code carries and exercises the rewind; it does not claim that the deployed P1 harness has rolled to this image.
     source: manual
-    execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: sh -c 'docker exec omninode-runtime python -c "from omnibase_infra.errors import DlqPersistenceUnconfirmedError"'
+        check_value: |-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/event_bus/event_bus_kafka.py" | grep -F 'except DlqPersistenceUnconfirmedError:' &&
+          uv run pytest tests/integration/runtime/test_omn14936_no_dispatcher_dlq_recovery.py -q -n 0 --no-cov
     binds_ac:
       - AC3
