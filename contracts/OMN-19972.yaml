@@ -64,5 +64,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_delegation_dispatch_run_steps_omn19972.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_delegation_dispatch_port.py?ref=7670e7a35bac9f7aa41b250464692e58e987907f --jq .content | base64 -d | grep -c 'async def _publish_run_steps'
     binds_ac:
       - AC12
