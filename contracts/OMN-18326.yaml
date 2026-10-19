@@ -1,0 +1,28 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18326
+title: "Gate C19 - the runtime kernel seam injects the envelope event time the delegation projection needs"
+summary: >
+  Evidence for OMN-18326 in the repository that carries the kernel-seam fix (omnibase_infra#3496, then omnibase_infra#4623), with the reader in omnimarket#2523. Only AC3 is bound here: AC1, AC2, AC4 and AC5 are lab-overlay and lab-database readbacks recorded by the original lane in the rolling ledger (2026-09-13T22:28:50Z) and carry no check a hosted runner of this repository can run.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn-18326-ac3-seam-injects-envelope-time
+    description: >
+      AC3. The runtime kernel seam injects the producer's envelope event time as _envelope_timestamp and omits it when the producer recorded none; the delegation projection consumes it (omnimarket#2523, merged). RED first on both sides. Also runs test_projection_envelope_timestamp_extractor_omn18326.py, added with this contract: the extractor reads the time from a mapping-shaped envelope, refuses a naive or untyped one, and keeps a non-UTC offset unchanged.
+
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_handler_wiring_db_injection.py -q -k envelope_timestamp'
+      - check_type: test_passes
+        check_value: 'uv run pytest tests/integration/runtime/test_projection_envelope_timestamp_authority_omn18326.py -q'
+      - check_type: test_passes
+        check_value: 'uv run pytest tests/unit/runtime/auto_wiring/test_projection_envelope_timestamp_extractor_omn18326.py -q'
+    binds_ac:
+      - AC3
