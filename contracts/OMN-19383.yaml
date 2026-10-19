@@ -1,0 +1,39 @@
+schema_version: 1.0.0
+ticket_id: OMN-19383
+title: 'fix(omnibase_infra): runtime-rebuild-trigger under-classifies src/omnimarket/events/** -- a runtime change lands with no rebuild'
+summary: 'Coverage-only evidence for OMN-19383: preserves the accepted AC1 binding and exercises event paths through the shared classifier union with canonical matches present and absent, duplicate inputs, pattern attribution and a docs-only negative control. No runtime path is touched.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19383-ac1-events-package-is-lane-state:
+      - label: AC1
+        criterion_hash: 122db45896f00902cdfc059f9cb90bb7fa403445bd5f16d6bd8df9f040a9d92a
+        proposed_by: lane=dod-closeout-bind-2026-10-19T0445Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-19T0445Z-c2
+        accepted_at: '2026-10-19T05:10:12Z'
+requirements:
+  - id: req-omn19383
+    statement: 'fix(omnibase_infra): runtime-rebuild-trigger under-classifies src/omnimarket/events/** -- a runtime change lands with no rebuild'
+    acceptance:
+      - id: AC1
+        statement: 'AC1: `omnibase_infra/scripts/runtime_change_classifier.py`''s `LANE_STATE_PATH_PATTERNS` classifies every path under `src/omnimarket/events/**` as runtime-affecting, documented with the measured handler-importer evidence above -- falsifier: `uv run pytest tests/scripts/test_runtime_affecting_predicate_shared_omn19318.py -q` including a new case asserting `src/omnimarket/events/runtime_deployment.py` classifies runtime, with a negative control (an unrelated docs-only path) preserved'
+evidence_requirements:
+  - kind: tests
+    description: Event package paths classify as lane state and trigger through both the supplement and the shared classifier union. Canonical matches present and absent, duplicate inputs, events-pattern attribution and the docs-only negative control are covered. This adds coverage for the already-merged implementation.
+    command: uv run pytest -q tests/scripts/test_trigger_events_package_omn19383.py -k TestOmnimarketEventsPackageIsLaneState
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19383-ac1-events-package-is-lane-state
+    description: Event package paths classify as lane state and trigger through both the supplement and the shared classifier union. Canonical matches present and absent, duplicate inputs, events-pattern attribution and the docs-only negative control are covered. This adds coverage for the already-merged implementation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest -q tests/scripts/test_trigger_events_package_omn19383.py -k TestOmnimarketEventsPackageIsLaneState
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
