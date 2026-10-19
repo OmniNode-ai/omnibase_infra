@@ -243,6 +243,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k, a peer taking the lease stops the run with no teardown and exit 2, a renewal racing seven breakers of its expired lease leaves one holder in 25 rounds, and the committed TLC results pass the model and fail every mutation -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q -k "renew or model or mutation"'
+  - id: req-omn17427-aiohttp-security-patch
+    statement: The runtime dependency floor excludes aiohttp releases affected by GHSA-2g87-pp6c-29x5 and GHSA-5wr8-gcqf-gqf3, whose upstream patched version is 3.14.4.
+    acceptance:
+      - id: AC53
+        statement: 'AC53: the declared aiohttp dependency excludes versions below 3.14.4, the lockfile and installed package agree on a patched version, and the runtime health endpoint still serves a real HTTP request -- falsifier: the bound dependency command and real_health_endpoint test below'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1055,3 +1060,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
+  - id: dod-omn-17427-ac53-aiohttp-deploy-patch
+    description: Hosted-runner deploy check for the runtime dependency patch. Reads the declared dependency and lockfile, verifies the installed aiohttp matches the patched lock, and serves the real runtime health endpoint on loopback. No Docker, broker, credentials or deployed service is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run python -c "import tomllib; from pathlib import Path; from packaging.requirements import Requirement; from packaging.version import Version; import aiohttp; p=tomllib.loads(Path(''pyproject.toml'').read_text()); r=next(Requirement(d) for d in p[''project''][''dependencies''] if Requirement(d).name == ''aiohttp''); v=next(d[''version''] for d in tomllib.loads(Path(''uv.lock'').read_text())[''package''] if d[''name''] == ''aiohttp''); assert not r.specifier.contains(''3.14.3''); assert str(r.specifier).find(''>=3.14.4'') >= 0; assert Version(v) >= Version(''3.14.4''); assert v in r.specifier; assert aiohttp.__version__ == v; print(''patched aiohttp floor and lock agree:'', v)"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_service_health.py -q -k real_health_endpoint
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
