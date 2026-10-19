@@ -4824,5 +4824,9 @@ main() {
 
     # OMN-18496: after DEPLOYMENT_COMPLETE=true, so cleanup_on_exit neither rolls
     # back nor restores tags; the exit status reports the cloud failure.
+    # A deploy with no recorded cloud failure completes on the success path.
+    if [[ -z "${DEV_LANE_CLOUD_MIGRATION_FAILURE:-}" ]]; then
+        return 0
+    fi
     report_cloud_migration_failure
 }
