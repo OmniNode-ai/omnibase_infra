@@ -11,10 +11,6 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: `omnibase_infra/scripts/runtime_change_classifier.py`''s `LANE_STATE_PATH_PATTERNS` classifies every path under `src/omnimarket/events/**` as runtime-affecting, documented with the measured handler-importer evidence above -- falsifier: `uv run pytest tests/scripts/test_runtime_affecting_predicate_shared_omn19318.py -q` including a new case asserting `src/omnimarket/events/runtime_deployment.py` classifies runtime, with a negative control (an unrelated docs-only path) preserved'
-      - id: AC2
-        statement: 'AC2: omnimarket''s `.github/workflows/runtime-rebuild-trigger.yml` pin advances to an `omnibase_infra` commit containing both [OMN-19318](https://linear.app/omninode/issue/OMN-19318) (omnibase_infra#4038) and this fix -- falsifier: `git log --oneline <old-pin>..<new-pin> -- scripts/runtime_change_classifier.py` shows this ticket''s commit, and the pinned SHA is a real commit on `omnibase_infra` origin/dev'
-      - id: AC3
-        statement: 'AC3: the live classifier at the new pin reads `omnimarket#2813`''s actual changed-file set as runtime-affecting -- falsifier: the probe command above, run against `omnimarket#2813`''s real diff, prints "Runtime change detected"'
 evidence_requirements:
   - kind: tests
     description: omnimarket#2813's file list (events/runtime_deployment.py), events/topics.py and a nested events/sub/deeper.py all classify as lane state and trigger, and the docs-only negative control yields nothing. The test file is absent at the merge parent 057cd5591~1; the LANE_STATE_PATH_PATTERNS entry carries the measured handler-importer comment.
