@@ -366,6 +366,29 @@ class TestOmnidashPrincipalCanCreateTheLedgerSchema:
         )
 
 
+class TestIntelligencePrincipalCanCreateItsExtensions:
+    """The intelligence corpus opens with CREATE EXTENSION pgcrypto, which needs CREATE on the database (OMN-19064)."""
+
+    def test_apply_grants_create_on_the_slot_intelligence_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert '_intel_db="$(derive omniintelligence)"' in text
+        assert '_intel_role="$(derive role_omniintelligence)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_intel_db}\\" TO \\"${_intel_role}\\";'
+            in text
+        )
+        assert (
+            "has_database_privilege('${_intel_role}', '${_intel_db}', 'CREATE')" in text
+        )
+
+    def test_the_grant_runs_before_the_isolation_falsifier(self) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        grant = text.index('GRANT CREATE ON DATABASE \\"${_intel_db}\\"')
+        assert grant < text.index("# --- the falsifier, run in-band")
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 

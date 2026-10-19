@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: on a slot migration failure the prove script prints the lines of the migration one-shot before the entrypoint refusal as migration-output lines, leaving out the lines and refusal text of the entrypoint -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_migration_output_omn19064.py -q'
+  - id: req-omn17427-slot-intelligence-create
+    statement: The pre-PR slot provisioner grants the slot intelligence principal CREATE on the slot intelligence database, so the intelligence corpus can create its extensions (OMN-19064).
+    acceptance:
+      - id: AC53
+        statement: 'AC53: provision_db_slot.sh --apply grants CREATE on the slot omniintelligence database to the slot role_omniintelligence and reads has_database_privilege back, before the isolation falsifier -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipal'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1043,3 +1048,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
+  - id: dod-omn-17427-ac53-slot-intel-create
+    description: The intelligence CREATE grant pins pass at this head and fail at the merge base. They read the provisioner source; the live grant is exercised by a slot bring-up on the lab, quoted in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipal
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac53-slot-intel-deploy-check
+    description: Hosted-runner deploy check -- the same pins over the committed provisioner; no database is touched here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipal
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
