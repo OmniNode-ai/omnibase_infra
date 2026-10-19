@@ -33,7 +33,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
-  - id: dod-omn-18638-ac2-ac3-flag-takes-the-correlation-id
+  - id: dod-omn-18638-ac2-ac3-flag-takes-correlation-id
     description: AC2 and AC3 binding, coverage-only (the fix merged in omnibase_infra#3748, and its product file changed afterwards, so a Binds-Merged-Fix control cannot revert it). On every emit step of runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml the argument right after --agent-command-id is the quoted CORRELATION_ID env reference, so a flag handed a literal or another variable fails.
     source: manual
     checks:
