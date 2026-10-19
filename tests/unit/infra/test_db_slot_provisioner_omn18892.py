@@ -366,6 +366,54 @@ class TestOmnidashPrincipalCanCreateTheLedgerSchema:
         )
 
 
+class TestIntelligencePrincipalCanCreateItsExtensions:
+    """Trusted extensions still need CREATE on the database (OMN-17427).
+
+    Live slot bring-up at 2026-10-19T13:42Z died with permission denied to create
+    extension "pgcrypto".
+    """
+
+    def test_the_intelligence_corpus_creates_extensions(self) -> None:
+        migrations = REPO_ROOT / "docker" / "migrations" / "intelligence"
+        assert any(
+            "CREATE EXTENSION" in migration.read_text(encoding="utf-8")
+            for migration in migrations.glob("*.sql")
+        )
+
+    def test_the_intelligence_migration_runs_as_the_slot_intelligence_role(
+        self,
+    ) -> None:
+        # Compose nodes retain the override tags without constructing objects.
+        root = yaml.compose(OVERLAY.read_text(encoding="utf-8"), Loader=yaml.SafeLoader)
+        assert root is not None
+        services = _compose_mapping(_compose_mapping(root)["services"])
+        env = _compose_mapping(
+            _compose_mapping(services["intelligence-migration"])["environment"]
+        )
+        assert env["POSTGRES_USER"].value == (
+            "role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+        )
+
+    def test_apply_grants_create_on_the_slot_intelligence_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omniintelligence)"' in text
+        assert 'derive role_omniintelligence)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_intel_db}\\" TO \\"${_intel_role}\\";'
+            in text
+        )
+        assert (
+            "has_database_privilege('${_intel_role}', '${_intel_db}', 'CREATE')" in text
+        )
+
+    def test_both_names_are_inside_the_slot_fence(self) -> None:
+        result = _run_scope("prepr1")
+        assert "omniintelligence_prepr1" in _scope_values(result.stdout, "database")
+        assert "role_omniintelligence_prepr1" in _scope_values(result.stdout, "role")
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 

@@ -233,6 +233,11 @@ requirements:
     acceptance:
       - id: AC49
         statement: 'AC49: no contracts/*.yaml dod_evidence id is longer than the limit read from omnibase_core, and contracts/OMN-19812.yaml loads with ModelTicketContract -- falsifier: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q'
+  - id: req-omn17427-prepr-slot-intelligence-create
+    statement: The pre-PR slot provisioner grants the slot's intelligence principal CREATE on the slot's intelligence database, so the intelligence corpus's CREATE EXTENSION statements apply under the slot's own NOSUPERUSER principal.
+    acceptance:
+      - id: AC56
+        statement: 'AC56: scripts/provision_db_slot.sh grants CREATE on omniintelligence_<slot> to role_omniintelligence_<slot> and reads it back with has_database_privilege, the role the prepr overlay runs the intelligence migration as -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k Intelligence fails over the merge base, which has no such grant'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -345,6 +350,9 @@ evidence_requirements:
   - kind: tests
     description: Every contract dod_evidence id fits the core limit and the OMN-19812 contract loads with ModelTicketContract.
     command: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
+  - kind: tests
+    description: The slot provisioner grants the slot intelligence principal CREATE on its own database and reads it back.
+    command: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k Intelligence
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1017,3 +1025,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC49
+  - id: dod-omn-17427-ac56-prepr-intel-create-grant
+    description: The provisioner test reads the intelligence corpus's CREATE EXTENSION, the prepr overlay's intelligence-migration POSTGRES_USER, and the provisioner's CREATE grant and readback for the slot intelligence pair; it fails at the merge base, which has no grant. Reads repository files and the provisioner's --print-scope output only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k Intelligence
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC56
+  - id: dod-omn-17427-ac56-prepr-intel-deploy-check
+    description: Hosted-runner deploy check -- the same provisioner test over the repository's files; it does not claim a live slot boot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k Intelligence
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC56
