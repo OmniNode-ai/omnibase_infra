@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19312"
+title: "lab-pass gate all-of required lanes, bounded wait, runtime-ancestor subject, and a re-pinned staging receiver"
+summary: "Evidence-only contract for the merged change omnibase_infra#4014 (44ff0303760df4c8d3940f0d685ae1717d4f158f). The gate's --require-lane is all-of, a required lane with no receipt after --wait-seconds is refused, --resolve-runtime-ancestor inherits only across non-runtime commits, and no new flag carries a force or skip. AC3, AC6 and AC7 are not bound here."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: "tests"
+    description: "The OMN-19312 gate classes in omnibase_infra pass at dev."
+    command: "env -u PYTHONPATH uv run --frozen pytest 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRequireLaneIsAllOf' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestBoundedWait' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRuntimeAncestorSubject' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestNoOverrideOnTheNewFlags' -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19312-ac1-require-lane-all-of"
+    description: "AC1: under --require-lane, a sha whose required lane has a FAIL receipt beside a PASS on another lane is refused naming the sha, while the unchanged any-of call on the same inputs passes (positive control). The test class is absent at the merge parent 66ef36514."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run --frozen pytest 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRequireLaneIsAllOf::test_require_lane_refuses_a_chain_fail_beside_an_onex_lab_pass' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRequireLaneIsAllOf::test_require_lane_positive_control_any_of_alone_passes_the_same_inputs' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+    # Binding provenance (binds_ac above is the schema-owned binding):
+    # - label: "AC1"
+    #   criterion_hash: "31862b1d3e20db0c2f43249b8671c1eeeedb067a76ce2ebfbddbf43f86e38606"
+    #   proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+    #   accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"
+  - id: "dod-omn19312-ac2-bounded-wait-refuses-absent"
+    description: "AC2: a required lane with no receipt after --wait-seconds is refused as no receipt, and a receipt that lands inside the bound is read and judged (a FAIL that lands inside the bound is refused)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run --frozen pytest 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestBoundedWait::test_wait_expiry_on_an_absent_required_receipt_refuses' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestBoundedWait::test_wait_reads_a_receipt_that_lands_inside_the_bound' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestBoundedWait::test_wait_refuses_a_fail_receipt_that_lands_inside_the_bound' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+    # Binding provenance (binds_ac above is the schema-owned binding):
+    # - label: "AC2"
+    #   criterion_hash: "143a709f38f6adbefa940cfbc409fbc28a0b915ab0eec583ecfd9ca5b301dc2c"
+    #   proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+    #   accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"
+  - id: "dod-omn19312-ac4-runtime-ancestor"
+    description: "AC4: --resolve-runtime-ancestor inherits a required-lane receipt only across non-runtime-affecting commits, and a runtime-affecting commit between voids the older receipt."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run --frozen pytest 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRuntimeAncestorSubject::test_ancestor_inherits_only_across_non_runtime_commits' 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestRuntimeAncestorSubject::test_ancestor_a_runtime_commit_between_voids_the_older_receipt' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC4"]
+    # Binding provenance (binds_ac above is the schema-owned binding):
+    # - label: "AC4"
+    #   criterion_hash: "f839c549a0f09c1a8e1f7a09e225137c0466effde321cbf776d739761b0356e2"
+    #   proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+    #   accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"
+  - id: "dod-omn19312-ac5-no-override-on-new-flags"
+    description: "AC5: no force, skip or override option exists on the new gate flags, and the new workflow step carries no if-override."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "env -u PYTHONPATH uv run --frozen pytest 'tests/ci/test_lab_pass_receipt_gate_omn17530.py::TestNoOverrideOnTheNewFlags::test_no_force_skip_or_override_on_the_new_flags' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC5"]
+    # Binding provenance (binds_ac above is the schema-owned binding):
+    # - label: "AC5"
+    #   criterion_hash: "c43bababf7408457be86560ae74ef26d41756e1cd863ad1bb5e0a75c6d18a677"
+    #   proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+    #   accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"

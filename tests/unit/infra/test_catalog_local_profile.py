@@ -95,6 +95,45 @@ def test_laptop_required_env_check_can_fail() -> None:
     )
 
 
+#: A compose interpolation the render cannot start without: ``${NAME:?...}`` or ``${NAME?...}``.
+_REQUIRED_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?\?")
+
+
+def _rendered_required_secrets(compose: Mapping[str, object]) -> list[str]:
+    """Each ``service: NAME`` the render requires whose name is a lab or ops secret."""
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return sorted(
+        {
+            f"{service}: {name}"
+            for service, svc in services.items()
+            for name in _REQUIRED_REFERENCE.findall(
+                json.dumps(svc.get("environment", {}))
+            )
+            for fragment in _FORBIDDEN_FRAGMENTS
+            if fragment in name
+        }
+    )
+
+
+def test_laptop_render_requires_no_lab_or_ops_secret() -> None:
+    """AC1 in the render: no service of the laptop profile refuses to start
+    without a lab or ops secret, beyond what the bundle declares as required."""
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    )
+    assert _rendered_required_secrets(compose) == []
+
+
+def test_laptop_render_required_secret_check_can_fail() -> None:
+    """Positive control: the full runtime bundle's render requires lab and ops secrets."""
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["runtime"])
+    )
+    names = {hit.split(": ", 1)[1] for hit in _rendered_required_secrets(compose)}
+    assert {"DEPLOY_AGENT_HMAC_SECRET", "GITHUB_TOKEN"} <= names
+
+
 def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gate() -> (
     None
 ):
