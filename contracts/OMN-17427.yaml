@@ -214,6 +214,15 @@ requirements:
     acceptance:
       - id: AC47
         statement: 'AC47: an in-memory run on a declared lab host carries the install identity (or no stamp on a fresh install), a shared-bus run on the same host carries the lab tenant, and a declared lane host with no row still refuses -- falsifier: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q -k "TestHostWithNoLabRow"'
+  - id: req-omn17427-prepr-slot-isolation-readback
+    statement: A pre-PR slot's pool run reads its own isolation (OMN-19064) - the host ports its project publishes against its reserved block, and every declared-lane container by id, start time and restart count before and after the run; and a slot run ships the slot's own lane overlay.
+    acceptance:
+      - id: AC49
+        statement: 'AC49: the probe of a pre-PR slot prints every host port the slot project publishes and those outside its reserved block, and the judge fails a slot run that published a port outside the block, published none, or printed no line -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "port or publishing"'
+      - id: AC50
+        statement: 'AC50: snap-pre and snap-post of a pre-PR slot read every container of the declared lanes by id, start time and restart count, and snap-post prints the count of changed lines over the count read and names each changed container; the slot''s own containers are not read -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "neighbour or declared_lane"'
+      - id: AC51
+        statement: 'AC51: a pre-PR slot run with no --overlay ships the slot''s own Bifrost overlay, read from ONEX_LANE_OVERLAY_DIR or else the lane-overlays directory beside the pool table, and an isolated member or a slot with no overlay file ships none -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "lane_overlay or overlay_is_read"'
   - id: req-omn17427-cloud-migration-nonfatal
     statement: A failing dev-lane omninode_cloud migration one-shot in the deploy agent gates only onex-api, the runtime family still restarts and is verified, and the job then ends failed with the one-shot's error.
     acceptance:
@@ -224,11 +233,16 @@ requirements:
     acceptance:
       - id: AC49
         statement: 'AC49: no contracts/*.yaml dod_evidence id is longer than the limit read from omnibase_core, and contracts/OMN-19812.yaml loads with ModelTicketContract -- falsifier: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q'
+  - id: req-omn17427-cloud-oneshot-exit-report
+    statement: A dev-lane cloud migration one-shot that exits non-zero after a detached compose up is reported at once with its exit code and its own last log lines, URL credentials redacted, instead of after the whole poll timeout.
+    acceptance:
+      - id: AC50
+        statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
   - id: req-omn17427-lane-lock-contended-outcome
     statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
     acceptance:
-      - id: AC50
-        statement: 'AC50: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
+      - id: AC52
+        statement: 'AC52: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -333,11 +347,17 @@ evidence_requirements:
     description: The delegation terminal readback grants read and describe on one topic and write none, and the committed derived grants are the node's output.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q
   - kind: tests
+    description: A pre-PR slot run reads its published ports and its declared-lane neighbours, and the driver judges them.
+    command: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q
+  - kind: tests
     description: A failing cloud migration one-shot gates only onex-api while the runtime family restarts, and the agent fails the job after verification.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q
   - kind: tests
     description: Every contract dod_evidence id fits the core limit and the OMN-19812 contract loads with ModelTicketContract.
     command: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
+  - kind: tests
+    description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -946,6 +966,36 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC47
+  - id: dod-omn-17427-ac48-prepr-slot-ports-in-block
+    description: The slot ports readback runs against a fake docker and names a port outside the block, a port range and an empty publish; the judge fails each and a driver run of a slot publishing outside its block exits FAIL. Every one of these tests fails against origin/dev, where neither the readback nor the check exists. Unit tests only; no lab host is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "port or publishing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "slot_run"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC49
+  - id: dod-omn-17427-ac49-prepr-slot-neighbour-readback
+    description: The neighbour readback runs against a fake docker; an untouched host reads zero changes over two containers read, a restarted and a recreated declared-lane container are named by id, and a change to the slot's own container is not read. The driver passes every declared lane of the slot policy to a slot and none to an isolated member. These tests fail against origin/dev. Unit tests only; no lab host is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "neighbour or declared_lane"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC50
+  - id: dod-omn-17427-ac50-prepr-slot-ships-its-overlay
+    description: 'Found live on pre-PR slot 2 on 2026-10-19: the slot entrypoint refused "no lane overlay for the slot''s compose project" before any build, because lane overlays live in the private workspace config (OMN-20932) and the pool''s non-login ssh shell names no config root. The tests assert a slot run puts the overlay on the host and names OVERLAY_FILE, the overlay resolves beside the pool table, ONEX_LANE_OVERLAY_DIR outranks it, and an isolated member or a slot with no file ships none. Both fail at the previous head.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "lane_overlay or overlay_is_read"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC51
   - id: dod-omn-17427-ac47-cloud-migration-nonfatal
     description: Deploy-agent unit tests drive the real preflight and _compose_up with a failing cloud-migration fixture (compose calls mocked; no container, credential or lab service is touched) and the real _run_deploy with a fake executor. The failure is recorded and onex-api stopped, the runtime up excludes onex-api, a lane-agnostic migration failure still raises, and the job ends failed after verify with only the repair build. Does not claim a live dev-lane deployment.
     source: manual
@@ -980,7 +1030,23 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC49
-  - id: dod-omn-17427-ac50-lane-lock-contended-outcome
+  - id: dod-omn-17427-ac50-cloud-oneshot-exit-report
+    description: Deploy-agent unit tests with the compose state read and compose calls mocked; a sleep that raises proves the poll returns without waiting on an exited-1 one-shot, a running-then-exited-0 sequence is still waited for, and the preflight failure carries "exited 1", the one-shot's log line, and no URL password. The same behaviour against a real Docker daemon is in scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_real_docker_omn18496.py, which skips where no daemon or local postgres:16-alpine image is available. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC50
+  - id: dod-omn-17427-ac50-cloud-exit-deploy-check
+    description: Hosted-runner deploy check -- the exited-0 poll stops at a non-zero exit and the preflight failure carries the exit code and redacted log tail. Mocked compose calls; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac52-lane-lock-contended-outcome
     description: The deploy agent's _run_deploy, with the lane lock raising LaneLockContendedError, runs no executor phase and records not_started=lane_lock_contended on the job record and the published completion payload, with status failed; a build-failure control records not_started None. Unit tests with the executor, the lock and the publish faked; no broker, lane or lab service is touched.
     source: manual
     checks:
@@ -988,8 +1054,8 @@ dod_evidence:
         check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC50
-  - id: dod-omn-17427-ac50-lane-lock-deploy-check
+      - AC52
+  - id: dod-omn-17427-ac52-lane-lock-deploy-check
     description: Hosted-runner deploy check exercises the real deploy-agent job completion and publisher payload with a contended lock and a build-failure control. Executor, lock and publication are faked; no container, broker, credentials or live lane is required.
     source: manual
     checks:
@@ -997,4 +1063,4 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q -k "contended_job_and_terminal_event or build_failure_control"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC50
+      - AC52
