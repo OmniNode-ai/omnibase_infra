@@ -219,6 +219,11 @@ requirements:
     acceptance:
       - id: AC48
         statement: 'AC48: with a failing cloud-migration fixture the preflight records the failure and stops onex-api, the runtime up names omninode-runtime and not onex-api, a lane-agnostic migration failure stays fatal, and the agent fails the job after verify with the repair build and no overlay apply -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q'
+  - id: req-omn17427-dod-evidence-id-fits-core
+    statement: Every committed ticket contract's dod_evidence ids fit omnibase_core's ModelContractDodItem id limit, so contract-validation can load the contract of the ticket a pull request branch names.
+    acceptance:
+      - id: AC49
+        statement: 'AC49: no contracts/*.yaml dod_evidence id is longer than the limit read from omnibase_core, and contracts/OMN-19812.yaml loads with ModelTicketContract -- falsifier: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -325,6 +330,9 @@ evidence_requirements:
   - kind: tests
     description: A failing cloud migration one-shot gates only onex-api while the runtime family restarts, and the agent fails the job after verification.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q
+  - kind: tests
+    description: Every contract dod_evidence id fits the core limit and the OMN-19812 contract loads with ModelTicketContract.
+    command: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -949,3 +957,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q -k "bash_array or exclude_cloud_consumer"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac49-dod-evidence-id-fits-core
+    description: The contract id-length test reads the limit from omnibase_core and scans every contracts/*.yaml; it fails at the merge base on the 59-character OMN-19812 id and passes after the rename. Reads repository files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC49
+  - id: dod-omn-17427-ac49-contract-id-deploy-check
+    description: Hosted-runner deploy check -- the same id-length test over the repository's committed contracts; no deployment surface is involved, this reads repository files only.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC49
