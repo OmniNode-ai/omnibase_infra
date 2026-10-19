@@ -214,6 +214,11 @@ requirements:
     acceptance:
       - id: AC47
         statement: 'AC47: an in-memory run on a declared lab host carries the install identity (or no stamp on a fresh install), a shared-bus run on the same host carries the lab tenant, and a declared lane host with no row still refuses -- falsifier: uv run pytest tests/unit/cli/test_delegate_tenant_omn17427.py -q -k "TestHostWithNoLabRow"'
+  - id: req-omn17427-cloud-migration-nonfatal
+    statement: A failing dev-lane omninode_cloud migration one-shot in the deploy agent gates only onex-api, the runtime family still restarts and is verified, and the job then ends failed with the one-shot's error.
+    acceptance:
+      - id: AC48
+        statement: 'AC48: with a failing cloud-migration fixture the preflight records the failure and stops onex-api, the runtime up names omninode-runtime and not onex-api, a lane-agnostic migration failure stays fatal, and the agent fails the job after verify with the repair build and no overlay apply -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -317,6 +322,9 @@ evidence_requirements:
   - kind: tests
     description: The delegation terminal readback grants read and describe on one topic and write none, and the committed derived grants are the node's output.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q
+  - kind: tests
+    description: A failing cloud migration one-shot gates only onex-api while the runtime family restarts, and the agent fails the job after verification.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -925,3 +933,19 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC47
+  - id: dod-omn-17427-ac47-cloud-migration-nonfatal
+    description: Deploy-agent unit tests drive the real preflight and _compose_up with a failing cloud-migration fixture (compose calls mocked; no container, credential or lab service is touched) and the real _run_deploy with a fake executor. The failure is recorded and onex-api stopped, the runtime up excludes onex-api, a lane-agnostic migration failure still raises, and the job ends failed after verify with only the repair build. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC48
+  - id: dod-omn-17427-ac47-cloud-migration-deploy-check
+    description: Hosted-runner deploy check -- the deploy agent's cloud consumer set equals the bash handler's DEV_LANE_CLOUD_DB_SERVICES array and the runtime up on a failed cloud corpus excludes onex-api. Reads repository files and mocked compose calls; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_omn18496.py -q -k "bash_array or exclude_cloud_consumer"
+        cwd: ${OMNI_HOME}/omnibase_infra

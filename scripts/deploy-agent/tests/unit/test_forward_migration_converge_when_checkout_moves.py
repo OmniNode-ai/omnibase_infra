@@ -202,10 +202,15 @@ def test_preflight_failure_preserves_last_successful_record(
             "_run",
             Mock(return_value=subprocess.CompletedProcess([], 0, "f\n", "")),
         )
-    with pytest.raises(RuntimeError, match="migration preflight"):
-        DeployExecutor(migration_record_dir=tmp_path)._ensure_runtime_migrations_ready(
-            lane=EnumRuntimeLane.DEV
-        )
+    executor = DeployExecutor(migration_record_dir=tmp_path)
+    if failure == "oneshot":
+        # OMN-18496: a cloud one-shot failure is recorded, not raised, so the
+        # runtime family still restarts; the record must still not advance.
+        executor._ensure_runtime_migrations_ready(lane=EnumRuntimeLane.DEV)
+        assert "cloud-migration" in executor.cloud_migration_failure
+    else:
+        with pytest.raises(RuntimeError, match="migration preflight"):
+            executor._ensure_runtime_migrations_ready(lane=EnumRuntimeLane.DEV)
     assert (
         read_applied_migration_fingerprint(tmp_path, EnumRuntimeLane.DEV) == "previous"
     )
