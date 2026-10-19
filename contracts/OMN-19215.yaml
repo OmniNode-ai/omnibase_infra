@@ -41,3 +41,10 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_omn19215_ac2_lab_pair_evidence.py -q -p no:randomly -n 0 --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn19215-deploy-render-ladder-check
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the runtime image's Bifrost renderer carries the placement check against the pinned routing ladder. It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime import render_bifrost_delegation_contract as m; assert callable(getattr(m, \"_validate_lane_placements\"))'"
