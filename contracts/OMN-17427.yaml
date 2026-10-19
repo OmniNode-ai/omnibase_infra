@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-slot-intelligence-extension
+    statement: The pre-PR slot provisioner grants the slot's intelligence principal CREATE on the slot's own intelligence database and reads it back, so the intelligence corpus can create its trusted extensions on a fresh slot database.
+    acceptance:
+      - id: AC96
+        statement: 'AC96: provision_db_slot.sh grants role_omniintelligence_<slot> CREATE on omniintelligence_<slot> and reads it back with has_database_privilege, and the intelligence corpus is shown to issue CREATE EXTENSION -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1041,3 +1046,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac96-slot-intel-extension
+    description: The provisioner test reads the intelligence corpus for CREATE EXTENSION and asserts the slot provisioner grants and reads back CREATE on the slot intelligence database; it fails at the merge base and passes after the change. Reads repository files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC96
+  - id: dod-omn-17427-ac96-deploy-slot-intel-extension
+    description: Hosted-runner deploy check -- the whole slot provisioner test file over the committed script, scope derivation run under bash with no Postgres; does not claim a live slot bring-up.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC96
