@@ -20,17 +20,18 @@ requirements:
         statement: "AC4: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance."
 evidence_requirements:
   - kind: "tests"
-    description: "The lane-boundary tests assert the new lane is in neither the deploy-attribution governed set nor the prod grant interlock set."
-    command: "uv run pytest tests/ci/test_sim_202_lane_boundary_omn19339.py::test_sim_202_is_not_deploy_attribution_governed tests/ci/test_sim_202_lane_boundary_omn19339.py::test_sim_202_is_not_in_the_prod_grant_interlock -q -p no:cacheprovider"
+    description: "The lane-boundary tests assert the new lane is in neither the deploy-attribution governed set nor the prod grant interlock set, and the deploy-attribution preflight allows a deploy of the new lane with no reason and runs no grant interlock, while an unattributed deploy of the grant-interlock lane is refused."
+    command: "uv run pytest tests/ci/test_sim_202_lane_boundary_omn19339.py -q -p no:cacheprovider -k \"deploy_attribution or grant_interlock\""
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn19339-ac4-lane-not-governed"
-    description: "AC4: the two lane-boundary tests assert the new lane appears in neither GOVERNED_LANES nor GRANT_INTERLOCK_LANES. Re-run by the accepting lane on h202 at omnibase_infra dev a8ab64c1891d: 2 passed, exit 0. The property is a non-regression invariant that also held before the change, when the lane did not exist; the tests make it a guard for the lane the change added."
+    description: "AC4: the two lane-boundary tests assert the new lane appears in neither GOVERNED_LANES nor GRANT_INTERLOCK_LANES. Re-run by the accepting lane on h202 at omnibase_infra dev a8ab64c1891d: 2 passed, exit 0. The property is a non-regression invariant that also held before the change, when the lane did not exist; the tests make it a guard for the lane the change added. Added coverage drives the preflight decision path for the overlay's compose project: attribution not required, grant interlock NOT_APPLICABLE, result ALLOW; the positive control, the grant-interlock lane's compose project with no reason, is REFUSE."
     source: "manual"
     checks:
-      - check_type: "command"
-        check_value: "uv run pytest tests/ci/test_sim_202_lane_boundary_omn19339.py::test_sim_202_is_not_deploy_attribution_governed tests/ci/test_sim_202_lane_boundary_omn19339.py::test_sim_202_is_not_in_the_prod_grant_interlock -q -p no:cacheprovider"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_sim_202_lane_boundary_omn19339.py -q -p no:cacheprovider -k \"deploy_attribution or grant_interlock\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC4"]
