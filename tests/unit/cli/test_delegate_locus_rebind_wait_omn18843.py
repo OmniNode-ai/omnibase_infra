@@ -43,8 +43,11 @@ _GROUP = (
     "local.omnimarket.node_delegate_skill_orchestrator.consume.1.3.0"
     ".__i.runtime-effects.__t." + _COMMAND_TOPIC
 )
-# The post-#3939 window measured on the dev lane, created -> joined.
-_MEASURED_WINDOW_SECONDS = 98.0
+# The longest window measured on the dev lane: omninode-runtime created
+# 2026-10-19T04:57:52.784Z, delegate-skill group joined 05:01:41.689Z on image
+# a8ab64c1 (effects created 04:58:29.976Z, 191.7 s before the join). Earlier
+# samples: 98.0 s (2026-09-23), 122.6 s to 127.9 s (2026-10-14 to 2026-10-17).
+_MEASURED_WINDOW_SECONDS = 228.9
 
 
 class _FakeClock:
@@ -150,7 +153,7 @@ class TestRebindWindowIsWaitedFor:
     def test_the_measured_window_fits_inside_the_bound(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _FakeClock
     ) -> None:
-        """A lane unbound for the whole measured 98 s window is still served."""
+        """A lane unbound for the whole measured 229 s window is still served."""
         unbound_probes = (
             int(_MEASURED_WINDOW_SECONDS // delegate_locus._REBIND_POLL_SECONDS) + 1
         )

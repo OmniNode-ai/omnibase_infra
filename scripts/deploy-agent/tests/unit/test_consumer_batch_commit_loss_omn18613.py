@@ -157,6 +157,25 @@ def test_the_measured_loss_leaves_the_buffered_record_uncommitted() -> None:
 
 
 @pytest.mark.unit
+def test_the_redelivered_buffered_record_is_accepted_and_committed_on_its_own() -> None:
+    """AC4, after the re-exec: the replacement image re-reads 263 and accepts it.
+
+    Because accepting 262 left 263 uncommitted, the replacement consumer is
+    delivered 263 again. Accepting it commits 264 -- through 263 only -- and
+    the command carries the correlation id the original loss dropped.
+    """
+    consumer = _consumer()
+
+    with patch("deploy_agent.consumer.verify_command", return_value=True):
+        cmd, reason = consumer._process_message(_message(LOST_CORRELATION, LOST_OFFSET))
+
+    assert reason is None
+    assert cmd is not None
+    assert str(cmd.correlation_id) == LOST_CORRELATION
+    assert _committed_offsets(consumer) == [LOST_OFFSET + 1]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("setup", "expected_reason"),
     [

@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-18638
+title: The sibling lab-pass receipt carries the deploy agent's correlation id through the reusable workflow
+summary: |-
+  Evidence for OMN-18638 in the repository that carries the fix (omnibase_infra#3748, squash 19c6c33c6fd3f1f651603e76c433ddccc04b2ab8). AC2 and AC3 bind to the emitter-wiring test in tests/ci/test_receipt_agent_command_id_omn18573.py. AC1, AC4, AC5 and AC6 are not bound here, and the criteria are not transcribed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The emitter-wiring test passes for both runtime-rebuild workflows.
+    command: uv run pytest tests/ci/test_receipt_agent_command_id_omn18573.py -q -k test_every_emitter_passes_the_correlation_id_from_the_job_output
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18638-ac2-sibling-emitters-pass-the-id
+    description: AC2 binding (accepted 2026-10-18T2045Z, proposed by lane=dod-closeout-bind-2026-10-18T2045Z-c2, accepted by lane=dod-closeout-accept-2026-10-18T2045Z-c2). Every lab_pass_receipt.py emit step in runtime-rebuild-trigger-reusable.yml passes --agent-command-id from needs.trigger-rebuild.outputs.correlation_id, and the set of emitting jobs there is pinned to exactly verify-sibling-converged, so no second sibling-path receipt can be emitted without the argument. With runtime-rebuild-trigger-reusable.yml restored from the parent of 19c6c33c6fd3f1f651603e76c433ddccc04b2ab8 the test fails on verify-sibling-converged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_receipt_agent_command_id_omn18573.py -q -k test_every_emitter_passes_the_correlation_id_from_the_job_output
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-18638-ac3-either-workflow-omission-fails
+    description: AC3 binding (accepted 2026-10-18T2045Z, proposed by lane=dod-closeout-bind-2026-10-18T2045Z-c2, accepted by lane=dod-closeout-accept-2026-10-18T2045Z-c2). The test is parametrized over runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml and asserts --agent-command-id and the needs.trigger-rebuild correlation_id env on every emit step. With runtime-rebuild-trigger-reusable.yml restored from the parent of 19c6c33c6fd3f1f651603e76c433ddccc04b2ab8 the test fails on verify-sibling-converged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_receipt_agent_command_id_omn18573.py -q -k test_every_emitter_passes_the_correlation_id_from_the_job_output
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-18638-ac2-ac3-flag-takes-correlation-id
+    description: AC2 and AC3 binding, coverage-only (the fix merged in omnibase_infra#3748, and its product file changed afterwards, so a Binds-Merged-Fix control cannot revert it). On every emit step of runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml the argument right after --agent-command-id is the quoted CORRELATION_ID env reference, so a flag handed a literal or another variable fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_receipt_agent_command_id_omn18573.py -q -k test_the_flag_takes_the_dereferenced_correlation_id_and_nothing_else
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3

@@ -1,0 +1,66 @@
+schema_version: 1.0.0
+ticket_id: OMN-19807
+title: Node-migration source-ref resolver reads the queued PR body on merge_group, fail-closed
+summary: |-
+  Evidence for OMN-19807 in the repository that carries the fix (omnibase_infra#4179, squash f58e75a5e). AC1 and AC2 bind to the resolver tests that feed a merge_group payload with a stubbed GitHub API. AC3 binds to the merge_group test that models omnibase_infra#4165's queue entry and its omnimarket#2953 paired source; #4165 landed on dev as 8a177b86c, whose parent is f58e75a5e.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: On a merge_group event the resolver reads the queued PR's live body (PR number from merge_group.head_ref gh-readonly-queue/<base>/pr-<n>-<sha>) and applies the same paired-source checks -- falsifier: pytest in tests/unit/scripts feeding a merge_group payload with a stubbed API asserts the paired SHA is returned
+      - id: AC2
+        statement: |-
+          AC2: A merge_group payload whose PR body cannot be read fails closed, never silently falls back to dev -- falsifier: pytest asserting a non-200 API read raises
+      - id: AC3
+        statement: |-
+          AC3: omnibase_infra#4165 passes the merge queue -- falsifier: gh api graphql mergeQueueEntry for #4165 ends in a merge, and its Application Database Domain Enforcement merge_group run reads the omnimarket#2953 SHA in its resolve step log
+evidence_requirements:
+  - kind: tests
+    description: The resolver's merge_group tests pass against a stubbed GitHub API.
+    command: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19807-ac1-merge-group-paired-source
+    description: AC1 binding (accepted 2026-10-18T1445Z, proposed by lane=dod-closeout-bind-2026-10-18T1445Z-c0, accepted by lane=dod-closeout-accept-2026-10-18T1445Z-c0). A merge_group payload whose head_ref is gh-readonly-queue/dev/pr-4165-<sha> (with and without refs/heads/) makes the resolver read pulls/4165 and print the paired omnimarket source SHA. With scripts/resolve_node_migration_source_ref.py restored from the parent of f58e75a5e both cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k test_merge_group_reads_the_queued_pr_body_and_its_paired_source
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19807-ac2-unreadable-body-fails-closed
+    description: AC2 binding (accepted 2026-10-18T1445Z, proposed by lane=dod-closeout-bind-2026-10-18T1445Z-c0, accepted by lane=dod-closeout-accept-2026-10-18T1445Z-c0). A merge_group payload whose queued PR body read answers 404 makes the resolver exit 1 with nothing on stdout and fail-closed on stderr, never dev. With the resolver restored from the parent of f58e75a5e the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k test_merge_group_with_unreadable_pr_body_fails_closed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19807-ac3-pr-4165-paired-source
+    description: AC3 binding. omnibase_infra#4165 landed on dev as 8a177b86c, whose parent is the fix f58e75a5e, so its merge_group run used the fixed resolver. A hosted check cannot re-read that 2026-09-26 merge queue entry or its job log, so this binds the behaviour the criterion names. A merge_group payload whose head_ref is gh-readonly-queue/dev/pr-4165-<sha> (with and without refs/heads/) makes the resolver read pulls/4165, follow Node-Migration-Source-PR omnimarket#2953 and print that paired SHA. With scripts/resolve_node_migration_source_ref.py restored from the parent of f58e75a5e both cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k test_merge_group_reads_the_queued_pr_body_and_its_paired_source
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19807-ac1-slashed-base-branch-queue-ref
+    description: AC1 binding, coverage-only (the fix merged in omnibase_infra#4179, and its product file changed afterwards, so a Binds-Merged-Fix control cannot revert it). A merge_group payload whose head_ref names a base branch containing a slash, gh-readonly-queue/release/1.x/pr-4165-<sha>, makes the resolver read pulls/4165 and print the paired omnimarket source SHA.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_resolve_node_migration_source_ref.py -q -k test_merge_group_reads_the_queued_pr_when_the_base_branch_name_has_slashes
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

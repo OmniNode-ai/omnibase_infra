@@ -232,6 +232,7 @@ from omnibase_infra.enums.enum_kafka_permanent_failure import (
 )
 from omnibase_infra.errors import (
     DispatchDeadlineExceededError,
+    DlqPersistenceUnconfirmedError,
     EventPayloadTooLargeError,
     EventTopicAuthorizationError,
     InfraConnectionError,
@@ -3159,6 +3160,31 @@ class EventBusKafka(
                 validation_detail=str(deadline_error),
             )
             return dlq_result is not False
+        except DlqPersistenceUnconfirmedError:
+            # OMN-14936: the subscriber routed this record to the DLQ and the
+            # write was not confirmed durable, so the record exists nowhere
+            # but its own topic. A callback that returned normally would be an
+            # ACK and auto-commit would advance past it; the only action that
+            # withholds the offset is a rewind of the fetch position (see
+            # `_rewind_after_unpersisted_dlq`). Offset-unsafe regardless of the
+            # retry budget: redelivery retries the DLQ write, and the feed
+            # stalls with visible lag until the DLQ is writable.
+            logger.exception(
+                "dlq_persistence_unconfirmed_offset_withheld topic=%s "
+                "subscription_id=%s correlation_id=%s -- the subscriber's DLQ "
+                "write was not confirmed; the partition is rewound so the "
+                "record is redelivered (OMN-14936)",
+                topic,
+                subscription_id,
+                str(correlation_id),
+                extra={
+                    "topic": topic,
+                    "group_id": group_id,
+                    "subscription_id": subscription_id,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return False
         except ProjectionNotMaterializedError as projection_error:
             # OMN-17379: a projection consumed a well-formed event and wrote no
             # row because its WRITE PATH failed. Every other arm below decides
@@ -3367,10 +3393,13 @@ class EventBusKafka(
         The consumers this class builds run with
         ``enable_auto_commit=self._config.enable_auto_commit``, which defaults
         to ``True``: the client commits the *fetch position* on its own cadence,
-        and this loop never calls ``commit`` itself. So — unlike the manual-commit
-        path in ``runtime/event_bus_subcontract_wiring.py``, where the OMN-14936
-        gate simply returns without committing — merely declining to commit here
-        does nothing. The offset advances anyway and the message is lost.
+        and this loop never calls ``commit`` itself. So merely declining to
+        commit does nothing, and that includes a subscriber callback that just
+        returns without calling ``commit_offset`` (which this class does not
+        define): a callback that returns normally is an ACK. The offset advances
+        anyway and the message is lost. ``runtime/event_bus_subcontract_wiring.py``
+        therefore raises ``DlqPersistenceUnconfirmedError`` (OMN-14936) so
+        ``_dispatch_to_subscriber`` reaches this rewind.
 
         The fail-closed action that works under BOTH commit models is a rewind of
         the fetch position to the failed message's own offset

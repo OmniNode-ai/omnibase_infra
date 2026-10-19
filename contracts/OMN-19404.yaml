@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19404"
+title: "A pre-PR slot reaches a ready runtime: slot principals get the migration grants, the intelligence migration runs, and slot topics are provisioned"
+summary: "Evidence-only contract for OMN-19404, carrying the acceptance-criterion bindings proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3 and accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3 after a re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203. Implementing change: omnibase_infra#4070 (squash 11aaaeff2). Bound here: AC1, AC2, AC3. Every other criterion carries no binding and stays unproven."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-transcribed-acceptance-criteria"
+    statement: "The acceptance criteria declared on the ticket body, transcribed verbatim. The ticket body is the source; each id is the label a binds_ac entry claims. Only bound criteria are transcribed."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: Under ONEX_DB_SLOT the forward-migration runner rewrites every managed role name in an applied file to its slot principal, and datname and has_database_privilege database literals to the slot database, and applies files unchanged outside a slot -- falsifier: uv run pytest tests/unit/infra/test_forward_migration_slot_role_confinement.py, red against the pre-fix runner"
+      - id: "AC2"
+        statement: "AC2: Under ONEX_DB_SLOT the intelligence migration runner targets omniintelligence\\_<slot>, refuses to create it, and the slot overlay runs it as a prepr-migrate one-shot that the entrypoint invokes after the forward migration -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_gaps_intelligence_migration.py, red against the pre-fix scripts"
+      - id: "AC3"
+        statement: "AC3: With KAFKA_TOPIC_NAMESPACE set, the topic provisioner creates, finds and confirms the namespaced physical names, and with it unset the names it sends to the broker are byte-identical to today -- falsifier: uv run pytest tests/unit/event_bus/test_topic_provisioner_namespace_omn18893.py, red against the pre-fix provisioner"
+evidence_requirements:
+  - kind: "tests"
+    description: "AC1: slot role confinement"
+    command: "uv run pytest tests/unit/infra/test_forward_migration_slot_role_confinement.py -q -p no:randomly -o addopts="
+  - kind: "tests"
+    description: "AC2: slot intelligence migration"
+    command: "uv run pytest tests/unit/scripts/test_prepr_slot_gaps_intelligence_migration.py -q -p no:randomly -o addopts="
+  - kind: "tests"
+    description: "AC3: topic provisioner namespace"
+    command: "uv run pytest tests/unit/event_bus/test_topic_provisioner_namespace_omn18893.py -q -p no:randomly -o addopts="
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19404-ac1-slot-roles-accepted"
+    description: 'AC1 binding proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3, accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3. Re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203: 111 passed, exit 0. The suite is absent at the parent of the implementing merge. Coverage-only evidence for the merged behavior; the implementing product patch no longer reverts cleanly at the current merge base. The suite also covers isolation across multiple slot names.'
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/infra/test_forward_migration_slot_role_confinement.py -q -p no:randomly -o addopts="
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac:
+      - "AC1"
+  - id: "dod-omn19404-ac2-slot-migration-accepted"
+    description: 'AC2 binding proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3, accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3. Re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203: 6 passed, exit 0. The suite is absent at the parent of the implementing merge. Coverage-only evidence for the merged behavior; the implementing product patch no longer reverts cleanly at the current merge base. The suite also covers isolation across multiple slot names.'
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_prepr_slot_gaps_intelligence_migration.py -q -p no:randomly -o addopts="
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac:
+      - "AC2"
+  - id: "dod-omn19404-ac3-slot-topics-accepted"
+    description: 'AC3 binding proposed by lane=dod-closeout-bind-2026-10-19T0445Z-c3, accepted by lane=dod-closeout-accept-2026-10-19T0445Z-c3. Re-run at omnibase_infra origin/dev a8ab64c18 on lab host h203: 4 passed, exit 0. The suite is absent at the parent of the implementing merge. Coverage-only evidence for the merged behavior; the implementing product patch no longer reverts cleanly at the current merge base. The suite also covers isolation across multiple slot names.'
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/event_bus/test_topic_provisioner_namespace_omn18893.py -q -p no:randomly -o addopts="
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac:
+      - "AC3"
+context:
+  accepted_ac_bindings:
+    dod-omn19404-ac1-slot-roles-accepted:
+      - label: AC1
+        criterion_hash: 5962069b3c6d890b6b37cf792bd060f71f2e980193ab71ef5797773831f86dc7
+        proposed_by: lane=dod-closeout-bind-2026-10-19T0445Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-10-19T0445Z-c3
+        accepted_at: '2026-10-19T05:12:13Z'
+    dod-omn19404-ac2-slot-migration-accepted:
+      - label: AC2
+        criterion_hash: a8aa2e2ca1fb0c19673ba445264cdbed730d8717215004319edc9509c8ef8359
+        proposed_by: lane=dod-closeout-bind-2026-10-19T0445Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-10-19T0445Z-c3
+        accepted_at: '2026-10-19T05:12:13Z'
+    dod-omn19404-ac3-slot-topics-accepted:
+      - label: AC3
+        criterion_hash: 1bc98c7672e9994ceac97b6d0edbbe4b5e11ba51d886b2b869461d3fb583cba0
+        proposed_by: lane=dod-closeout-bind-2026-10-19T0445Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-10-19T0445Z-c3
+        accepted_at: '2026-10-19T05:12:13Z'

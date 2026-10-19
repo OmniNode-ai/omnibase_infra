@@ -31,6 +31,33 @@ WHAT IT GRANTS
     its password: the password is never stored here, so re-issue is the only way
     to hand one back, and the device asking is the one that will use it.
 
+THE CLIENT REQUEST (OMN-17427)
+    A developer machine issues its own principal, from that machine, with one
+    request to the issuer URL its lab onboarding config names (tailnet only):
+
+        POST /v1/principals
+        Content-Type: application/json
+
+        {"lane": "dev", "device": "<a device name for this machine>"}
+
+    The client sends no credential and no identity. Tailscale serve strips any
+    ``Tailscale-User-*`` header the client sends and sets ``Tailscale-User-Login``
+    to the device owner's tailnet login. The principal is named from that login's
+    local part and ``device`` (see :func:`principal_name`); under ``--overlay`` the
+    pair must be declared in the document first. A 201 answers with exactly:
+
+        {"principal": "...", "password": "...", "lane": "dev",
+         "mechanism": "SCRAM-SHA-256", "security_protocol": "SASL_PLAINTEXT",
+         "action": "created"}
+
+    ``action`` is ``rotated`` when the device asked before. The password is in
+    that body only and is never shown again: pipe it straight into
+    ``onex auth lane-login --lane dev --sasl-username <principal>
+    --sasl-password-stdin`` and never print it. A refusal answers
+    ``{"error": "..."}``: 403 with no tailnet user (a tagged device) or a pair the
+    overlay does not declare, 400 for another lane or a blank device, 409 past
+    ``max_devices_per_login``, 502 when the broker's admin API does not answer.
+
 HOW A PRINCIPAL IS HELD TO THE FILE (OMN-19975)
     ``audit-grants`` lists each principal's live ACLs read-only and compares them with
     the rows this file derives for that principal (:func:`expected_acl_rows`). A derived

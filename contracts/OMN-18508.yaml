@@ -1,0 +1,31 @@
+schema_version: 1.0.0
+ticket_id: OMN-18508
+title: Compose dev lane provisions omninode_cloud so role_omninode can apply the corpus (CREATE on database)
+summary: The compose dev lane applied the omninode_cloud corpus as role_omninode, which lacked CREATE on the database, so CREATE EXTENSION pgcrypto failed. omnibase_infra#3660 grants it from an explicit corpus-applier map in both provisioning seams with a has_database_privilege readback, and omnibase_infra#3664 orders the corpus one-shot after the seam that provisions its identity. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn-18508-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the labelled criterion of the same name on the ticket.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC6: a non-superuser migration one-shot declares a service_completed_successfully edge to the service that provisions its identity, both derived by parsing the compose set. Fails at the parent of omnibase_infra#3664.'
+    command: uv run pytest tests/unit/infra/test_corpus_applier_database_create_omn18508.py -q -k test_a_non_superuser_applier_waits_for_its_own_provisioning
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18508-ac6-accepted-20261018t2045z
+    description: 'AC6: a non-superuser migration one-shot declares a service_completed_successfully edge to the service that provisions its identity, both derived by parsing the compose set. Fails at the parent of omnibase_infra#3664.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_corpus_applier_database_create_omn18508.py -q -k test_a_non_superuser_applier_waits_for_its_own_provisioning
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6

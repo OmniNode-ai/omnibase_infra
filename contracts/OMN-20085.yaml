@@ -1,0 +1,72 @@
+schema_version: 1.0.0
+ticket_id: OMN-20085
+title: One call verifies a branch or sha on the pre-PR slots
+summary: 'The pool driver gains a verify subcommand: verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha> takes the first free pre-PR slot under a lease, builds it from the ref with no PR, runs the named tests or the repo unit suite, tears the slot down on every catchable exit, and writes one onex.prepr.verify-result.v1 file for every outcome. The expired-lease break is made atomic (a guard directory plus a re-read) so two acquirers cannot both hold a slot. Not delivered here: the TLA+ model of the lease (AC3 formal half) and the live slot run (AC7), which need a TLC host and a pre-PR slot hold.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy. AC3 (formal model half) and AC7 (live run) are not transcribed because this change does not evidence them, and AC2 is evidenced below without a binding because its line names the slot host's address, which the public-repo hygiene gate refuses to carry into this file.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: `verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha>` builds the slot from a ref with no PR, and a ref that does not resolve exits 5 before any lease is taken -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_ref'
+      - id: AC4
+        statement: 'AC4: `verify --suite` runs the repo''s unit suite on the slot host under its own budget with a bounded dev control, and `verify` with neither `--tests` nor `--suite` exits 5 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_suite'
+      - id: AC5
+        statement: 'AC5: `verify --result-out` writes one onex.prepr.verify-result.v1 JSON file for every outcome including no free slot, and its exit_code field equals the process exit code -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_result'
+      - id: AC6
+        statement: 'AC6: a SIGTERM, SIGHUP or SIGINT to the driver mid-run tears the slot down and releases the lease before it exits, and its result file says INTERRUPTED -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_signal'
+evidence_requirements:
+  - kind: tests
+    description: The verify tests and the real-shell lease race tests pass.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20085-ac1-ref-build-and-unresolved-ref
+    description: 'AC1. The verify_ref tests assert a branch builds the slot with INFRA_REF_SHA and no PR param, omnimarket gets MARKET_REF_SHA, a ref that resolves in no canonical clone exits 5 with no host command run (the transport fails the test on any call), and resolve_ref_in_clone reads a real git clone for a branch and a sha. They fail at the merge base, where the verify subcommand does not exist.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_ref -q
+    binds_ac:
+      - "AC1"
+  - id: dod-omn-20085-ac2-first-free-slot
+    description: 'AC2 (unbound corroboration, no binds_ac: the criterion line is not transcribed above). The verify_first_free_slot tests assert only prepr-slot members are offered even when a free isolated member exists, slot order decides, a busy slot is skipped, a slot a peer leases between the survey and the lease sends the run to the next free slot, and no free slot, or every free slot lost, exits 3.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_first_free_slot -q
+  - id: dod-omn-20085-ac4-suite-budget-no-tests-refusal
+    description: 'AC4. The verify_suite tests assert --suite passes SUITE_REPO to the host and gives the tests phase the suite budget, a focused run keeps the 2400 s default, the judge reads a suite rc line and a failure past the bounded dev control as the PR''s, the on-host script bounds its dev control (DEV_CONTROL_MAX) and runs tests/unit, and a call with neither --tests nor --suite exits 5 before touching a host.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_suite -q
+    binds_ac:
+      - "AC4"
+  - id: dod-omn-20085-ac5-result-file-for-every-outcome
+    description: 'AC5. The verify_result tests assert the result file carries the onex.prepr.verify-result.v1 schema for PASS, FAIL, INCONCLUSIVE, no free slot, usage and unresolved-ref outcomes, and for a config error and an unreadable ledger, and that exit_code equals the return value of main() for a pass, a no-free-slot and an unresolved ref run through the CLI.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_result -q
+    binds_ac:
+      - "AC5"
+  - id: dod-omn-20085-ac6-catchable-signals-tear-down
+    description: 'AC6. The verify_signal tests send a real SIGTERM, SIGHUP and SIGINT to the process mid-build and assert the teardown and snap-post phases ran, the lease is released, the result file says INTERRUPTED with exit_code 128 plus the signal number, the previous signal handlers are restored, a signal in the survey leaves nothing leased, and a second signal during cleanup does not cut it short.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_signal -q
+    binds_ac:
+      - "AC6"
+  - id: dod-omn-20085-lease-race-one-holder
+    description: 'The lease critical section (AC3 python half). Real bash processes run the driver''s own remote lease commands at the same moment against one lease directory, for 25 rounds of 8 acquirers over an expired lease and over a free one, and exactly one holds the slot each round; a lease a peer took between the read and the break is left alone. Against the previous driver the expired-lease round fails with two holders. The TLA+ model half of AC3 is not delivered here. Unbound corroboration (no binds_ac).'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q

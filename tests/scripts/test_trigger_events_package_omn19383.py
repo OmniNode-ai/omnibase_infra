@@ -110,6 +110,42 @@ class TestOmnimarketEventsPackageIsLaneState:
         assert trigger_module.find_lane_state_paths(DOCS_ONLY_FILES) == []
         assert not trigger_module.should_trigger([], [])
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/omnimarket/events/__init__.py",
+            "src/omnimarket/events/runtime_deployment.py",
+            "src/omnimarket/events/topics.py",
+            "src/omnimarket/events/sub/deeper.py",
+        ],
+    )
+    @pytest.mark.parametrize("canonical_matches", [False, True])
+    def test_events_survive_the_shared_classifier_union(
+        self, trigger_module: Any, path: str, canonical_matches: bool
+    ) -> None:
+        """The deployed caller keeps events even when the canonical list misses them."""
+        hits = trigger_module.classify_runtime_paths(
+            [*DOCS_ONLY_FILES, path, path],
+            lambda _files: [path] if canonical_matches else [],
+            source_repo="OmniNode-ai/omnimarket",
+        )
+        assert hits == [path]
+        assert trigger_module.should_trigger(hits, [])
+        assert trigger_module.attribute_runtime_paths(hits) == [
+            (path, "src/omnimarket/events/**")
+        ]
+
+    def test_docs_only_merge_through_the_shared_classifier_stays_inert(
+        self, trigger_module: Any
+    ) -> None:
+        hits = trigger_module.classify_runtime_paths(
+            DOCS_ONLY_FILES,
+            lambda _files: [],
+            source_repo="OmniNode-ai/omnimarket",
+        )
+        assert hits == []
+        assert not trigger_module.should_trigger(hits, [])
+
     def test_a_sibling_omnimarket_directory_is_lane_state_too(
         self, trigger_module: Any
     ) -> None:
