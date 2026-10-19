@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-cve-autobump-keeps-contract
+    statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
+    acceptance:
+      - id: AC60
+        statement: 'AC60: a refresh of an open bump PR whose branch holds contracts/OMN-20174.yaml commits that file with the regenerated locks, a branch without it commits only the locks, and a new PR reads no branch contract -- falsifier: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q -k "keeps_the_pr_evidence_contract or new_pr_reads_no_branch_contract"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -353,6 +358,9 @@ evidence_requirements:
   - kind: tests
     description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+  - kind: tests
+    description: Fake-runner tests check that the autobump refresh carries an existing branch contract into its commit and adds nothing when there is none; they do not claim a scheduled run.
+    command: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1041,3 +1049,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac60-autobump-keeps-contract
+    description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC60
+  - id: dod-omn-17427-ac60-autobump-deploy-check
+    description: Hosted-runner deploy check -- fake-runner tests of the autobump contract carry-forward; they do not claim a scheduled run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC60
