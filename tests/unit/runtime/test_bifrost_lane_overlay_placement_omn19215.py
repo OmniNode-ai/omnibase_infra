@@ -6,13 +6,12 @@ OMN-17099 lets a lane overlay ADD a backend, but routing only offers a backend
 the packaged routing ladder names, so an added backend was reachable only by a
 per-run pin. The routing authority (omnimarket) now reads an optional
 ``placement`` on a rendered backend entry and mirrors the backend into the named
-tier after the rungs it backs. This renderer's part is small: validate what it
-alone can check, and pass the placement through unchanged.
+tier after the rungs it backs. The renderer validates the context window and,
+when the runtime pins its ladder path, the tier and rung names before passing
+the placement through unchanged.
 
-What it alone can check is the context window, because only the lane overlay
-declares one: a placement may not offer the backend a larger prompt than the
-backend says it holds. The tier and rung names are checked by the routing
-authority against the ladder it loads, which this renderer does not read.
+A placement may not offer the backend a larger prompt than the backend says it
+holds. The routing authority also checks tier and rung names at its own load.
 """
 
 from __future__ import annotations
@@ -109,7 +108,12 @@ def _added_binding(**overrides: object) -> dict[str, object]:
     return binding
 
 
-def _render(tmp_path: Path, backends: list[dict[str, object]]) -> dict[str, object]:
+def _render(
+    tmp_path: Path,
+    backends: list[dict[str, object]],
+    *,
+    extra_environ: dict[str, str] | None = None,
+) -> dict[str, object]:
     overlay = tmp_path / "overlay.yaml"
     overlay.write_text(
         yaml.safe_dump(
@@ -128,7 +132,7 @@ def _render(tmp_path: Path, backends: list[dict[str, object]]) -> dict[str, obje
         source_path=_base_contract(tmp_path / "base.yaml"),
         overlay_path=overlay,
         target_path=target,
-        environ={},
+        environ=extra_environ if extra_environ is not None else {},
         verify_endpoints=False,
     )
     rendered = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -211,6 +215,178 @@ def test_the_render_refuses_an_oversized_placement_with_a_typed_error(
                 _added_binding(placement={**_PLACEMENT, "max_context_tokens": 65_536}),
             ],
         )
+
+
+def _ladder(
+    tmp_path: Path,
+    *,
+    rung_key: str = "backend_id",
+    local_rungs: tuple[str, ...] = ("local-writer", "local-coder"),
+) -> Path:
+    path = tmp_path / "routing_tiers.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "tiers": [
+                    {
+                        "name": "local",
+                        "models": [{rung_key: rung} for rung in local_rungs],
+                    },
+                    {
+                        "name": "frontier_api",
+                        "models": [{rung_key: "cloud-frontier"}],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rung_key", ["backend_id", "backend_ref"])
+def test_a_valid_placement_renders_against_the_pinned_ladder(
+    tmp_path: Path, rung_key: str
+) -> None:
+    rendered = _render(
+        tmp_path,
+        [_base_binding(), _added_binding()],
+        extra_environ={
+            "DELEGATION_ROUTING_TIERS_PATH": str(_ladder(tmp_path, rung_key=rung_key))
+        },
+    )
+    assert _added(rendered)["placement"] == _PLACEMENT
+
+
+@pytest.mark.unit
+def test_an_unknown_placement_tier_is_refused_naming_the_backend(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [
+                _base_binding(),
+                _added_binding(placement={**_PLACEMENT, "tier": "unknown-tier"}),
+            ],
+            extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(_ladder(tmp_path))},
+        )
+    assert "unknown-tier" in str(exc.value)
+    assert "['frontier_api', 'local']" in str(exc.value)
+    assert str(exc.value).endswith("(OMN-19215)")
+    assert not (tmp_path / "rendered.yaml").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rung", ["unknown-rung", "cloud-frontier"])
+def test_a_fallback_rung_outside_the_tier_is_refused_naming_the_backend(
+    tmp_path: Path, rung: str
+) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [
+                _base_binding(),
+                _added_binding(placement={**_PLACEMENT, "fallback_for": [rung]}),
+            ],
+            extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(_ladder(tmp_path))},
+        )
+    assert rung in str(exc.value)
+    assert "['local-coder', 'local-writer']" in str(exc.value)
+    assert str(exc.value).endswith("(OMN-19215)")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rung_key", ["backend_id", "backend_ref"])
+def test_a_tier_already_carrying_the_added_backend_is_refused(
+    tmp_path: Path, rung_key: str
+) -> None:
+    ladder = _ladder(
+        tmp_path,
+        rung_key=rung_key,
+        local_rungs=("local-coder", "local-second-host"),
+    )
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [_base_binding(), _added_binding()],
+            extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(ladder)},
+        )
+    assert "already declares" in str(exc.value)
+    assert str(exc.value).endswith("(OMN-19215)")
+
+
+@pytest.mark.unit
+def test_a_missing_ladder_is_refused_when_a_placement_exists(tmp_path: Path) -> None:
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [_base_binding(), _added_binding()],
+            extra_environ={
+                "DELEGATION_ROUTING_TIERS_PATH": str(tmp_path / "missing.yaml")
+            },
+        )
+    assert "missing.yaml" in str(exc.value)
+    assert str(exc.value).endswith("(OMN-19215)")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "document",
+    ["[", "- local", "{}", "tiers: {}", "tiers: null", "\xff"],
+    ids=["malformed", "non-mapping", "no-tiers", "non-list", "null", "non-utf8"],
+)
+def test_an_invalid_ladder_is_refused_naming_the_backend(
+    tmp_path: Path, document: str
+) -> None:
+    ladder = tmp_path / "routing_tiers.yaml"
+    ladder.write_bytes(document.encode("latin-1"))
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [_base_binding(), _added_binding()],
+            extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(ladder)},
+        )
+    assert str(exc.value).endswith("(OMN-19215)")
+
+
+@pytest.mark.unit
+def test_an_unreadable_ladder_is_refused_naming_the_backend(tmp_path: Path) -> None:
+    # A directory reliably raises an OSError even when tests run as root.
+    with pytest.raises(ProtocolConfigurationError, match="local-second-host") as exc:
+        _render(
+            tmp_path,
+            [_base_binding(), _added_binding()],
+            extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(tmp_path)},
+        )
+    assert str(exc.value).endswith("(OMN-19215)")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "extra_environ", [{}, {"DELEGATION_ROUTING_TIERS_PATH": " \t"}]
+)
+def test_an_invalid_tier_passes_through_without_a_ladder_pin(
+    tmp_path: Path, extra_environ: dict[str, str]
+) -> None:
+    placement = {**_PLACEMENT, "tier": "unknown-tier"}
+    rendered = _render(
+        tmp_path,
+        [_base_binding(), _added_binding(placement=placement)],
+        extra_environ=extra_environ,
+    )
+    assert _added(rendered)["placement"] == placement
+
+
+@pytest.mark.unit
+def test_a_render_without_placements_does_not_read_the_ladder(tmp_path: Path) -> None:
+    rendered = _render(
+        tmp_path,
+        [_base_binding(), _added_binding(placement=None)],
+        extra_environ={"DELEGATION_ROUTING_TIERS_PATH": str(tmp_path / "missing.yaml")},
+    )
+    assert "placement" not in _added(rendered)
 
 
 # --- AC4: placement mode (RULING ledger:4257) --------------------------------

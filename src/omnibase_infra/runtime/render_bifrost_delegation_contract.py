@@ -141,6 +141,69 @@ def _load_lane_overlay(path: Path) -> ModelBifrostLaneOverlay:
         ) from exc
 
 
+def _load_routing_ladder_rungs(path: Path, *, backend_key: str) -> dict[str, set[str]]:
+    """Read tier and rung names from the runtime's pinned ladder (OMN-19215)."""
+    label = f"Routing ladder for backend {backend_key!r} placement"
+    try:
+        ladder = _load_mapping(path, label=label)
+    except (ProtocolConfigurationError, OSError, UnicodeError) as exc:
+        raise ProtocolConfigurationError(f"{label}: {exc} (OMN-19215)") from exc
+    tiers = ladder.get("tiers")
+    if not isinstance(tiers, list):
+        raise ProtocolConfigurationError(
+            f"{label} must declare a tiers list: {path} (OMN-19215)"
+        )
+    rungs_by_tier: dict[str, set[str]] = {}
+    for tier in tiers:
+        if not isinstance(tier, dict) or not isinstance(tier.get("name"), str):
+            continue
+        rungs = rungs_by_tier.setdefault(tier["name"], set())
+        models = tier.get("models")
+        if isinstance(models, list):
+            for model in models:
+                if isinstance(model, dict):
+                    rung = model.get("backend_id") or model.get("backend_ref")
+                    if isinstance(rung, str):
+                        rungs.add(rung)
+    return rungs_by_tier
+
+
+def _validate_lane_placements(
+    overlay: ModelBifrostLaneOverlay, *, env: Mapping[str, str]
+) -> None:
+    """Refuse invalid placements before publishing the rendered contract."""
+    configured = env.get("DELEGATION_ROUTING_TIERS_PATH", "").strip()
+    bindings = [
+        binding for binding in overlay.backends if binding.placement is not None
+    ]
+    if not configured or not bindings:
+        return
+    rungs_by_tier = _load_routing_ladder_rungs(
+        Path(configured), backend_key=bindings[0].backend_key
+    )
+    for binding in bindings:
+        placement = binding.placement
+        assert placement is not None
+        label = f"Backend {binding.backend_key!r} placement"
+        if placement.tier not in rungs_by_tier:
+            raise ProtocolConfigurationError(
+                f"{label} names unknown tier {placement.tier!r}; "
+                f"ladder tiers: {sorted(rungs_by_tier)} (OMN-19215)"
+            )
+        rungs = rungs_by_tier[placement.tier]
+        if binding.backend_key in rungs:
+            raise ProtocolConfigurationError(
+                f"{label} tier {placement.tier!r} already declares the added "
+                "backend as a rung (OMN-19215)"
+            )
+        for rung in placement.fallback_for:
+            if rung not in rungs:
+                raise ProtocolConfigurationError(
+                    f"{label} names unknown fallback_for rung {rung!r} in tier "
+                    f"{placement.tier!r}; tier rungs: {sorted(rungs)} (OMN-19215)"
+                )
+
+
 def lane_overlay_store_key(lane: str) -> str:
     """The config-store key holding ``lane``'s overlay document (OMN-19214)."""
     stripped = lane.strip()
@@ -674,8 +737,9 @@ def render_bifrost_delegation_contract_with_source(
     records which source supplied it. ``lane`` names the store row and defaults
     to ``ONEX_ENVIRONMENT``; it is read only when a store is given.
 
-    ``environ`` is used only for the target path, the lane's overlay path pin
-    (``BIFROST_LANE_OVERLAY_PATH``), and the endpoint-verification flag;
+    ``environ`` supplies the target path, the lane's overlay path pin
+    (``BIFROST_LANE_OVERLAY_PATH``), the routing ladder path pin
+    (``DELEGATION_ROUTING_TIERS_PATH``), and the endpoint-verification flag;
     endpoint, model, and local operational bindings always come from the
     resolved overlay file, never from the environment.
 
@@ -708,6 +772,8 @@ def render_bifrost_delegation_contract_with_source(
         verify=should_verify,
         endpoint_probe=endpoint_probe or _probe_openai_model_endpoint,
     )
+    # OMN-19215: check placements against the same pinned ladder the runtime loads.
+    _validate_lane_placements(overlay, env=env)
     _validate_rendered_contract(data, overlay=overlay)
     target.parent.mkdir(parents=True, exist_ok=True)
     staged_target = target.with_suffix(f"{target.suffix}.tmp")

@@ -246,6 +246,10 @@ DEV_LANE_ONLY_MIGRATION_SERVICES: tuple[str, ...] = (
     "cloud-migration",
 )
 
+# OMN-18496: the only services that read omninode_cloud; bound by a test to
+# the bash array of the same name in handler_runtime_deploy.sh.
+DEV_LANE_CLOUD_DB_SERVICES: tuple[str, ...] = ("onex-api",)
+
 
 DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     "projection-tenant-registry-writer",
