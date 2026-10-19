@@ -40,6 +40,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_CLOUD_DB_SERVICES,
     DEV_LANE_GATEWAY_SERVICES,
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
     DEV_LANE_ONLY_MIGRATION_SERVICES,
@@ -2086,12 +2087,19 @@ def verify_oneshots_completed(
     timeout_s: int = 300,
     *,
     lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    failed: dict[str, int] | None = None,
 ) -> tuple[bool, list[str]]:
     """Poll compose until every named one-shot has exited 0.
 
     Returns ``(False, [names])`` on timeout rather than raising, matching
     ``verify_containers_up``'s contract so the caller owns the error text and
     can name the phase the failure belongs to.
+
+    A detached up of a one-shot returns before it runs, so this poll is the
+    only place its failure is seen. A one-shot with restart "no" that exited
+    non-zero will never exit 0: return immediately with those service names.
+    Each service's exit code is written to ``failed``, which the caller passes
+    when it records them; it is filled before the return.
     """
     deadline = time.monotonic() + timeout_s
     pending: list[str] = list(expected_oneshots)
@@ -2104,6 +2112,15 @@ def verify_oneshots_completed(
             )
             time.sleep(2)
             continue
+        terminal_failures: dict[str, int] = {}
+        for service in expected_oneshots:
+            state, exit_code = states.get(service, ("missing", None))
+            if state == "exited" and isinstance(exit_code, int) and exit_code != 0:
+                terminal_failures[service] = exit_code
+        if terminal_failures:
+            if failed is not None:
+                failed.update(terminal_failures)
+            return False, list(terminal_failures)
         pending = [
             service
             for service in expected_oneshots
@@ -2118,6 +2135,34 @@ def verify_oneshots_completed(
         )
         time.sleep(2)
     return False, pending
+
+
+_ONESHOT_LOG_URL_CREDENTIALS_RE = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^@\s]+@"
+)
+
+
+def _oneshot_log_tail(lane: EnumRuntimeLane, service: str, *, lines: int = 5) -> str:
+    """Return the one-shot's last log lines with URL credentials redacted."""
+    result = _run(
+        [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            lane_config_for(lane).compose_project,
+            "logs",
+            "--no-color",
+            "--tail",
+            str(lines),
+            service,
+        ],
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return ""
+    tail = " / ".join(line.strip() for line in result.stdout.strip().splitlines())
+    return _ONESHOT_LOG_URL_CREDENTIALS_RE.sub(r"\g<scheme>***@", tail)
 
 
 def runtime_compose_up_budget(
@@ -2576,6 +2621,8 @@ class DeployExecutor:
         # because their config hash moved, with each exit code. Read by the
         # agent when it writes the job's terminal record and event.
         self.oneshot_reruns: list[ModelOneShotRerun] = []
+        # OMN-18496: read by the agent after runtime verification to fail the job.
+        self.cloud_migration_failure: str = ""
         # OMN-20864: per runtime health port, what its LAST probe answered when
         # that was a running runtime whose monitor reads degraded, else None.
         # Read by the declared-start wait (has the monitor settled?) and by the
@@ -2622,6 +2669,7 @@ class DeployExecutor:
         self.recreate_supervision = []
         self.verify_recreate = []
         self.oneshot_reruns = []
+        self.cloud_migration_failure = ""
         self.deps_convergence = []
         self.compose_invocations = []
         self.health_checks = []
@@ -3956,8 +4004,10 @@ class DeployExecutor:
                 targets=gateway_targets,
                 git_ref=git_ref,
             )
-            return _without_disabled_services(
-                services_for_scope(Scope.FULL, lane=lane), lane
+            return self._without_failed_cloud_consumers(
+                _without_disabled_services(
+                    services_for_scope(Scope.FULL, lane=lane), lane
+                )
             )
 
         # OMN-20154: span staging through the LAST build so reconcile-host
@@ -3991,9 +4041,17 @@ class DeployExecutor:
             targets=gateway_targets,
             git_ref=git_ref,
         )
-        return _without_disabled_services(
-            services if services else services_for_scope(scope, lane=lane), lane
+        return self._without_failed_cloud_consumers(
+            _without_disabled_services(
+                services if services else services_for_scope(scope, lane=lane), lane
+            )
         )
+
+    def _without_failed_cloud_consumers(self, services: list[str]) -> list[str]:
+        # OMN-18496: a stopped cloud consumer is neither restarted nor read back.
+        if self.cloud_migration_failure:
+            return [s for s in services if s not in DEV_LANE_CLOUD_DB_SERVICES]
+        return services
 
     def _gateway_child_env(
         self, build_source: BuildSource | str, *, git_ref: str
@@ -5341,6 +5399,18 @@ class DeployExecutor:
             self.rerun_changed_oneshots(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=build
             )
+            if self.cloud_migration_failure:
+                had_requested_services = bool(requested_services)
+                requested_services = self._without_failed_cloud_consumers(
+                    requested_services
+                )
+                expected = self._without_failed_cloud_consumers(expected)
+                # OMN-18496: an empty argv would widen compose to the whole profile.
+                if had_requested_services and not requested_services:
+                    raise DevLaneMigrationPreflightError(
+                        f"{self.cloud_migration_failure}; every requested service needs "
+                        "omninode_cloud, refusing an empty service scope"
+                    )
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
@@ -5659,6 +5729,7 @@ class DeployExecutor:
 
     def converge_forward_migration(self, *, lane: EnumRuntimeLane) -> str:
         """Apply migration one-shots under the lane lock without restarting runtime."""
+        self.cloud_migration_failure = ""
         fingerprint = read_checkout_migration_fingerprint()
         with lane_lock(
             lane_config_for(lane).compose_project,
@@ -5666,9 +5737,13 @@ class DeployExecutor:
             ref=fingerprint or "migration-converge",
             timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
         ):
-            return self._ensure_runtime_migrations_ready(
+            applied = self._ensure_runtime_migrations_ready(
                 lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
             )
+            # OMN-18496: idle convergence still reports a failed cloud corpus loudly.
+            if self.cloud_migration_failure:
+                raise DevLaneMigrationPreflightError(self.cloud_migration_failure)
+            return applied
 
     def _ensure_runtime_migrations_ready(
         self,
@@ -5751,19 +5826,67 @@ class DeployExecutor:
                     env=_compose_env(),
                 )
                 if result.returncode != 0:
-                    raise DevLaneMigrationPreflightError(
+                    self.cloud_migration_failure = (
                         f"Dev-lane migration preflight failed for {service}: "
                         f"{result.stderr.strip() or result.stdout.strip()}"
                     )
-                ok, pending = verify_oneshots_completed(
-                    [service], timeout_s=timeout, lane=lane
-                )
-                if not ok:
-                    raise DevLaneMigrationPreflightError(
-                        "Dev-lane migration preflight did not complete "
-                        f"{service}: {pending}. A one-shot that has not exited "
-                        "0 has not proven it did its job."
+                else:
+                    # OMN-18496: detached up succeeds before the one-shot runs.
+                    failed: dict[str, int] = {}
+                    ok, pending = verify_oneshots_completed(
+                        [service], timeout_s=timeout, lane=lane, failed=failed
                     )
+                    if not ok:
+                        if service in failed:
+                            self.cloud_migration_failure = (
+                                f"Dev-lane migration preflight failed for {service}: "
+                                f"the one-shot exited {failed[service]}"
+                            )
+                            tail = _oneshot_log_tail(lane, service)
+                            if tail:
+                                self.cloud_migration_failure += ": " + tail
+                        else:
+                            self.cloud_migration_failure = (
+                                "Dev-lane migration preflight did not complete "
+                                f"{service}: {pending}. A one-shot that has not exited "
+                                "0 has not proven it did its job."
+                            )
+                if self.cloud_migration_failure:
+                    # OMN-18496: stop warm cloud readers, but let the runtime
+                    # adopt its new image; the agent fails the job after verify.
+                    logger.error(
+                        "%s; only %s are gated; runtime migrations remain required",
+                        self.cloud_migration_failure,
+                        ", ".join(DEV_LANE_CLOUD_DB_SERVICES),
+                    )
+                    consumers = _without_disabled_services(
+                        list(DEV_LANE_CLOUD_DB_SERVICES), lane
+                    )
+                    if consumers:
+                        stopped = _run(
+                            [
+                                "docker",
+                                "compose",
+                                *_compose_file_args(lane),
+                                "-p",
+                                config.compose_project,
+                                "--profile",
+                                "runtime",
+                                "stop",
+                                "--timeout",
+                                "30",
+                                *consumers,
+                            ],
+                            timeout=timeout,
+                        )
+                        if stopped.returncode != 0:
+                            self.cloud_migration_failure += (
+                                "; stopping onex-api also failed: "
+                                f"{stopped.stderr.strip()}"
+                            )
+                            logger.error("%s", self.cloud_migration_failure)
+                    # A failed copier must never apply a stale corpus.
+                    break
 
         for table_name in REQUIRED_PROJECTION_TABLES:
             result = _run(
@@ -5787,7 +5910,11 @@ class DeployExecutor:
                     f"omnidash_analytics.{table_name}"
                 )
 
-        if self._migration_record_dir is not None and fingerprint is not None:
+        if (
+            self._migration_record_dir is not None
+            and fingerprint is not None
+            and not self.cloud_migration_failure
+        ):
             write_applied_migration_fingerprint(
                 self._migration_record_dir, lane, fingerprint
             )

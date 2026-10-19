@@ -343,6 +343,7 @@ def _agent(
         "health_checks",
     ):
         setattr(executor, name, [])
+    executor.cloud_migration_failure = ""
     executor.sibling_source_refs = {}
     agent.executor = executor
     monkeypatch.setattr(agent, "_resolve_lab_overlay_sha", lambda *args, **kwargs: None)

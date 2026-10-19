@@ -1842,6 +1842,14 @@ class DeployAgent:
                     lane=cmd.runtime_lane, materialize_root=STATE_DIR / "lane-mirror"
                 )
 
+                # OMN-18496: runtime restarted, verified and keeps serving. Fail
+                # loudly on the job and terminal event before lab apply/promotion;
+                # the unchanged type still triggers the OMN-18545 repair build.
+                if self.executor.cloud_migration_failure:
+                    raise DevLaneMigrationPreflightError(
+                        self.executor.cloud_migration_failure
+                    )
+
                 # Complete -- AND SAY WHAT IS STILL RUNNING (OMN-18636 AC5).
                 #
                 # The verdict below is final and is deliberately not affected by

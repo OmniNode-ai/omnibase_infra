@@ -270,13 +270,14 @@ class TestThePreflightRunsThem:
 
 
 class TestExitZeroGating:
-    def test_a_one_shot_that_did_not_exit_zero_fails_the_preflight(self) -> None:
+    def test_a_one_shot_that_did_not_exit_zero_records_the_failure(self) -> None:
         """A one-shot that is merely RUNNING is not done.
 
         ``_service_satisfied`` deliberately accepts ``running`` for the
         lane-agnostic set, which mixes in a keepalive. Applied to a corpus
-        migration that tolerance would let the runtime start against a
-        half-applied database and report success.
+        migration that tolerance would report success against a half-applied
+        database. OMN-18496: only cloud consumers are gated; the agent fails
+        the job after the runtime family restarts and passes verification.
         """
         executor = DeployExecutor()
 
@@ -297,9 +298,9 @@ class TestExitZeroGating:
                 "deploy_agent.executor.verify_oneshots_completed",
                 return_value=(False, ["cloud-migration"]),
             ),
-            pytest.raises(RuntimeError, match="cloud-migration"),
         ):
             executor._ensure_runtime_migrations_ready(lane=EnumRuntimeLane.DEV)
+        assert "cloud-migration" in executor.cloud_migration_failure
 
 
 # ---------------------------------------------------------------------------
