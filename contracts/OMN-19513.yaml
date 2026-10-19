@@ -2,10 +2,16 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-19513"
 title: "the runtime-image services carry a nofile ulimit of 65535 instead of the container default of 1024"
-summary: "The dev lane's omninode-runtime passed 1024 open files about four minutes after each start, failed every write with Errno 24, exited 0 and was restarted, leaving the claude hook-events projection 18-20 minutes behind. docker-compose.infra.yml's x-runtime-base anchor and the omninode-runtime, runtime-effects and runtime-worker catalog manifests now declare ulimits.nofile soft and hard 65535. This contract binds no acceptance criterion of the ticket: the ticket's own criteria concern the omnimarket work_events projection."
+summary: "The dev lane's omninode-runtime passed 1024 open files about four minutes after each start, failed every write with Errno 24, exited 0 and was restarted, leaving the claude hook-events projection 18-20 minutes behind. docker-compose.infra.yml's x-runtime-base anchor and the omninode-runtime, runtime-effects and runtime-worker catalog manifests now declare ulimits.nofile soft and hard 65535."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+requirements:
+  - id: req-omn19513-runtime-nofile-ulimit
+    statement: "Every runtime-image service declares an open-file limit above the 1024 container default."
+    acceptance:
+      - id: AC1
+        statement: "AC1: The base compose x-runtime-base anchor and the omninode-runtime, runtime-effects and runtime-worker catalog manifests declare ulimits.nofile soft and hard 65535 -- falsifier: uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py fails at origin/dev, which declares none"
 evidence_requirements:
   - kind: tests
     description: "Every service built from docker/Dockerfile.runtime in the base compose file, and the three runtime catalog manifests, declare nofile soft >= 65535."
@@ -22,9 +28,10 @@ dod_evidence:
     description: "The base compose runtime anchor and the runtime catalog manifests declare nofile 65535. 13 of the 14 tests fail against origin/dev b4b7c7f8c, which declares none."
     source: "manual"
     checks:
-      - check_type: "command"
+      - check_type: "test_passes"
         check_value: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]
   - id: "dod-omn19513-deploy-runtime-nofile"
     description: "Deploy probe: the compose file the dev lane deploys from carries the nofile block at this head; at origin/dev b4b7c7f8c the grep exits 1."
     source: "manual"
