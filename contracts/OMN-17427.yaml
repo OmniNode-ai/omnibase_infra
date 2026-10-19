@@ -224,6 +224,11 @@ requirements:
     acceptance:
       - id: AC49
         statement: 'AC49: no contracts/*.yaml dod_evidence id is longer than the limit read from omnibase_core, and contracts/OMN-19812.yaml loads with ModelTicketContract -- falsifier: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q'
+  - id: req-omn17427-cloud-oneshot-exit-report
+    statement: A dev-lane cloud migration one-shot that exits non-zero after a detached compose up is reported at once with its exit code and its own last log lines, URL credentials redacted, instead of after the whole poll timeout.
+    acceptance:
+      - id: AC50
+        statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -333,6 +338,9 @@ evidence_requirements:
   - kind: tests
     description: Every contract dod_evidence id fits the core limit and the OMN-19812 contract loads with ModelTicketContract.
     command: uv run pytest tests/ci/test_contract_dod_evidence_id_length_omn17427.py -q
+  - kind: tests
+    description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -975,3 +983,19 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC49
+  - id: dod-omn-17427-ac50-cloud-oneshot-exit-report
+    description: Deploy-agent unit tests with the compose state read and compose calls mocked; a sleep that raises proves the poll returns without waiting on an exited-1 one-shot, a running-then-exited-0 sequence is still waited for, and the preflight failure carries "exited 1", the one-shot's log line, and no URL password. The same behaviour against a real Docker daemon is in scripts/deploy-agent/tests/unit/test_cloud_migration_nonfatal_real_docker_omn18496.py, which skips where no daemon or local postgres:16-alpine image is available. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC50
+  - id: dod-omn-17427-ac50-cloud-exit-deploy-check
+    description: Hosted-runner deploy check -- the exited-0 poll stops at a non-zero exit and the preflight failure carries the exit code and redacted log tail. Mocked compose calls; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra

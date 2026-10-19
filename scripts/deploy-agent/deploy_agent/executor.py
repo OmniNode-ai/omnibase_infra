@@ -2087,12 +2087,19 @@ def verify_oneshots_completed(
     timeout_s: int = 300,
     *,
     lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+    failed: dict[str, int] | None = None,
 ) -> tuple[bool, list[str]]:
     """Poll compose until every named one-shot has exited 0.
 
     Returns ``(False, [names])`` on timeout rather than raising, matching
     ``verify_containers_up``'s contract so the caller owns the error text and
     can name the phase the failure belongs to.
+
+    A detached up of a one-shot returns before it runs, so this poll is the
+    only place its failure is seen. A one-shot with restart "no" that exited
+    non-zero will never exit 0: return immediately with those service names.
+    Each service's exit code is written to ``failed``, which the caller passes
+    when it records them; it is filled before the return.
     """
     deadline = time.monotonic() + timeout_s
     pending: list[str] = list(expected_oneshots)
@@ -2105,6 +2112,15 @@ def verify_oneshots_completed(
             )
             time.sleep(2)
             continue
+        terminal_failures: dict[str, int] = {}
+        for service in expected_oneshots:
+            state, exit_code = states.get(service, ("missing", None))
+            if state == "exited" and isinstance(exit_code, int) and exit_code != 0:
+                terminal_failures[service] = exit_code
+        if terminal_failures:
+            if failed is not None:
+                failed.update(terminal_failures)
+            return False, list(terminal_failures)
         pending = [
             service
             for service in expected_oneshots
@@ -2119,6 +2135,34 @@ def verify_oneshots_completed(
         )
         time.sleep(2)
     return False, pending
+
+
+_ONESHOT_LOG_URL_CREDENTIALS_RE = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^@\s]+@"
+)
+
+
+def _oneshot_log_tail(lane: EnumRuntimeLane, service: str, *, lines: int = 5) -> str:
+    """Return the one-shot's last log lines with URL credentials redacted."""
+    result = _run(
+        [
+            "docker",
+            "compose",
+            *_compose_file_args(lane),
+            "-p",
+            lane_config_for(lane).compose_project,
+            "logs",
+            "--no-color",
+            "--tail",
+            str(lines),
+            service,
+        ],
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return ""
+    tail = " / ".join(line.strip() for line in result.stdout.strip().splitlines())
+    return _ONESHOT_LOG_URL_CREDENTIALS_RE.sub(r"\g<scheme>***@", tail)
 
 
 def runtime_compose_up_budget(
@@ -5787,15 +5831,26 @@ class DeployExecutor:
                         f"{result.stderr.strip() or result.stdout.strip()}"
                     )
                 else:
+                    # OMN-18496: detached up succeeds before the one-shot runs.
+                    failed: dict[str, int] = {}
                     ok, pending = verify_oneshots_completed(
-                        [service], timeout_s=timeout, lane=lane
+                        [service], timeout_s=timeout, lane=lane, failed=failed
                     )
                     if not ok:
-                        self.cloud_migration_failure = (
-                            "Dev-lane migration preflight did not complete "
-                            f"{service}: {pending}. A one-shot that has not exited "
-                            "0 has not proven it did its job."
-                        )
+                        if service in failed:
+                            self.cloud_migration_failure = (
+                                f"Dev-lane migration preflight failed for {service}: "
+                                f"the one-shot exited {failed[service]}"
+                            )
+                            tail = _oneshot_log_tail(lane, service)
+                            if tail:
+                                self.cloud_migration_failure += ": " + tail
+                        else:
+                            self.cloud_migration_failure = (
+                                "Dev-lane migration preflight did not complete "
+                                f"{service}: {pending}. A one-shot that has not exited "
+                                "0 has not proven it did its job."
+                            )
                 if self.cloud_migration_failure:
                     # OMN-18496: stop warm cloud readers, but let the runtime
                     # adopt its new image; the agent fails the job after verify.
