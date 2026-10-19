@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19314"
+title: "the overlay apply record quotes the end of the failing stream, not the head of stdout"
+summary: "Evidence-only contract for the merged fix omnibase_infra#4011 (00b37ae0719c65438dc5e9ed3c3ac61563a08514). A failed apply_lab_lane.sh run now records the tail of its stderr (where the FATAL line is) in the lab_overlay_applied evidence, and with empty stderr the tail of stdout. AC3 (a live failed apply on the lab host) is not bound here: no failed apply record exists yet."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19314-ac1-failed-apply-records-stderr-tail:
+      - label: "AC1"
+        criterion_hash: "a491a04edd1ea78622be90606b54176e3ba51c584ccede73e814b2e2a283fc34"
+        proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+        accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"
+    dod-omn19314-ac2-empty-stderr-records-stdout-tail:
+      - label: "AC2"
+        criterion_hash: "0d51ec8b67fb74311ca5d2729723a8166b6feb835202dd8613846a265c9f5e42"
+        proposed_by: "lane=dod-closeout-bind-2026-10-19T0445Z-c0"
+        accepted_by: "lane=dod-closeout-accept-2026-10-19T0445Z-c0"
+evidence_requirements:
+  - kind: "tests"
+    description: "A failed apply records the end of stderr, including when stderr is long."
+    command: "env -u PYTHONPATH uv run --frozen --project scripts/deploy-agent --extra dev pytest 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_a_failed_apply_records_the_end_of_stderr' 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_a_failed_apply_with_a_long_stderr_keeps_its_last_line' -q -p no:cacheprovider"
+  - kind: "tests"
+    description: "With empty stderr the evidence is the end of stdout, not its head."
+    command: "env -u PYTHONPATH uv run --frozen --project scripts/deploy-agent --extra dev pytest 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_without_stderr_the_evidence_is_the_end_of_stdout_not_its_head' -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19314-ac1-failed-apply-records-stderr-tail"
+    description: "AC1: a failed apply_lab_lane.sh run records the end of its stderr, where the FATAL line is, in the lab_overlay_applied evidence; a long stderr keeps its last line. Both tests fail against the pre-merge lab_overlay.py (6c408a370), which quoted the head of stdout."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run --frozen --project scripts/deploy-agent --extra dev pytest 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_a_failed_apply_records_the_end_of_stderr' 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_a_failed_apply_with_a_long_stderr_keeps_its_last_line' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn19314-ac2-empty-stderr-records-stdout-tail"
+    description: "AC2: when stderr is empty, the evidence carries the end of stdout rather than its beginning. Fails against the pre-merge lab_overlay.py (6c408a370)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "env -u PYTHONPATH uv run --frozen --project scripts/deploy-agent --extra dev pytest 'scripts/deploy-agent/tests/unit/test_lab_overlay_apply_evidence_omn19314.py::test_without_stderr_the_evidence_is_the_end_of_stdout_not_its_head' -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

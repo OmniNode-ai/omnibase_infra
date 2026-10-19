@@ -1270,6 +1270,22 @@ class TestBoundedWait:
         assert code == 1
         assert "waiting for required" not in output
 
+    def test_wait_refuses_a_fail_receipt_that_lands_inside_the_bound(
+        self, monkeypatch: Any
+    ) -> None:
+        """A receipt read inside the bound is judged, not just counted: a FAIL
+        that lands while the gate waits is refused and ends the wait."""
+        _install_fake_clock(monkeypatch)
+        chain = _receipt(lane=CHAIN, ok=False)
+        surface = _LandingSurface(
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB_K3S)), _bodies(chain), after=2
+        )
+        code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=600)
+        assert code == 1
+        assert f"REQUIRED lane {CHAIN.value} does not pass" in output
+        assert "its newest receipt is FAIL" in output
+        assert "3 read(s)" in output
+
     @pytest.mark.parametrize("bad", [-1.0, MAX_WAIT_SECONDS + 1.0])
     def test_wait_out_of_bounds_refuses(self, monkeypatch: Any, bad: float) -> None:
         code, output = _gate(
