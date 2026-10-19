@@ -24,6 +24,7 @@ each is asserted in both directions where a direction exists:
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,10 @@ from scripts.lane_census_plan import build_plan, resolve_host, validate_hosts
 from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
+    EnumGrantVerdict,
+    build_record,
+    lane_from_compose_project,
+    resolve_grant_block,
 )
 from tests.helpers.lane_census_fixtures import LAB_MANIFEST
 from tests.helpers.lane_overlay_fixtures import (
@@ -103,6 +108,52 @@ def test_sim_202_is_not_in_the_prod_grant_interlock() -> None:
     """AC4, gate 2. No grant resolves anything from this lane."""
     assert LANE not in GRANT_INTERLOCK_LANES
     assert frozenset({"stability-test"}) == GRANT_INTERLOCK_LANES
+
+
+def _attribution_record(compose_project: str) -> dict[str, Any]:
+    """The preflight's verdict for a deploy of ``compose_project`` with no reason set."""
+    lane = lane_from_compose_project(compose_project)
+    now = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
+    grant_block = resolve_grant_block(
+        lane=lane, now=now, grants_file=None, grants_repo=None
+    )
+    return build_record(
+        lane=lane,
+        compose_project=compose_project,
+        source="test",
+        invoking_command="test",
+        mode="deploy",
+        env={},
+        now=now,
+        grant_block=grant_block,
+    )
+
+
+def test_sim_202_deploy_attribution_preflight_runs_no_grant_interlock() -> None:
+    """AC4 as the preflight applies it: this lane owes no reason and reads no grant.
+
+    The membership tests above pin the sets; this drives the decision path a
+    deploy of the overlay's compose project takes, so a lane-name derivation
+    that stopped resolving to ``LANE`` would fail here too.
+    """
+    record = _attribution_record(COMPOSE_PROJECT)
+    assert record["lane"] == LANE
+    assert record["attribution_required"] is False
+    assert record["grant_guard"]["applies"] is False
+    assert record["grant_guard"]["verdict"] == EnumGrantVerdict.NOT_APPLICABLE.value
+    assert record["result"] == "ALLOW", record["refusal_reasons"]
+
+
+def test_stability_test_deploy_attribution_preflight_still_refuses_without_reason() -> (
+    None
+):
+    """Positive control: the same path refuses a governed lane's unattributed deploy."""
+    (interlocked,) = GRANT_INTERLOCK_LANES
+    record = _attribution_record(f"omnibase-infra-{interlocked}")
+    assert record["lane"] == interlocked
+    assert record["attribution_required"] is True
+    assert record["grant_guard"]["applies"] is True
+    assert record["result"] == "REFUSE"
 
 
 @pytest.mark.lab_overlay
