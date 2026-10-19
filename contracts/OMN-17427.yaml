@@ -238,6 +238,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-prepr-teardown-stop-on-failure
+    statement: The pre-PR slot teardown stops after a failed container removal and keeps the staging root whenever an earlier step failed, and a staging root it cannot remove is reported in the teardown report instead of raised.
+    acceptance:
+      - id: AC52
+        statement: 'AC52: a refused container removal leaves the containers, topics, databases and staging root in place and ends INCOMPLETE, and a staging root that cannot be removed ends INCOMPLETE with a report -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -353,6 +358,9 @@ evidence_requirements:
   - kind: tests
     description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
+  - kind: tests
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root is reported; they do not claim a live slot teardown.
+    command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1041,3 +1049,21 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac52-prepr-teardown-stop
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root ends INCOMPLETE with a report; they do not claim a live slot teardown.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
+  - id: dod-omn-17427-ac52-teardown-deploy-check
+    description: Hosted-runner deploy check -- tests use a fake docker host to verify teardown failure handling and report writing; they do not claim a live slot teardown.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
