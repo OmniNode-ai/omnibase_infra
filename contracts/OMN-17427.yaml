@@ -248,6 +248,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: the declared aiohttp dependency excludes versions below 3.14.4, the lockfile and installed package agree on a patched version, and the runtime health endpoint still serves a real HTTP request -- falsifier: the bound dependency command and real_health_endpoint test below'
+  - id: req-omn17427-runner-identity-after-deps
+    statement: The runner image identity is bound to this branch's resolved dependencies after the aiohttp security update.
+    acceptance:
+      - id: AC54
+        statement: 'AC54: the recorded identity and shared environment digests equal their recomputed values for this head, identity verification passes, and the runtime health endpoint serves HTTP -- falsifier: the bound identity tests and hosted-runner deploy command below'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1072,3 +1077,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC53
+  - id: dod-omn-17427-ac54-runner-identity
+    description: Recompute the runner identity from the current dependency manifest and lock. These existing tests reject both stale digests at dispatch head 88f7e7d33763d73684af232fa7ff34111441a9d7.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_runner_image_identity.py -q -k "recorded_identity_matches_recomputed_identity or identity_uses_shared_env_digest_as_a_binding_component"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-runner-deploy-check
+    description: Hosted-runner deploy check verifies the runner's dependency binding and serves the runtime health endpoint on loopback. No Docker, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_service_health.py -q -k real_health_endpoint
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
