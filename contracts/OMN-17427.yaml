@@ -238,7 +238,15 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-live-contact-local-carrier
+    statement: Local CI-tooling admission reads an exception from the staged .github/live-contact-exception.md while CI reads the PR body and clean-root continues to refuse root PR_BODY.md.
+    acceptance:
+      - id: AC52
+        statement: 'AC52: the bus node accepts a valid staged local carrier, refuses absent, unstaged, stale and invalid exceptions, CI still requires the PR body, and clean-root refuses root PR_BODY.md -- falsifier: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"'
 evidence_requirements:
+  - kind: tests
+    description: Local exception admission and clean-root controls run through the existing bus node and validator.
+    command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
     command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q
@@ -358,6 +366,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac52-live-contact-carrier
+    description: Temporary Git repositories exercise the pre-commit bus node and clean-root validator with staged, absent, unstaged, stale and invalid local exceptions; committed-head controls continue to read the PR body. No external service or credential is used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
+  - id: dod-omn-17427-ac52-carrier-deploy-check
+    description: Hosted-runner check exercises the same contract-declared admission bus node and clean-root validator in temporary Git repositories; no deployed service is changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC52
   - id: dod-omn-17427-core-pin-incident
     description: The recorded incident pair is refused and its recorded lock agrees with its pin.
     source: manual
