@@ -46,6 +46,6 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.errors import DlqPersistenceUnconfirmedError"
+        check_value: python3 -c "import subprocess, sys; sys.exit(subprocess.run(['docker', 'exec', 'omninode-runtime', 'python', '-c', 'from omnibase_infra.errors import DlqPersistenceUnconfirmedError']).returncode)"
     binds_ac:
       - AC3
