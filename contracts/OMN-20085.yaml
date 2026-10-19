@@ -18,7 +18,7 @@ requirements:
       - id: AC6
         statement: 'AC6: a SIGTERM, SIGHUP or SIGINT to the driver mid-run tears the slot down and releases the lease before it exits, and its result file says INTERRUPTED -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_signal'
 evidence_requirements:
-  - kind: test
+  - kind: tests
     description: The verify tests and the real-shell lease race tests pass.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
 emergency_bypass:
@@ -26,7 +26,7 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn-20085-ac1-ref-builds-the-slot-and-unresolved-ref-exits-5
+  - id: dod-omn-20085-ac1-ref-build-and-unresolved-ref
     description: 'AC1. The verify_ref tests assert a branch builds the slot with INFRA_REF_SHA and no PR param, omnimarket gets MARKET_REF_SHA, a ref that resolves in no canonical clone exits 5 with no host command run (the transport fails the test on any call), and resolve_ref_in_clone reads a real git clone for a branch and a sha. They fail at the merge base, where the verify subcommand does not exist.'
     source: generated
     checks:
@@ -40,7 +40,7 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_first_free_slot -q
-  - id: dod-omn-20085-ac4-suite-budget-and-no-tests-refusal
+  - id: dod-omn-20085-ac4-suite-budget-no-tests-refusal
     description: 'AC4. The verify_suite tests assert --suite passes SUITE_REPO to the host and gives the tests phase the suite budget, a focused run keeps the 2400 s default, the judge reads a suite rc line and a failure past the bounded dev control as the PR''s, the on-host script bounds its dev control (DEV_CONTROL_MAX) and runs tests/unit, and a call with neither --tests nor --suite exits 5 before touching a host.'
     source: generated
     checks:
@@ -48,7 +48,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_suite -q
     binds_ac:
       - "AC4"
-  - id: dod-omn-20085-ac5-typed-result-file-for-every-outcome
+  - id: dod-omn-20085-ac5-result-file-for-every-outcome
     description: 'AC5. The verify_result tests assert the result file carries the onex.prepr.verify-result.v1 schema for PASS, FAIL, INCONCLUSIVE, no free slot, usage and unresolved-ref outcomes, and for a config error and an unreadable ledger, and that exit_code equals the return value of main() for a pass, a no-free-slot and an unresolved ref run through the CLI.'
     source: generated
     checks:
