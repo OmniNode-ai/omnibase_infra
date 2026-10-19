@@ -116,13 +116,6 @@ skills:
       - {name: max-cycles, payload_field: max_cycles, arg_type: integer}
       - {name: skip-closeout, payload_field: skip_closeout, arg_type: boolean, default: false}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
-  - skill_name: coderabbit_triage
-    node_name: node_coderabbit_triage
-    result_model: omnimarket.nodes.node_coderabbit_triage.handlers.handler_coderabbit_triage.ModelCoderabbitTriageResult
-    args:
-      - {name: repo, payload_field: repo, arg_type: string, required: true}
-      - {name: pr-number, payload_field: pr_number, arg_type: integer, required: true}
-      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
   - skill_name: compliance_sweep
     node_name: node_compliance_sweep
     result_model: omnimarket.nodes.node_compliance_sweep.handlers.handler_compliance_sweep.ComplianceSweepResult
