@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20834
+title: Generation runs on an unpriced model record a null cost, not 0.0
+summary: Vendors omnimarket node_projection_delegation migration 0063, which drops NOT NULL and DEFAULT 0 on generation_events.cost_inference_usd so an unpriced generation run is stored as NULL, bound to the omnimarket source's checksum and declared forward-only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20834-generation-cost-null-on-postgres
+    statement: The generation_events projection on Postgres can hold null for a run the pricing surface could not price.
+    acceptance:
+      - id: AC2
+        statement: "AC2: The `generation_events` projection stores null for that run and a priced run's cost unchanged -- falsifier: uv run pytest on the projection finds 0 for the unpriced run, or a priced run's stored cost changes"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0063 matches the omnimarket source's checksum, has its ledger row and forward-only class, and drops the column's NOT NULL and DEFAULT without rewriting a row.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn20834_generation_cost_null_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20834-vendored-generation-cost-null-test
+    description: The vendored 0063 matches the omnimarket source's checksum, has its omninode_internal ledger row and forward-only class, and drops NOT NULL and DEFAULT on generation_events.cost_inference_usd without rewriting any row. At the merge base the file is absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn20834_generation_cost_null_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20834-infra-manifest-and-class
+    description: The application migration manifest binds the vendored 0063 to the omnimarket source's checksum, and the migration class check declares it forward-only.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && uv run --frozen python scripts/validation/check_migration_class.py && grep -F 'nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql' docker/migrations/forward/_ledger/application-migrations.tsv | grep -qF 'baf6c484400d471535117c76493bae4763da501237d58f1a504350fe2294e16a'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
