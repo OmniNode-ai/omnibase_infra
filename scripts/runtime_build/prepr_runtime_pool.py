@@ -187,6 +187,10 @@ class PoolConfig:
     model_endpoint: str
     max_load_ratio: float
     hosts: tuple[PoolHost, ...]
+    # the lane overlays beside the pool table (config/lab/lane-overlays), where
+    # a pre-PR slot's own Bifrost overlay is read from (OMN-19064); where the
+    # table was read, not what it says, so two reads of one table compare equal
+    lane_overlay_dir: Path | None = field(default=None, compare=False)
 
     def host(self, name: str) -> PoolHost:
         for h in self.hosts:
@@ -320,6 +324,7 @@ def load_pool_config(path: Path | None = None) -> PoolConfig:
         work_root_prefix=slot["work_root_prefix"],
         model_endpoint=slot["model_endpoint"],
         max_load_ratio=float(slot["max_load_ratio"]),
+        lane_overlay_dir=path.parent / "lane-overlays",
         hosts=tuple(hosts),
     )
 
@@ -1104,6 +1109,72 @@ def judge(
 EXERCISE_TAIL_LINES = 15
 
 
+def neighbour_projects(host: PoolHost) -> str:
+    """The declared lanes a pre-PR slot's run reads by container id (OMN-19064).
+
+    The slot policy's declared-lane table, pipe-joined for the on-host script;
+    empty for an isolated member, whose snapshot already covers the whole host.
+    """
+    if host.kind != "prepr-slot":
+        return ""
+    return "|".join(sorted(_slot_policy().DECLARED_LANE_PROJECTS))
+
+
+def judge_slot_isolation(rb: Readback, outputs: Mapping[str, str]) -> None:
+    """Hold a pre-PR slot's run to its reserved ports and read its neighbours.
+
+    OMN-19064 AC-2: the slot's project publishes only its reserved block. The
+    probe's ``slot-published-ports`` line decides it, and a missing line, or a
+    slot that published nothing, is a fail, never a quiet pass.
+
+    OMN-19064 AC-1: no container of a declared lane was recreated or restarted
+    during the run, read by id, start time and restart count in snap-pre and
+    snap-post. That reading is a note and not a check: the declared lanes
+    redeploy on their own schedule, so a change there is not the slot's by
+    this readback alone, and the changed lines ride in the readback to be read.
+    """
+    probe = outputs.get("probe", "")
+    m = re.search(r"^slot-published-ports=(\S+) outside-block=(\S+)$", probe, re.M)
+    rb.checks["slot_ports_in_block"] = (
+        m is not None and m.group(1) != "none" and m.group(2) == "none"
+    )
+    if m is None:
+        rb.notes.append("slot ports: the probe printed no slot-published-ports line")
+    elif m.group(1) == "none":
+        rb.notes.append("slot ports: the slot's project published no host port")
+    elif m.group(2) != "none":
+        rb.notes.append(
+            f"slot ports: published {m.group(2)} outside the reserved block"
+        )
+    else:
+        rb.notes.append(
+            f"slot ports: published {m.group(1)}, all in the reserved block"
+        )
+    post = outputs.get("snap-post", "")
+    n = re.search(r"^neighbour-diff=(\d+) neighbours=(\d+)$", post, re.M)
+    if n is None:
+        rb.notes.append("neighbours: snap-post printed no neighbour readback")
+    elif n.group(2) == "0":
+        rb.notes.append(
+            "neighbours: no declared-lane container was read before the run, "
+            "so an unchanged readback shows nothing"
+        )
+    elif n.group(1) == "0":
+        rb.notes.append(
+            f"neighbours: {n.group(2)} declared-lane containers, none recreated "
+            "or restarted during the run (id, start time and restart count unchanged)"
+        )
+    else:
+        rb.notes.append(
+            f"neighbours: {n.group(1)} changed lines across {n.group(2)} "
+            "declared-lane containers during the run; the declared lanes "
+            "redeploy on their own, so read them before attributing them to the slot"
+        )
+        rb.notes.extend(
+            ln for ln in post.splitlines() if ln.startswith("neighbour-changed ")
+        )
+
+
 def judge_exercise(rb: Readback, output: str) -> None:
     """Hold the readback to the post-up command's exit code (the exercise phase).
 
@@ -1348,6 +1419,10 @@ def _check_map(
             _lines(probe, r"^\S+ lines=\d+ autowire-fail=.*$"),
         ),
         "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
+        "slot_ports_in_block": (
+            "slot_ports_in_reserved_block",
+            _lines(probe, r"^slot-published-ports=.*$"),
+        ),
         "post_bringup": (
             "post_bringup",
             _lines(outputs.get("post-bringup", ""), r"^post-bringup .*$"),
@@ -1852,6 +1927,8 @@ def run_proof(
         log(f"lease {host.name}: {rwhy}")
     if not released:
         rb.notes.append(f"lease not released: {rwhy}")
+    if host.kind == "prepr-slot":
+        judge_slot_isolation(rb, outputs)
     if post_up_command is not None:
         judge_exercise(rb, outputs.get("exercise", ""))
     finished_at = now_fn()
@@ -1899,10 +1976,31 @@ RESERVED_PARAMS = (
     "EFFECTS_PORT",
     "SLOT_PORTS",
     "POSITIVE_CONTROL",
+    "NEIGHBOUR_PROJECTS",
     "REASON",
     "OVERLAY_FILE",
     "POST_UP_COMMAND",
 )
+
+
+def slot_lane_overlay(cfg: PoolConfig, host: PoolHost) -> Path | None:
+    """A pre-PR slot's own Bifrost overlay on the launching host (OMN-19064).
+
+    Lab lane overlays live in the private workspace config (OMN-20932), and the
+    slot entrypoint refuses a slot with none before any build. The pool runs its
+    on-host script over a non-login ssh shell that names no config root, so the
+    driver ships the slot's overlay itself, read where the compose helper reads
+    it: ``$ONEX_LANE_OVERLAY_DIR``, else the lane-overlays directory beside the
+    pool table. None when the file is absent, and the on-host refusal names it.
+    """
+    if host.kind != "prepr-slot":
+        return None
+    configured = os.environ.get("ONEX_LANE_OVERLAY_DIR", "").strip()
+    root = Path(configured) if configured else cfg.lane_overlay_dir
+    if root is None:
+        return None
+    candidate = root / f"{host.compose_project}.bifrost.yaml"
+    return candidate if candidate.is_file() else None
 
 
 def _run_stack(
@@ -1926,6 +2024,8 @@ def _run_stack(
     ``overlay`` replaces the stack's Bifrost overlay; ``post_up_command`` runs
     once against the live stack after the probe (the ``exercise`` phase).
     """
+    if overlay is None:
+        overlay = slot_lane_overlay(cfg, host)
     # A path on the REMOTE host, private to this run and removed at the end.
     remote_dir = f"/tmp/{tag}"  # noqa: S108
     # keyed by member as well as holder: one lane may hold both .201 slots at
@@ -1947,6 +2047,7 @@ def _run_stack(
         f"EFFECTS_PORT={host.effects_port}",
         f"SLOT_PORTS={shlex.quote('|'.join(str(p) for p in host.ports))}",
         f"POSITIVE_CONTROL={shlex.quote(host.positive_control)}",
+        f"NEIGHBOUR_PROJECTS={shlex.quote(neighbour_projects(host))}",
         f"REASON={shlex.quote(f'lab pool run {tag} by {holder} (OMN-18893)')}",
     ]
     if overlay is not None:
@@ -2365,6 +2466,8 @@ def _verify_steps(
             released, rwhy = release_lease(cfg, transport, host, facts.holder)
             log(f"lease {host.name}: {rwhy}")
         rb = judge(outputs, None, ports)
+        if host.kind == "prepr-slot":
+            judge_slot_isolation(rb, outputs)
         facts.readback = rb
         outcome = "INCONCLUSIVE" if "lease-lost" in outputs else rb.outcome
         if not released:

@@ -1177,6 +1177,11 @@ SLOT_GOOD = {
         "omninode-prepr-1-runtime-effects lines=800 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
         "failed-contracts omninode-prepr-1-runtime: \n"
         "failed-contracts omninode-prepr-1-runtime-effects: \n"
+        "slot-published-ports=23002,28085,28086,28090 outside-block=none\n"
+    ),
+    "snap-post": (
+        "snapshot-diff=0\nneighbour-diff=0 neighbours=40\n"
+        "snap-post lines=50 local-containers=0 listeners=0"
     ),
     "teardown": (
         "prepr_teardown_slot rc=0\nslot-teardown verdict=CLEAN\n"
@@ -1244,6 +1249,113 @@ def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> Non
     ):
         assert line in env.splitlines(), line
     assert hosts["pool-c-slot-1"].lease is None
+    assert (
+        "NEIGHBOUR_PROJECTS="
+        + shlex.quote(pool.neighbour_projects(CFG.host("pool-c-slot-1")))
+        in env.splitlines()
+    )
+    assert (
+        "slot ports: published 23002,28085,28086,28090, all in the reserved block"
+        in text
+    )
+    assert "40 declared-lane containers, none recreated or restarted" in text
+
+
+def _pool_with_overlays(tmp_path: Path, projects: tuple[str, ...]) -> Any:
+    lab = tmp_path / "config" / "lab"
+    (lab / "lane-overlays").mkdir(parents=True)
+    table = lab / "prepr_runtime_pool.yaml"
+    table.write_text(POOL_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    for project in projects:
+        (lab / "lane-overlays" / f"{project}.bifrost.yaml").write_text(
+            "providers: []\n", encoding="utf-8"
+        )
+    return pool.load_pool_config(table)
+
+
+def test_a_slot_run_ships_the_slot_s_own_lane_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-19064, found live 2026-10-19 on a pre-PR slot: lane overlays left the repo
+    # (OMN-20932) and the pool's non-login ssh shell names no config root, so the
+    # slot entrypoint refused "no lane overlay for the slot's compose project"
+    # before any build. The driver now ships the overlay beside the pool table.
+    monkeypatch.delenv("ONEX_LANE_OVERLAY_DIR", raising=False)
+    slot = CFG.host("pool-c-slot-1")
+    cfg = _pool_with_overlays(tmp_path, (slot.compose_project,))
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
+    hosts["pool-c-slot-1"].phases = dict(SLOT_GOOD)
+    tp = FakeTransport(hosts)
+    work = tmp_path / "work"
+    work.mkdir()
+    code, text = pool.run_proof(
+        cfg,
+        tp,
+        _params(work),
+        "me",
+        150,
+        "pool-c-slot-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    assert any(r.endswith("/overlay.bifrost.yaml") for _, r in tp.puts), tp.puts
+    env = next(work.glob("*.resolved.env")).read_text(encoding="utf-8")
+    assert any(ln.startswith("OVERLAY_FILE=") for ln in env.splitlines())
+
+
+def test_the_slot_overlay_is_read_from_the_pool_table_s_config_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_LANE_OVERLAY_DIR", raising=False)
+    slot = CFG.host("pool-c-slot-1")
+    cfg = _pool_with_overlays(tmp_path, (slot.compose_project,))
+    found = pool.slot_lane_overlay(cfg, cfg.host("pool-c-slot-1"))
+    assert found == (
+        tmp_path / "config/lab/lane-overlays" / f"{slot.compose_project}.bifrost.yaml"
+    )
+    # an isolated member mounts its own stack's overlay, never a slot's
+    isolated = next(h for h in cfg.hosts if h.kind != "prepr-slot")
+    assert pool.slot_lane_overlay(cfg, isolated) is None
+    # a slot with no overlay file ships none; the on-host refusal names it
+    other = next(h for h in cfg.hosts if h.kind == "prepr-slot" and h.slot != slot.slot)
+    assert pool.slot_lane_overlay(cfg, other) is None
+    # ONEX_LANE_OVERLAY_DIR outranks the config root, as in compose_files.sh
+    alt = tmp_path / "alt"
+    alt.mkdir()
+    (alt / f"{other.compose_project}.bifrost.yaml").write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(alt))
+    assert (
+        pool.slot_lane_overlay(cfg, other)
+        == alt / f"{other.compose_project}.bifrost.yaml"
+    )
+    assert pool.slot_lane_overlay(cfg, cfg.host("pool-c-slot-1")) is None
+
+
+def test_a_slot_run_publishing_outside_its_block_fails(tmp_path: Path) -> None:
+    # OMN-19064 AC-2: a slot whose project publishes a port outside its reserved
+    # block is a FAIL, even with every other check green
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
+    hosts["pool-c-slot-1"].phases = {
+        **SLOT_GOOD,
+        "probe": SLOT_GOOD["probe"].replace(
+            "outside-block=none", "outside-block=28098"
+        ),
+    }
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        150,
+        "pool-c-slot-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_FAIL, text
+    assert "published 28098 outside the reserved block" in text
 
 
 def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) -> None:
