@@ -65,6 +65,45 @@ drop_source_trees() {
   rm -rf "${HOME}/.omnibase/state/deploy_source_trees/${ctx//[!A-Za-z0-9._-]/_}"
 }
 
+# OMN-19064 AC-1: every container of the declared lanes beside a pre-PR slot, by
+# id, start time and restart count. snap-pre and snap-post each take one, so a run
+# shows by container id that it recreated or restarted none of them. The project
+# list is the slot policy's declared-lane table, passed by the driver.
+# --- neighbour-readback begin ---
+neighbour_snapshot() {
+  local proj ids
+  for proj in $(printf '%s' "${NEIGHBOUR_PROJECTS:-}" | tr '|' ' '); do
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=$proj")
+    [ -n "$ids" ] || continue
+    docker inspect -f "$proj {{.Name}} {{.Id}} {{.State.StartedAt}} {{.RestartCount}}" $ids
+  done | sort
+}
+neighbour_diff() {
+  local n d
+  n=$(grep -c . "$1" 2>/dev/null); n=${n:-0}
+  d=$(diff "$1" "$2" 2>/dev/null | grep -E '^[<>]')
+  echo "neighbour-diff=$(printf '%s' "$d" | grep -c .) neighbours=$n"
+  printf '%s\n' "$d" | grep . | head -20 | sed 's/^/neighbour-changed /'
+}
+# --- neighbour-readback end ---
+
+# OMN-19064 AC-2: every host port the slot's project publishes, and those outside
+# its reserved block (PORTS, the slot policy's four). A port range is never one of
+# the four literals, so it is reported outside as written.
+# --- slot-ports-readback begin ---
+slot_ports_readback() {
+  local pub out p
+  pub=$(docker ps --filter "label=com.docker.compose.project=$P" --format '{{.Ports}}' \
+    | tr ',' '\n' | sed -n 's/.*:\([0-9][0-9-]*\)->.*/\1/p' | sort -u | tr '\n' ' ')
+  out=""
+  for p in $pub; do
+    case "|$PORTS|" in *"|$p|"*) ;; *) out="$out $p" ;; esac
+  done
+  pub=$(echo $pub | tr ' ' ','); out=$(echo $out | tr ' ' ',')
+  echo "slot-published-ports=${pub:-none} outside-block=${out:-none}"
+}
+# --- slot-ports-readback end ---
+
 # Image identity is proven from content, never from the revision label (a label
 # is evidence of intent, not of what was built; OMN-18893). For each repository
 # under test the probe lists every file of its installed package inside the
@@ -310,6 +349,10 @@ snap-pre|snap-post)
       echo "## networks"; docker network ls --filter label=com.docker.compose.project=$P --format '{{.Name}}' | sort
       echo "## listeners"; lsn | grep -E ":($PORTS)\b" || echo none
     } > "$out"
+    neighbour_snapshot > "/tmp/$TAG-$PHASE-neighbours.txt"
+    if [ "$PHASE" = snap-post ]; then
+      neighbour_diff "/tmp/$TAG-snap-pre-neighbours.txt" "/tmp/$TAG-snap-post-neighbours.txt"
+    fi
   else
   { ts; uptime
     echo "## ps"; docker ps -a --format '{{.Names}} {{.ID}} {{.Label "com.docker.compose.project"}}' | sort
@@ -465,6 +508,7 @@ probe)
     sleep 15
   done
   echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
+  if [ "$KIND" = prepr-slot ]; then slot_ports_readback; fi
   echo "== identity"
   # the label is printed for the reader and never judged: it records intent only
   echo "image-revision-label $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1 | tail -1)"
