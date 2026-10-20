@@ -350,6 +350,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-dispatch-port-trace-queue-wait
+    statement: The runtime delegation dispatch port and its protocol accept the trace_id and queue_wait_ms keywords omnimarket#4252 declares on the consumer side; a trace_id rides the bus command, which omnibase_core's ModelDelegationRequest declares, and queue_wait_ms, which that model does not declare, is not published.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: both dispatch signatures take trace_id and queue_wait_ms keyword-only with default None, a dispatch with a trace_id publishes it and the consumer decodes it, and neither a given queue_wait_ms nor an omitted trace_id appears on the command -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_trace_queue_wait_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1615,6 +1620,24 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_service_kernel_nofile_boot_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-dispatch-trace-queue-wait
+    description: The new test reads both dispatch signatures and drives RuntimeDelegationDispatchPort over the in-memory bus with a consumer that decodes the command as ModelDelegationRequest; the consumer keyword parity module reads omnimarket's handler source. Neither claims a deployed-lane delegation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_trace_queue_wait_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-dispatch-trace-deploy-check
+    description: Hosted-runner deploy check -- the dispatch signature and in-memory bus test only; it needs no omnimarket checkout and does not claim a deployed-lane delegation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_trace_queue_wait_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141

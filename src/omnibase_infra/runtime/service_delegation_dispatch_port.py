@@ -300,6 +300,8 @@ class RuntimeDelegationDispatchPort:
         attribution: Mapping[str, str] | None = None,
         model: str | None = None,
         named_tests: BaseModel | None = None,
+        trace_id: UUID | None = None,
+        queue_wait_ms: int | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -310,8 +312,15 @@ class RuntimeDelegationDispatchPort:
         to a deployed lane whose own handler stamps the caller onto its
         terminal. Only omnimarket's in-process port writes an evidence terminal
         of its own and needs it.
+
+        ``trace_id`` (OMN-19448) rides the bus command: the consumer validates
+        it as omnibase_core's ModelDelegationRequest, which declares it
+        (OMN-19437). ``queue_wait_ms`` is accepted and unused: that model is
+        extra="forbid" and does not declare it, so publishing it would refuse
+        every delegation at the consumer. Only omnimarket's in-process port
+        writes it, onto its own evidence terminal.
         """
-        del attribution
+        del attribution, queue_wait_ms
 
         # Refuse a spec the lane cannot run before any route is resolved or
         # anything is published.
@@ -424,6 +433,8 @@ class RuntimeDelegationDispatchPort:
             # broker wait and is not a delegation request field.
             "requested_timeout_seconds": execution_timeout_seconds,
             "backend_id": backend_id,
+            # OMN-19448: absent when the consumer has none, like provenance.
+            "trace_id": None if trace_id is None else str(trace_id),
             # OMN-18321 / OMN-18172: carried ONTO THE WIRE, not merely accepted.
             # Accepting the keyword and dropping it would trade a loud TypeError
             # for a silent classification hole -- precisely the silent-drop
