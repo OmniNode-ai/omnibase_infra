@@ -113,6 +113,101 @@ def test_the_shipped_manifest_loads_and_every_tracked_file_exists() -> None:
         assert (_REPO_ROOT / entry.tracked).is_file(), entry.tracked
 
 
+_DISK_GC_INSTALLER = _REPO_ROOT / "deploy" / "disk-gc" / "install-disk-gc.sh"
+
+
+def _disk_gc_entry() -> ModelUnitEntry:
+    entries = load_manifest(_REPO_ROOT / "deploy" / "unit-drift-manifest.yaml")
+    return next(entry for entry in entries if entry.name == "onex-disk-gc.service")
+
+
+def _registry_with_disk_gc_scripts(root: Path) -> Path:
+    scripts = root / "omnibase_infra" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("disk-gc.sh", "docker-volume-gc.sh", "disk-watermark-check.sh"):
+        (scripts / name).write_text("#!/bin/sh\n")
+    return root
+
+
+def _install_with_the_installers_renderer(root: Path, destination: Path) -> None:
+    """Run the installer's own render heredoc, not a copy of its logic (OMN-20210)."""
+    installer = _DISK_GC_INSTALLER.read_text()
+    renderer = installer.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            renderer,
+            str(_REPO_ROOT / _disk_gc_entry().tracked),
+            str(destination),
+            str(root),
+        ],
+        check=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("root_name", ["registry", 'registry%with"quote\\backslash'])
+def test_disk_gc_service_installed_by_its_installer_is_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_name: str
+) -> None:
+    entry = _disk_gc_entry()
+    root = _registry_with_disk_gc_scripts(tmp_path / root_name)
+    installed = tmp_path / "onex-disk-gc.service"
+    _install_with_the_installers_renderer(root, installed)
+    monkeypatch.setenv("UNIT_DRIFT_REGISTRY_ROOT", str(root))
+    kwargs = {
+        "repo_root": _REPO_ROOT,
+        "hostname": entry.hosts[0],
+        "home": tmp_path,
+        "overrides": {entry.name: installed},
+    }
+    assert check_units([entry], **kwargs)[0].status is EnumUnitStatus.OK
+
+    installed.write_bytes((_REPO_ROOT / entry.tracked).read_bytes())
+    assert check_units([entry], **kwargs)[0].status is EnumUnitStatus.DRIFT
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("registry_root", [None, "relative/registry"])
+def test_rendered_unit_requires_an_absolute_registry_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry_root: str | None
+) -> None:
+    if registry_root is None:
+        monkeypatch.delenv("UNIT_DRIFT_REGISTRY_ROOT", raising=False)
+    else:
+        monkeypatch.setenv("UNIT_DRIFT_REGISTRY_ROOT", registry_root)
+    entry = _disk_gc_entry()
+    with pytest.raises(ValueError, match="UNIT_DRIFT_REGISTRY_ROOT"):
+        check_units(
+            [entry], repo_root=_REPO_ROOT, hostname=entry.hosts[0], home=tmp_path
+        )
+
+
+@pytest.mark.unit
+def test_rendered_unit_without_the_named_default_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, home = _tree(tmp_path, "[Service]\nType=oneshot\n", "[Service]\n")
+    monkeypatch.setenv("UNIT_DRIFT_REGISTRY_ROOT", str(tmp_path / "registry"))
+    entry = _entry().model_copy(update={"render_registry_root_env": "OMNI_HOME"})
+    with pytest.raises(ValueError, match="no OMNI_HOME default"):
+        check_units([entry], repo_root=repo, hostname=_HOST, home=home)
+
+
+@pytest.mark.unit
+def test_an_entry_has_one_renderer() -> None:
+    with pytest.raises(ValueError, match="exclusive"):
+        ModelUnitEntry(
+            name="x.service",
+            tracked="tracked/x.service",
+            installed="~/x.service",
+            hosts=[_HOST],
+            render_script="render.sh",
+            render_registry_root_env="OMNI_HOME",
+        )
+
+
 @pytest.mark.unit
 def test_cli_exits_nonzero_and_prints_a_drift_line(tmp_path: Path) -> None:
     repo, home = _tree(tmp_path, "new\n", "old\n")

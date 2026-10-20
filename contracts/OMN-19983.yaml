@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: "AC4"
         statement: "AC4: the `local-lane-mirror` bundle renders the laptop stack plus one mirror-only `lane-mirror-forwarder` (no cloud leg, operator overlay and credential map mounted read-only, started after the broker requires SASL), the shipped overlay and credential templates load through `load_gateway_forwarder_runtime_config` and select exactly the delegation topic set from dev-local to dev, and the `local` bundle renders without the forwarder -- falsifier: `uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py -n 0 -q` fails on the pre-change bundle, or the overlay naming `hook_edge` still selects a delegation topic"
+  - id: "req-issued-principal-writes-mirror-set"
+    statement: "The principal the lab issues to a developer machine holds every dev-lane grant the laptop lane mirror derives, so the mirror's writes of the delegation topic set are authorized."
+    acceptance:
+      - id: "AC5"
+        statement: "AC5: every grant the shipped laptop lane-mirror overlay derives on lane.dev.kafka.broker through build_gateway_transports and HandlerBrokerGrantDerive is in the grants node_broker_grant_derive_compute derives from deploy/lab/developer-principal-bindings.yaml, and those mirror grants are topic WRITE and DESCRIBE only -- falsifier: `uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -n 0 -q -k laptop_lane_mirror` fails on the pre-change bindings, naming WRITE on delegation-completed, delegation-failed and llm-call-completed"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay binding tests, including the per-lane-broker grant derivation."
@@ -23,6 +28,9 @@ evidence_requirements:
   - kind: "tests"
     description: "The laptop lane-mirror bundle render and the shipped overlay templates."
     command: "uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py tests/unit/infra/test_catalog_local_profile.py -n 0 -q"
+  - kind: "tests"
+    description: "The issued developer principal's derived grants cover the laptop lane mirror's dev-lane writes."
+    command: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -n 0 -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -44,3 +52,11 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/infra/test_catalog_local_lane_mirror_omn19983.py -n 0 -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC4"]
+  - id: "dod-omn19983-ac5-issued-principal-mirror-writes"
+    description: "The developer principal's derived grants include every dev-lane write the laptop lane mirror derives, and the mirror derives only topic writes."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -n 0 -q -k laptop_lane_mirror"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC5"]
