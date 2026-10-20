@@ -239,8 +239,13 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # The DoD closeout proof (OMN-21048) adds write on the decide command only.
     # The laptop lane mirror (OMN-19983) adds write on the delegation topic set it
     # republishes onto the lab lane, which reads none of them.
+    # The Claude Code hook edge (OMN-17427) adds write on the 29 `onex.evt.omniclaude.*`
+    # hook topics the operator's hook principal holds, and on no command topic.
     writable = [g for g in declaration.grants if "write" in g.operations]
-    assert {g.name for g in writable} == {
+    hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
+    assert len(hook_edge) == 29
+    assert "onex.evt.omniclaude.hook-event.v1" in hook_edge
+    assert {g.name for g in writable} - hook_edge == {
         "onex.cmd.omnimarket.delegate-skill.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",

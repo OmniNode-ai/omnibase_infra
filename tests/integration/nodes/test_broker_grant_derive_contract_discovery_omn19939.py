@@ -149,6 +149,8 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
         for g in result.grants
     }
     assert rows == expected
-    assert len(rows) == 77
+    # OMN-17427: 73 before the hook edge, plus WRITE and DESCRIBE on its 29 topics.
+    # OMN-19983: plus the laptop lane mirror's 4 rows.
+    assert len(rows) == 135
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
