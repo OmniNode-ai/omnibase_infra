@@ -1901,6 +1901,107 @@ def remove_recreate_leftovers(
     return removed
 
 
+def finish_recreate_renames(lane: EnumRuntimeLane) -> list[str]:
+    """Finish this lane's running recreates; return the completed name changes.
+
+    OMN-17427. A recreate killed after its new container starts but before the
+    final rename leaves it running under ``RECREATE_TMP_NAME``. Measured on
+    the lab dev lane at 2026-10-20T10:01Z: the healthy redpanda broker
+    had been Up 11 hours with RestartCount 0 as
+    ``e2fc03e50cd0_omnibase-infra-redpanda``, with no container under its declared
+    name, so the exact-name census reported it absent. Compose up does not
+    finish that rename. Rename only running containers in this lane's project
+    whose real name is free across the daemon, in any state or project. A
+    rename never removes, stops, or restarts the container.
+    """
+    project = lane_config_for(lane).compose_project
+    try:
+        listed = _run(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "status=running",
+                "--format",
+                "{{.ID}}\t{{.Names}}",
+            ],
+            timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+        )
+        if listed.returncode != 0:
+            logger.warning(
+                "recreate renames on %s unread: docker ps exited %s: %s",
+                project,
+                listed.returncode,
+                (listed.stderr or listed.stdout).strip()[:200],
+            )
+            return []
+        names = _run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("recreate renames on %s unread: %s", project, exc)
+        return []
+    if names.returncode != 0:
+        logger.warning(
+            "recreate renames on %s unread: docker ps -a exited %s: %s",
+            project,
+            names.returncode,
+            (names.stderr or names.stdout).strip()[:200],
+        )
+        return []
+    all_names = {name.strip() for name in names.stdout.splitlines()}
+    renamed: list[str] = []
+    for line in listed.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 2:
+            continue
+        container_id, temp_name = (field.strip() for field in fields)
+        match = RECREATE_TMP_NAME.match(temp_name)
+        if match is None:
+            continue
+        real_name = match.group("name")
+        if real_name in all_names:
+            logger.warning(
+                "left recreate container %s because real name %s is occupied "
+                "(OMN-17427)",
+                temp_name,
+                real_name,
+            )
+            continue
+        try:
+            result = _run(
+                ["docker", "rename", container_id, real_name],
+                timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning(
+                "could not rename recreate container %s to %s: %s",
+                temp_name,
+                real_name,
+                exc,
+            )
+            continue
+        if result.returncode == 0:
+            renamed.append(f"{temp_name} -> {real_name}")
+            all_names.add(real_name)
+            logger.warning(
+                "renamed running recreate container %s to %s (OMN-17427)",
+                temp_name,
+                real_name,
+            )
+        else:
+            logger.warning(
+                "could not rename recreate container %s to %s: %s",
+                temp_name,
+                real_name,
+                (result.stderr or result.stdout).strip()[:200],
+            )
+    return renamed
+
+
 def run_compose_recreate(
     argv: list[str],
     *,
@@ -5474,6 +5575,10 @@ class DeployExecutor:
         # here and the verify + per-container recovery below -- the recovery a
         # non-zero exit already gets -- never ran at all, which is how command
         # 23edaf62 left three services in Created with :8086 down.
+        # OMN-17427: a recreate killed after startup but before its final rename
+        # leaves the service running under a temp name. Compose up does not
+        # rename it back, and the census reports the declared container absent.
+        finish_recreate_renames(lane)
         self._record_compose_invocation(phase, cmd)
         if deps_phase:
             # OMN-18640: say what convergence is about to do BEFORE it does it.

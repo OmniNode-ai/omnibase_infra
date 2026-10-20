@@ -356,48 +356,13 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
-class Transport(Protocol):
-    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
-
-    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
-
-    def put(self, host: PoolHost, local: Path, remote: str) -> int: ...
-
-
-class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
-        self._opts = [
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            f"ConnectTimeout={connect_timeout}",
-        ]
-
-    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
-        try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            out = exc.stdout if isinstance(exc.stdout, str) else ""
-            return 124, out + f"\n[timeout after {timeout:.0f}s]"
-        return proc.returncode, proc.stdout + proc.stderr
-
-    def put(self, host: PoolHost, local: Path, remote: str) -> int:
-        return subprocess.run(
-            ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
-            check=False,
-        ).returncode
-
-
 def _bindable(addr: str) -> bool:
-    """Whether a literal IP belongs to this machine."""
+    """Whether an IP, or the IPv4 address a name resolves to, belongs to this machine."""
     try:
-        ipaddress.ip_address(addr)
+        try:
+            ipaddress.ip_address(addr)
+        except ValueError:
+            addr = socket.gethostbyname(addr)
         family = socket.AF_INET6 if ":" in addr else socket.AF_INET
         with socket.socket(family, socket.SOCK_DGRAM) as sock:
             sock.bind((addr, 0))
@@ -411,11 +376,80 @@ def is_this_host(
     user: str | None = None,
     bind: Callable[[str], bool] | None = None,
 ) -> bool:
-    """Whether the target names this machine and the current user."""
+    """Whether the target names this machine and the current user.
+
+    A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
     target_user, sep, addr = ssh_target.rpartition("@")
     if sep and target_user != (getpass.getuser() if user is None else user):
         return False
     return (bind or _bindable)(addr)
+
+
+class Transport(Protocol):
+    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int: ...
+
+
+class SshTransport:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
+        self._opts = [
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            f"ConnectTimeout={connect_timeout}",
+        ]
+
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        try:
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            out = exc.stdout if isinstance(exc.stdout, str) else ""
+            return 124, out + f"\n[timeout after {timeout:.0f}s]"
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
+        return subprocess.run(
+            ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
+            check=False,
+        ).returncode
 
 
 class LocalTransport:
@@ -467,7 +501,9 @@ class HostRoutingTransport:
         local: Transport | None = None,
         is_local: Callable[[str], bool] | None = None,
     ) -> None:
-        self._ssh = ssh if ssh is not None else SshTransport()
+        self._ssh = (
+            ssh if ssh is not None else SshTransport(local_check=lambda _target: False)
+        )
         self._local = local if local is not None else LocalTransport()
         self._is_local = is_local if is_local is not None else is_this_host
         self._targets: dict[str, bool] = {}
