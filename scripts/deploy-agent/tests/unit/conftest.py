@@ -73,6 +73,22 @@ def _stub_promotion_guard(
 
 
 @pytest.fixture(autouse=True)
+def _stub_recreate_renames(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-17427: keep the pre-compose-up rename pass out of argv captures.
+
+    ``_compose_up`` lists the lane's containers before every compose up to
+    finish a recreate whose rename never ran. Tests that capture ``_run`` argv
+    are not testing that pass, so it is a no-op here. Tests that drive it opt
+    out via the ``recreate_renames`` marker.
+    """
+    if request.node.get_closest_marker("recreate_renames") is not None:
+        return
+    monkeypatch.setattr(executor_mod, "finish_recreate_renames", lambda lane: [])
+
+
+@pytest.fixture(autouse=True)
 def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
     """OMN-16939: DEPLOY_AGENT_ALLOWED_LANES is required and has no default.
 

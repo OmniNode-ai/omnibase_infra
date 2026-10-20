@@ -27,10 +27,19 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_infra.cli.cli_delegate import _HARD_TIMEOUT_GRACE_SECONDS
+from omnibase_infra.cli.cli_delegate import (
+    _HARD_TIMEOUT_GRACE_SECONDS,
+    _terminal_wait_seconds,
+    _timeout_left_after_probe,
+)
+from omnibase_infra.cli.delegate_locus import (
+    _REBIND_WAIT_SECONDS,
+    rebind_wait_for_timeout,
+)
 from scripts.ci.r1_front_door_probe import (
+    CLI_DELIVERY_MARGIN_S,
     CLI_HARD_TIMEOUT_GRACE_S,
-    CLI_TERMINAL_WAIT_S,
+    CLI_REQUESTED_TIMEOUT_S,
     DEFAULT_TIMEOUT_S,
     PROBE_LANE,
     PROBE_PROMPT,
@@ -80,6 +89,8 @@ def test_build_argv_uses_the_corrected_lane_dev_form() -> None:
         "kafka",
         "--lane",
         PROBE_LANE,
+        "--timeout",
+        str(CLI_REQUESTED_TIMEOUT_S),
     ]
     joined = " ".join(argv)
     assert "--kafka-bootstrap" not in joined
@@ -132,9 +143,91 @@ def test_probe_timeout_outlasts_the_cli_own_terminal_wait() -> None:
     backstop adds a grace window. A probe that kills the CLI sooner reports "I
     could not run the probe" for a lane that was merely queued, and the CLI
     never gets to name its own terminal.
+
+    The scheduled run 39375143558 of 2026-10-20T05:29Z was then killed at
+    330 s: with no ``--timeout`` the CLI first waits up to its 300 s consumer
+    rebind window and only then starts the terminal wait, so the terminal
+    wait alone was the wrong bound. The probe passes ``--timeout``, and the
+    bound is computed here from the CLI's own wait functions for every
+    locus-probe duration the CLI allows.
     """
     assert CLI_HARD_TIMEOUT_GRACE_S == _HARD_TIMEOUT_GRACE_SECONDS
-    assert DEFAULT_TIMEOUT_S > CLI_TERMINAL_WAIT_S + CLI_HARD_TIMEOUT_GRACE_S
+
+    class _Budget:
+        @property
+        def task_class_timeout_ceiling_seconds(self) -> int:
+            return CLI_REQUESTED_TIMEOUT_S
+
+        @property
+        def terminal_delivery_margin_seconds(self) -> int:
+            return CLI_DELIVERY_MARGIN_S
+
+    rebind_cap = rebind_wait_for_timeout(CLI_REQUESTED_TIMEOUT_S)
+    assert rebind_cap is not None
+    # A locus probe that overruns its rebind cap (a slow broker answer on
+    # top of the wait) is still charged against --timeout, so sweep past it.
+    worst_cli_wall_s = max(
+        probe_s
+        + _terminal_wait_seconds(
+            requested_timeout_seconds=_timeout_left_after_probe(
+                CLI_REQUESTED_TIMEOUT_S, probe_s
+            ),
+            execution_budget=_Budget(),
+        )
+        + _HARD_TIMEOUT_GRACE_SECONDS
+        for probe_s in (
+            0.0,
+            0.5,
+            rebind_cap,
+            rebind_cap + 0.5,
+            float(CLI_REQUESTED_TIMEOUT_S),
+        )
+    )
+    assert worst_cli_wall_s < DEFAULT_TIMEOUT_S
+
+    # Falsifier: the argv the 2026-10-20 run used (no --timeout) leaves the
+    # rebind window uncapped, and that bound is beyond the probe's kill.
+    assert rebind_wait_for_timeout(None) is None
+    uncapped_wall_s = (
+        _REBIND_WAIT_SECONDS
+        + CLI_REQUESTED_TIMEOUT_S
+        + CLI_DELIVERY_MARGIN_S
+        + _HARD_TIMEOUT_GRACE_SECONDS
+    )
+    assert uncapped_wall_s > DEFAULT_TIMEOUT_S
+
+
+def test_run_probe_timeout_keeps_the_cli_partial_output_and_names_its_phase() -> None:
+    """A killed CLI's own last line is the evidence of where it was waiting.
+
+    The 2026-10-20T05:29Z record carried ``stderr_tail: ""`` because the
+    timeout path dropped what the CLI had already written, so nothing said
+    whether it hung in the consumer rebind wait or in the terminal wait.
+    """
+    partial_stderr = (
+        "drift_guard: verdict=IN_SYNC\n"
+        "ticket: none (unresolved)\n"
+        "dispatching: run r-1 correlation c-1 to onex.cmd.x via broker:19092; "
+        "awaiting the lane's terminal for up to 160 s\n"
+    )
+
+    def _raising_run(argv: list[str], *, timeout: float) -> _StubCompleted:
+        raise subprocess.TimeoutExpired(
+            argv, timeout, output=b"partial out\n", stderr=partial_stderr.encode()
+        )
+
+    result = run_probe(onex_bin="onex", runner=_raising_run)
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.leg == "probe-timeout"
+    assert "awaiting the lane's terminal" in result.stderr_tail
+    assert result.stdout_tail == "partial out\n"
+    assert result.named_cause.startswith(
+        f"probe killed the CLI after {DEFAULT_TIMEOUT_S}s"
+    )
+    assert "awaiting the lane's terminal for up to 160 s" in result.named_cause
+    assert "\n" not in result.named_cause
+    assert len(result.named_cause) <= 240
 
 
 def test_record_result_writes_json_and_returns_the_probes_own_exit_code(
