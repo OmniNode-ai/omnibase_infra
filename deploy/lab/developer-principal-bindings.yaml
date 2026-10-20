@@ -84,6 +84,15 @@
 # group; the binding names the terminal group the other terminals use, which the
 # `local.omnibase_core.runtime_local_` prefix already covers. The projector publishes the
 # topic, so a developer principal gets no write on it.
+# CLAUDE CODE HOOK EDGE (OMN-17427): a developer machine's hook-emit drainer publishes
+# that person's Claude Code hook events to the dev lane as its own principal, so the lab
+# projections (`omninode_internal.claude_hook_events` reads `hook-event`) see every
+# person's sessions and not only the operator's. These are the `onex.evt.omniclaude.*`
+# observability topics the operator's own hook principal holds, produce only: no READ,
+# and no `onex.cmd.*` hook topic. The command topics carry full prompts and content and
+# stay a separate, consented grant. A class whose fan-out names an ungranted topic is
+# dead-lettered by the drainer after its first failures, so the machine keeps
+# publishing the rest.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -119,6 +128,35 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.projection-delegation-applied.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.agent-actions.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.agent-status.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.correlation-trace.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.delegation-shadow-comparison.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.dod-guard-fired.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.friction-observed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.hook-event.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.hook-health-error.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.intent-commit-bound.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.llm-routing-decision.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.llm-routing-fallback.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.pattern-enforcement.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.phase-metrics.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.prompt-submitted.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.pr-validation-rollup.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.routing-decision.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.routing-feedback.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-ended.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-outcome.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.session-started.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-invoked.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.skill-started.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.static-context-edit-detected.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-evidence-written.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-assigned.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}

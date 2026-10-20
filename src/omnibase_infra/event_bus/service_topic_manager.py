@@ -126,6 +126,26 @@ def topic_partition_cap_from_env() -> int | None:
     return cap
 
 
+def _declared_contract_name(contract_path: Path, cache: dict[Path, str]) -> str:
+    """The ``name`` a contract file declares, or "" when it declares none.
+
+    A source that is not a contract mapping (a ``topics.yaml`` manifest, an
+    unreadable file) has no name, so a node selection never admits it.
+    """
+    if contract_path not in cache:
+        import yaml
+
+        name = ""
+        try:
+            raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            raw = None
+        if isinstance(raw, dict) and isinstance(raw.get("name"), str):
+            name = raw["name"]
+        cache[contract_path] = name
+    return cache[contract_path]
+
+
 def _topic_provisioning_sort_key(spec: ModelTopicSpec) -> tuple[int, str]:
     """Sort topics using contract-declared provisioning priority."""
     return (spec.provisioning_priority, spec.suffix)
@@ -588,12 +608,23 @@ class TopicProvisioner:
         ``ContractTopicExtractor.extract_all()``. There is no fallback to
         the Python constant registry (``ALL_PROVISIONED_TOPIC_SPECS``).
 
+        When the deployment sets ``ONEX_RUNTIME_NODE_SELECTION`` (OMN-17427),
+        only topics declared by a selected contract are kept, so the plane
+        provisions the topics of the nodes it loads and no others. Unset keeps
+        every extracted topic.
+
         Raises:
             ImportError: If ``ContractTopicExtractor`` is not importable.
             RuntimeError: If extraction fails unexpectedly.
 
-        Ticket: OMN-4594, OMN-4622, OMN-5132
+        Ticket: OMN-4594, OMN-4622, OMN-5132, OMN-17427
         """
+        # Runtime models load the gateway tree; defer them until provisioning
+        # so importing the event bus does not load runtime handlers for the CLI.
+        from omnibase_infra.models.runtime.model_runtime_node_selection import (
+            ENV_RUNTIME_NODE_SELECTION,
+            ModelRuntimeNodeSelection,
+        )
         from omnibase_infra.tools.contract_topic_extractor import (
             ContractTopicExtractor,
         )
@@ -604,6 +635,27 @@ class TopicProvisioner:
             skill_manifests_root=self._skill_manifests_root,
             skill_manifests_roots=self._skill_manifests_roots,
         )
+
+        node_selection = ModelRuntimeNodeSelection.from_env()
+        if node_selection.is_active:
+            names: dict[Path, str] = {}
+            extracted_count = len(contract_entries)
+            contract_entries = [
+                entry
+                for entry in contract_entries
+                if any(
+                    node_selection.admits(_declared_contract_name(path, names))
+                    for path in entry.source_contracts
+                )
+            ]
+            logger.info(
+                "topic provisioning: %s selects %d contract(s); keeping %d of %d "
+                "extracted topics (OMN-17427)",
+                ENV_RUNTIME_NODE_SELECTION,
+                len(node_selection.contracts),
+                len(contract_entries),
+                extracted_count,
+            )
 
         result_specs: list[ModelTopicSpec] = []
         for entry in contract_entries:

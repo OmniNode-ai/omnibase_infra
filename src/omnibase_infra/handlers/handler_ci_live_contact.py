@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
 _EXCEPTION = re.compile(r"^Live-contact exception:[ \t]*(\S[^\n]*)$", re.MULTILINE)
+_LOCAL_EXCEPTION_PATH = ".github/live-contact-exception.md"
 # A pin-only workflow edit swaps a full commit sha on an existing `uses:` or
 # `ref:` line (or the comment naming it) and changes nothing else: no step,
 # command, trigger, permission or logic, so it reaches no new contact surface.
@@ -165,14 +166,15 @@ class HandlerCILiveContact:
                     changed_tooling=tooling,
                 )
             body = request.pr_body
-            # The local hook has no PR event. A tracked PR body lets the same
-            # explicit exception grammar apply locally; CI reads the real body.
+            # The local hook reads only a carrier changed in this index. Its
+            # declared location fits the existing clean-root policy; CI uses
+            # the actual PR body and never borrows a repository exception.
             if (
                 not request.base_ref
-                and "PR_BODY.md" in paths
-                and "PR_BODY.md" in present
+                and _LOCAL_EXCEPTION_PATH in paths
+                and _LOCAL_EXCEPTION_PATH in present
             ):
-                body = read("PR_BODY.md")
+                body = read(_LOCAL_EXCEPTION_PATH)
             body = re.sub(r"```.*?```|<!--.*?-->", "", body, flags=re.DOTALL)
             exception = _EXCEPTION.search(body)
             if exception and len(exception.group(1).split()) >= 8:
@@ -294,7 +296,11 @@ class HandlerCILiveContact:
                     changed_tooling=tooling,
                     live_contact_tests=tuple(contacts),
                 )
-            reason = "CI-tooling change requires a live-contact test with a recorded response/replay, or a Live-contact exception: reason in the PR body"
+            reason = (
+                "CI-tooling change requires a live-contact test with a recorded "
+                "response/replay, or a Live-contact exception: reason in the PR "
+                f"body (locally, stage {_LOCAL_EXCEPTION_PATH})"
+            )
             if problems:
                 reason += "; " + "; ".join(problems)
             return ModelCILiveContactResult(

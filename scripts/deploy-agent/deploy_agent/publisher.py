@@ -205,6 +205,7 @@ def build_completion_payload(
         oneshot_reruns=list(oneshot_reruns or []),
         onex_api_delivery=onex_api_delivery,
         lane_mirror=lane_mirror,
+        not_started=job.not_started,
     )
     return completed.model_dump(mode="json")
 
