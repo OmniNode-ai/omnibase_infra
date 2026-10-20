@@ -243,6 +243,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q'
+  - id: req-omn17427-cve-autobump-keeps-contract
+    statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
+    acceptance:
+      - id: AC60
+        statement: 'AC60: a refresh of an open bump PR whose branch holds contracts/OMN-20174.yaml commits that file with the regenerated locks, a branch without it commits only the locks, and a new PR reads no branch contract -- falsifier: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q -k "keeps_the_pr_evidence_contract or new_pr_reads_no_branch_contract"'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -361,6 +366,9 @@ evidence_requirements:
   - kind: tests
     description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
     command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
+  - kind: tests
+    description: Fake-runner tests check that the autobump refresh carries an existing branch contract into its commit and adds nothing when there is none; they do not claim a scheduled run.
+    command: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1067,3 +1075,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
+  - id: dod-omn-17427-ac60-autobump-keeps-contract
+    description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC60
+  - id: dod-omn-17427-ac60-autobump-deploy-check
+    description: Hosted-runner deploy check -- fake-runner tests of the autobump contract carry-forward; they do not claim a scheduled run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC60
