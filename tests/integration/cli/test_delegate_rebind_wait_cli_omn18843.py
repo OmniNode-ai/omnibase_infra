@@ -97,7 +97,9 @@ def _answer(monkeypatch: pytest.MonkeyPatch, answers: list[tuple[str, ...]]) -> 
     monkeypatch.setattr(delegate_locus, "live_consumer_groups", _fake)
 
 
-def _delegate(state_root: Path, tmp_path: Path) -> int:
+def _delegate(state_root: Path, tmp_path: Path, timeout: int | None = None) -> int:
+    # No --timeout keeps the full rebind window; a declared one caps it at half
+    # (OMN-17427, tested at the end of this file).
     return run_delegate(
         prompt="probe",
         task_type="research",
@@ -106,7 +108,7 @@ def _delegate(state_root: Path, tmp_path: Path) -> int:
         locus=EnumDelegateLocus.DEPLOYED_LANE,
         kafka_bootstrap="broker.invalid:19092",
         state_root=state_root,
-        timeout=5,
+        timeout=timeout,
         verbose=False,
         emit_socket=tmp_path / "emit.sock",
     )
@@ -169,4 +171,31 @@ def test_the_longest_measured_rebind_window_reaches_receipt_mode(
     )
     assert harness["clock"]["slept"] == pytest.approx(
         decision.consumer_bind_wait_seconds
+    )
+
+
+def test_a_declared_timeout_caps_the_rebind_wait_at_half(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: dict[str, Any]
+) -> None:
+    """OMN-17427: a caller killing at 120 s gets a refusal inside 60 s, not a hang."""
+    _answer(monkeypatch, [()])
+
+    with pytest.raises(click.ClickException, match="half the caller's --timeout"):
+        _delegate(harness["state"], tmp_path, timeout=120)
+
+    assert harness["dispatched"] == []
+    assert harness["clock"]["slept"] <= 60
+
+
+def test_a_rebind_inside_the_capped_wait_still_dispatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: dict[str, Any]
+) -> None:
+    _answer(monkeypatch, [(), (), (), (_GROUP,)])
+
+    assert _delegate(harness["state"], tmp_path, timeout=120) == 0
+
+    assert len(harness["dispatched"]) == 1
+    decision = harness["dispatched"][0]["locus_decision"]
+    assert decision.consumer_bind_wait_seconds == pytest.approx(
+        3 * delegate_locus._REBIND_POLL_SECONDS
     )

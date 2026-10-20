@@ -223,6 +223,11 @@ requirements:
         statement: 'AC50: snap-pre and snap-post of a pre-PR slot read every container of the declared lanes by id, start time and restart count, and snap-post prints the count of changed lines over the count read and names each changed container; the slot''s own containers are not read -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_isolation_readback_omn19064.py -q -k "neighbour or declared_lane"'
       - id: AC51
         statement: 'AC51: a pre-PR slot run with no --overlay ships the slot''s own Bifrost overlay, read from ONEX_LANE_OVERLAY_DIR or else the lane-overlays directory beside the pool table, and an isolated member or a slot with no overlay file ships none -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "lane_overlay or overlay_is_read"'
+  - id: req-omn17427-slot-runtime-connect
+    statement: The pre-PR slot provisioner grants the slot's runtime principal CONNECT on the slot's own omnidash database and reads it back, so the slot runtime's savings-correlation pool opens and the runtime boots.
+    acceptance:
+      - id: AC97
+        statement: 'AC97: provision_db_slot.sh grants omninode_runtime_<slot> CONNECT on omnidash_analytics_<slot> and reads it back with has_database_privilege, and the only flat migration granting omninode_runtime CONNECT is undeliverable under a slot -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase'
   - id: req-omn17427-cloud-migration-nonfatal
     statement: A failing dev-lane omninode_cloud migration one-shot in the deploy agent gates only onex-api, the runtime family still restarts and is verified, and the job then ends failed with the one-shot's error.
     acceptance:
@@ -238,27 +243,115 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
-  - id: req-omn17427-prepr-verify-lease-renew
-    statement: The pre-PR verify driver renews its slot lease before every phase in the same remote command that starts the phase, stops without teardown when the lease is no longer its own, and the TLA+ model of the slot lease (OMN-20085 AC3 formal half) is committed with its TLC results.
-    acceptance:
-      - id: AC52
-        statement: 'AC52: every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k, a peer taking the lease stops the run with no teardown and exit 2, a renewal racing seven breakers of its expired lease leaves one holder in 25 rounds, and the committed TLC results pass the model and fail every mutation -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q -k "renew or model or mutation"'
-  - id: req-omn17427-aiohttp-security-patch
-    statement: The runtime dependency floor excludes aiohttp releases affected by GHSA-2g87-pp6c-29x5 and GHSA-5wr8-gcqf-gqf3, whose upstream patched version is 3.14.4.
-    acceptance:
-      - id: AC53
-        statement: 'AC53: the declared aiohttp dependency excludes versions below 3.14.4, the lockfile and installed package agree on a patched version, and the runtime health endpoint still serves a real HTTP request -- falsifier: the bound dependency command and real_health_endpoint test below'
-  - id: req-omn17427-runner-identity-after-deps
-    statement: The runner image identity is bound to this branch's resolved dependencies after the aiohttp security update.
+  - id: req-omn17427-live-contact-local-carrier
+    statement: Local CI-tooling admission reads an exception from the staged .github/live-contact-exception.md while CI reads the PR body and clean-root continues to refuse root PR_BODY.md.
     acceptance:
       - id: AC54
-        statement: 'AC54: the recorded identity and shared environment digests equal their recomputed values for this head, identity verification passes, and the runtime health endpoint serves HTTP -- falsifier: the bound identity tests and hosted-runner deploy command below'
+        statement: 'AC54: the bus node accepts a valid staged local carrier, refuses absent, unstaged, stale and invalid exceptions, CI still requires the PR body, and clean-root refuses root PR_BODY.md -- falsifier: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"'
+  - id: req-omn17427-rebind-wait-honours-timeout
+    statement: A dev-bus onex delegate run whose caller declares --timeout waits at most half of it for a consumer group to bind, and its terminal wait gets only the part of --timeout the probe left, so a lane that is unbound refuses with a receipt before the caller's own kill.
+    acceptance:
+      - id: AC51
+        statement: 'AC51: with --timeout 120 an unbound lane is refused after at most 60 s of rebind wait and the refusal names the cap, a lane that binds inside the cap is still dispatched, and a run with no --timeout keeps the full 300 s rebind window -- falsifier: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -q'
+  - id: req-omn17427-bash-deploy-cloud-migration-fails-loud
+    statement: A failing dev-lane omninode_cloud migration one-shot in onex-runtime-deploy (src/omnibase_infra/handlers/handler_runtime_deploy.sh) still lets the runtime family deploy and verify, reports the one-shot's exit code and redacted log tail, and ends the deploy with exit 3 instead of 0; refresh_dev_lane.sh records that exit and ends FAILED_CLOUD_MIGRATION, exit 1, with no rollback.
+    acceptance:
+      - id: AC52
+        statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q'
+  - id: req-omn17427-prepr-teardown-stop-on-failure
+    statement: The pre-PR slot teardown stops after a failed container removal and keeps the staging root whenever an earlier step failed, and a staging root it cannot remove is reported in the teardown report instead of raised.
+    acceptance:
+      - id: AC99
+        statement: 'AC99: a refused container removal leaves the containers, topics, databases and staging root in place and ends INCOMPLETE, and a staging root that cannot be removed ends INCOMPLETE with a report -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q'
+  - id: req-omn17427-prepr-verify-lease-renew
+    statement: The pre-PR verify driver renews its slot lease before every phase in the same remote command that starts the phase, stops without teardown when the lease is no longer its own, and the TLA+ model of the slot lease (OMN-20085 AC3 formal half) is committed with its TLC results under formal/prepr_slot_lease_renew.
+    acceptance:
+      - id: AC55
+        statement: 'AC55: every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k, a peer taking the lease stops the run with no teardown and exit 2, a renewal racing seven breakers of its expired lease leaves one holder in 25 rounds, and the committed TLC results pass the model and fail every mutation -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_renew_model.py -q -k "renew or model or mutation"'
   - id: req-omn17427-cve-autobump-keeps-contract
     statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
     acceptance:
       - id: AC60
         statement: 'AC60: a refresh of an open bump PR whose branch holds contracts/OMN-20174.yaml commits that file with the regenerated locks, a branch without it commits only the locks, and a new PR reads no branch contract -- falsifier: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q -k "keeps_the_pr_evidence_contract or new_pr_reads_no_branch_contract"'
+  - id: req-omn17427-prepr-slot-lease-model
+    statement: The pre-PR slot lease has a TLA+ model whose TLC run passes with each mutation violating its named property, and release_lease runs under the break's guard directory, so an expired holder's release can no longer remove the lease a breaker has just written (OMN-20085 AC3).
+    acceptance:
+      - id: AC98
+        statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-prepr-tenant-state-writable
+    statement: The pre-PR slot's tenant-state directory, bind-mounted into the slot gateway, admits the gateway's container user, which is neither the operator nor in its group, so the tenant mint can write its credential.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: prepr_verify_lane.sh creates the tenant-state directory with write and search for others, no listing for others, the sticky bit set, and the slot env directory still 0700 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q'
+  - id: req-omn17427-lane-lock-contended-outcome
+    statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
+    acceptance:
+      - id: AC53
+        statement: 'AC53: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
+  - id: req-omn17427-docker-proof-hosts
+    statement: Docker proof profiles exclude the host retained only for script work, while selectors for other hosts and script proofs stay unchanged.
+    acceptance:
+      - id: AC61
+        statement: 'AC61: Docker selectors exclude the script-only host, the runtime profile advances its version and both script-only selectors retain their three hosts -- falsifier: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"'
+  - id: req-omn17427-slot-intelligence-extension
+    statement: The pre-PR slot provisioner grants the slot's intelligence principal CREATE on the slot's own intelligence database and reads it back, so the intelligence corpus can create its trusted extensions on a fresh slot database.
+    acceptance:
+      - id: AC96
+        statement: 'AC96: provision_db_slot.sh grants role_omniintelligence_<slot> CREATE on omniintelligence_<slot> and reads it back with has_database_privilege, and the intelligence corpus is shown to issue CREATE EXTENSION -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions'
+  - id: req-omn17427-dangling-hours-floor
+    statement: The disk-GC planner removes a dangling image that no container references once it is older than dangling_min_age_hours (6 in the committed keep-list), instead of holding every dangling image for min_age_days; tagged images keep the day-scale gate (OMN-20210, h202 root disk).
+    acceptance:
+      - id: AC53
+        statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
+  - id: req-omn17427-runtime-node-selection
+    statement: A deployment that sets ONEX_RUNTIME_NODE_SELECTION attaches, subscribes and provisions only the contracts it names; unset, every discovered contract is attached and every contract topic is provisioned as before.
+    acceptance:
+      - id: AC63
+        statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
+      - id: AC62
+        statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-issuer-rpk-container
+    statement: The lab principal issuer's apply-grants and audit-grants can reach the broker through the running issuer container's own rpk, so the grants derived from the current grant file can be applied and read back without a superuser identity in the caller's environment and without setting a password.
+    acceptance:
+      - id: AC64
+        statement: 'AC64: with --rpk-container NAME, apply-grants and audit-grants run every rpk call as docker exec NAME rpk, read users with rpk security user list and never the admin API, need no RPK_USER, RPK_PASS or RPK_ADMIN_HOSTS, never set a password, and serve and check refuse the flag -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q'
+  - id: req-omn17427-r1-probe-caller-timeout
+    statement: The daily R1 front-door probe passes --timeout to onex delegate so the CLI caps its consumer rebind wait and grades an unbound lane itself, and a probe that still kills the CLI keeps the CLI's partial output and names its last line.
+    acceptance:
+      - id: AC100
+        statement: 'AC100: the probe kill timeout outlasts the CLI wall-time bound computed from the CLI''s own wait functions for the --timeout it passes, and a killed CLI''s partial stderr is kept in the record and its last line named -- falsifier: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k "outlasts or partial_output"'
+  - id: req-omn17427-prepr-pool-local-transport
+    statement: The pre-PR pool driver reaches a pool member on the machine it runs on with a local shell instead of loopback ssh, so a lane on a lab host reads and leases that host's own pre-PR slots without its key being accepted by its own sshd (OMN-20085).
+    acceptance:
+      - id: AC97
+        statement: 'AC97: a member whose ssh target is the current user at an address bound on this machine is run with a local bash in the home directory and no remote PATH prefix, a file is copied instead of sent with scp, and any other member is still reached with ssh -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport'
+  - id: req-omn17427-finish-recreate-rename
+    statement: Before each compose up the deploy agent renames a running container of its lane's compose project that still carries compose's recreate temporary name into its real name when no container holds that name, and never removes, stops or restarts it, so a recreate interrupted after its new container started no longer leaves the declared container reading absent to the lane census.
+    acceptance:
+      - id: AC104
+        statement: 'AC104: a running e2fc03e50cd0_omnibase-infra-redpanda in the lane project is renamed to omnibase-infra-redpanda when that name is free, before the compose up argv runs; an occupied real name, a plain name or a failed listing renames nothing; no docker rm, stop or restart is issued -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"'
+  - id: req-omn17427-developer-hook-edge-grants
+    statement: A developer machine's lab dev-lane principal may publish its Claude Code hook events on the 29 onex.evt.omniclaude.* hook topics the operator's hook principal holds, produce only, with no read and no command-topic grant, so the claude_hook_events projection can receive every person's sessions.
+    acceptance:
+      - id: AC140
+        statement: 'AC140: the derived developer-principal grants carry WRITE and DESCRIBE on exactly the 29 onex.evt.omniclaude.* hook topics, onex.evt.omniclaude.hook-event.v1 among them, no READ on any of them and no omniintelligence topic, and the committed derived file is the derivation node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "hook_edge or writable or committed_derived"'
+  - id: req-omn17427-dependabot-sibling-pins
+    statement: Dependabot opens no github-actions update for an OmniNode-ai sibling workflow or action pin, which moves only through .github/sibling-pins.yaml or a deliberate pin PR; third-party actions keep their weekly updates.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
+  - id: req-omn17427-unit-drift-rendered-disk-gc
+    statement: The installed-unit drift checker compares onex-disk-gc.service to the unit its installer renders for the declared registry root, so a correct install reads OK and a stale or unrendered one reads DRIFT.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: with UNIT_DRIFT_REGISTRY_ROOT set, an installed onex-disk-gc.service rendered for that root checks OK and the unrendered tracked text checks DRIFT, the comparison uses the render heredoc of install-disk-gc.sh itself for a root carrying percent, quote and backslash, and a missing or relative root or a unit with no OMNI_HOME default refuses -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"'
 evidence_requirements:
+  - kind: tests
+    description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+  - kind: tests
+    description: Local exception admission and clean-root controls run through the existing bus node and validator.
+    command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
     command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q
@@ -374,13 +467,133 @@ evidence_requirements:
     description: A cloud one-shot that exited non-zero is reported at once with its exit code and redacted log tail; a running one-shot is still waited for.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
   - kind: tests
+    description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
+    command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
+  - kind: tests
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root is reported; they do not claim a live slot teardown.
+    command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+  - kind: tests
     description: Fake-runner tests check that the autobump refresh carries an existing branch contract into its commit and adds nothing when there is none; they do not claim a scheduled run.
     command: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
+  - kind: tests
+    description: The committed TLC results of the pre-PR slot lease model bind to the model digest, and the release runs under the guard in real shells.
+    command: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - kind: tests
+    description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
+  - kind: tests
+    description: apply-grants and audit-grants reach the broker through the issuer container's own rpk with no superuser identity in the caller's environment.
+    command: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+  - kind: tests
+    description: Stubbed-subprocess tests check the R1 probe argv carries --timeout, its kill timeout outlasts the CLI bound from the CLI's own wait functions, and a timeout keeps the CLI's partial output; they do not claim a scheduled run.
+    command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+  - kind: tests
+    description: The pool driver runs a member on this machine through a local shell and every other member through ssh.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+  - kind: tests
+    description: The deploy agent renames a running recreate-temp-named container into its free real name before compose up, and leaves occupied and plain names alone.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"
+  - kind: tests
+    description: Developer principals derive produce-only grants on the hook edge's evt topics and nothing on its command topics.
+    command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+  - kind: tests
+    description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac141-prepr-tenant-state-writable
+    description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-prepr-tenant-state-deploy
+    description: Hosted-runner deploy check -- the tenant-state mode test; it does not claim a live mint on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac61-docker-proof-hosts
+    description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn-17427-ac61-profile-deploy-check
+    description: Hosted-runner check of the committed proof selectors and profile version; repository data only, with no runtime deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn-17427-ac54-carrier-integration
+    description: Integration tests read the contract-declared bus terminal verdict from workflow_result.json in real temporary Git repositories, including staged-index, stale-carrier and committed-head PR-body controls, and run the unchanged clean-root validator.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-integration-deploy-check
+    description: Hosted-runner check reads admission results from the local runtime bus and checks clean-root in temporary Git repositories. The refused root carrier and unstaged, stale and working-copy-only exceptions are negative controls. No container, credential or external service is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-live-contact-carrier
+    description: Temporary Git repositories exercise the pre-commit bus node and clean-root validator with staged, absent, unstaged, stale and invalid local exceptions; committed-head controls continue to read the PR body. No external service or credential is used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-carrier-deploy-check
+    description: Hosted-runner check exercises the same contract-declared admission bus node and clean-root validator in temporary Git repositories; no deployed service is changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac97-slot-runtime-connect
+    description: The provisioner test asserts the slot runtime principal CONNECT grant and its readback on the slot omnidash database; it fails at the merge base and passes after the change. Reads repository files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
+  - id: dod-omn-17427-ac97-deploy-slot-runtime-connect
+    description: Hosted-runner deploy check -- the slot provisioner test file over the committed script, scope derivation run under bash with no Postgres; does not claim a live slot bring-up.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k RuntimePrincipalReachesTheSlotOmnidashDatabase
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
   - id: dod-omn-17427-core-pin-incident
     description: The recorded incident pair is refused and its recorded lock agrees with its pin.
     source: manual
@@ -1064,54 +1277,78 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-omn-17427-ac52-prepr-lease-renew
-    description: 'The verify driver prefixes every phase, teardown and snap-post included, with a guarded renewal of its own lease and a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown; release takes the same guard. Real-shell tests run the renewal and release commands, and one races a renewal against seven breakers of its expired lease for 25 rounds with exactly one holder each round. 15 of the renew and budget tests fail against the merge-base driver. The model test binds the committed TLC output (Model passes about 1.9 million distinct states; nine mutations each fail) to the spec and cfg digest.'
+  - id: dod-omn-17427-ac51-rebind-wait-timeout
+    description: Unit and CLI integration tests with the consumer-group probe and the clock faked; an unbound lane under --timeout 120 is refused after at most 60 s of rebind wait, a lane binding on the fourth probe is dispatched, and a run without --timeout keeps the 300 s window. Does not claim a live dev-lane run.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q -k "renew or model or mutation"
+        check_value: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC51
+  - id: dod-omn-17427-ac51-rebind-wait-deploy-check
+    description: Hosted-runner deploy check -- the rebind wait of a dev-bus delegate run is capped at half its declared --timeout. Faked probe and clock; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC51
+  - id: dod-omn-17427-ac52-bash-cloud-fails-loud
+    description: Bash handler and dev refresh functions extracted from the real scripts and run under set -euo pipefail with docker mocked; a failing cloud-migration one-shot is logged with "exited 7" and a redacted URL, the runtime refresh completes, the report returns 3, and refresh_dev_lane.sh maps SUCCESS plus deploy exit 3 to FAILED_CLOUD_MIGRATION. A real-Docker run of the same handler functions in a throwaway compose project is recorded in the pull request body. Does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
-  - id: dod-omn-17427-ac53-aiohttp-deploy-patch
-    description: Hosted-runner deploy check for the runtime dependency patch. Reads the declared dependency and lockfile, verifies the installed aiohttp matches the patched lock, and serves the real runtime health endpoint on loopback. No Docker, broker, credentials or deployed service is required.
+  - id: dod-omn-17427-ac52-bash-cloud-deploy-check
+    description: Hosted-runner deploy check -- the same tests over the repository's committed deploy scripts; docker is mocked, no deployment surface is touched, and no live deployment is claimed.
     source: manual
     checks:
       - check_type: command
-        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run python -c "import tomllib; from pathlib import Path; from packaging.requirements import Requirement; from packaging.version import Version; import aiohttp; p=tomllib.loads(Path(''pyproject.toml'').read_text()); r=next(Requirement(d) for d in p[''project''][''dependencies''] if Requirement(d).name == ''aiohttp''); v=next(d[''version''] for d in tomllib.loads(Path(''uv.lock'').read_text())[''package''] if d[''name''] == ''aiohttp''); assert not r.specifier.contains(''3.14.3''); assert str(r.specifier).find(''>=3.14.4'') >= 0; assert Version(v) >= Version(''3.14.4''); assert v in r.specifier; assert aiohttp.__version__ == v; print(''patched aiohttp floor and lock agree:'', v)"'
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_service_health.py -q -k real_health_endpoint
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC53
-  - id: dod-omn-17427-ac54-runner-identity
-    description: Recompute the runner identity from the current dependency manifest and lock. These existing tests reject both stale digests at dispatch head 88f7e7d33763d73684af232fa7ff34111441a9d7. The identity is bound to the dependency set whose declared aiohttp floor excludes 3.14.3, which fails at a base that still admits it.
+      - AC52
+  - id: dod-omn-17427-ac52-prepr-teardown-stop
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root ends INCOMPLETE with a report; they do not claim a live slot teardown.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_runner_image_identity.py -q -k "recorded_identity_matches_recomputed_identity or identity_uses_shared_env_digest_as_a_binding_component"
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run python -c "import tomllib; from pathlib import Path; from packaging.requirements import Requirement; p=tomllib.loads(Path(''pyproject.toml'').read_text()); r=next(Requirement(d) for d in p[''project''][''dependencies''] if Requirement(d).name == ''aiohttp''); assert not r.specifier.contains(''3.14.3''), str(r.specifier); print(''runner identity inputs carry the patched aiohttp floor:'', r.specifier)"'
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC54
-  - id: dod-omn-17427-ac54-runner-deploy-check
-    description: Hosted-runner deploy check verifies the runner's dependency binding and serves the runtime health endpoint on loopback. It also requires the declared aiohttp floor that the identity binds to exclude 3.14.3. No Docker, broker, credentials or live lane is required.
+      - AC99
+  - id: dod-omn-17427-ac52-teardown-deploy-check
+    description: Hosted-runner deploy check -- tests use a fake docker host to verify teardown failure handling and report writing; they do not claim a live slot teardown.
     source: manual
     checks:
       - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run python scripts/ci/runner_image_identity.py --mode verify
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: 'env PYTHONDONTWRITEBYTECODE=1 uv run python -c "import tomllib; from pathlib import Path; from packaging.requirements import Requirement; p=tomllib.loads(Path(''pyproject.toml'').read_text()); r=next(Requirement(d) for d in p[''project''][''dependencies''] if Requirement(d).name == ''aiohttp''); assert not r.specifier.contains(''3.14.3''), str(r.specifier); print(''runner identity inputs carry the patched aiohttp floor:'', r.specifier)"'
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_service_health.py -q -k real_health_endpoint
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC54
+      - AC99
+  - id: dod-omn-17427-ac55-prepr-lease-renew
+    description: 'The verify driver prefixes every phase, teardown and snap-post included, with a guarded renewal of its own lease and a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown. Real-shell tests run the renewal and release commands, and one races a renewal against seven breakers of its expired lease for 25 rounds with exactly one holder each round. 15 of the renew and budget tests fail against the merge-base driver. The model test binds the committed TLC output (Model passes about 1.9 million distinct states; nine mutations each fail) to the spec and cfg digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_renew_model.py -q -k "renew or model or mutation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC55
+  - id: dod-omn-17427-ac55-lease-renew-deploy-check
+    description: Hosted-runner deploy check -- the renewal and phase-command tests run the real renewal command in bash against a lease directory on local disk; no pre-PR slot is touched and no live slot run (OMN-20085 AC7) is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k renew
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC55
   - id: dod-omn-17427-ac60-autobump-keeps-contract
     description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
     source: manual
@@ -1130,3 +1367,228 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC60
+  - id: dod-omn-17427-ac98-prepr-slot-lease-model
+    description: TLC results committed under formal/prepr_slot_lease bind to the spec and cfg digest; the model passes and each mutation fails its named property (mut_unguarded_release is the driver before this change). The real-shell tests hold a release to the guard; the guard test fails against the previous release_lease. TLC itself is not run in CI.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC98
+  - id: dod-omn-17427-ac98-lease-deploy-check
+    description: Hosted-runner deploy check -- the committed lease model results and the real-shell lease tests; they do not claim a live slot run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC98
+  - id: dod-omn-17427-ac53-lane-lock-contended-outcome
+    description: The deploy agent's _run_deploy, with the lane lock raising LaneLockContendedError, runs no executor phase and records not_started=lane_lock_contended on the job record and the published completion payload, with status failed; a build-failure control records not_started None. Unit tests with the executor, the lock and the publish faked; no broker, lane or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac53-lane-lock-deploy-check
+    description: Hosted-runner deploy check exercises the real deploy-agent job completion and publisher payload with a contended lock and a build-failure control. Executor, lock and publication are faked; no container, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q -k "contended_job_and_terminal_event or build_failure_control"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac96-slot-intel-extension
+    description: The provisioner test reads the intelligence corpus for CREATE EXTENSION and asserts the slot provisioner grants and reads back CREATE on the slot intelligence database; it fails at the merge base and passes after the change. Reads repository files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC96
+  - id: dod-omn-17427-ac96-deploy-slot-intel-extension
+    description: Hosted-runner deploy check -- the whole slot provisioner test file over the committed script, scope derivation run under bash with no Postgres; does not claim a live slot bring-up.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC96
+  - id: dod-omn-17427-ac48-dangling-hours-floor
+    description: Dangling images older than the 6 h floor are planned for removal, younger or in-use ones are kept, and tagged images keep the min_age_days gate. Pure planner unit tests over synthetic docker inventory; no docker daemon or lab host is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-dangling-hours-deploy-check
+    description: Hosted-runner deploy check exercises the committed keep-list's 6 h dangling floor and the planner's removal of a 12 h dangling image. Synthetic inventory only; no Docker daemon, containers, credentials or lab service is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q -k "committed_keep_list or dangling_image_older"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac61-node-selection
+    description: The ownership filter and the topic provisioner honour ONEX_RUNTIME_NODE_SELECTION and leave every contract in place when it is unset.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
+  - id: dod-omn-17427-ac62-node-selection-real
+    description: A selection of real main-profile contracts wires exactly those with zero failures against the real discovered manifest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC62
+  - id: dod-omn-17427-ac61-node-selection-deploy
+    description: Hosted-runner deploy check -- unit tests of the selection filter and provisioner with no broker; they do not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
+  - id: dod-omn-17427-ac61-cli-import
+    description: Importing the delegate entry point avoids the gateway tree while the topic provisioner still applies node selection. Fresh-interpreter tests run on a hosted runner without a broker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_delegate_import_cost.py tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
+  - id: dod-omn-17427-ac64-issuer-rpk-container
+    description: Unit tests drive ContainerBroker and the apply-grants and audit-grants commands with a recording fake runner; no broker, container, credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
+  - id: dod-omn17427-ac64-issuer-rpk-container-deploy
+    description: Hosted-runner deploy check -- the issuer script's apply-grants and audit-grants accept --rpk-container and run every rpk call inside the named container, with the superuser environment unset. Reads repository files and a fake runner; does not claim a live broker change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q -k "needs_no_superuser_environment or reports_exact_missing_and_extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
+  - id: dod-omn-17427-ac100-r1-probe-caller-timeout
+    description: The R1 probe passes --timeout, its kill timeout outlasts the CLI wall-time bound for that timeout, and a killed CLI's partial output is kept and its last line named.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k "outlasts or partial_output or argv"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-r1-probe-caller-timeout-deploy
+    description: Hosted-runner deploy check -- stubbed-subprocess tests of the R1 probe with no broker and no lane; they do not claim a scheduled run on the lab runner.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac97-prepr-pool-local-transport
+    description: 'Found live on 2026-10-19: from a lane on the lab host that carries the pre-PR slots, prepr_runtime_pool.py read both slots OFFLINE with "Permission denied (publickey,password)" because the driver ssh''d to its own host, so OMN-20085 lanes there could not run verify. The tests assert is_this_host is true for the current user at 127.0.0.1 and false for another user, a TEST-NET address and an unresolvable name; a local member runs bash -c with the command unprefixed in the home directory and never ssh; put copies the file and returns 1 into a missing directory; a remote member still gets ssh with BatchMode and the REMOTE_PATH prefix. They fail at the previous head, where is_this_host does not exist. Live readback on that host at 2026-10-19T20:16Z: the previous driver''s verify read both slots OFFLINE with the ssh refusal; this driver''s read slot 1 BUSY (3 listeners on the slot ports) and slot 2 BUSY (a peer lane''s lease), exit 3 NO_FREE_SLOT, result file exit_code 3. A full slot build through the local transport was not run: no slot was free.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
+  - id: dod-omn-17427-ac97-local-transport-deploy-check
+    description: Hosted-runner deploy check of the local transport using loopback detection, a local shell, temporary files and a mocked remote subprocess; no live slot or deployment is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
+  - id: dod-omn-17427-ac104-finish-recreate-rename
+    description: 'Found live on 2026-10-20 at 10:01Z on the lab dev lane: the dev broker was running and healthy (Up 11 hours, RestartCount 0) as e2fc03e50cd0_omnibase-infra-redpanda, compose''s recreate temporary name, with no container under omnibase-infra-redpanda, so the lane census reported container_absent and the census drift gate failed on omnibase_infra#5148 and #5187. Unit tests with docker faked: a running temp-named container is renamed into its free real name before the compose up argv, an occupied name, a plain name and a failed listing rename nothing, and no rm, stop or restart is issued. The rename on the live lane happens at the next deploy after merge; it was not run by hand.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC104
+  - id: dod-omn-17427-ac104-rename-deploy-check
+    description: Hosted-runner deploy check of the recreate rename pass with docker faked; no container, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC104
+  - id: dod-omn-17427-ac140-developer-hook-edge-grants
+    description: 'Developer principals (deploy/lab/developer-principal-bindings.yaml) gain produce bindings on the 29 onex.evt.omniclaude.* hook topics, and the derived grants file is regenerated by node_broker_grant_derive_compute. Applying them to the live dev broker is a separate act (lab_principal_issuer.py apply-grants, or the next issuance); it was not run by this change.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC140
+  - id: dod-omn-17427-ac141-dependabot-sibling-pins
+    description: Reads the committed .github/dependabot.yml and workflow files; checks the OmniNode-ai/* ignore and that actions/setup-node still updates. It does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-dependabot-deploy-check
+    description: Hosted-runner deploy check -- the committed dependabot.yml ignore and the sibling pin tests; it does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-disk-gc-render
+    description: Unit tests drive check_units over the shipped manifest's onex-disk-gc.service entry with a tmp registry root and an installed-override file, and run the installer's own render heredoc into a tmp file; no unit is installed and no systemctl call is made. The live readback on the lab host is recorded in the pull request body, not by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-deploy-check
+    description: Hosted-runner deploy check -- the same drift-checker unit tests over repository files and tmp paths; it reads no installed unit on any host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141

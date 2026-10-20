@@ -73,9 +73,8 @@ dependencies = [
     "fastapi>=0.120.1,<0.144.0",
     "uvicorn>=0.32.0,<0.55.0",
     "pyyaml>=6.0.2,<7.0.0",
-    # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
-    # (HIGH, out-of-bounds heap read in the C HTTP response parser error path
-    # on malformed responses). 3.9.0 was reachable and the lock resolved 3.14.1.
+    # OMN-20834: 3.14.4 also clears GHSA-2g87-pp6c-29x5 and
+    # GHSA-5wr8-gcqf-gqf3, which blocked the merge-group lockfile scan.
     "aiohttp>=3.14.4,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
     "asyncpg>=0.29.0,<0.33.0",

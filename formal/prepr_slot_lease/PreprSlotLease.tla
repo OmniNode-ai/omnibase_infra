@@ -1,326 +1,197 @@
--------------------------- MODULE PreprSlotLease --------------------------
-(*
-  The host lease of the pre-PR verify slots and the one-call `verify` driver
-  (OMN-20085, under OMN-18893).
+---------------------------- MODULE PreprSlotLease ----------------------------
+(* The pre-PR slot lease of scripts/runtime_build/prepr_runtime_pool.py      *)
+(* (OMN-20085). A lease is a directory on the slot host holding lease.json.  *)
+(* Every shell step of acquire_lease and release_lease is one action here;   *)
+(* nothing between two steps is atomic.                                      *)
+(*                                                                            *)
+(* acquire_lease: mkdir the lease; on success write lease.json. Otherwise    *)
+(* read lease.json; a lease judged expired is broken under the guard         *)
+(* directory <lease>.break: re-read, and only when lease.json is still the   *)
+(* one judged expired, rm -rf, mkdir, write; then rmdir the guard.           *)
+(* release_lease: under the same guard, read lease.json and rm -rf it when   *)
+(* it is this holder's.                                                      *)
+(*                                                                            *)
+(* The lease starts held by Old, already expired and still running, so it    *)
+(* can release while acquirers race to break it. A token is the holder that  *)
+(* wrote it (an acquirer writes at most once). Expire is time passing.       *)
+(*                                                                            *)
+(* Property     Kind       Mutation that must break it                       *)
+(* OneHolder    invariant  mut_two_step_break, mut_no_reread,                *)
+(*                         mut_unguarded_release (the driver before          *)
+(*                         OMN-20085's release fix), mut_break_live          *)
+(* Terminates   temporal   mut_leak_guard (a refused break keeps the guard)  *)
+(*                                                                            *)
+(* Bounds: 3 acquirers and the expired holder. results/ holds TLC output for *)
+(* Model.cfg and each mut_*.cfg, host paths cut to basenames, and           *)
+(* model.sha256, the sha256 of this file then the cfg files in sorted       *)
+(* order. Each run, from this directory:                                     *)
+(*   java -cp tla2tools.jar tlc2.TLC -config <cfg> -workers 2 \             *)
+(*     -metadir "$(mktemp -d)" PreprSlotLease.tla                            *)
+EXTENDS Naturals, FiniteSets
 
-  What this models, and the code it stands for
-  --------------------------------------------
-  Several runners (one driver process each, on the operator Mac or on a peer
-  lane's machine) race for a small ordered set of slots. Each run has a unique
-  identity (`<lane>~<run id>`), never just the lane name: two runs of one lane
-  are two runners here and in the code. A slot is leased for a bounded time: a
-  lease names its holder and an absolute expiry. The driver in
-  scripts/runtime_build/prepr_runtime_pool.py:
+CONSTANTS Procs,         \* acquirers
+          Old,           \* the holder of the expired lease at the start
+          BreakGuard,    \* the break runs under the guard directory
+          ReRead,        \* the break re-reads lease.json inside the guard
+          ExpiryCheck,   \* only a lease judged expired is broken
+          ReleaseGuard,  \* release runs under the guard directory
+          GuardFreed     \* a refused break removes the guard again
 
-    Attempt   survey the slots in order and try the first; when a peer holds it
-              try the next; when every slot is held report "nofree".
-    Begin     before EVERY phase, teardown and snap-post included, one remote
-              command on the host renews the lease and then starts the phase
-              (renew_lease_command, prefixed to the phase by _run_stack). The
-              renewal is refused when the lease is no longer this runner's: the
-              phase is not started (exit 97, LEASE-LOST), and the runner stops
-              and does not tear down, because what is on the slot is a
-              successor's. Nothing on the driver's side can fall between the
-              renewal and the start, so Begin is one step.
-    Step      one phase, at most StepLen long, inside the lease the renewal
-              just set (until = now + the phase budget + RENEW_MARGIN_S, so
-              TTL >= StepLen). The host kills a phase when its budget ends
-              (`timeout -k 30 <budget>` in the same command), so StepLen holds on
-              the host and not only in the driver's ssh call. The driver may be delayed for any time
-              between two phases (a sleeping laptop); the next Begin then finds
-              the lease lost or renews it, and either is safe.
-    Release   remove the lease, but only if it is still this runner's.
+All == Procs \cup {Old}
+Absent == "absent"   \* no lease directory
+Empty == "empty"     \* the directory exists, lease.json not yet written
 
-  A lease whose expiry has passed is free, so a runner that died without
-  releasing cannot hold a slot for ever. That frees the LEASE. A hard-killed run
-  leaves its containers on the slot, and the driver's survey reads a slot with
-  containers as busy, so the residue is cleaned by a reaper (OMN-18896, not
-  built by this change): the action Reap below is that assumption, stated as a
-  rule and not as code, and the mutation "no_reaper" shows what fails without it.
+VARIABLES lease,     \* Absent, Empty or the token (holder) in lease.json
+          expired,   \* tokens whose until has passed
+          guard,     \* the guard directory exists
+          pc,
+          seen       \* what an acquirer read from lease.json
 
-  The faults are a hard kill (SIGKILL, power loss: nothing runs after it and the
-  lease and the residue are left in place) and a soft kill (SIGTERM, SIGHUP,
-  SIGINT: the driver's handler goes straight to the teardown phase and then the
-  release).
+vars == <<lease, expired, guard, pc, seen>>
 
-  Time is discrete. The acquire, the renewal and the release are each one
-  critical section on the host. Taking a free lease is one `mkdir` of the lease
-  directory, which the kernel admits once. Breaking an expired lease, renewing
-  and releasing each hold the guard directory `<lease>.break` (also a `mkdir`)
-  and re-read lease.json inside it: the break replaces only the exact lease the
-  runner judged expired, the renewal and the release act only on a lease that
-  still names this runner. So each is atomic with respect to the others, and
-  Attempt and Begin are one step each. The mutation "racy_break" is what the
-  acquire did before OMN-20085: read the lease, later `rm -rf` it if the read
-  was expired, later `mkdir`. A runner that read a lease before it was released
-  and retaken acts on the stale read and deletes the new holder's lease: two
-  runners operate on one slot. The real-shell race tests in
-  tests/unit/scripts/test_prepr_slot_lease_omn18893.py check the same
-  critical sections against the driver's own commands.
-
-  Assumed and not modelled: the lease and guard directories sit on a local
-  filesystem on each host, and the driver-supplied clock is the one clock every
-  expiry is judged by. A guard directory left by a process killed inside its
-  few-millisecond critical section is not cleaned by anything: renewals and
-  breaks then refuse (safe, but the slot stays held until an operator removes
-  the guard).
-  An ssh command that times out after it ran on the host is answered by a
-  release of this run's own identity before the next slot is tried; if that
-  release ran before the timed-out acquire did, the acquire leaves a lease of
-  this run's own identity that no operation runs under and that lapses within
-  the first phase's budget plus the margin (seven minutes). A phase command sent
-  twice because no reply came back starts the phase once: it creates a marker
-  with mkdir, which refuses a second creation, before it renews anything.
-
-  Properties (each has a mutation that must break it; the mut_*.cfg files)
-  ---------------------------------------------------------------------
-  MutualExclusion          two runners never operate on one slot at once
-  OperatingOwnsLiveLease   a runner in a phase, teardown included, holds an
-                           unexpired lease of that slot
-  NoSoftKillAbandon        a soft-killed runner never leaves its lease behind
-  AbandonedReusable        a dead runner's lease becomes free again (temporal)
-  DeadSlotCleaned          a dead runner's residue is eventually cleaned (temporal)
-*)
-EXTENDS Naturals, Sequences, FiniteSets
-
-CONSTANTS Runners, TTL, StepLen, Steps, MaxTime, MaxKills, MUT
-
-\* The slots in the order the driver tries them: slot 1, then slot 2.
-Order == <<"s1", "s2">>
-Slots == {Order[i] : i \in 1..Len(Order)}
-None == "none"
-
-ASSUME /\ TTL >= 1 /\ StepLen >= 1 /\ Steps >= 2 /\ MaxTime >= TTL /\ MaxKills >= 0
-
-VARIABLES now, lease, pc, idx, slotOf, stepStart, stepsLeft, seen,
-          softKilled, killsLeft, dirty
-
-vars == <<now, lease, pc, idx, slotOf, stepStart, stepsLeft, seen,
-          softKilled, killsLeft, dirty>>
-
-NoLease == [h |-> None, until |-> 0]
-
-\* A lease is free when nobody holds it or its expiry has passed. The mutation
-\* "no_expiry" is the rule that reclaimed nothing: only a released lease is free.
-Free(l) == IF MUT = "no_expiry" THEN l.h = None ELSE (l.h = None \/ l.until <= now)
-
-Phases == {"idle", "saw", "broke", "between", "run", "done", "nofree", "dead", "lost"}
+HoldPcs == {"bunguard_ok", "hold", "rguard", "rread", "rrm"}
+Holding == {p \in All : pc[p] \in HoldPcs}
 
 TypeOK ==
-    /\ now \in 0..MaxTime
-    /\ lease \in [Slots -> [h : Runners \cup {None}, until : 0..(MaxTime + TTL)]]
-    /\ pc \in [Runners -> Phases]
-    /\ idx \in [Runners -> 1..Len(Order)]
-    /\ slotOf \in [Runners -> Slots \cup {None}]
-    /\ stepStart \in [Runners -> 0..MaxTime]
-    /\ stepsLeft \in [Runners -> 0..Steps]
-    /\ seen \in [Runners -> [h : Runners \cup {None}, until : 0..(MaxTime + TTL)]]
-    /\ softKilled \in [Runners -> BOOLEAN]
-    /\ killsLeft \in 0..MaxKills
-    /\ dirty \in [Slots -> BOOLEAN]
+  /\ lease \in All \cup {Absent, Empty}
+  /\ expired \subseteq All
+  /\ guard \in BOOLEAN
+  /\ seen \in [All -> All \cup {Absent, Empty}]
 
 Init ==
-    /\ now = 0
-    /\ lease = [s \in Slots |-> NoLease]
-    /\ pc = [r \in Runners |-> "idle"]
-    /\ idx = [r \in Runners |-> 1]
-    /\ slotOf = [r \in Runners |-> None]
-    /\ stepStart = [r \in Runners |-> 0]
-    /\ stepsLeft = [r \in Runners |-> 0]
-    /\ seen = [r \in Runners |-> NoLease]
-    /\ softKilled = [r \in Runners |-> FALSE]
-    /\ killsLeft = MaxKills
-    /\ dirty = [s \in Slots |-> FALSE]
+  /\ lease = Old
+  /\ expired = {Old}
+  /\ guard = FALSE
+  /\ pc = [p \in All |-> IF p = Old THEN "hold" ELSE "try"]
+  /\ seen = [p \in All |-> Absent]
 
-Cur(r) == Order[idx[r]]
+Goto(p, s) == pc' = [pc EXCEPT ![p] = s]
 
-\* A lease or a renewal is only made while the whole lease fits inside the
-\* model's horizon, so every lease this model grants can expire inside it.
-CanTry == now + TTL <= MaxTime
+\* ---- acquire: `if mkdir lease; then printf ... > lease.json; else cat lease.json`
+Try(p) ==
+  /\ pc[p] = "try"
+  /\ IF lease = Absent
+       THEN /\ lease' = Empty /\ Goto(p, "write")
+       ELSE /\ UNCHANGED lease /\ Goto(p, "read")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-Operating(r) == pc[r] = "run"
+Write(p) ==
+  /\ pc[p] = "write"
+  /\ lease' = p
+  /\ Goto(p, "hold")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-\* The runner takes slot s: the lease names it and the run is ready for its
-\* first phase.
-Take(r, s) ==
-    /\ lease' = [lease EXCEPT ![s] = [h |-> r, until |-> now + TTL]]
-    /\ slotOf' = [slotOf EXCEPT ![r] = s]
-    /\ stepsLeft' = [stepsLeft EXCEPT ![r] = Steps]
-    /\ pc' = [pc EXCEPT ![r] = "between"]
+Read(p) ==
+  /\ pc[p] = "read"
+  /\ seen' = [seen EXCEPT ![p] = lease]
+  /\ Goto(p, "decide")
+  /\ UNCHANGED <<lease, expired, guard>>
 
-\* The runner moves to the next slot, or reports that none is free.
-Advance(r) ==
-    /\ IF idx[r] < Len(Order)
-          THEN /\ idx' = [idx EXCEPT ![r] = idx[r] + 1]
-               /\ pc' = [pc EXCEPT ![r] = "idle"]
-          ELSE /\ pc' = [pc EXCEPT ![r] = "nofree"]
-               /\ UNCHANGED idx
+\* an empty read parses to no lease and is refused; a live lease is refused
+Decide(p) ==
+  /\ pc[p] = "decide"
+  /\ IF seen[p] \in All /\ (seen[p] \in expired \/ ~ExpiryCheck)
+       THEN Goto(p, IF BreakGuard THEN "bguard" ELSE "brm")
+       ELSE Goto(p, "done")
+  /\ UNCHANGED <<lease, expired, guard, seen>>
 
-\* ---------------------------------------------------------------- acquire, as built
-Attempt(r) ==
-    /\ pc[r] = "idle"
-    /\ MUT # "racy_break"
-    /\ CanTry
-    /\ LET s == Cur(r) IN
-       IF Free(lease[s])
-          THEN /\ Take(r, s)
-               /\ UNCHANGED <<idx, seen, stepStart>>
-          ELSE /\ Advance(r)
-               /\ UNCHANGED <<lease, slotOf, stepStart, stepsLeft, seen>>
-    /\ UNCHANGED <<now, softKilled, killsLeft, dirty>>
+BGuard(p) ==
+  /\ pc[p] = "bguard"
+  /\ IF ~guard
+       THEN /\ guard' = TRUE /\ Goto(p, IF ReRead THEN "breread" ELSE "brm")
+       ELSE /\ UNCHANGED guard /\ Goto(p, "done")
+  /\ UNCHANGED <<lease, expired, seen>>
 
-\* ---------------------------------------------------------------- acquire, as it was
-\* Three separate remote commands: mkdir-or-cat, rm -rf, mkdir.
-RacyRead(r) ==
-    /\ pc[r] = "idle"
-    /\ MUT = "racy_break"
-    /\ CanTry
-    /\ LET s == Cur(r) IN
-       IF lease[s].h = None
-          THEN /\ Take(r, s)
-               /\ UNCHANGED <<idx, seen, stepStart>>
-          ELSE /\ seen' = [seen EXCEPT ![r] = lease[s]]
-               /\ pc' = [pc EXCEPT ![r] = "saw"]
-               /\ UNCHANGED <<lease, idx, slotOf, stepStart, stepsLeft>>
-    /\ UNCHANGED <<now, softKilled, killsLeft, dirty>>
+BReRead(p) ==
+  /\ pc[p] = "breread"
+  /\ Goto(p, IF lease = seen[p] THEN "brm" ELSE "bunguard_refuse")
+  /\ UNCHANGED <<lease, expired, guard, seen>>
 
-RacyBreak(r) ==
-    /\ pc[r] = "saw"
-    /\ LET s == Cur(r) IN
-       IF seen[r].until <= now
-          THEN /\ lease' = [lease EXCEPT ![s] = NoLease]     \* rm -rf, unconditional
-               /\ pc' = [pc EXCEPT ![r] = "broke"]
-               /\ UNCHANGED <<idx, slotOf, stepStart, stepsLeft, seen>>
-          ELSE /\ Advance(r)
-               /\ UNCHANGED <<lease, slotOf, stepStart, stepsLeft, seen>>
-    /\ UNCHANGED <<now, softKilled, killsLeft, dirty>>
+BRm(p) ==
+  /\ pc[p] = "brm"
+  /\ lease' = Absent
+  /\ Goto(p, "bmkdir")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-RacyMkdir(r) ==
-    /\ pc[r] = "broke"
-    /\ LET s == Cur(r) IN
-       IF lease[s].h = None
-          THEN /\ Take(r, s)
-               /\ UNCHANGED <<idx, seen, stepStart>>
-          ELSE /\ Advance(r)
-               /\ UNCHANGED <<lease, slotOf, stepStart, stepsLeft, seen>>
-    /\ UNCHANGED <<now, softKilled, killsLeft, dirty>>
+BMkdir(p) ==
+  /\ pc[p] = "bmkdir"
+  /\ IF lease = Absent
+       THEN /\ lease' = Empty /\ Goto(p, "bwrite")
+       ELSE /\ UNCHANGED lease
+            /\ Goto(p, IF BreakGuard THEN "bunguard_refuse" ELSE "done")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-\* ---------------------------------------------------------------- phases
-\* Begin renews the lease and starts the next phase, in one critical section.
-\* When the lease is no longer this runner's the runner stops. The mutation
-\* "no_renew_check" is a driver that goes on regardless, as the code did before
-\* this renewal was built.
-Begin(r) ==
-    /\ pc[r] = "between"
-    /\ CanTry
-    /\ LET s == slotOf[r] IN
-       IF lease[s].h = r \/ MUT = "no_renew_check"
-          THEN /\ lease' = [lease EXCEPT ![s] =
-                                IF lease[s].h = r
-                                   THEN [h |-> r, until |-> now + TTL]
-                                   ELSE lease[s]]
-               /\ stepStart' = [stepStart EXCEPT ![r] = now]
-               /\ pc' = [pc EXCEPT ![r] = "run"]
-               \* the first phase puts the driver's containers on the slot
-               /\ dirty' = [dirty EXCEPT ![s] = TRUE]
-               /\ UNCHANGED <<stepsLeft>>
-          ELSE /\ pc' = [pc EXCEPT ![r] = "lost"]
-               /\ UNCHANGED <<lease, stepStart, stepsLeft, dirty>>
-    /\ UNCHANGED <<now, idx, slotOf, seen, softKilled, killsLeft>>
+BWrite(p) ==
+  /\ pc[p] = "bwrite"
+  /\ lease' = p
+  /\ Goto(p, IF BreakGuard THEN "bunguard_ok" ELSE "hold")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-\* A phase ends. The last one is the teardown, which leaves the slot clean.
-EndStep(r) ==
-    /\ pc[r] = "run"
-    /\ stepsLeft' = [stepsLeft EXCEPT ![r] = stepsLeft[r] - 1]
-    /\ IF stepsLeft[r] = 1
-          THEN /\ dirty' = [dirty EXCEPT ![slotOf[r]] = FALSE]
-               /\ pc' = [pc EXCEPT ![r] = "done"]
-               \* Release removes the lease only when it is still this runner's
-               /\ lease' = [lease EXCEPT ![slotOf[r]] =
-                                IF lease[slotOf[r]].h = r
-                                   THEN NoLease ELSE lease[slotOf[r]]]
-          ELSE /\ pc' = [pc EXCEPT ![r] = "between"]
-               /\ UNCHANGED <<dirty, lease>>
-    /\ UNCHANGED <<now, idx, slotOf, stepStart, seen, softKilled, killsLeft>>
+BUnguardOk(p) ==
+  /\ pc[p] = "bunguard_ok"
+  /\ guard' = FALSE
+  /\ Goto(p, "hold")
+  /\ UNCHANGED <<lease, expired, seen>>
 
-\* ---------------------------------------------------------------- faults
-HardKill(r) ==
-    /\ pc[r] \in {"run", "between"}
-    /\ killsLeft > 0
-    /\ killsLeft' = killsLeft - 1
-    /\ pc' = [pc EXCEPT ![r] = "dead"]
-    /\ UNCHANGED <<now, lease, idx, slotOf, stepStart, stepsLeft, seen,
-                   softKilled, dirty>>
+BUnguardRefuse(p) ==
+  /\ pc[p] = "bunguard_refuse"
+  /\ guard' = (guard /\ ~GuardFreed)
+  /\ Goto(p, "done")
+  /\ UNCHANGED <<lease, expired, seen>>
 
-\* The signal handler goes straight to the teardown phase and the release. The
-\* mutation "no_signal_teardown" is the default handler, which does neither.
-SoftKill(r) ==
-    /\ pc[r] \in {"run", "between"}
-    /\ stepsLeft[r] > 1
-    /\ killsLeft > 0
-    /\ killsLeft' = killsLeft - 1
-    /\ softKilled' = [softKilled EXCEPT ![r] = TRUE]
-    /\ IF MUT = "no_signal_teardown"
-          THEN /\ pc' = [pc EXCEPT ![r] = "dead"]
-               /\ UNCHANGED stepsLeft
-          ELSE /\ pc' = [pc EXCEPT ![r] = "between"]
-               /\ stepsLeft' = [stepsLeft EXCEPT ![r] = 1]
-    /\ UNCHANGED <<now, lease, idx, slotOf, stepStart, seen, dirty>>
+\* ---- release: under the guard, `case $(cat lease.json) in *holder*) rm -rf lease`
+Release(p) ==
+  /\ pc[p] = "hold"
+  /\ Goto(p, IF ReleaseGuard THEN "rguard" ELSE "rread")
+  /\ UNCHANGED <<lease, expired, guard, seen>>
 
-\* ---------------------------------------------------------------- the reaper
-\* ASSUMED, not built here (OMN-18896): a slot whose lease is free is cleaned.
-Reap(s) ==
-    /\ MUT # "no_reaper"
-    /\ dirty[s]
-    /\ Free(lease[s])
-    /\ \A r \in Runners : ~(pc[r] = "run" /\ slotOf[r] = s)
-    /\ dirty' = [dirty EXCEPT ![s] = FALSE]
-    /\ UNCHANGED <<now, lease, pc, idx, slotOf, stepStart, stepsLeft, seen,
-                   softKilled, killsLeft>>
+\* release waits for the guard; the driver's wait is bounded and, when it runs
+\* out, gives up without touching the lease, which is safe and is not modelled
+RGuard(p) ==
+  /\ pc[p] = "rguard"
+  /\ ~guard
+  /\ guard' = TRUE
+  /\ Goto(p, "rread")
+  /\ UNCHANGED <<lease, expired, seen>>
 
-\* ---------------------------------------------------------------- time
-\* Time may pass unless it would carry a runner past the end of its own phase.
-Tick ==
-    /\ now < MaxTime
-    /\ \A r \in Runners : Operating(r) => (now + 1) - stepStart[r] < StepLen
-    /\ now' = now + 1
-    /\ UNCHANGED <<lease, pc, idx, slotOf, stepStart, stepsLeft, seen,
-                   softKilled, killsLeft, dirty>>
+RRead(p) ==
+  /\ pc[p] = "rread"
+  /\ Goto(p, IF lease = p THEN "rrm" ELSE IF ReleaseGuard THEN "runguard" ELSE "done")
+  /\ UNCHANGED <<lease, expired, guard, seen>>
 
-Live(r) ==
-    \/ Attempt(r) \/ RacyRead(r) \/ RacyBreak(r) \/ RacyMkdir(r)
-    \/ Begin(r) \/ EndStep(r)
+RRm(p) ==
+  /\ pc[p] = "rrm"
+  /\ lease' = Absent
+  /\ Goto(p, IF ReleaseGuard THEN "runguard" ELSE "done")
+  /\ UNCHANGED <<expired, guard, seen>>
 
-Next ==
-    \/ Tick
-    \/ \E s \in Slots : Reap(s)
-    \/ \E r \in Runners : Live(r) \/ HardKill(r) \/ SoftKill(r)
+RUnguard(p) ==
+  /\ pc[p] = "runguard"
+  /\ guard' = FALSE
+  /\ Goto(p, "done")
+  /\ UNCHANGED <<lease, expired, seen>>
 
-Spec ==
-    /\ Init
-    /\ [][Next]_vars
-    /\ WF_vars(Tick)
-    /\ \A s \in Slots : WF_vars(Reap(s))
-    /\ \A r \in Runners : WF_vars(Live(r))
+\* time passes: the lease on disk reaches its until
+Expire ==
+  /\ lease \in All \ expired
+  /\ expired' = expired \cup {lease}
+  /\ UNCHANGED <<lease, guard, pc, seen>>
 
-\* ---------------------------------------------------------------- properties
-MutualExclusion ==
-    \A r1, r2 \in Runners :
-        (r1 # r2 /\ Operating(r1) /\ Operating(r2)) => slotOf[r1] # slotOf[r2]
+Step(p) ==
+  \/ Try(p) \/ Write(p) \/ Read(p) \/ Decide(p)
+  \/ BGuard(p) \/ BReRead(p) \/ BRm(p) \/ BMkdir(p) \/ BWrite(p)
+  \/ BUnguardOk(p) \/ BUnguardRefuse(p)
+  \/ Release(p) \/ RGuard(p) \/ RRead(p) \/ RRm(p) \/ RUnguard(p)
 
-OperatingOwnsLiveLease ==
-    \A r \in Runners :
-        Operating(r) => (lease[slotOf[r]].h = r /\ lease[slotOf[r]].until > now)
+Next == Expire \/ \E p \in All : Step(p)
 
-NoSoftKillAbandon ==
-    \A r \in Runners : ~(softKilled[r] /\ pc[r] = "dead")
+Spec == Init /\ [][Next]_vars /\ \A p \in All : WF_vars(Step(p))
 
-AbandonedReusable ==
-    \A r \in Runners : \A s \in Slots :
-        (pc[r] = "dead" /\ lease[s].h = r) ~> Free(lease[s])
+\* ---- properties
+\* No two processes hold the slot on leases that are both still live.
+OneHolder ==
+  \A p, q \in Holding : p # q => (p \in expired \/ q \in expired)
 
-DeadSlotCleaned ==
-    \A r \in Runners : \A s \in Slots :
-        (pc[r] = "dead" /\ slotOf[r] = s /\ dirty[s]) ~> ~dirty[s]
-
+\* Every acquirer and the old holder finish; none waits on the guard forever.
+Terminates == <>(\A p \in All : pc[p] = "done")
 =============================================================================

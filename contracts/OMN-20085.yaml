@@ -1,16 +1,18 @@
 schema_version: 1.0.0
 ticket_id: OMN-20085
 title: One call verifies a branch or sha on the pre-PR slots
-summary: 'The pool driver gains a verify subcommand: verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha> takes the first free pre-PR slot under a lease, builds it from the ref with no PR, runs the named tests or the repo unit suite, tears the slot down on every catchable exit, and writes one onex.prepr.verify-result.v1 file for every outcome. The expired-lease break is made atomic (a guard directory plus a re-read) so two acquirers cannot both hold a slot. A follow-up change renews the lease before every phase in the command that starts it and commits the TLA+ model of the lease (AC3 formal half) with its TLC results. Not delivered: the live slot run (AC7), which needs a pre-PR slot hold.'
+summary: 'The pool driver gains a verify subcommand: verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha> takes the first free pre-PR slot under a lease, builds it from the ref with no PR, runs the named tests or the repo unit suite, tears the slot down on every catchable exit, and writes one onex.prepr.verify-result.v1 file for every outcome. The expired-lease break is made atomic (a guard directory plus a re-read) so two acquirers cannot both hold a slot. The TLA+ model of the lease (AC3 formal half) followed in a later change, with release_lease moved under the break''s guard after the model found an expired holder''s release could remove a breaker''s fresh lease. A further change renews the lease before every phase in the command that starts it, with a TLA+ model of the renewal under formal/prepr_slot_lease_renew. Not delivered here: the live slot run (AC7), which needs a pre-PR slot hold.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-transcribed-acceptance-criteria
-    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy. AC3 (formal model half) and AC7 (live run) are not transcribed because this change does not evidence them, and AC2 is evidenced below without a binding because its line names the slot host's address, which the public-repo hygiene gate refuses to carry into this file.
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy. AC7 (live run) is not transcribed because this change does not evidence it, and AC2 is evidenced below without a binding because its line names the slot host's address, which the public-repo hygiene gate refuses to carry into this file.
     acceptance:
       - id: AC1
         statement: 'AC1: `verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha>` builds the slot from a ref with no PR, and a ref that does not resolve exits 5 before any lease is taken -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_ref'
+      - id: AC3
+        statement: 'AC3: the lease critical section admits one holder under a real concurrent race of acquirers, and the TLA+ model in formal/prepr_slot_lease passes with each mutation violating its named property -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py'
       - id: AC4
         statement: 'AC4: `verify --suite` runs the repo''s unit suite on the slot host under its own budget with a bounded dev control, and `verify` with neither `--tests` nor `--suite` exits 5 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_suite'
       - id: AC5
@@ -19,8 +21,8 @@ requirements:
         statement: 'AC6: a SIGTERM, SIGHUP or SIGINT to the driver mid-run tears the slot down and releases the lease before it exits, and its result file says INTERRUPTED -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -k verify_signal'
 evidence_requirements:
   - kind: tests
-    description: The verify tests and the real-shell lease race tests pass.
-    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+    description: The verify tests, the real-shell lease race tests and the committed lease model results pass.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_model.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -65,20 +67,28 @@ dod_evidence:
     binds_ac:
       - "AC6"
   - id: dod-omn-20085-lease-race-one-holder
-    description: 'The lease critical section (AC3 python half). Real bash processes run the driver''s own remote lease commands at the same moment against one lease directory, for 25 rounds of 8 acquirers over an expired lease and over a free one, and exactly one holds the slot each round; a lease a peer took between the read and the break is left alone. Against the previous driver the expired-lease round fails with two holders. The TLA+ model half of AC3 is not delivered here. Unbound corroboration (no binds_ac).'
+    description: 'The lease critical section (AC3 python half). Real bash processes run the driver''s own remote lease commands at the same moment against one lease directory, for 25 rounds of 8 acquirers over an expired lease and over a free one, and exactly one holds the slot each round; a lease a peer took between the read and the break is left alone. Against the previous driver the expired-lease round fails with two holders. Unbound corroboration (no binds_ac).'
     source: generated
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - id: dod-omn-20085-ac3-lease-model-and-race
+    description: 'AC3. TLC results committed under formal/prepr_slot_lease bind to the spec and cfg digest: the model passes OneHolder and Terminates, four mutations (two-step break, no re-read, release outside the guard, no expiry check) violate OneHolder and a leaked guard violates Terminates. The real-shell tests race acquirers over one lease directory, with an expired holder releasing during the race, and hold a release to the guard. TLC itself is not run in CI.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+    binds_ac:
+      - "AC3"
   - id: dod-omn-20085-lease-renew-every-phase
     description: 'The lease renewal (AC3, the property the model checks). Every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown; a renewal racing seven breakers of its expired lease leaves one holder in each of 25 rounds. Unbound corroboration (no binds_ac).'
     source: generated
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q -k renew
-  - id: dod-omn-20085-lease-tla-model
-    description: 'The TLA+ model half of AC3: formal/prepr_slot_lease/PreprSlotLease.tla with its committed TLC output; the model passes MutualExclusion, OperatingOwnsLiveLease, NoSoftKillAbandon, AbandonedReusable and DeadSlotCleaned, and each of nine mutations fails its named property, bound to the spec and cfg digest. Unbound corroboration (no binds_ac).'
+  - id: dod-omn-20085-lease-renew-tla-model
+    description: 'The TLA+ model of the lease renewal: formal/prepr_slot_lease_renew/PreprSlotLease.tla with its committed TLC output; the model passes MutualExclusion, OperatingOwnsLiveLease, NoSoftKillAbandon, AbandonedReusable and DeadSlotCleaned, and each of nine mutations fails its named property, bound to the spec and cfg digest. Unbound corroboration (no binds_ac).'
     source: generated
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py -q
+        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_renew_model.py -q

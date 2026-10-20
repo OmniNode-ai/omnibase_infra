@@ -34,6 +34,12 @@ def _array(source: str, name: str) -> str:
     return match[0]
 
 
+def _readonly(source: str, name: str) -> str:
+    match = re.search(rf"^readonly {name}=.*$", source, re.M)
+    assert match is not None, name
+    return match[0]
+
+
 def _invoke(
     *,
     failed_service: str = "",
@@ -44,6 +50,7 @@ def _invoke(
     full_stack: bool = False,
     config_fails: bool = False,
     config_empty: bool = False,
+    report: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     source = SCRIPT.read_text()
     arrays = (
@@ -70,6 +77,9 @@ def _invoke(
     if "exclude_cloud_database_services() {" in source:
         extras = _array(source, "DEV_LANE_CLOUD_DB_SERVICES") + "\n"
         extras += _function(source, "exclude_cloud_database_services")
+    if "report_cloud_migration_failure() {" in source:
+        extras += "\n" + _readonly(source, "CLOUD_MIGRATION_FAILED_EXIT_CODE")
+        extras += "\n" + _function(source, "report_cloud_migration_failure")
     shell = "\n".join(
         [
             "set -euo pipefail",
@@ -89,6 +99,9 @@ def _invoke(
     { printf 'DOCKER'; printf ': %s' "$@"; printf '\n'; } >&2
     if [[ "$1" == wait ]]; then
         if [[ "$FAILURE_PHASE" == wait && "$2" == "$PROJECT-$FAILED_SERVICE" ]]; then echo 7; else echo 0; fi
+    elif [[ "$1" == logs ]]; then
+        echo "connecting (dsn postgresql://svc_cloud:***REDACTED***@postgres:5432/omninode_cloud)"
+        echo "ERROR: permission denied to create database"
     elif [[ "$1" == exec ]]; then
         if [[ "$FAILED_SERVICE" == projection-table ]]; then echo f; else echo t; fi
     elif [[ " $* " == *" config --services "* ]]; then
@@ -107,6 +120,7 @@ def _invoke(
             'run_runtime_migration_preflight /proof "$PROJECT"',
             'if [[ "$FULL_STACK" == true ]]; then bringup_full_stack /proof "$PROJECT"; else restart_services /proof "$PROJECT"; fi',
             "echo RUNTIME_REFRESH_COMPLETED",
+            "report_cloud_migration_failure" if report else "",
         ]
     )
     env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME"}}
@@ -256,3 +270,52 @@ def test_effects_keep_their_declared_companion_dependencies() -> None:
         "omninode-runtime": {"condition": "service_started"},
         "redpanda": {"condition": "service_healthy"},
     }
+
+
+def test_failed_one_shot_names_its_exit_code_and_redacted_log_tail() -> None:
+    result = _invoke(failed_service="cloud-migration")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "cloud-migration exited 7" in result.stderr
+    assert "permission denied to create database" in result.stderr
+    assert "postgresql://***@postgres:5432/omninode_cloud" in result.stderr
+    assert "svc_cloud" not in result.stderr
+
+
+def test_cloud_failure_fails_the_deploy_after_the_runtime_refresh() -> None:
+    result = _invoke(failed_service="cloud-migration", report=True)
+    assert "RUNTIME_REFRESH_COMPLETED" in result.stdout
+    assert ": runtime-effects" in result.stderr
+    assert result.returncode == 3, result.stdout + result.stderr
+    report = result.stderr.split("CLOUD_MIGRATION_FAILED", 1)[-1]
+    assert "cloud-migration exited 7" in report
+    assert "onex-api" in report
+    assert "svc_cloud" not in report
+
+
+def test_successful_cloud_migration_reports_no_failure() -> None:
+    result = _invoke(report=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CLOUD_MIGRATION_FAILED" not in result.stderr
+
+
+def test_effects_only_override_reports_no_cloud_failure() -> None:
+    result = _invoke(
+        failed_service="cloud-migration", override="runtime-effects", report=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CLOUD_MIGRATION_FAILED" not in result.stderr
+
+
+def test_cloud_failure_exit_code_is_distinct_from_deploy_failures() -> None:
+    source = SCRIPT.read_text()
+    assert _readonly(source, "CLOUD_MIGRATION_FAILED_EXIT_CODE").endswith("=3")
+    assert not re.search(r"^\s*exit 3$", source, re.M)
+
+
+def test_main_reports_the_cloud_failure_only_after_the_deploy_completes() -> None:
+    body = _function(SCRIPT.read_text(), "main")
+    complete = body.index("DEPLOYMENT_COMPLETE=true")
+    summary = body.index('show_summary "${deploy_target}"')
+    report = body.index("report_cloud_migration_failure")
+    assert complete < summary < report
+    assert body.rstrip().splitlines()[-2].strip() == "report_cloud_migration_failure"

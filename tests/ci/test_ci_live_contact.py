@@ -87,6 +87,160 @@ ROOT = Path(__file__).resolve().parents[2]
 CHECK_RUNS = "tests/ci/fixtures/omn15496_merge_time_external_check_runs.json"
 PROTECTION = "tests/ci/fixtures/ci_live_contact/required_status_checks.json"
 CONTRACT = ROOT / "src/omnibase_infra/nodes/node_ci_live_contact_effect/contract.yaml"
+LOCAL_EXCEPTION = ".github/live-contact-exception.md"
+EXCEPTION_BODY = (
+    "Live-contact exception: This changes a workflow display label; "
+    "there is no API or runner behaviour to replay.\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("case", "accepted"),
+    [
+        ("staged", True),
+        ("staged-bytes", True),
+        ("missing", False),
+        ("unstaged", False),
+        ("working-tree-only", False),
+        ("short", False),
+        ("fenced", False),
+        ("commented", False),
+        ("root-body", False),
+    ],
+)
+def test_local_exception_carrier_through_bus(
+    change: Path, case: str, accepted: bool
+) -> None:
+    """Exercise the pre-commit node and clean-root validator together."""
+    from omnibase_core.runtime.runtime_local import RuntimeLocal
+
+    carrier = change / ("PR_BODY.md" if case == "root-body" else LOCAL_EXCEPTION)
+    if case != "missing":
+        carrier.parent.mkdir(exist_ok=True)
+        body = {
+            "short": "Live-contact exception: impossible\n",
+            "fenced": f"```\n{EXCEPTION_BODY}```\n",
+            "commented": f"<!--\n{EXCEPTION_BODY}-->\n",
+            "working-tree-only": "No exception is declared here.\n",
+        }.get(case, EXCEPTION_BODY)
+        carrier.write_text(body)
+        if case != "unstaged":
+            subprocess.run(
+                ["git", "-C", str(change), "add", str(carrier)],
+                check=True,
+                env=scrub_git_location_env(os.environ),
+            )
+        if case == "working-tree-only":
+            carrier.write_text(EXCEPTION_BODY)
+        elif case == "staged-bytes":
+            carrier.write_text("No exception is declared in the working tree.\n")
+    runtime_root = change / "tests/runtime"
+    runtime_root.mkdir()
+    request = runtime_root / "request.json"
+    request.write_text(
+        ModelCILiveContactRequest(repository=str(change)).model_dump_json()
+    )
+    runtime = RuntimeLocal(
+        workflow_path=CONTRACT,
+        state_root=runtime_root / "state",
+        input_path=request,
+        backend_overrides={"event_bus": "inmemory"},
+        timeout=10,
+    )
+    runtime.run()
+    assert runtime.exit_code == (0 if accepted else 1), runtime.last_error
+    assert runtime._handlers_wired, "the local exception must cross the declared bus"
+    clean_root = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/validation/validate_clean_root.py"),
+            str(change),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=scrub_git_location_env(os.environ),
+    )
+    assert clean_root.returncode == (1 if case == "root-body" else 0), (
+        clean_root.stdout + clean_root.stderr
+    )
+    if case == "root-body":
+        assert "PR_BODY.md" in clean_root.stdout
+
+
+@pytest.mark.parametrize("pr_body", ["", EXCEPTION_BODY])
+async def test_ci_uses_pr_body_instead_of_local_exception(
+    change: Path, pr_body: str
+) -> None:
+    carrier = change / LOCAL_EXCEPTION
+    carrier.parent.mkdir()
+    carrier.write_text(EXCEPTION_BODY)
+    subprocess.run(
+        ["git", "-C", str(change), "add", str(carrier)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(change),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "tooling",
+        ],
+        check=True,
+        capture_output=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    result = await HandlerCILiveContact().handle(
+        ModelCILiveContactRequest(
+            repository=str(change), base_ref="HEAD^", pr_body=pr_body
+        )
+    )
+    assert result.success == bool(pr_body), result
+
+
+async def test_local_exception_from_previous_commit_is_not_reused(change: Path) -> None:
+    carrier = change / LOCAL_EXCEPTION
+    carrier.parent.mkdir()
+    carrier.write_text(EXCEPTION_BODY)
+    subprocess.run(
+        ["git", "-C", str(change), "add", str(carrier)],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(change),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "previous change",
+        ],
+        check=True,
+        capture_output=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    (change / "scripts/ci/check.py").write_text("print('another gate')\n")
+    subprocess.run(
+        ["git", "-C", str(change), "add", "scripts/ci/check.py"],
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    result = await HandlerCILiveContact().handle(
+        ModelCILiveContactRequest(repository=str(change))
+    )
+    assert not result.success, result
 
 
 def add_recorded_test(

@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 505b04c6933abac08ed73c479d7a8d581b82805b"
+title: "The omnimarket contract pin advances to 078016160be75094cdde77a22a4fd21062593a2f"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,12 +10,10 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 505b04c6933abac08ed73c479d7a8d581b82805b -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-      - id: AC2
-        statement: "AC2: skill_mapping.yaml maps no skill to node_coderabbit_triage, which omnimarket #4070 removed inside the advanced pin range -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/cli/test_cli_skill.py -q -k 'registry or resolves_in_omnimarket_catalog'"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 078016160be75094cdde77a22a4fd21062593a2f -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 505b04c6933abac08ed73c479d7a8d581b82805b.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 078016160be75094cdde77a22a4fd21062593a2f.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 emergency_bypass:
   enabled: false
@@ -23,21 +21,10 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 505b04c6933abac08ed73c479d7a8d581b82805b.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 078016160be75094cdde77a22a4fd21062593a2f.
     source: manual
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-17292-ac2
-    description: skill_mapping.yaml no longer maps coderabbit_triage to node_coderabbit_triage, removed from omnimarket at the advanced pin.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: "! grep -n node_coderabbit_triage src/omnibase_infra/cli/skill_mapping.yaml"
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: test_passes
-        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/cli/test_cli_skill.py -q -k 'registry or resolves_in_omnimarket_catalog'"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]

@@ -58,6 +58,9 @@
 #      (FAILED_ROLLED_BACK) or no rollback was needed because the only failing
 #      dimensions were build provenance on an otherwise healthy lane
 #      (FAILED_BUILD_PROVENANCE; the lane was left exactly as it was)
+#      or the runtime family refreshed and the health-gate passed, but the
+#      omninode_cloud migration one-shot failed and onex-api was stopped
+#      (FAILED_CLOUD_MIGRATION; no rollback)
 #   2  refresh FAILED and could not be confirmed healthy (warm-rollback also
 #      unhealthy, OR cold-aware path failed with nothing to roll back to) --
 #      STOP AND REPORT, do not retry-until-green
@@ -186,6 +189,9 @@ readonly COMPOSE_PROJECT="${DEV_COMPOSE_PROJECT}"
 readonly REDPANDA_CONTAINER="omnibase-infra-redpanda"
 readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
 readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+# OMN-18496: must equal CLOUD_MIGRATION_FAILED_EXIT_CODE in
+# src/omnibase_infra/handlers/handler_runtime_deploy.sh.
+readonly CLOUD_MIGRATION_FAILED_DEPLOY_EXIT=3
 
 # OMN-17448: BUILD/RESTART scope, deliberately WIDER than CORE_SERVICES and
 # deliberately not merged into it.
@@ -1196,6 +1202,20 @@ else
     err "=============================================================="
 fi
 
+# --- cloud migration one-shot (OMN-18496) -----------------------------------
+# The deploy restarted and verified the runtime family and stopped onex-api.
+# The health gate does not cover onex-api; the refresh must not certify it.
+# No rollback, because the lane is serving.
+if [[ "${RESULT}" == "SUCCESS" && "${DEPLOY_EXIT}" -eq "${CLOUD_MIGRATION_FAILED_DEPLOY_EXIT}" ]]; then
+    RESULT="FAILED_CLOUD_MIGRATION"
+    err "=============================================================="
+    err "STOP AND REPORT: onex-runtime-deploy exited ${DEPLOY_EXIT}: the omninode_cloud"
+    err "migration one-shot failed. The runtime family was restarted and the"
+    err "health-gate passed; ${ONEX_API_SERVICE} was stopped and is not serving."
+    err "The one-shot's exit code and log tail are in the deploy output above."
+    err "=============================================================="
+fi
+
 # --- close with the lane census (OMN-20876) ----------------------------------
 # A refresh that landed is only done when the lane it landed on matches its
 # manifest: the census is read last, and its exit code is the refresh's.
@@ -1265,6 +1285,7 @@ jq -n \
     --argjson provenance_failures "${PROVENANCE_FAILURES_JSON}" \
     --argjson decision "${DECISION_RECORD_JSON}" \
     --argjson onex_api "${ONEX_API_JSON}" \
+    --argjson deploy_exit "${DEPLOY_EXIT}" \
     --argjson census_ran "${CENSUS_RAN}" \
     --argjson census_exit "${CENSUS_EXIT}" \
     --argjson census_removed "${CENSUS_REMOVED_JSON}" \
@@ -1282,6 +1303,7 @@ jq -n \
         lane_health: {healthy: $lane_is_healthy, failing_dimensions: $unhealthy_dimensions},
         build_provenance: {failing_dimensions: $provenance_failures},
         onex_api: $onex_api,
+        deploy_exit: $deploy_exit,
         lane_census: {ran: $census_ran, exit: $census_exit, leftovers_removed: $census_removed},
         rollback: {
             triggered: $rollback_triggered,
@@ -1301,7 +1323,9 @@ case "${RESULT}" in
     SUCCESS) exit 0 ;;
     # 1 == refresh failed, lane HEALTHY. FAILED_ROLLED_BACK got there by being
     # restored; FAILED_BUILD_PROVENANCE got there by never being touched.
-    FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE) exit 1 ;;
+    # FAILED_CLOUD_MIGRATION: lane serving, onex-api stopped by a failed cloud
+    # migration one-shot.
+    FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE|FAILED_CLOUD_MIGRATION) exit 1 ;;
     # The lane is serving and the refresh landed; the census disagrees with the
     # manifest. The census's own code, so a caller can tell drift (30) from an
     # unreadable census (4, 5).

@@ -41,11 +41,11 @@ The lease
 The unit of leasing is the host, because the slot's project name and ports are
 fixed. The lease is a directory on the host (``mkdir`` is atomic on macOS and
 Linux) holding ``lease.json`` with the holder and an absolute expiry. An
-expired lease is broken; a live one held by someone else is refused. The ledger
-is read, never written: a live ``HOLD`` naming the host's surface, placed by
-another lane, makes the host busy. The HOLD and RELEASE rows themselves are
-the calling lane's to write through ``/omni:ledger-msg``; this file prints the
-text for them.
+expired lease is broken; a live one held by someone else is refused. Release
+runs under the same guard as the break. The ledger is read, never written: a
+live ``HOLD`` naming the host's surface, placed by another lane, makes the host
+busy. The HOLD and RELEASE rows themselves are the calling lane's to write
+through ``/omni:ledger-msg``; this file prints the text for them.
 The verify driver renews the lease before every phase inside the same remote
 command that starts it, and stops without teardown when the lease is no longer
 its own. Each phase is killed on the host when its budget ends.
@@ -82,6 +82,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -361,8 +362,24 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
+def is_this_host(ssh_target: str) -> bool:
+    """A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
+    user, _, addr = ssh_target.rpartition("@")
+    if user and user != pwd.getpwuid(os.getuid()).pw_name:
+        return False
+    try:
+        ip = socket.gethostbyname(addr)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind((ip, 0))
+    except OSError:
+        return False
+    return True
+
+
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host via ssh, or a local shell for this host; tests pass a fake."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -370,7 +387,13 @@ class Transport(Protocol):
 
 
 class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
         self._opts = [
             "-o",
             "BatchMode=yes",
@@ -378,21 +401,42 @@ class SshTransport:
             f"ConnectTimeout={connect_timeout}",
         ]
 
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
         try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
             return 124, out + f"\n[timeout after {timeout:.0f}s]"
         return proc.returncode, proc.stdout + proc.stderr
 
     def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
         return subprocess.run(
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
@@ -704,21 +748,27 @@ def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
     lease = f"$HOME/{host.lease_dir}"
+    # An expired holder can read its lease before a breaker replaces it, then
+    # remove the breaker's fresh lease. Guard the read and removal with the same
+    # directory the break holds, so release cannot erase a new holder (OMN-20085).
     guard = f"{lease}.break"
     cmd = (
         f"mkdir -p $(dirname {lease}); "
-        f"i=0; until mkdir {guard} 2>/dev/null; do "
-        'i=$((i + 1)); if [ "$i" -ge 20 ]; then '
-        "echo FOREIGN GUARD-BUSY; exit 0; fi; sleep 0.5; done; "
+        "GOTGUARD=0; i=0; while [ $i -lt 100 ]; do "
+        f"if mkdir {guard} 2>/dev/null; then GOTGUARD=1; break; fi; "
+        'i=$((i+1)); sleep 0.1; done; if [ "$GOTGUARD" = 1 ]; then '
         f"H=$(cat {lease}/lease.json 2>/dev/null); "
         f'case "$H" in *\'"holder": "{holder}"\'*) rm -rf {lease} && echo RELEASED;; '
-        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}"
+        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
+        "else echo GUARDBUSY; fi"
     )
     rc, out = transport.run(host, cmd, timeout=30)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
         return True, "no lease was present"
+    if "GUARDBUSY" in out:
+        return False, f"lease guard {guard} held past the wait; lease left to expire"
     return False, f"lease is not this holder's (rc={rc}): {out.strip()[:200]}"
 
 
