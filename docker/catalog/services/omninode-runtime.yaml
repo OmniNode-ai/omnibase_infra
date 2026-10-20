@@ -89,6 +89,12 @@ depends_on:
   - service: redpanda
     condition: service_healthy
 restart: unless-stopped
+ulimits:
+  # OMN-19513: the 1024 default is exhausted ~4 minutes after boot (one consumer
+  # group per projection topic plus a Postgres pool per dispatch).
+  nofile:
+    soft: 65535
+    hard: 65535
 resources:
   cpus: '1.0'
   memory: 1536M
