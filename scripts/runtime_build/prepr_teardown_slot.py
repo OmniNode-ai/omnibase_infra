@@ -77,10 +77,13 @@ def _load_policy() -> Any:
 policy = _load_policy()
 
 #: The dev lane's dependency servers, which a slot borrows. Read and written
-#: here only through the slot's own selectors.
-BROKER_CONTAINER = "omnibase-infra-redpanda"
-VALKEY_CONTAINER = "omnibase-infra-valkey"
-POSTGRES_CONTAINER = "omnibase-infra-postgres"
+#: here only through the slot's own selectors. Resolve by compose label
+#: (project + service), not by container name: a timed-out compose recreate
+#: leaves a hash-prefixed container name. Same pattern as compose_container()
+#: in scripts/smoke/smoke_delegation.sh.
+BROKER_SERVICE = "redpanda"
+VALKEY_SERVICE = "valkey"
+POSTGRES_SERVICE = "postgres"
 #: The dev lane's compose project, read as the containers positive control.
 DEV_PROJECT = "omnibase-infra"
 
@@ -210,18 +213,59 @@ class _Teardown:
         self.run = runner
         self.env = dict(base_env)
         self.errors: list[str] = []
+        self._servers: dict[str, str | None] = {}
         self.tenant_authentication: dict[str, Any] | None = None
 
     # -- helpers ----------------------------------------------------------
-    def _exec(self, container: str, names: tuple[str, ...], *cmd: str) -> list[str]:
+    def server(self, service: str) -> str | None:
+        if service not in self._servers:
+            names = self._lines(
+                self._checked(
+                    [
+                        "docker",
+                        "ps",
+                        "--filter",
+                        f"label=com.docker.compose.project={DEV_PROJECT}",
+                        "--filter",
+                        f"label=com.docker.compose.service={service}",
+                        "--filter",
+                        "status=running",
+                        "--format",
+                        "{{.Names}}",
+                    ],
+                    f"resolve {service} in compose project {DEV_PROJECT}",
+                )
+            )
+            self._servers[service] = None
+            if not names:
+                self.errors.append(
+                    f"no running {service} container in compose project {DEV_PROJECT}"
+                )
+            elif len(names) > 1:
+                self.errors.append(
+                    f"ambiguous running {service} containers in compose project "
+                    f"{DEV_PROJECT}: {', '.join(names)}; refusing to guess"
+                )
+            else:
+                self._servers[service] = names[0]
+        return self._servers[service]
+
+    def _exec(
+        self, service: str, names: tuple[str, ...], *cmd: str
+    ) -> list[str] | None:
+        container = self.server(service)
+        if container is None:
+            return None
         argv = ["docker", "exec"]
         for name in names:
             argv += ["-e", name]
         return argv + [container, *cmd]
 
     def _checked(
-        self, argv: list[str], what: str, env: dict[str, str] | None = None
+        self, argv: list[str] | None, what: str, env: dict[str, str] | None = None
     ) -> str:
+        if argv is None:
+            return ""
         result = self.run(argv, env if env is not None else self.env)
         if result.returncode != 0:
             self.errors.append(
@@ -286,7 +330,7 @@ class _Teardown:
 
     def _rpk_names(self, kind: str, column: str) -> list[str] | None:
         out = self._checked(
-            self._exec(BROKER_CONTAINER, RPK_ENV, "rpk", kind, "list"),
+            self._exec(BROKER_SERVICE, RPK_ENV, "rpk", kind, "list"),
             f"rpk {kind} list",
         )
         try:
@@ -305,7 +349,7 @@ class _Teardown:
         return self._scalar(
             self._checked(
                 self._exec(
-                    VALKEY_CONTAINER,
+                    VALKEY_SERVICE,
                     VALKEY_ENV,
                     "valkey-cli",
                     "-n",
@@ -323,12 +367,15 @@ class _Teardown:
                 "POSTGRES_USER is not set; the Postgres readback cannot run"
             )
             return -1
+        container = self.server(POSTGRES_SERVICE)
+        if container is None:
+            return -1
         return self._scalar(
             self._checked(
                 [
                     "docker",
                     "exec",
-                    POSTGRES_CONTAINER,
+                    container,
                     "psql",
                     "-U",
                     user,
@@ -387,17 +434,17 @@ class _Teardown:
                 return
         for chunk in _chunks(planned["groups"], DELETE_CHUNK):
             self._checked(
-                self._exec(BROKER_CONTAINER, RPK_ENV, "rpk", "group", "delete", *chunk),
+                self._exec(BROKER_SERVICE, RPK_ENV, "rpk", "group", "delete", *chunk),
                 "delete groups",
             )
         for chunk in _chunks(planned["topics"], DELETE_CHUNK):
             self._checked(
-                self._exec(BROKER_CONTAINER, RPK_ENV, "rpk", "topic", "delete", *chunk),
+                self._exec(BROKER_SERVICE, RPK_ENV, "rpk", "topic", "delete", *chunk),
                 "delete topics",
             )
         self._checked(
             self._exec(
-                VALKEY_CONTAINER,
+                VALKEY_SERVICE,
                 VALKEY_ENV,
                 "valkey-cli",
                 "-n",

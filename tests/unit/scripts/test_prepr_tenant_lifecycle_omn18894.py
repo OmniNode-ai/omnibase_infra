@@ -188,6 +188,12 @@ def test_teardown_adapter_preserves_resources_when_offboard_fails(
         argv: list[str], env: dict[str, str] | None
     ) -> subprocess.CompletedProcess[str]:
         commands.append(argv)
+        if argv[:2] == ["docker", "ps"]:
+            # the teardown resolves each dev-lane server by its compose labels
+            service = next(a for a in argv if "compose.service=" in a)
+            return subprocess.CompletedProcess(
+                argv, 0, f"omnibase-infra-{service.rsplit('=', 1)[1]}\n", ""
+            )
         is_revoke = "revoke" in argv
         if is_revoke:
             assert env and env["COMPOSE_PROJECT"] == slot_one_project()
