@@ -283,6 +283,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
+  - id: req-omn17427-runtime-nofile-soft-raise
+    statement: The runtime kernel raises its soft RLIMIT_NOFILE to the hard limit at start (capped at 1048576 when the hard limit is unlimited), so a container started without compose ulimits at 1024 soft boots without Errno 24; a refused raise is logged and never stops the boot.
+    acceptance:
+      - id: AC100
+        statement: 'AC100: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1260,3 +1265,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC53
+  - id: dod-omn-17427-ac100-nofile-soft-raise
+    description: Unit tests over a faked resource module plus one real subprocess that starts at 256 soft and ends at the hard limit, and the kernel ordering test. Does not claim a live dev-lane boot.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-nofile-deploy-check
+    description: Hosted-runner deploy check -- a real Python process started at 256 soft open files ends at its hard limit after raise_nofile_soft_limit. No container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q -k subprocess
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
