@@ -800,6 +800,20 @@ EOSQL
         fail 1 "${_dash_role} still lacks CREATE on ${_dash_db} after the grant."
     fi
 
+    # The intelligence corpus opens with CREATE EXTENSION pgcrypto (000_extensions),
+    # and the same trusted-extension rule applies: CREATE on the DATABASE. The
+    # live slot bring-up died there with "permission denied to create extension
+    # pgcrypto" against omniintelligence_prepr1 (2026-10-19, OMN-17427).
+    _intel_db="$(derive omniintelligence)"
+    _intel_role="$(derive role_omniintelligence)"
+    assert_in_fence "$_intel_db" "database"
+    assert_in_fence "$_intel_role" "role"
+    psql_admin -c "GRANT CREATE ON DATABASE \"${_intel_db}\" TO \"${_intel_role}\";"
+    _intel_create_ok="$(scalar "SELECT has_database_privilege('${_intel_role}', '${_intel_db}', 'CREATE')")"
+    if [ "$_intel_create_ok" != "t" ]; then
+        fail 1 "${_intel_role} still lacks CREATE on ${_intel_db} after the grant."
+    fi
+
     # --- the falsifier, run in-band -----------------------------------------
     # AC-4. This is not a post-hoc probe somebody may forget to run: the
     # provisioner refuses to report success until it has proven, from the
