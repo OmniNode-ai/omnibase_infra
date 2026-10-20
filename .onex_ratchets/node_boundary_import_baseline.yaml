@@ -391,7 +391,6 @@ edges:
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_build_loop.models.model_loop_state.ModelLoopState:'
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_bus_audit_compute.models.model_bus_audit_compute_result.ModelBusAuditComputeResult:'
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_checkpoint_compute.models.model_checkpoint_result.ModelCheckpointResult:'
-  - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_coderabbit_triage.handlers.handler_coderabbit_triage.ModelCoderabbitTriageResult:'
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_compliance_sweep.handlers.handler_compliance_sweep.ComplianceSweepResult:'
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_contract_sweep.handlers.handler_contract_sweep.ContractSweepResult:'
   - 'src/omnibase_infra/cli/skill_mapping.yaml -> omnimarket.nodes.node_coverage_sweep.handlers.handler_coverage_sweep.CoverageSweepResult:'

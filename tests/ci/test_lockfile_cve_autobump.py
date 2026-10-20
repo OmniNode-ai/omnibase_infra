@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -83,6 +84,7 @@ class ModelFakeRunner:
         same_tree: bool = False,
         upgrade: bool = True,
         remote: bool = False,
+        contract: bool = False,
         fail: tuple[str, ...] = (),
     ) -> None:
         self.calls: list[list[str]] = []
@@ -90,6 +92,7 @@ class ModelFakeRunner:
         self.same_tree = same_tree
         self.upgrade = upgrade
         self.remote = remote
+        self.contract = contract
         self.fail = fail
 
     def __call__(
@@ -126,6 +129,8 @@ class ModelFakeRunner:
                 if self.same_tree or args[-1] == "HEAD^{tree}"
                 else "old-tree"
             )
+        elif args[:3] == ["git", "cat-file", "-e"]:
+            code = 0 if self.contract else 128
         elif args[:2] == ["git", "ls-remote"]:
             out = "old-oid\trefs/heads/" + BRANCH if self.remote else ""
         elif args[:3] == ["gh", "pr", "create"]:
@@ -248,6 +253,84 @@ def test_refresh_never_duplicates(
             c[:3] == ["gh", "pr", "edit"] and "--body" in c and "priority:landing" in c
             for c in runner.calls
         )
+
+
+@pytest.mark.parametrize("contract", [False, True])
+def test_refresh_keeps_the_pr_evidence_contract(
+    cfg: bump.ModelAutobumpConfig, contract: bool
+) -> None:
+    """A refresh rebuilds the branch from the base; the PR's contract survives it.
+
+    repo-evidence / dod-verify reads contracts/<ticket>.yaml at the PR head. A
+    fix worker commits it to the bot branch; before this, the next scheduled
+    refresh force-pushed a tree without it and the PR went red again.
+    """
+    runner = ModelFakeRunner(open_pr=True, contract=contract)
+    assert bump.run_autobump(cfg, runner) == 0
+    path = "contracts/OMN-20174.yaml"
+    carry = ["git", "checkout", f"origin/{BRANCH}", "--", path]
+    adds = [c for c in runner.calls if c[:2] == ["git", "add"]]
+    commit = next(c for c in runner.calls if "commit" in c)
+    if contract:
+        assert carry in runner.calls
+        assert adds == [["git", "add", "uv.lock", RUNNER_LOCK, path]]
+        assert commit[-1] == path
+    else:
+        assert carry not in runner.calls
+        assert adds == [["git", "add", "uv.lock", RUNNER_LOCK]]
+    fetch = [
+        "git",
+        "fetch",
+        "origin",
+        f"+refs/heads/{BRANCH}:refs/remotes/origin/{BRANCH}",
+    ]
+    assert runner.calls.index(fetch) < runner.calls.index(commit)
+
+
+class ModelReplayRunner(ModelFakeRunner):
+    """Answers git cat-file with the exit code recorded against a real head."""
+
+    def __init__(self, cat_file_rc: int) -> None:
+        super().__init__(open_pr=True)
+        self.cat_file_rc = cat_file_rc
+
+    def __call__(
+        self, cmd: Sequence[str], cwd: Path | None
+    ) -> subprocess.CompletedProcess[str]:
+        if list(cmd[:3]) == ["git", "cat-file", "-e"]:
+            self.calls.append(list(cmd))
+            return subprocess.CompletedProcess(list(cmd), self.cat_file_rc, "", "")
+        return super().__call__(cmd, cwd)
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/lockfile_cve_autobump_contract_refresh_omn17427.json"
+)
+@pytest.mark.parametrize("head", ["worker_head", "refresh_head"])
+def test_recorded_heads_of_pr_5162_decide_the_carry(
+    recorded_response: dict[str, Any], cfg: bump.ModelAutobumpConfig, head: str
+) -> None:
+    """Replay the real bot branch: the worker's contract head and the refresh that wiped it."""
+    response = recorded_response["response"]
+    assert (
+        hashlib.sha256(json.dumps(response, sort_keys=True).encode()).hexdigest()
+        == recorded_response["_provenance"]["source_sha256"]
+    )
+    assert response["branch"] == BRANCH
+    path = response["contract_path"]
+    recorded = response[head]
+    runner = ModelReplayRunner(recorded["cat_file_rc"])
+    assert bump.run_autobump(cfg, runner) == 0
+    assert ["git", "cat-file", "-e", f"origin/{BRANCH}:{path}"] in runner.calls
+    carried = ["git", "checkout", f"origin/{BRANCH}", "--", path] in runner.calls
+    assert carried is (recorded["cat_file_rc"] == 0)
+
+
+def test_new_pr_reads_no_branch_contract(cfg: bump.ModelAutobumpConfig) -> None:
+    runner = ModelFakeRunner(contract=True)
+    assert bump.run_autobump(cfg, runner) == 0
+    assert not any(c[:2] == ["git", "cat-file"] for c in runner.calls)
+    assert ["git", "add", "uv.lock", RUNNER_LOCK] in runner.calls
 
 
 @pytest.mark.parametrize(
