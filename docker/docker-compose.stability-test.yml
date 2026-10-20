@@ -128,6 +128,10 @@ services:
     ports: !override
       - "${STABILITY_TEST_POSTGRES_EXTERNAL_PORT:-15436}:5432"
   redpanda:
+    # OMN-17427: this lane declares its own broker image. The dev lane moved
+    # to v24.3.18, and a broker upgrade is one-way on its data volume, so a
+    # dev pin move must never reach this broker by inheritance.
+    image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-stability-test-redpanda
     command: !override
       - redpanda
