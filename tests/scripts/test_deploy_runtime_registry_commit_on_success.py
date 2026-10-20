@@ -375,6 +375,12 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             "COLD_START_KAFKA_TIMEOUT_SECONDS=180",
             'FORCE="${FAKE_FORCE:-false}"',
             'RESTART="${FAKE_RESTART:-false}"',
+            # OMN-18496: main() ends with report_cloud_migration_gate, which
+            # reads the cloud one-shot readiness the migration preflight sets.
+            "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
+            'DEV_LANE_CLOUD_MIGRATION_FAILED_SERVICE=""',
+            "DEV_LANE_CLOUD_DB_SERVICES=(onex-api)",
+            "DEPLOY_EXIT_CLOUD_MIGRATION_DEGRADED=3",
             "DEPLOY_INVOCATION_ARGS=()",
         ]
     )
@@ -396,6 +402,7 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             # deploy dir, so it must be present in the harness too.
             _extract_function("containers_bound_to_deploy_dir"),
             _extract_function("cleanup_on_exit"),
+            _extract_function("report_cloud_migration_gate"),
             _extract_function("main"),
             "trap 'cleanup_on_exit' EXIT",
             'main "$@"',
