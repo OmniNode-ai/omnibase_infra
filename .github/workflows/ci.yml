@@ -3745,7 +3745,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@fbc9b1ad39f66341edbcb07452f03bdb70b3dfb9
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@02004601215778575a088bdeabfa2069f6952df6
     with:
       vocabulary_ref: fbc9b1ad39f66341edbcb07452f03bdb70b3dfb9
       context_name: merge-hold-gate / evaluate
