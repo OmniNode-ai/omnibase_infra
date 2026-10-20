@@ -80,9 +80,11 @@ def _plant(home: Path, holder: str, until: dt.datetime) -> Path:
     return lease
 
 
-def _race(home: Path, names: list[str]) -> list[tuple[str, bool]]:
+def _race(
+    home: Path, names: list[str], release_holder: str | None = None
+) -> list[tuple[str, bool]]:
     tp = ShellTransport(home)
-    gate = threading.Barrier(len(names))
+    gate = threading.Barrier(len(names) + (release_holder is not None))
     won: list[tuple[str, bool]] = []
     lock = threading.Lock()
 
@@ -95,10 +97,18 @@ def _race(home: Path, names: list[str]) -> list[tuple[str, bool]]:
             won.append((name, ok))
 
     threads = [threading.Thread(target=acquire, args=(n,)) for n in names]
+    if release_holder is not None:
+
+        def release() -> None:
+            gate.wait()
+            pool.release_lease(CFG, tp, SLOT, release_holder)
+
+        threads.append(threading.Thread(target=release))
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=120)
+        assert not t.is_alive()
     return won
 
 
@@ -175,3 +185,57 @@ def test_the_break_re_reads_the_lease_and_leaves_a_fresh_one_alone(
         json.loads((lease / "lease.json").read_text(encoding="utf-8"))["holder"]
         == "peer"
     )
+
+
+def test_release_waits_for_the_guard_and_leaves_the_lease_while_it_is_held(
+    tmp_path: Path,
+) -> None:
+    lease = _plant(tmp_path, "me", NOW + dt.timedelta(hours=1))
+    guard = tmp_path / f"{SLOT.lease_dir}.break"
+    guard.mkdir()
+    ok, why = pool.release_lease(CFG, ShellTransport(tmp_path), SLOT, "me")
+    assert not ok and "guard" in why, why
+    assert (
+        json.loads((lease / "lease.json").read_text(encoding="utf-8"))["holder"] == "me"
+    )
+    assert guard.is_dir()
+
+
+def test_release_removes_its_own_lease_and_the_guard(tmp_path: Path) -> None:
+    lease = _plant(tmp_path, "me", NOW + dt.timedelta(hours=1))
+    assert pool.release_lease(CFG, ShellTransport(tmp_path), SLOT, "me") == (
+        True,
+        "released",
+    )
+    assert not lease.exists()
+    assert not (tmp_path / f"{SLOT.lease_dir}.break").exists()
+
+
+def test_release_leaves_a_peers_lease_and_frees_the_guard(tmp_path: Path) -> None:
+    lease = _plant(tmp_path, "peer", NOW + dt.timedelta(hours=1))
+    ok, why = pool.release_lease(CFG, ShellTransport(tmp_path), SLOT, "me")
+    assert not ok, why
+    assert (
+        json.loads((lease / "lease.json").read_text(encoding="utf-8"))["holder"]
+        == "peer"
+    )
+    assert not (tmp_path / f"{SLOT.lease_dir}.break").exists()
+
+
+def test_an_expired_holder_releasing_during_a_break_race_leaves_one_holder(
+    tmp_path: Path,
+) -> None:
+    names = [f"lane-{i}" for i in range(6)]
+    for n in range(10):
+        home = tmp_path / f"release-{n}"
+        _plant(home, "gone-lane", NOW - dt.timedelta(minutes=1))
+        won = _race(home, names, release_holder="gone-lane")
+        winners = {name for name, ok in won if ok}
+        assert len(won) == len(names)
+        assert len(winners) <= 1, f"round {n}: {winners} all hold the slot"
+        if winners:
+            on_disk = json.loads(
+                (home / SLOT.lease_dir / "lease.json").read_text(encoding="utf-8")
+            )
+            assert on_disk["holder"] in winners
+        assert not (home / f"{SLOT.lease_dir}.break").exists()
