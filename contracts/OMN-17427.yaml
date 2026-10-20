@@ -350,6 +350,13 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-dev-broker-image
+    statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: the dev broker, partition-cap, SCRAM and SASL services and all three catalog declarations use redpandadata/redpanda:v24.3.18 -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"'
+      - id: AC143
+        statement: 'AC143: every other compose file that starts a dev-named broker or rpk service declares its own image or independent template -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1618,3 +1625,31 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
+  - id: dod-omn-17427-ac142-dev-broker-image
+    description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac143-other-lanes-pinned
+    description: Scans the other compose files for broker and rpk services inheriting the dev image. It fails against the merge base, where those lanes inherit the base compose image.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC143
+  - id: dod-omn-17427-dev-broker-image-deploy-check
+    description: Hosted-runner deploy check reads the compose and catalog declarations and refuses a dev image other than v24.3.18 or an unpinned borrower lane. It requires no Docker daemon, private lab overlay or credentials and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place or no_other_compose_file_inherits"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+      - AC143
