@@ -60,7 +60,8 @@ _EXPECTED_SKILLS = frozenset(
         # OMN-14151: auto_merge's legacy node_auto_merge_effect backing node is
         # deregistered; the active path is the merge-queue governor.
         "build_loop",
-        "coderabbit_triage",
+        # OMN-17292: omnimarket #4070 removed node_coderabbit_triage; its
+        # skill_mapping.yaml entry is removed with the pin advance.
         "compliance_sweep",
         "coverage_sweep",
         "create_ticket",
