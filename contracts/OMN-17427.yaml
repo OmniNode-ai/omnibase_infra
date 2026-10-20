@@ -298,6 +298,11 @@ requirements:
     acceptance:
       - id: AC104
         statement: 'AC104: Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov'
+  - id: req-omn17427-prepr-tenant-state-writable
+    statement: The pre-PR slot's tenant-state directory, bind-mounted into the slot gateway, admits the gateway's container user, which is neither the operator nor in its group, so the tenant mint can write its credential.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: prepr_verify_lane.sh creates the tenant-state directory with write and search for others, no listing for others, the sticky bit set, and the slot env directory still 0700 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q'
   - id: req-omn17427-lane-lock-contended-outcome
     statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
     acceptance:
@@ -325,6 +330,11 @@ requirements:
         statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-issuer-rpk-container
+    statement: The lab principal issuer's apply-grants and audit-grants can reach the broker through the running issuer container's own rpk, so the grants derived from the current grant file can be applied and read back without a superuser identity in the caller's environment and without setting a password.
+    acceptance:
+      - id: AC64
+        statement: 'AC64: with --rpk-container NAME, apply-grants and audit-grants run every rpk call as docker exec NAME rpk, read users with rpk security user list and never the admin API, need no RPK_USER, RPK_PASS or RPK_ADMIN_HOSTS, never set a password, and serve and check refuse the flag -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q'
   - id: req-omn17427-r1-probe-caller-timeout
     statement: The daily R1 front-door probe passes --timeout to onex delegate so the CLI caps its consumer rebind wait and grades an unbound lane itself, and a probe that still kills the CLI keeps the CLI's partial output and names its last line.
     acceptance:
@@ -340,7 +350,20 @@ requirements:
     acceptance:
       - id: AC104
         statement: 'AC104: a running e2fc03e50cd0_omnibase-infra-redpanda in the lane project is renamed to omnibase-infra-redpanda when that name is free, before the compose up argv runs; an occupied real name, a plain name or a failed listing renames nothing; no docker rm, stop or restart is issued -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"'
+  - id: req-omn17427-developer-hook-edge-grants
+    statement: A developer machine's lab dev-lane principal may publish its Claude Code hook events on the 29 onex.evt.omniclaude.* hook topics the operator's hook principal holds, produce only, with no read and no command-topic grant, so the claude_hook_events projection can receive every person's sessions.
+    acceptance:
+      - id: AC140
+        statement: 'AC140: the derived developer-principal grants carry WRITE and DESCRIBE on exactly the 29 onex.evt.omniclaude.* hook topics, onex.evt.omniclaude.hook-event.v1 among them, no READ on any of them and no omniintelligence topic, and the committed derived file is the derivation node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "hook_edge or writable or committed_derived"'
+  - id: req-omn17427-dependabot-sibling-pins
+    statement: Dependabot opens no github-actions update for an OmniNode-ai sibling workflow or action pin, which moves only through .github/sibling-pins.yaml or a deliberate pin PR; third-party actions keep their weekly updates.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
     command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
@@ -474,6 +497,9 @@ evidence_requirements:
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
   - kind: tests
+    description: apply-grants and audit-grants reach the broker through the issuer container's own rpk with no superuser identity in the caller's environment.
+    command: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+  - kind: tests
     description: Stubbed-subprocess tests check the R1 probe argv carries --timeout, its kill timeout outlasts the CLI bound from the CLI's own wait functions, and a timeout keeps the CLI's partial output; they do not claim a scheduled run.
     command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
   - kind: tests
@@ -482,11 +508,32 @@ evidence_requirements:
   - kind: tests
     description: The deploy agent renames a running recreate-temp-named container into its free real name before compose up, and leaves occupied and plain names alone.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"
+  - kind: tests
+    description: Developer principals derive produce-only grants on the hook edge's evt topics and nothing on its command topics.
+    command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac141-prepr-tenant-state-writable
+    description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-prepr-tenant-state-deploy
+    description: Hosted-runner deploy check -- the tenant-state mode test; it does not claim a live mint on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
   - id: dod-omn-17427-ac61-docker-proof-hosts
     description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
     source: manual
@@ -1476,6 +1523,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC63
+  - id: dod-omn-17427-ac64-issuer-rpk-container
+    description: Unit tests drive ContainerBroker and the apply-grants and audit-grants commands with a recording fake runner; no broker, container, credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
+  - id: dod-omn17427-ac64-issuer-rpk-container-deploy
+    description: Hosted-runner deploy check -- the issuer script's apply-grants and audit-grants accept --rpk-container and run every rpk call inside the named container, with the superuser environment unset. Reads repository files and a fake runner; does not claim a live broker change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q -k "needs_no_superuser_environment or reports_exact_missing_and_extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
   - id: dod-omn-17427-ac100-r1-probe-caller-timeout
     description: The R1 probe passes --timeout, its kill timeout outlasts the CLI wall-time bound for that timeout, and a killed CLI's partial output is kept and its last line named.
     source: manual
@@ -1530,3 +1595,30 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC104
+  - id: dod-omn-17427-ac140-developer-hook-edge-grants
+    description: 'Developer principals (deploy/lab/developer-principal-bindings.yaml) gain produce bindings on the 29 onex.evt.omniclaude.* hook topics, and the derived grants file is regenerated by node_broker_grant_derive_compute. Applying them to the live dev broker is a separate act (lab_principal_issuer.py apply-grants, or the next issuance); it was not run by this change.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC140
+  - id: dod-omn-17427-ac141-dependabot-sibling-pins
+    description: Reads the committed .github/dependabot.yml and workflow files; checks the OmniNode-ai/* ignore and that actions/setup-node still updates. It does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-dependabot-deploy-check
+    description: Hosted-runner deploy check -- the committed dependabot.yml ignore and the sibling pin tests; it does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141

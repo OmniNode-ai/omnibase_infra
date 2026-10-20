@@ -418,6 +418,11 @@ log "staging a slot-private snapshot into ${STAGING_ROOT} ..."
 rm -rf "${STAGING_ROOT}"
 mkdir -p "${STAGING_ROOT}" "${SLOT_ENV_DIR}" "${TENANT_STATE_DIR}"
 chmod 700 "${SLOT_ENV_DIR}"
+# OMN-19064: the slot gateway runs as a container user that is neither this
+# operator nor in its group, and writes its 0600 credential.env into this
+# bind mount. Others get write+search but no listing, and the sticky bit keeps
+# a credential from being removed by anyone but its writer or this operator.
+chmod 1733 "${TENANT_STATE_DIR}"
 
 # Each tree is extracted from the OBJECT STORE at a resolved sha, never copied
 # out of a working directory.

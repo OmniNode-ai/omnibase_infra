@@ -237,13 +237,55 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         ("read", "describe"),
     ),
 )
+# The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
+# its own hook events to the dev lane, so the lab projections (claude_hook_events among
+# them) see every person's sessions and not only the operator's. These are the
+# `onex.evt.omniclaude.*` observability topics the operator's own hook principal holds,
+# produce only. No READ, and no `onex.cmd.*` hook topic: the command topics carry full
+# prompts and content and stay a separate, consented grant.
+HOOK_EDGE_TOPICS: tuple[str, ...] = (
+    "onex.evt.omniclaude.agent-actions.v1",
+    "onex.evt.omniclaude.agent-status.v1",
+    "onex.evt.omniclaude.correlation-trace.v1",
+    "onex.evt.omniclaude.delegation-shadow-comparison.v1",
+    "onex.evt.omniclaude.dod-guard-fired.v1",
+    "onex.evt.omniclaude.friction-observed.v1",
+    "onex.evt.omniclaude.hook-event.v1",
+    "onex.evt.omniclaude.hook-health-error.v1",
+    "onex.evt.omniclaude.intent-commit-bound.v1",
+    "onex.evt.omniclaude.llm-routing-decision.v1",
+    "onex.evt.omniclaude.llm-routing-fallback.v1",
+    "onex.evt.omniclaude.pattern-enforcement.v1",
+    "onex.evt.omniclaude.phase-metrics.v1",
+    "onex.evt.omniclaude.prompt-submitted.v1",
+    "onex.evt.omniclaude.pr-validation-rollup.v1",
+    "onex.evt.omniclaude.routing-decision.v1",
+    "onex.evt.omniclaude.routing-feedback.v1",
+    "onex.evt.omniclaude.session-ended.v1",
+    "onex.evt.omniclaude.session-outcome.v1",
+    "onex.evt.omniclaude.session-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
+    "onex.evt.omniclaude.skill-invoked.v1",
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.static-context-edit-detected.v1",
+    "onex.evt.omniclaude.team-evidence-written.v1",
+    "onex.evt.omniclaude.team-task-assigned.v1",
+    "onex.evt.omniclaude.team-task-completed.v1",
+    "onex.evt.omniclaude.team-task-progress.v1",
+    "onex.evt.omniclaude.tool-executed.v1",
+)
+HOOK_EDGE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tuple(
+    ("topic", topic, "literal", ("write", "describe")) for topic in HOOK_EDGE_TOPICS
+)
 BROKER = "dev"
 
 
 def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
-        for resource, name, pattern, operations in TYPED_GRANTS + DECLARED_GRANTS
+        for resource, name, pattern, operations in (
+            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
+        )
         for operation in operations
     }
 
@@ -315,7 +357,9 @@ def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
     } - {
         (resource_type, resource, operation)
         for _, resource_type, resource, _, operation in rows
-        if "delegate-skill" in resource or "projection-delegation" in resource
+        if "delegate-skill" in resource
+        or "projection-delegation" in resource
+        or resource in HOOK_EDGE_TOPICS
     }
     assert morning == {
         ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "WRITE"),
@@ -477,3 +521,24 @@ def test_the_delegation_terminal_readback_grants_read_one_topic_and_write_none()
         ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "READ"),
         ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "DESCRIBE"),
     }
+
+
+def test_the_hook_edge_grants_produce_metadata_only() -> None:
+    """A developer machine may publish its hook events and read none of them back."""
+    rows = derive(shipped_bindings())
+    hook_edge = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource_type == "TOPIC" and ".omniclaude." in resource
+    }
+    assert hook_edge == {
+        ("TOPIC", topic, operation)
+        for topic in HOOK_EDGE_TOPICS
+        for operation in ("WRITE", "DESCRIBE")
+    }
+    assert "onex.evt.omniclaude.hook-event.v1" in HOOK_EDGE_TOPICS
+    assert not any(
+        "omniintelligence" in resource
+        for _, resource_type, resource, _, _ in rows
+        if resource_type == "TOPIC"
+    )
