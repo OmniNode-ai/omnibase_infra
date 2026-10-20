@@ -336,6 +336,34 @@ def run_autobump(cfg: ModelAutobumpConfig, runner: Runner = default_runner) -> i
             return 0
         if diff.returncode != 1:
             raise ModelCommandError(f"git diff failed: {diff.stderr}")
+        prs = _open_prs(cfg, runner, branch)
+        if prs:
+            _execute(
+                runner,
+                cfg,
+                [
+                    "git",
+                    "fetch",
+                    "origin",
+                    f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+                ],
+            )
+            # repo-evidence / dod-verify reads contracts/<ticket>.yaml at the PR
+            # head. The refresh rebuilds the branch from the base, so a contract
+            # committed to the open PR is carried forward instead of being
+            # force-pushed away on every scheduled run.
+            contract = f"contracts/{cfg.ticket}.yaml"
+            if not (cfg.repo_root / contract).exists() and (
+                runner(
+                    ["git", "cat-file", "-e", f"origin/{branch}:{contract}"],
+                    cfg.repo_root,
+                ).returncode
+                == 0
+            ):
+                _execute(
+                    runner, cfg, ["git", "checkout", f"origin/{branch}", "--", contract]
+                )
+                paths.append(contract)
         _execute(runner, cfg, ["git", "add", *paths])
         _execute(
             runner,
@@ -354,20 +382,9 @@ def run_autobump(cfg: ModelAutobumpConfig, runner: Runner = default_runner) -> i
                 *paths,
             ],
         )
-        prs = _open_prs(cfg, runner, branch)
         body = _body(cfg, plan)
         if prs:
             pr = prs[0]
-            _execute(
-                runner,
-                cfg,
-                [
-                    "git",
-                    "fetch",
-                    "origin",
-                    f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
-                ],
-            )
             new_tree = _execute(
                 runner, cfg, ["git", "rev-parse", "HEAD^{tree}"]
             ).stdout.strip()
