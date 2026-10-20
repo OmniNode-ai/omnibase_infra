@@ -3,9 +3,9 @@ schema_version: 1.0.0
 ticket_id: OMN-20388
 title: 'Retrospective cost estimator v1: a prospect uploads their prompt history and sees which model each prompt should have
   gone to and what it would have saved'
-summary: DEV LANE HALF. The .201 compose dev lane's onex-api receives ESTIMATOR_FERNET_KEY from the operator env file (unset
-  leaves only the estimator routes at 503), and render_dev_lane_tenant_path_env.sh provisions a lane-local Fernet key, so
-  the lane's estimator encrypts uploads, prompts and leads at rest.
+summary: DEV LANE HALF. The compose dev lane's onex-api receives ESTIMATOR_FERNET_KEY from the operator env file (unset leaves
+  only the estimator routes at 503), and render_dev_lane_tenant_path_env.sh provisions a lane-local Fernet key, so the lane's
+  estimator encrypts uploads, prompts and leads at rest.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -29,6 +29,17 @@ dod_evidence:
   checks:
   - check_type: test_passes
     check_value: uv run pytest tests/ci/test_dev_lane_estimator_key_omn20388.py -q -o addopts=''
+    cwd: ${OMNI_HOME}/omnibase_infra
+  binds_ac:
+  - AC6
+- id: dod-omn20388-lane-deploy-probe
+  description: 'Deploy probe: the dev-lane compose at this commit hands onex-api ESTIMATOR_FERNET_KEY from the operator env
+    file (AC6).'
+  source: manual
+  checks:
+  - check_type: command
+    check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse
+      HEAD)" --jq .content | base64 -d | grep -qF ''ESTIMATOR_FERNET_KEY: ${ESTIMATOR_FERNET_KEY:-}'''
     cwd: ${OMNI_HOME}/omnibase_infra
   binds_ac:
   - AC6
