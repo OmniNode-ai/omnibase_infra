@@ -1483,11 +1483,11 @@ dod_evidence:
     binds_ac:
       - AC141
   - id: dod-omn-17427-ac141-nofile-deploy-check
-    description: Hosted-runner deploy check -- a real Python process started at 256 soft open files ends at its hard limit after raise_nofile_soft_limit. No container, lab host or credential is used.
+    description: Hosted-runner deploy check -- the real kernel main and asyncio event loop start in a subprocess at 256 soft open files; a replacement broker-free bootstrap reads the raised limit and opens 512 files concurrently. The hard limit and parent process limits stay unchanged. No container, lab host or credential is used.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q -k subprocess
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_service_kernel_nofile_boot_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
