@@ -273,11 +273,21 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
+  - id: req-omn17427-docker-proof-hosts
+    statement: Docker proof profiles exclude the host retained only for script work, while selectors for other hosts and script proofs stay unchanged.
+    acceptance:
+      - id: AC61
+        statement: 'AC61: Docker selectors exclude the script-only host, the runtime profile advances its version and both script-only selectors retain their three hosts -- falsifier: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"'
   - id: req-omn17427-slot-intelligence-extension
     statement: The pre-PR slot provisioner grants the slot's intelligence principal CREATE on the slot's own intelligence database and reads it back, so the intelligence corpus can create its trusted extensions on a fresh slot database.
     acceptance:
       - id: AC96
         statement: 'AC96: provision_db_slot.sh grants role_omniintelligence_<slot> CREATE on omniintelligence_<slot> and reads it back with has_database_privilege, and the intelligence corpus is shown to issue CREATE EXTENSION -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions'
+  - id: req-omn17427-dangling-hours-floor
+    statement: The disk-GC planner removes a dangling image that no container references once it is older than dangling_min_age_hours (6 in the committed keep-list), instead of holding every dangling image for min_age_days; tagged images keep the day-scale gate (OMN-20210, h202 root disk).
+    acceptance:
+      - id: AC53
+        statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -410,6 +420,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac61-docker-proof-hosts
+    description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn-17427-ac61-profile-deploy-check
+    description: Hosted-runner check of the committed proof selectors and profile version; repository data only, with no runtime deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
   - id: dod-omn-17427-ac97-slot-runtime-connect
     description: The provisioner test asserts the slot runtime principal CONNECT grant and its readback on the slot omnidash database; it fails at the merge base and passes after the change. Reads repository files only.
     source: manual
@@ -1237,3 +1265,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC96
+  - id: dod-omn-17427-ac48-dangling-hours-floor
+    description: Dangling images older than the 6 h floor are planned for removal, younger or in-use ones are kept, and tagged images keep the min_age_days gate. Pure planner unit tests over synthetic docker inventory; no docker daemon or lab host is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-dangling-hours-deploy-check
+    description: Hosted-runner deploy check exercises the committed keep-list's 6 h dangling floor and the planner's removal of a 12 h dangling image. Synthetic inventory only; no Docker daemon, containers, credentials or lab service is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q -k "committed_keep_list or dangling_image_older"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
