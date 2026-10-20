@@ -305,6 +305,11 @@ requirements:
         statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-issuer-rpk-container
+    statement: The lab principal issuer's apply-grants and audit-grants can reach the broker through the running issuer container's own rpk, so the grants derived from the current grant file can be applied and read back without a superuser identity in the caller's environment and without setting a password.
+    acceptance:
+      - id: AC64
+        statement: 'AC64: with --rpk-container NAME, apply-grants and audit-grants run every rpk call as docker exec NAME rpk, read users with rpk security user list and never the admin API, need no RPK_USER, RPK_PASS or RPK_ADMIN_HOSTS, never set a password, and serve and check refuse the flag -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q'
   - id: req-omn17427-r1-probe-caller-timeout
     statement: The daily R1 front-door probe passes --timeout to onex delegate so the CLI caps its consumer rebind wait and grades an unbound lane itself, and a probe that still kills the CLI keeps the CLI's partial output and names its last line.
     acceptance:
@@ -466,6 +471,9 @@ evidence_requirements:
   - kind: tests
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
+  - kind: tests
+    description: apply-grants and audit-grants reach the broker through the issuer container's own rpk with no superuser identity in the caller's environment.
+    command: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
   - kind: tests
     description: Stubbed-subprocess tests check the R1 probe argv carries --timeout, its kill timeout outlasts the CLI bound from the CLI's own wait functions, and a timeout keeps the CLI's partial output; they do not claim a scheduled run.
     command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
@@ -1436,6 +1444,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC63
+  - id: dod-omn-17427-ac64-issuer-rpk-container
+    description: Unit tests drive ContainerBroker and the apply-grants and audit-grants commands with a recording fake runner; no broker, container, credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
+  - id: dod-omn17427-ac64-issuer-rpk-container-deploy
+    description: Hosted-runner deploy check -- the issuer script's apply-grants and audit-grants accept --rpk-container and run every rpk call inside the named container, with the superuser environment unset. Reads repository files and a fake runner; does not claim a live broker change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q -k "needs_no_superuser_environment or reports_exact_missing_and_extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
   - id: dod-omn-17427-ac100-r1-probe-caller-timeout
     description: The R1 probe passes --timeout, its kill timeout outlasts the CLI wall-time bound for that timeout, and a killed CLI's partial output is kept and its last line named.
     source: manual
