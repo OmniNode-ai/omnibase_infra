@@ -97,6 +97,8 @@ class ProtocolDelegationDispatchPort(Protocol):
         # carries it inline on the command (OMN-17427) and refuses a spec that
         # points at the caller's workspace, which the lane cannot read.
         named_tests: BaseModel | None = None,
+        trace_id: UUID | None = None,
+        queue_wait_ms: int | None = None,
     ) -> dict[str, object]: ...
 
 

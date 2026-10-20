@@ -8,3 +8,14 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # OMN-17427 / OMN-20331: every OmniNode-ai sibling workflow/action pin is
+    # declared in .github/sibling-pins.yaml (or pinned deliberately) and moves
+    # only in a PR passing the gates that read that sibling at the new sha.
+    # Dependabot PRs cannot pass: GitHub withholds repository Actions secrets
+    # from Dependabot-triggered runs, so every overlay-token job fails at token
+    # minting ("The 'client-id' (or deprecated 'app-id') input must be set to
+    # a non-empty string").
+    # omnibase_infra#5180, #5181, #5182 and #5183 (2026-10-20) were such PRs.
+    # Third-party actions (actions/*, etc.) keep their weekly updates.
+    ignore:
+      - dependency-name: "OmniNode-ai/*"

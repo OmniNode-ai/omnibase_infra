@@ -300,6 +300,8 @@ class RuntimeDelegationDispatchPort:
         attribution: Mapping[str, str] | None = None,
         model: str | None = None,
         named_tests: BaseModel | None = None,
+        trace_id: UUID | None = None,
+        queue_wait_ms: int | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -411,6 +413,7 @@ class RuntimeDelegationDispatchPort:
             "source_session_id": source_session_id,
             "source_file_path": source_file_path,
             "correlation_id": str(correlation_id),
+            "trace_id": None if trace_id is None else str(trace_id),
             "max_tokens": max_tokens,
             "emitted_at": datetime.now(UTC).isoformat(),
             "output_schema_key": output_schema_key,
@@ -503,11 +506,16 @@ class RuntimeDelegationDispatchPort:
                 command,
                 terminal_observer=observe_terminal,
             )
-        return _normalize_result_payload(
+        normalized = _normalize_result_payload(
             status=result.status,
             payload=result.payload,
             error_message=result.error_message,
         )
+        # Queue wait was measured by the delegate-skill caller before pickup.
+        # It belongs to that caller's terminal, not ModelDelegationRequest.
+        if queue_wait_ms is not None:
+            normalized["queue_wait_ms"] = max(0, queue_wait_ms)
+        return normalized
 
 
 def _named_tests_wire(named_tests: BaseModel) -> dict[str, object]:
