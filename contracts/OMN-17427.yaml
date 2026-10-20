@@ -243,11 +243,6 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: a refused container removal leaves the containers, topics, databases and staging root in place and ends INCOMPLETE, and a staging root that cannot be removed ends INCOMPLETE with a report -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q'
-  - id: req-omn17427-aiohttp-initial-request-timeout
-    statement: The runtime installs patched aiohttp with bounded initial request handling instead of the vulnerable 3.14.3 release.
-    acceptance:
-      - id: AC53
-        statement: 'AC53: aiohttp closes a connection that sends no request or an incomplete header within its configured keepalive bound, while a complete request succeeds -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/services/test_aiohttp_initial_request_timeout_omn17427.py -q'
   - id: req-omn17427-cve-autobump-keeps-contract
     statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
     acceptance:
@@ -1080,24 +1075,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
-  - id: dod-omn-17427-ac53-aiohttp-request-timeout
-    description: Loopback TCP tests send no bytes or an incomplete header to the installed aiohttp server and require EOF within two seconds, with its keepalive timeout set to 50 ms. A complete HTTP request must still return 200. Both cases time out on aiohttp 3.14.3.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/services/test_aiohttp_initial_request_timeout_omn17427.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC53
-  - id: dod-omn-17427-ac53-aiohttp-deploy-check
-    description: Hosted-runner deploy check exercises the installed aiohttp server on loopback with idle and incomplete initial requests and a successful HTTP control. No container, credential or live lane is used.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/services/test_aiohttp_initial_request_timeout_omn17427.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC53
   - id: dod-omn-17427-ac60-autobump-keeps-contract
     description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
     source: manual

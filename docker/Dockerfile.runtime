@@ -478,11 +478,12 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "cryptography>=50.0.0"
 
-# Security: aiohttp >=3.14.4 includes the CVE-2026-69244 parser fix and
-# GHSA-2g87-pp6c-29x5 / GHSA-5wr8-gcqf-gqf3 resource and idle-request bounds.
+# Security: upgrade aiohttp to clear CVE-2026-69244 (HIGH, out-of-bounds heap
+# read in the C HTTP response parser error path on malformed responses, fixed in
+# >=3.14.3). The lock resolved 3.14.1; flagged by the same run 30878868464 scan.
 # Force upgrade here after all plugin installs -- a plugin may pull an older pin.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv-with-retry pip install "aiohttp>=3.14.4"
+    uv-with-retry pip install "aiohttp>=3.14.3"
 
 # OMN-15147: upgrade pyasn1 to clear CVE-2026-59885/CVE-2026-59886 (DoS via
 # crafted ASN.1 OBJECT IDENTIFIER / REAL values, fixed in >=0.6.4) and

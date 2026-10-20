@@ -2422,7 +2422,7 @@ dev = [
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=0.3.4,<2.0.0" },
     { name = "aiofiles", specifier = ">=23.2.1,<26.0.0" },
-    { name = "aiohttp", specifier = ">=3.14.4,<4.0.0" },
+    { name = "aiohttp", specifier = ">=3.14.3,<4.0.0" },
     { name = "aiokafka", extras = ["snappy"], specifier = ">=0.11.0,<0.15.0" },
     { name = "asyncpg", specifier = ">=0.29.0,<0.33.0" },
     { name = "aws-msk-iam-sasl-signer-python", specifier = ">=1.0.2,<2.0.0" },
