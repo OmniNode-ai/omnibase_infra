@@ -295,6 +295,11 @@ requirements:
         statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-prepr-pool-local-transport
+    statement: The pre-PR pool driver reaches a pool member on the machine it runs on with a local shell instead of loopback ssh, so a lane on a lab host reads and leases that host's own pre-PR slots without its key being accepted by its own sshd (OMN-20085).
+    acceptance:
+      - id: AC97
+        statement: 'AC97: a member whose ssh target is the current user at an address bound on this machine is run with a local bash in the home directory and no remote PATH prefix, a file is copied instead of sent with scp, and any other member is still reached with ssh -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -425,6 +430,9 @@ evidence_requirements:
   - kind: tests
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
+  - kind: tests
+    description: The pool driver runs a member on this machine through a local shell and every other member through ssh.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1329,3 +1337,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC63
+  - id: dod-omn-17427-ac97-prepr-pool-local-transport
+    description: 'Found live on 2026-10-19: from a lane on the lab host that carries the pre-PR slots, prepr_runtime_pool.py read both slots OFFLINE with "Permission denied (publickey,password)" because the driver ssh''d to its own host, so OMN-20085 lanes there could not run verify. The tests assert is_this_host is true for the current user at 127.0.0.1 and false for another user, a TEST-NET address and an unresolvable name; a local member runs bash -c with the command unprefixed in the home directory and never ssh; put copies the file and returns 1 into a missing directory; a remote member still gets ssh with BatchMode and the REMOTE_PATH prefix. They fail at the previous head, where is_this_host does not exist. Live readback on that host at 2026-10-19T20:16Z: the previous driver''s verify read both slots OFFLINE with the ssh refusal; this driver''s read slot 1 BUSY (3 listeners on the slot ports) and slot 2 BUSY (a peer lane''s lease), exit 3 NO_FREE_SLOT, result file exit_code 3. A full slot build through the local transport was not run: no slot was free.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
+  - id: dod-omn-17427-ac97-local-transport-deploy-check
+    description: Hosted-runner deploy check of the local transport using loopback detection, a local shell, temporary files and a mocked remote subprocess; no live slot or deployment is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC97
