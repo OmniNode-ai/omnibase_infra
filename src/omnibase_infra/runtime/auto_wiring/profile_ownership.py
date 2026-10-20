@@ -29,6 +29,12 @@ lane-health projection folds rows for the class's own lane and would consume
 and drop everything on an instance. A selection that cannot be honoured is a
 discovery error, never a silent skip.
 
+A deployment may also select the nodes it loads at all (OMN-17427):
+``ONEX_RUNTIME_NODE_SELECTION`` names contracts, and every other discovered
+contract is left unattached before profile or lane ownership is decided. Unset,
+nothing is excluded. A named contract that no discovered contract is becomes a
+discovery error, never a silent zero.
+
 Both the kernel's wiring and the health monitor's expectations read this one
 filter, so what is attached and what health expects cannot disagree.
 """
@@ -47,6 +53,10 @@ from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import
 )
 from omnibase_infra.models.runtime.model_runtime_lane_class_selection import (
     ModelRuntimeLaneClassSelection,
+)
+from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_SELECTION,
+    ModelRuntimeNodeSelection,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -185,13 +195,19 @@ def runtime_profile_owns_contract(
     mirrors auto-wiring ownership filtering for legacy runtime-host subscription
     paths that operate on raw contract dictionaries, including the
     ``runtime_lanes`` scope (OMN-19408): a lane-scoped contract is owned only
-    on a runtime whose declared lane is in the scope.
+    on a runtime whose declared lane is in the scope. A contract the
+    deployment's node selection (OMN-17427) does not name is never owned.
 
     Args:
         environ: Override for the process environment the runtime lane is read
             from. Injected by tests; the default reads ``os.environ``.
     """
     normalized_profile = _normalize_runtime_profile(runtime_profile)
+    name = raw_contract.get("name")
+    if not ModelRuntimeNodeSelection.from_env(environ).admits(
+        name if isinstance(name, str) else ""
+    ):
+        return False
     runtime_profiles = extract_runtime_profiles_from_contract(raw_contract)
     if runtime_profiles:
         profile_owns = normalized_profile in runtime_profiles
@@ -240,6 +256,14 @@ class ModelRuntimeProfileOwnershipResult(BaseModel):
         description=(
             "Contracts attached because the deployment selected them from the "
             "runtime's lane class, though its own lane is outside their scope."
+        ),
+    )
+    node_selection_excluded_contracts: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Contracts left unattached because the deployment's node selection "
+            "(ONEX_RUNTIME_NODE_SELECTION) does not name them (OMN-17427). "
+            "Empty when no selection is set."
         ),
     )
 
@@ -303,6 +327,10 @@ def filter_manifest_for_runtime_profile(
     discovered contract has, and a selected contract whose scope excludes the
     class each add a discovery error.
 
+    Before any of that, a deployment node selection (OMN-17427) drops every
+    contract it does not name, listed in ``node_selection_excluded_contracts``;
+    a name it carries that no discovered contract has adds a discovery error.
+
     Args:
         environ: Override for the process environment the runtime lane is read
             from. Injected by tests; the default reads ``os.environ``.
@@ -314,6 +342,21 @@ def filter_manifest_for_runtime_profile(
     lane_excluded_contracts: list[str] = []
     lane_errors: list[ModelDiscoveryError] = []
     lane_class_admitted: list[str] = []
+    node_selection = ModelRuntimeNodeSelection.from_env(environ)
+    node_selection_excluded: list[str] = []
+    discovered_names = {contract.name for contract in manifest.contracts}
+    for name in node_selection.contracts:
+        if name not in discovered_names:
+            record = ModelDiscoveryError(
+                entry_point_name=name,
+                error=(
+                    f"{ENV_RUNTIME_NODE_SELECTION} names {name!r}, which no "
+                    "discovered contract is; nothing attached for it, "
+                    "fail-closed (OMN-17427)."
+                ),
+            )
+            logger.error("Auto-wiring node selection: %s", record.error)
+            lane_errors.append(record)
     selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
     if selection.refusal:
         lane_errors.append(_lane_class_error(ENV_RUNTIME_LANE_CLASS, selection.refusal))
@@ -330,6 +373,9 @@ def filter_manifest_for_runtime_profile(
                 )
 
     for contract in manifest.contracts:
+        if not node_selection.admits(contract.name):
+            node_selection_excluded.append(contract.name)
+            continue
         if contract.runtime_profiles:
             profile_owns = normalized_profile in contract.runtime_profiles
         else:
@@ -366,6 +412,13 @@ def filter_manifest_for_runtime_profile(
             continue
         owned_contracts.append(contract)
 
+    if node_selection_excluded:
+        logger.info(
+            "Auto-wiring node selection: attached only %s; excluded %d other "
+            "contract(s) (OMN-17427)",
+            list(node_selection.contracts),
+            len(node_selection_excluded),
+        )
     if lane_class_admitted:
         logger.info(
             "Auto-wiring runtime lane scope: lane=%s class=%s attached_by_class=%s "
@@ -393,6 +446,7 @@ def filter_manifest_for_runtime_profile(
         lane_excluded_contracts=tuple(lane_excluded_contracts),
         runtime_lane_class=selection.lane_class,
         lane_class_admitted_contracts=tuple(lane_class_admitted),
+        node_selection_excluded_contracts=tuple(node_selection_excluded),
     )
 
 

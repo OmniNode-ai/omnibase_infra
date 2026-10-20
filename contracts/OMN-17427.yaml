@@ -268,6 +268,11 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-lane-lock-contended-outcome
+    statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
+    acceptance:
+      - id: AC53
+        statement: 'AC53: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
   - id: req-omn17427-docker-proof-hosts
     statement: Docker proof profiles exclude the host retained only for script work, while selectors for other hosts and script proofs stay unchanged.
     acceptance:
@@ -288,6 +293,13 @@ requirements:
     acceptance:
       - id: AC100
         statement: 'AC100: is_this_host matches a bindable local address and the current user only, LocalTransport runs in the home directory with a minimal environment and kills the whole process group on a timeout, HostRoutingTransport routes each target once, and main() builds HostRoutingTransport when no transport is given -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q'
+  - id: req-omn17427-runtime-node-selection
+    statement: A deployment that sets ONEX_RUNTIME_NODE_SELECTION attaches, subscribes and provisions only the contracts it names; unset, every discovered contract is attached and every contract topic is provisioned as before.
+    acceptance:
+      - id: AC63
+        statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
+      - id: AC62
+        statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -418,6 +430,9 @@ evidence_requirements:
   - kind: tests
     description: The pool driver's local-shell route for a pool host that is this machine, with no ssh and no network; the existing pool and lease tests still pass over the routing transport.
     command: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - kind: tests
+    description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1232,6 +1247,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC98
+  - id: dod-omn-17427-ac53-lane-lock-contended-outcome
+    description: The deploy agent's _run_deploy, with the lane lock raising LaneLockContendedError, runs no executor phase and records not_started=lane_lock_contended on the job record and the published completion payload, with status failed; a build-failure control records not_started None. Unit tests with the executor, the lock and the publish faked; no broker, lane or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac53-lane-lock-deploy-check
+    description: Hosted-runner deploy check exercises the real deploy-agent job completion and publisher payload with a contended lock and a build-failure control. Executor, lock and publication are faked; no container, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q -k "contended_job_and_terminal_event or build_failure_control"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
   - id: dod-omn-17427-ac96-slot-intel-extension
     description: The provisioner test reads the intelligence corpus for CREATE EXTENSION and asserts the slot provisioner grants and reads back CREATE on the slot intelligence database; it fails at the merge base and passes after the change. Reads repository files only.
     source: manual
@@ -1278,11 +1311,47 @@ dod_evidence:
     binds_ac:
       - AC100
   - id: dod-omn-17427-ac100-local-transport-deploy
-    description: Hosted-runner deploy check -- the local transport runs a real bash command on the runner itself, routes a loopback target to the local shell, and leaves the ssh pool tests green; it does not claim a run on a lab pre-PR slot.
+    description: Hosted-runner deploy check -- the local transport runs a real bash command on the runner itself, and routes a loopback target to the local shell; the ssh pool tests read the lab lane census, which the hosted runner lacks, so this check runs only the local transport tests. It does not claim a run on a lab pre-PR slot.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC100
+  - id: dod-omn-17427-ac61-node-selection
+    description: The ownership filter and the topic provisioner honour ONEX_RUNTIME_NODE_SELECTION and leave every contract in place when it is unset.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
+  - id: dod-omn-17427-ac62-node-selection-real
+    description: A selection of real main-profile contracts wires exactly those with zero failures against the real discovered manifest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC62
+  - id: dod-omn-17427-ac61-node-selection-deploy
+    description: Hosted-runner deploy check -- unit tests of the selection filter and provisioner with no broker; they do not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
+  - id: dod-omn-17427-ac61-cli-import
+    description: Importing the delegate entry point avoids the gateway tree while the topic provisioner still applies node selection. Fresh-interpreter tests run on a hosted runner without a broker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_delegate_import_cost.py tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC63
