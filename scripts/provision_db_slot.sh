@@ -766,6 +766,20 @@ EOSQL
     echo "[provision-db-slot]   granting ${_tpw_role} CONNECT on ${_tpw_db}"
     psql_admin -c "GRANT CONNECT ON DATABASE \"${_tpw_db}\" TO \"${_tpw_role}\";"
 
+    # The slot runtime opens its savings-correlation pool (OMNINODE_INTERNAL_DB_URL)
+    # as omninode_runtime_<slot> on the slot's omnidash database. The only flat
+    # migration granting that CONNECT is 099, which a slot skips as undeliverable,
+    # so without this grant the runtime failed every boot with "permission denied
+    # for database omnidash_analytics_prepr2" (2026-10-19, OMN-17427).
+    _runtime_role="$(derive omninode_runtime)"
+    assert_in_fence "$_runtime_role" "role"
+    echo "[provision-db-slot]   granting ${_runtime_role} CONNECT on ${_tpw_db}"
+    psql_admin -c "GRANT CONNECT ON DATABASE \"${_tpw_db}\" TO \"${_runtime_role}\";"
+    _runtime_connect_ok="$(scalar "SELECT has_database_privilege('${_runtime_role}', '${_tpw_db}', 'CONNECT')")"
+    if [ "$_runtime_connect_ok" != "t" ]; then
+        fail 1 "${_runtime_role} still lacks CONNECT on ${_tpw_db} after the grant."
+    fi
+
     # omninode_cloud's corpus opens with CREATE EXTENSION pgcrypto, and
     # `trusted = t` waives the SUPERUSER requirement, never the PRIVILEGE
     # requirement -- CREATE on the DATABASE is a different privilege from CREATE
