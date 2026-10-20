@@ -263,6 +263,16 @@ requirements:
     acceptance:
       - id: AC96
         statement: 'AC96: provision_db_slot.sh grants role_omniintelligence_<slot> CREATE on omniintelligence_<slot> and reads it back with has_database_privilege, and the intelligence corpus is shown to issue CREATE EXTENSION -- falsifier: uv run pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q -k IntelligencePrincipalCanCreateItsExtensions'
+  - id: req-omn17427-issuer-rpk-container
+    statement: The lab principal issuer's apply-grants and audit-grants can reach the broker through the running issuer container's own rpk, so the grants derived from the current grant file can be applied and read back without a superuser identity in the caller's environment and without setting a password.
+    acceptance:
+      - id: AC61
+        statement: 'AC61: with --rpk-container NAME, apply-grants and audit-grants run every rpk call as docker exec NAME rpk, read users with rpk security user list and never the admin API, need no RPK_USER, RPK_PASS or RPK_ADMIN_HOSTS, never set a password, and serve and check refuse the flag -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q'
+  - id: req-omn17427-aiohttp-security-floor
+    statement: The runtime resolves aiohttp at or above the patched 3.14.4 release and closes an idle initial HTTP connection within the configured server keepalive timeout.
+    acceptance:
+      - id: AC53
+        statement: 'AC53: an aiohttp server with a 50 ms keepalive timeout closes a connection that sends no initial request within one second; the control on aiohttp 3.14.3 times out -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_aiohttp_initial_request_timeout_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -387,6 +397,12 @@ evidence_requirements:
   - kind: tests
     description: The committed TLC results of the pre-PR slot lease model bind to the model digest, and the release runs under the guard in real shells.
     command: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - kind: tests
+    description: apply-grants and audit-grants reach the broker through the issuer container's own rpk with no superuser identity in the caller's environment.
+    command: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+  - kind: tests
+    description: A real loopback aiohttp server closes an idle initial connection within its configured keepalive timeout; no container, credentials or lab service is used.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_aiohttp_initial_request_timeout_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1165,3 +1181,39 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC96
+  - id: dod-omn-17427-ac52-issuer-rpk-container
+    description: Unit tests drive ContainerBroker and the apply-grants and audit-grants commands with a recording fake runner; no broker, container, credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn17427-ac52-issuer-rpk-container-deploy
+    description: Hosted-runner deploy check -- the issuer script's apply-grants and audit-grants accept --rpk-container and run every rpk call inside the named container, with the superuser environment unset. Reads repository files and a fake runner; does not claim a live broker change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q -k "needs_no_superuser_environment or reports_exact_missing_and_extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn17427-ac53-aiohttp-initial-timeout
+    description: Regression test opens a real loopback HTTP connection without sending a request and requires EOF within one second. It fails with aiohttp 3.14.3. No container, credentials or lab service is used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_aiohttp_initial_request_timeout_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn17427-ac53-aiohttp-timeout-deploy
+    description: Hosted-runner deploy smoke exercises the resolved aiohttp server over loopback and refuses an idle initial connection held beyond its keepalive timeout. No deployed service or Docker is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/runtime/test_aiohttp_initial_request_timeout_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
