@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "git -C <canonical omnibase_infra clone> rev-parse / cat-file -e / log on origin/bot/lockfile-cve-autobump (the bot's 20:34Z refresh of omnibase_infra#5162) and b13f2ed6fd72 (the landing fix worker's contract commit it replaced)",
+    "captured_utc": "2026-10-19T21:40:34Z",
+    "source_sha256": "5aeaf6b3d23eca0d77b04fc165721bafa1f3da9433de9ed173806cc24fdaf224",
+    "ticket": "OMN-17427"
+  },
+  "response": {
+    "branch": "bot/lockfile-cve-autobump",
+    "contract_path": "contracts/OMN-20174.yaml",
+    "refresh_head": {
+      "sha": "3abc0ea1a014f3e3cc406b352b277469845b7049",
+      "cat_file_rc": 128,
+      "parent": "9a3fbc688a8041de4f2ba58184deb24a524c0f54",
+      "subject": "fix(OMN-20174): bump aiohttp for lockfile CVE advisories [bot]"
+    },
+    "worker_head": {
+      "sha": "b13f2ed6fd728a69c2ffd4174c3fe73f4b442d6d",
+      "cat_file_rc": 0,
+      "contract_blob": "9f99f62d17f267998eec67a7ae6a7500f18a3a44",
+      "subject": "fix(OMN-20174): add contracts/OMN-20174.yaml"
+    }
+  }
+}
