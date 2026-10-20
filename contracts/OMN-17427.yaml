@@ -248,6 +248,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: the bus node accepts a valid staged local carrier, refuses absent, unstaged, stale and invalid exceptions, CI still requires the PR body, and clean-root refuses root PR_BODY.md -- falsifier: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"'
+  - id: req-omn17427-rebind-wait-honours-timeout
+    statement: A dev-bus onex delegate run whose caller declares --timeout waits at most half of it for a consumer group to bind, and its terminal wait gets only the part of --timeout the probe left, so a lane that is unbound refuses with a receipt before the caller's own kill.
+    acceptance:
+      - id: AC51
+        statement: 'AC51: with --timeout 120 an unbound lane is refused after at most 60 s of rebind wait and the refusal names the cap, a lane that binds inside the cap is still dispatched, and a run with no --timeout keeps the full 300 s rebind window -- falsifier: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -q'
   - id: req-omn17427-bash-deploy-cloud-migration-fails-loud
     statement: A failing dev-lane omninode_cloud migration one-shot in onex-runtime-deploy (src/omnibase_infra/handlers/handler_runtime_deploy.sh) still lets the runtime family deploy and verify, reports the one-shot's exit code and redacted log tail, and ends the deploy with exit 3 instead of 0; refresh_dev_lane.sh records that exit and ends FAILED_CLOUD_MIGRATION, exit 1, with no rollback.
     acceptance:
@@ -1145,6 +1150,24 @@ dod_evidence:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac51-rebind-wait-timeout
+    description: Unit and CLI integration tests with the consumer-group probe and the clock faked; an unbound lane under --timeout 120 is refused after at most 60 s of rebind wait, a lane binding on the fourth probe is dispatched, and a run without --timeout keeps the 300 s window. Does not claim a live dev-lane run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py tests/integration/cli/test_delegate_rebind_wait_cli_omn18843.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC51
+  - id: dod-omn-17427-ac51-rebind-wait-deploy-check
+    description: Hosted-runner deploy check -- the rebind wait of a dev-bus delegate run is capped at half its declared --timeout. Faked probe and clock; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/cli/test_delegate_rebind_wait_honours_timeout_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC51
   - id: dod-omn-17427-ac52-bash-cloud-fails-loud
     description: Bash handler and dev refresh functions extracted from the real scripts and run under set -euo pipefail with docker mocked; a failing cloud-migration one-shot is logged with "exited 7" and a redacted URL, the runtime refresh completes, the report returns 3, and refresh_dev_lane.sh maps SUCCESS plus deploy exit 3 to FAILED_CLOUD_MIGRATION. A real-Docker run of the same handler functions in a throwaway compose project is recorded in the pull request body. Does not claim a live dev-lane deployment.
     source: manual

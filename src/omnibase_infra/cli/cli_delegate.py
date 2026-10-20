@@ -111,6 +111,7 @@ import functools
 import importlib
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -170,6 +171,7 @@ from omnibase_infra.cli.delegate_locus import (
     DelegateLocusSaslRefusedError,
     DelegateNoConsumerRefusedError,
     contract_terminal_topic,
+    rebind_wait_for_timeout,
     resolve_delegate_locus,
 )
 from omnibase_infra.cli.delegate_pre_publish_failure import (
@@ -2625,6 +2627,13 @@ def _write_payload(
     return payload_path
 
 
+def _timeout_left_after_probe(timeout: int | None, probe_seconds: float) -> int | None:
+    """Reserve only the caller's remaining timeout after the probe (OMN-17427)."""
+    if timeout is None:
+        return None
+    return max(1, timeout - math.ceil(probe_seconds))
+
+
 def _terminal_wait_seconds(
     *,
     requested_timeout_seconds: int | None,
@@ -4428,6 +4437,7 @@ def run_delegate(
                     kafka_bootstrap=resolved_bootstrap,
                     contract_path=contract_path,
                     shared_bus_value=BUS_KAFKA,
+                    rebind_wait_seconds=rebind_wait_for_timeout(timeout),
                 )
         except DelegateLocusRefusedError as exc:
             # OMN-18925 / C16: the SECOND transport exit, and the one a
@@ -4552,7 +4562,9 @@ def run_delegate(
             # bytecode boundary. Measured, never assumed from the bound.
             dispatch_started = time.monotonic()
             terminal_wait_seconds = _terminal_wait_seconds(
-                requested_timeout_seconds=timeout,
+                requested_timeout_seconds=_timeout_left_after_probe(
+                    timeout, time.monotonic() - locus_probe_started
+                ),
                 execution_budget=execution_budget,
             )
             if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE:
