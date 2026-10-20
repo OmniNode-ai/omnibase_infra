@@ -41,12 +41,13 @@ from uuid import UUID
 import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent.agent import DeployAgent
-from deploy_agent.events import EnumRuntimeLane, EnumVerifyRecreateOutcome, Phase
+from deploy_agent.events import EnumRuntimeLane, EnumVerifyRecreateOutcome, Phase, Scope
 from deploy_agent.executor import (
     DeployExecutor,
     ModelAnsweringDegraded,
     VerificationFailedError,
     _answering_degraded,
+    finish_recreate_renames,
     lane_config_for,
     monitor_settled_degraded,
     remove_recreate_leftovers,
@@ -737,3 +738,136 @@ def test_an_unreadable_presence_never_restores(
     agent._maybe_idle_converge()
 
     assert _jobs(tmp_path) == []
+
+
+# --- OMN-17427: finish a recreate's rename without disrupting its container ---
+
+
+def test_a_running_recreate_is_renamed_when_its_real_name_is_free() -> None:
+    calls: list[list[str]] = []
+    temp_name = "e2fc03e50cd0_omnibase-infra-redpanda"
+
+    def run(
+        cmd: list[str], timeout: int, **_kw: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if cmd[:3] == ["docker", "ps", "-a"]:
+            return _completed(cmd, stdout=f"{temp_name}\nother-project-container\n")
+        if cmd[:2] == ["docker", "ps"]:
+            return _completed(cmd, stdout=f"123456abcdef\t{temp_name}\n")
+        return _completed(cmd)
+
+    with patch("deploy_agent.executor._run", side_effect=run):
+        renamed = finish_recreate_renames(EnumRuntimeLane.DEV)
+
+    assert renamed == [f"{temp_name} -> omnibase-infra-redpanda"]
+    assert [c for c in calls if c[:2] == ["docker", "rename"]] == [
+        ["docker", "rename", "123456abcdef", "omnibase-infra-redpanda"]
+    ]
+    assert calls[0] == [
+        "docker",
+        "ps",
+        "--filter",
+        f"label=com.docker.compose.project={DEV.compose_project}",
+        "--filter",
+        "status=running",
+        "--format",
+        "{{.ID}}\t{{.Names}}",
+    ]
+    assert calls[1] == ["docker", "ps", "-a", "--format", "{{.Names}}"]
+    assert not [
+        c
+        for c in calls
+        if c[:2] in (["docker", "rm"], ["docker", "stop"], ["docker", "restart"])
+    ]
+
+
+@pytest.mark.parametrize(
+    ("running_name", "all_names"),
+    [
+        (
+            "e2fc03e50cd0_omnibase-infra-redpanda",
+            "e2fc03e50cd0_omnibase-infra-redpanda\nomnibase-infra-redpanda\n",
+        ),
+        ("omnibase-infra-redpanda", "omnibase-infra-redpanda\n"),
+    ],
+    ids=["real-name-occupied", "plain-running-name"],
+)
+def test_running_recreates_leave_occupied_and_plain_names_alone(
+    running_name: str, all_names: str
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(
+        cmd: list[str], timeout: int, **_kw: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if cmd[:3] == ["docker", "ps", "-a"]:
+            return _completed(cmd, stdout=all_names)
+        return _completed(cmd, stdout=f"123456abcdef\t{running_name}\n")
+
+    with patch("deploy_agent.executor._run", side_effect=run):
+        assert finish_recreate_renames(EnumRuntimeLane.DEV) == []
+
+    assert all(c[:2] == ["docker", "ps"] for c in calls)
+
+
+@pytest.mark.parametrize("failed_listing", ["running", "all-names"])
+@pytest.mark.parametrize("failure", ["returncode", "oserror", "timeout"])
+def test_recreate_renames_fail_soft_if_either_listing_fails(
+    failed_listing: str, failure: str
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(
+        cmd: list[str], timeout: int, **_kw: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        listing = "all-names" if "-a" in cmd else "running"
+        if listing == failed_listing:
+            if failure == "oserror":
+                raise OSError("docker unavailable")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return _completed(cmd, returncode=1, stderr="docker unavailable")
+        return _completed(
+            cmd, stdout="123456abcdef\te2fc03e50cd0_omnibase-infra-redpanda\n"
+        )
+
+    with patch("deploy_agent.executor._run", side_effect=run):
+        assert finish_recreate_renames(EnumRuntimeLane.DEV) == []
+
+    assert all(c[:2] == ["docker", "ps"] for c in calls)
+
+
+@pytest.mark.recreate_renames
+def test_compose_up_finishes_a_running_recreate_before_it_runs() -> None:
+    calls: list[list[str]] = []
+    temp_name = "e2fc03e50cd0_omnibase-infra-redpanda"
+
+    def run(
+        cmd: list[str], timeout: int, **_kw: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if cmd[:3] == ["docker", "ps", "-a"]:
+            return _completed(cmd, stdout=f"{temp_name}\n")
+        if cmd[:2] == ["docker", "ps"]:
+            return _completed(cmd, stdout=f"123456abcdef\t{temp_name}\n")
+        return _completed(cmd)
+
+    executor = DeployExecutor()
+    with (
+        patch("deploy_agent.executor._run", side_effect=run),
+        patch.object(executor, "_ensure_runtime_migrations_ready"),
+        patch.object(executor, "rerun_changed_oneshots"),
+        patch("deploy_agent.executor.verify_containers_up", return_value=(True, [])),
+    ):
+        executor._compose_up(
+            Phase.RUNTIME, Scope.RUNTIME, [], _phase, lane=EnumRuntimeLane.DEV
+        )
+
+    rename = ["docker", "rename", "123456abcdef", "omnibase-infra-redpanda"]
+    compose_up = next(
+        i for i, c in enumerate(calls) if c[:2] == ["docker", "compose"] and "up" in c
+    )
+    assert calls.index(rename) < compose_up

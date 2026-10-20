@@ -35,6 +35,7 @@ from deploy_agent.events import (
     TOPIC_REBUILD_REJECTED,
     TOPIC_REBUILD_REQUESTED,
     DeployInProgressError,
+    EnumJobNotStarted,
     EnumOnexApiDeliveryResult,
     EnumRejectionReason,
     EnumRuntimeLane,
@@ -1943,12 +1944,20 @@ class DeployAgent:
             # different actions: this one is retried later by whoever holds the
             # lane, and NOTHING on this lane was touched -- the contended
             # acquire happens before the first phase runs.
+            # OMN-18124 AC4: the job record and the terminal event name it by
+            # type (``not_started``), so a reader tells it from a build failure
+            # without parsing the holder prose in ``errors``.
             logger.error(  # noqa: TRY400
                 "Job %s did not start: %s friction_type=lane_lock_contended",
                 cid,
                 e,
             )
-            self.job_store.complete(cid, status="failed", errors=[str(e)])
+            self.job_store.complete(
+                cid,
+                status="failed",
+                errors=[str(e)],
+                not_started=EnumJobNotStarted.LANE_LOCK_CONTENDED,
+            )
         except Exception as e:
             logger.exception("Job %s failed: %s", cid, e)
             # OMN-18636 AC5: the failing path has a tail of its own -- the

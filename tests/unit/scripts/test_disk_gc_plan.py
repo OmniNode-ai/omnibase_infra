@@ -62,7 +62,9 @@ class TestDiskGcPlanSafety:
         assert "sha-dangle" in plan["remove_image_ids"]
 
     def test_young_dangling_image_is_kept(self) -> None:
-        images = [_img("sha-young", "<none>", "<none>", days_ago=1)]
+        # OMN-20210: dangling images are floored in hours, not min_age_days;
+        # 0.1 days (2.4 h) is under the default 6 h dangling floor.
+        images = [_img("sha-young", "<none>", "<none>", days_ago=0.1)]
         plan = disk_gc_plan.build_plan(KEEP_LIST, images, [], set(), now=NOW)
         assert plan["remove_image_ids"] == []
 

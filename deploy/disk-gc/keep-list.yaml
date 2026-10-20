@@ -70,9 +70,14 @@ protect_running: true
 # to retain before the oldest become eligible for removal once older than
 # superseded_image_max_age_days. Belt-and-suspenders with age.
 superseded_image_keep_generations: 2
-# Age threshold (days) below which NOTHING is removed, even dangling images.
+# Age threshold (days) for tagged images and stopped containers.
 # Conservative: a just-built image is never reaped.
 min_age_days: 3
+# OMN-20210 — on h202 on 2026-10-19, the second dev lane's hourly deploy-agent
+# rebuilds left 1,617 dangling images younger than 3 days and root at 97 percent.
+# A dangling image has no tag, so no compose file names it as a rollback target.
+# Use an hours-scale floor so hourly rebuilds do not accumulate for three days.
+dangling_min_age_hours: 6
 # OMN-16367 — CEILING on retained BuildKit build cache, as a docker-parseable
 # size string handed to `docker builder prune --max-used-space`.
 #
