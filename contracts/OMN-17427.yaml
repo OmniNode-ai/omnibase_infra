@@ -273,6 +273,11 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-prepr-tenant-state-writable
+    statement: The pre-PR slot's tenant-state directory, bind-mounted into the slot gateway, admits the gateway's container user, which is neither the operator nor in its group, so the tenant mint can write its credential.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: prepr_verify_lane.sh creates the tenant-state directory with write and search for others, no listing for others, the sticky bit set, and the slot env directory still 0700 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q'
   - id: req-omn17427-lane-lock-contended-outcome
     statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
     acceptance:
@@ -326,6 +331,9 @@ requirements:
       - id: AC141
         statement: 'AC141: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
     command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
@@ -475,6 +483,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac141-prepr-tenant-state-writable
+    description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-prepr-tenant-state-deploy
+    description: Hosted-runner deploy check -- the tenant-state mode test; it does not claim a live mint on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
   - id: dod-omn-17427-ac61-docker-proof-hosts
     description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
     source: manual
