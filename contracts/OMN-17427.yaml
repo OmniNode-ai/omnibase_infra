@@ -350,6 +350,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-certifi-ghsa-6q48
+    statement: uv.lock carries certifi 2026.10.19, the fix for GHSA-6q48-6c7w-9gw2, so the Lockfile CVE Scan (OMN-16228) on dev no longer blocks on certifi==2026.1.4, and the runner image lock is regenerated from that uv.lock.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: every certifi entry in uv.lock is at or above 2026.10.19 and the committed runner image lock verifies against the new uv.lock -- falsifier: uv run pytest tests/ci/test_uv_lock_certifi_ghsa_6q48_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -507,6 +512,9 @@ evidence_requirements:
   - kind: tests
     description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+  - kind: tests
+    description: uv.lock locks certifi at or above 2026.10.19, the GHSA-6q48-6c7w-9gw2 fix; the test fails on the previous lock at 2026.1.4.
+    command: uv run pytest tests/ci/test_uv_lock_certifi_ghsa_6q48_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1615,6 +1623,24 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_service_kernel_nofile_boot_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-certifi-ghsa-6q48
+    description: The test reads uv.lock and fails while any certifi entry is below 2026.10.19; it fails against the previous lock at certifi 2026.1.4. It does not run osv-scanner; the Lockfile CVE Scan job does that on the pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_uv_lock_certifi_ghsa_6q48_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-certifi-runner-lock-deploy-check
+    description: Hosted-runner deploy check -- the committed runner image lock verifies against the new uv.lock and the certifi lock test passes; it reads repository files only.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run python scripts/ci/runner_image_identity.py --mode verify
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
