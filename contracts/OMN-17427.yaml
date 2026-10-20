@@ -305,6 +305,11 @@ requirements:
     acceptance:
       - id: AC97
         statement: 'AC97: a member whose ssh target is the current user at an address bound on this machine is run with a local bash in the home directory and no remote PATH prefix, a file is copied instead of sent with scp, and any other member is still reached with ssh -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport'
+  - id: req-omn17427-finish-recreate-rename
+    statement: Before each compose up the deploy agent renames a running container of its lane's compose project that still carries compose's recreate temporary name into its real name when no container holds that name, and never removes, stops or restarts it, so a recreate interrupted after its new container started no longer leaves the declared container reading absent to the lane census.
+    acceptance:
+      - id: AC104
+        statement: 'AC104: a running e2fc03e50cd0_omnibase-infra-redpanda in the lane project is renamed to omnibase-infra-redpanda when that name is free, before the compose up argv runs; an occupied real name, a plain name or a failed listing renames nothing; no docker rm, stop or restart is issued -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"'
 evidence_requirements:
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
@@ -441,6 +446,9 @@ evidence_requirements:
   - kind: tests
     description: The pool driver runs a member on this machine through a local shell and every other member through ssh.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k local_transport
+  - kind: tests
+    description: The deploy agent renames a running recreate-temp-named container into its free real name before compose up, and leaves occupied and plain names alone.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1399,3 +1407,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC97
+  - id: dod-omn-17427-ac104-finish-recreate-rename
+    description: 'Found live on 2026-10-20 at 10:01Z on the lab dev lane: the dev broker was running and healthy (Up 11 hours, RestartCount 0) as e2fc03e50cd0_omnibase-infra-redpanda, compose''s recreate temporary name, with no container under omnibase-infra-redpanda, so the lane census reported container_absent and the census drift gate failed on omnibase_infra#5148 and #5187. Unit tests with docker faked: a running temp-named container is renamed into its free real name before the compose up argv, an occupied name, a plain name and a failed listing rename nothing, and no rm, stop or restart is issued. The rename on the live lane happens at the next deploy after merge; it was not run by hand.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC104
+  - id: dod-omn-17427-ac104-rename-deploy-check
+    description: Hosted-runner deploy check of the recreate rename pass with docker faked; no container, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC104
