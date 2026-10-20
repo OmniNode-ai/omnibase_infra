@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -160,10 +161,13 @@ class FakeHost:
     readback sees the result, rather than the test asserting a call was made.
     """
 
-    def __init__(self, *, leave_topic: bool = False, dev_topics: int = 2) -> None:
+    def __init__(
+        self, *, leave_topic: bool = False, dev_topics: int = 2, refuse_rm: bool = False
+    ) -> None:
         self.calls: list[list[str]] = []
         self.envs: list[dict[str, str] | None] = []
         self.leave_topic = leave_topic
+        self.refuse_rm = refuse_rm
         self.containers = {
             "omnibase-infra-prepr-1": {"c1", "c2"},
             "omnibase-infra": {"d1", "d2"},
@@ -207,6 +211,10 @@ class FakeHost:
         if argv[:3] == ["docker", "ps", "-a"]:
             return self._ok("\n".join(sorted(self.containers.get(label, set()))))
         if argv[:3] == ["docker", "rm", "-f"]:
+            if self.refuse_rm:
+                return subprocess.CompletedProcess(
+                    argv, 64, "", "LANDING-COMPOSE-GUARD refused: test"
+                )
             for p in self.containers.values():
                 p.difference_update(argv[3:])
             return self._ok()
@@ -302,6 +310,43 @@ def test_a_full_teardown_leaves_zero_slot_residue_and_the_dev_lane_intact(
     assert "omnibase_infra" in host.databases
     assert host.dropped_slot == "prepr1"
     assert not (tmp_path / "slot-1").exists()
+
+
+def test_a_refused_container_removal_stops_before_anything_else_is_deleted(
+    tmp_path: Path,
+) -> None:
+    host = FakeHost(refuse_rm=True)
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE
+    assert report["verdict"] == "INCOMPLETE"
+    assert host.containers[teardown.selectors_for(SLOT1).compose_project] == {
+        "c1",
+        "c2",
+    }
+    assert not any("delete" in argv for argv in host.calls)
+    assert not any("FLUSHDB" in argv for argv in host.calls)
+    assert not any(
+        argv[:2] == ["bash", str(teardown.PROVISION_DB)] for argv in host.calls
+    )
+    assert not any(
+        argv[:3] in (["docker", "volume", "rm"], ["docker", "rmi", "-f"])
+        for argv in host.calls
+    )
+    assert (tmp_path / "slot-1" / "repo").exists()
+
+
+def test_a_staging_root_that_cannot_be_removed_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_rmtree(path: Path, *, ignore_errors: bool) -> None:
+        raise OSError(39, "Directory not empty")
+
+    monkeypatch.setattr(teardown, "shutil", SimpleNamespace(rmtree=refuse_rmtree))
+    code, report = _run(FakeHost(), tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE
+    assert report["verdict"] == "INCOMPLETE"
+    assert report["residue"]["staging_root"] == 1
+    assert any(error.startswith("remove staging root:") for error in report["errors"])
 
 
 def test_no_delete_command_ever_names_a_non_slot_object(tmp_path: Path) -> None:
