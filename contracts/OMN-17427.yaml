@@ -248,6 +248,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q'
+  - id: req-omn17427-prepr-teardown-stop-on-failure
+    statement: The pre-PR slot teardown stops after a failed container removal and keeps the staging root whenever an earlier step failed, and a staging root it cannot remove is reported in the teardown report instead of raised.
+    acceptance:
+      - id: AC99
+        statement: 'AC99: a refused container removal leaves the containers, topics, databases and staging root in place and ends INCOMPLETE, and a staging root that cannot be removed ends INCOMPLETE with a report -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q'
   - id: req-omn17427-cve-autobump-keeps-contract
     statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
     acceptance:
@@ -381,6 +386,9 @@ evidence_requirements:
   - kind: tests
     description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
     command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
+  - kind: tests
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root is reported; they do not claim a live slot teardown.
+    command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
   - kind: tests
     description: Fake-runner tests check that the autobump refresh carries an existing branch contract into its commit and adds nothing when there is none; they do not claim a scheduled run.
     command: uv run pytest tests/ci/test_lockfile_cve_autobump.py -q
@@ -1111,6 +1119,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC52
+  - id: dod-omn-17427-ac52-prepr-teardown-stop
+    description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root ends INCOMPLETE with a report; they do not claim a live slot teardown.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC99
+  - id: dod-omn-17427-ac52-teardown-deploy-check
+    description: Hosted-runner deploy check -- tests use a fake docker host to verify teardown failure handling and report writing; they do not claim a live slot teardown.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC99
   - id: dod-omn-17427-ac60-autobump-keeps-contract
     description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
     source: manual
