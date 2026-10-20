@@ -31,6 +31,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_SELECTION,
+)
+from omnibase_infra.runtime.auto_wiring import filter_manifest_for_runtime_profile
 from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_cache_clear,
@@ -262,6 +266,57 @@ async def test_real_manifest_wiring_has_no_failures(
     assert not error_results, "ModelOnexError found in wiring results:\n" + "\n".join(
         f"  {r.contract_name}: {r.reason}" for r in error_results
     )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_manifest_node_selection_wires_only_selected_contracts() -> None:
+    """A deployment node selection attaches only the named real contracts (OMN-17427).
+
+    The kernel filters the discovered manifest through the ownership filter
+    before wiring. With ``ONEX_RUNTIME_NODE_SELECTION`` naming a few real
+    contracts the main profile owns, the filtered manifest holds exactly those,
+    the selection adds no discovery error, and wire_from_manifest() wires them
+    with zero failures.
+    """
+    discover_contracts_cache_clear()
+    manifest = discover_contracts()
+    owned = filter_manifest_for_runtime_profile(manifest, "main", environ={})
+    derived_appliers = {
+        contract.name: _StubResultApplier()
+        for contract in owned.manifest.contracts
+        if load_intent_routing_table(Path(contract.contract_path))
+    }
+    unwired = _KNOWN_UNWIRED_RAW_PROJECTIONS | set(derived_appliers)
+    selected = sorted(
+        contract.name
+        for contract in owned.manifest.contracts
+        if contract.name not in unwired and contract.runtime_lanes is None
+    )[:3]
+    assert selected, "the real manifest offers no main-profile contract to select"
+
+    result = filter_manifest_for_runtime_profile(
+        manifest,
+        "main",
+        environ={ENV_RUNTIME_NODE_SELECTION: ",".join(selected)},
+    )
+
+    assert sorted(c.name for c in result.manifest.contracts) == selected
+    assert len(result.manifest.errors) == len(manifest.errors)
+    assert len(result.node_selection_excluded_contracts) == (
+        manifest.total_discovered - len(selected) - len(result.skipped_contracts)
+    )
+
+    report = await wire_from_manifest(
+        manifest=result.manifest,
+        dispatch_engine=MessageDispatchEngine(),
+        event_bus=None,
+        container=ModelONEXContainer(),
+        subscribe_immediately=False,
+    )
+    assert {r.contract_name for r in report.results} == set(selected)
+    failed = [r for r in report.results if str(r.outcome).endswith("FAILED")]
+    assert not failed, "\n".join(f"  {r.contract_name}: {r.reason}" for r in failed)
 
 
 @pytest.mark.integration
