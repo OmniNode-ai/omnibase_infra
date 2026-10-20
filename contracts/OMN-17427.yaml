@@ -268,6 +268,11 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-docker-proof-hosts
+    statement: Docker proof profiles exclude the host retained only for script work, while selectors for other hosts and script proofs stay unchanged.
+    acceptance:
+      - id: AC61
+        statement: 'AC61: Docker selectors exclude the script-only host, the runtime profile advances its version and both script-only selectors retain their three hosts -- falsifier: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"'
   - id: req-omn17427-slot-intelligence-extension
     statement: The pre-PR slot provisioner grants the slot's intelligence principal CREATE on the slot's own intelligence database and reads it back, so the intelligence corpus can create its trusted extensions on a fresh slot database.
     acceptance:
@@ -405,6 +410,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac61-docker-proof-hosts
+    description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
+  - id: dod-omn-17427-ac61-profile-deploy-check
+    description: Hosted-runner check of the committed proof selectors and profile version; repository data only, with no runtime deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "docker_profiles or runtime_profile_reuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC61
   - id: dod-omn-17427-ac97-slot-runtime-connect
     description: The provisioner test asserts the slot runtime principal CONNECT grant and its readback on the slot omnidash database; it fails at the merge base and passes after the change. Reads repository files only.
     source: manual
