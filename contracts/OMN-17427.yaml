@@ -300,6 +300,11 @@ requirements:
         statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-r1-probe-caller-timeout
+    statement: The daily R1 front-door probe passes --timeout to onex delegate so the CLI caps its consumer rebind wait and grades an unbound lane itself, and a probe that still kills the CLI keeps the CLI's partial output and names its last line.
+    acceptance:
+      - id: AC100
+        statement: 'AC100: the probe kill timeout outlasts the CLI wall-time bound computed from the CLI''s own wait functions for the --timeout it passes, and a killed CLI''s partial stderr is kept in the record and its last line named -- falsifier: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k "outlasts or partial_output"'
 evidence_requirements:
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
@@ -433,6 +438,9 @@ evidence_requirements:
   - kind: tests
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
+  - kind: tests
+    description: Stubbed-subprocess tests check the R1 probe argv carries --timeout, its kill timeout outlasts the CLI bound from the CLI's own wait functions, and a timeout keeps the CLI's partial output; they do not claim a scheduled run.
+    command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1373,3 +1381,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC63
+  - id: dod-omn-17427-ac100-r1-probe-caller-timeout
+    description: The R1 probe passes --timeout, its kill timeout outlasts the CLI wall-time bound for that timeout, and a killed CLI's partial output is kept and its last line named.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q -k "outlasts or partial_output or argv"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-r1-probe-caller-timeout-deploy
+    description: Hosted-runner deploy check -- stubbed-subprocess tests of the R1 probe with no broker and no lane; they do not claim a scheduled run on the lab runner.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
