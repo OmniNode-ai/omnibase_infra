@@ -136,7 +136,9 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     assert (subject.base_sha, subject.merge_base_sha) == (DEV, MERGE_BASE)
     assert subject.pr_diff_digest == DIGEST
     assert subject.profile_id == "omnimarket.runtime_image"
-    assert subject.profile_version == "2"
+    profile = pool.runtime_profile("omnimarket")
+    assert profile is not None
+    assert subject.profile_version == profile.profile_version
     assert subject.handler_kind is receipts.EnumLabProofHandlerKind.RUNTIME_IMAGE
     assert subject.runner_identity == "plan-item-I7@pool-a"
     assert subject.verifier_identity == "prepr_runtime_pool.judge@test-mac"
@@ -156,7 +158,8 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     assert event["topic"] == "onex.evt.omnibase-infra.lab-proof-receipt.v1"
     assert event["verifier_token"] == "ACCEPTED"
     assert (
-        f"receipt OmniNode-ai/omnimarket#3042@{HEAD}:omnimarket.runtime_image@2 "
+        f"receipt OmniNode-ai/omnimarket#3042@{HEAD}:"
+        f"omnimarket.runtime_image@{profile.profile_version} "
         "result=PASS verifier=ACCEPTED"
     ) in text
 

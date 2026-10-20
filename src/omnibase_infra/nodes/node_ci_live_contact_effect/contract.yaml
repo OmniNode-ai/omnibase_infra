@@ -11,7 +11,7 @@ description: "OMN-18648: admit CI-tooling PRs only with recorded contact or an e
 input_model:
   name: ModelCILiveContactRequest
   module: omnibase_infra.models.model_ci_live_contact_request
-  description: "Inspected repository, base/head revisions and actual PR body; no base means index."
+  description: "Inspected repository, base/head revisions and actual PR body; no base means index, with local exceptions in staged .github/live-contact-exception.md."
 output_model:
   name: ModelCILiveContactResult
   module: omnibase_infra.models.model_ci_live_contact_result

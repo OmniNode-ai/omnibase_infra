@@ -79,6 +79,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -354,8 +355,24 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
+def is_this_host(ssh_target: str) -> bool:
+    """A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
+    user, _, addr = ssh_target.rpartition("@")
+    if user and user != pwd.getpwuid(os.getuid()).pw_name:
+        return False
+    try:
+        ip = socket.gethostbyname(addr)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind((ip, 0))
+    except OSError:
+        return False
+    return True
+
+
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host via ssh, or a local shell for this host; tests pass a fake."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -363,7 +380,13 @@ class Transport(Protocol):
 
 
 class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
         self._opts = [
             "-o",
             "BatchMode=yes",
@@ -371,21 +394,42 @@ class SshTransport:
             f"ConnectTimeout={connect_timeout}",
         ]
 
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
         try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
             return 124, out + f"\n[timeout after {timeout:.0f}s]"
         return proc.returncode, proc.stdout + proc.stderr
 
     def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
         return subprocess.run(
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
