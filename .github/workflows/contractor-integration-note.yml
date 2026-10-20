@@ -208,7 +208,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 505b04c6933abac08ed73c479d7a8d581b82805b # .github/sibling-pins.yaml
+          ref: 228d6f21d2c246d590d3764ef979c575f2cfa0b4 # .github/sibling-pins.yaml
           # Deliberately `dev`, not a pinned SHA: a fix to the note takes effect
           # on the next merge without a companion PR here. The trade is that an
           # omnimarket regression reaches this trigger immediately — acceptable
