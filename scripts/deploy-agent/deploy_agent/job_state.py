@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from deploy_agent.events import (
     DEPLOY_PHASE_ORDER,
+    EnumJobNotStarted,
     ModelLineageDecision,
     ModelOneShotRerun,
     ModelOnexApiDelivery,
@@ -84,6 +85,8 @@ class JobState(BaseModel):
         "accepted"
     )
     errors: list[str] = Field(default_factory=list)
+    #: OMN-18124: why no phase ran; ``None`` also loads older-agent records.
+    not_started: EnumJobNotStarted | None = None
     result_publish_pending: bool = False
     completed_at: datetime | None = None
     #: OMN-18636 AC5. Post-terminal work still executing for this job, or
@@ -499,6 +502,7 @@ class JobStore:
         settling_stage: EnumJobSettlingStage | None = None,
         verify_recreate: list[ModelVerifyRecreate] | None = None,
         oneshot_reruns: list[ModelOneShotRerun] | None = None,
+        not_started: EnumJobNotStarted | None = None,
     ) -> JobState:
         """Write the job's terminal verdict, and what it is still doing.
 
@@ -518,6 +522,7 @@ class JobStore:
         if job is None:
             raise ValueError(f"Job {correlation_id} not found")
         job.status = status
+        job.not_started = not_started
         job.completed_at = datetime.now(UTC)
         job.phase_results = reconcile_terminal_phase_results(job.phase_results)
         job.settling_stage = settling_stage

@@ -22,9 +22,17 @@ from typing import Any
 
 import pytest
 
+from omnibase_infra.lab_proof.enum_lab_proof_kind import EnumLabProofKind
+from omnibase_infra.lab_proof.lab_proof_profile_registry import (
+    load_lab_proof_profile_registry,
+    profile_pin,
+)
 from scripts.ci import lab_pass_receipt as receipts
 
 pytestmark = pytest.mark.unit
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
 
 HEAD_SHA = "a" * 40
 MOVED_HEAD_SHA = "9" * 40
@@ -35,7 +43,10 @@ DIFF_DIGEST = f"sha256:{'e' * 64}"
 REPO = "OmniNode-ai/omnimarket"
 PR_NUMBER = 3042
 PROFILE_ID = "omnimarket.runtime_image"
-PROFILE_VERSION = "2"
+# Read the version from the registry so only test_validate_lab_proof_profiles.py pins it.
+PROFILE_VERSION = profile_pin(
+    load_lab_proof_profile_registry(REGISTRY), REPO, EnumLabProofKind("runtime_image")
+).profile_version
 MANDATORY = frozenset({"runtime_main_healthy", "changed_path_live"})
 STARTED = datetime(2026, 9, 28, 10, 0, tzinfo=UTC)
 FINISHED = datetime(2026, 9, 28, 10, 16, tzinfo=UTC)
@@ -581,8 +592,6 @@ class TestTheCli:
         assert '--app-slug "${APP_SLUG}"' in text
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
 VALIDATOR = REPO_ROOT / "scripts" / "ci" / "validate_lab_proof_profiles.py"
 
 

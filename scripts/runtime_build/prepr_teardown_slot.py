@@ -388,9 +388,12 @@ class _Teardown:
         # Containers first: a live consumer keeps its group from being deleted
         # and its pool keeps sessions open on the slot's databases.
         if planned["containers"]:
+            before = len(self.errors)
             self._checked(
                 ["docker", "rm", "-f", *planned["containers"]], "remove containers"
             )
+            if len(self.errors) != before:
+                return
         self.drain_groups(planned["groups"])
         for chunk in _chunks(planned["topics"], DELETE_CHUNK):
             self._checked(
@@ -421,8 +424,15 @@ class _Teardown:
             )
         if planned["images"]:
             self._checked(["docker", "rmi", "-f", *planned["images"]], "remove images")
+        # Keep the compose files and tenant credential for a rerun if any
+        # earlier step failed.
+        if self.errors:
+            return
         if staging_root.exists():
-            shutil.rmtree(staging_root, ignore_errors=False)
+            try:
+                shutil.rmtree(staging_root, ignore_errors=False)
+            except OSError as exc:
+                self.errors.append(f"remove staging root: {str(exc)[:300]}")
 
     def drain_groups(self, pending: list[str]) -> None:
         """Stopped consumers remain active until their broker session expires.
@@ -431,6 +441,8 @@ class _Teardown:
         listing proves the slot groups gone. Every retry derives fresh exact
         slot-prefixed names; an unreadable listing stays a failure.
         """
+        if not pending:
+            return
         deadline = time.monotonic() + GROUP_DRAIN_TIMEOUT_S
         while True:
             for chunk in _chunks(pending, DELETE_CHUNK):
