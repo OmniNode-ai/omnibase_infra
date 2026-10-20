@@ -360,6 +360,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
+  - id: req-omn17427-unit-drift-rendered-disk-gc
+    statement: The installed-unit drift checker compares onex-disk-gc.service to the unit its installer renders for the declared registry root, so a correct install reads OK and a stale or unrendered one reads DRIFT.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: with UNIT_DRIFT_REGISTRY_ROOT set, an installed onex-disk-gc.service rendered for that root checks OK and the unrendered tracked text checks DRIFT, the comparison uses the render heredoc of install-disk-gc.sh itself for a root carrying percent, quote and backslash, and a missing or relative root or a unit with no OMNI_HOME default refuses -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -511,6 +516,9 @@ evidence_requirements:
   - kind: tests
     description: Developer principals derive produce-only grants on the hook edge's evt topics and nothing on its command topics.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+  - kind: tests
+    description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1619,6 +1627,24 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-disk-gc-render
+    description: Unit tests drive check_units over the shipped manifest's onex-disk-gc.service entry with a tmp registry root and an installed-override file, and run the installer's own render heredoc into a tmp file; no unit is installed and no systemctl call is made. The live readback on the lab host is recorded in the pull request body, not by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-deploy-check
+    description: Hosted-runner deploy check -- the same drift-checker unit tests over repository files and tmp paths; it reads no installed unit on any host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
