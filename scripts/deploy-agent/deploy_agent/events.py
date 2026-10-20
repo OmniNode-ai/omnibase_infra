@@ -954,6 +954,18 @@ class ModelRebuildRequested(BaseModel):
         return self
 
 
+class EnumJobNotStarted(StrEnum):
+    """Why a job never ran its first phase (OMN-18124).
+
+    Lane contention is distinct from a build failure: the lane was not touched,
+    and whoever holds it retries the command later. Wire ``status`` stays
+    ``failed`` for omnimarket EnumRedeployStatus (success|failed); the reason
+    rides in its own field, absent to consumers that ignore extra fields.
+    """
+
+    LANE_LOCK_CONTENDED = "lane_lock_contended"
+
+
 class EnumRejectionReason(StrEnum):
     """Why a command reached the rejection topic instead of running.
 
@@ -1388,6 +1400,9 @@ class ModelRebuildCompleted(BaseModel):
     # ``None`` means the step was not reached (a non-dev lane, a job that failed
     # before it, an agent older than this field). It never changes ``status``.
     lane_mirror: ModelLaneMirrorReceipt | None = None
+    # OMN-18124: why the job never ran its first phase. ``None`` means the job
+    # started (or an older agent); this field never changes ``status``.
+    not_started: EnumJobNotStarted | None = None
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:

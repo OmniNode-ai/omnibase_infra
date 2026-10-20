@@ -268,6 +268,11 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-lane-lock-contended-outcome
+    statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
+    acceptance:
+      - id: AC53
+        statement: 'AC53: a job whose lane lock is contended runs no phase and records not_started=lane_lock_contended on the job record and the terminal event, while a build-failure control records not_started None -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q'
   - id: req-omn17427-docker-proof-hosts
     statement: Docker proof profiles exclude the host retained only for script work, while selectors for other hosts and script proofs stay unchanged.
     acceptance:
@@ -1224,6 +1229,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC98
+  - id: dod-omn-17427-ac53-lane-lock-contended-outcome
+    description: The deploy agent's _run_deploy, with the lane lock raising LaneLockContendedError, runs no executor phase and records not_started=lane_lock_contended on the job record and the published completion payload, with status failed; a build-failure control records not_started None. Unit tests with the executor, the lock and the publish faked; no broker, lane or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
+  - id: dod-omn-17427-ac53-lane-lock-deploy-check
+    description: Hosted-runner deploy check exercises the real deploy-agent job completion and publisher payload with a contended lock and a build-failure control. Executor, lock and publication are faked; no container, broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_lock_contended_outcome_omn18124.py -q -k "contended_job_and_terminal_event or build_failure_control"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC53
   - id: dod-omn-17427-ac96-slot-intel-extension
     description: The provisioner test reads the intelligence corpus for CREATE EXTENSION and asserts the slot provisioner grants and reads back CREATE on the slot intelligence database; it fails at the merge base and passes after the change. Reads repository files only.
     source: manual
