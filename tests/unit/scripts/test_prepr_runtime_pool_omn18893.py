@@ -2648,6 +2648,25 @@ def test_verify_signal_a_second_signal_during_cleanup_does_not_cut_it_short(
     assert hosts["pool-c-slot-1"].lease is None
 
 
+def test_verify_signal_first_arriving_during_teardown_does_not_cut_it_short(
+    tmp_path: Path,
+) -> None:
+    # live 2026-10-20 (OMN-20085 AC7): a SIGTERM sent after a failed build
+    # landed in the teardown phase, which ended at once with no snap-post
+    hosts = _slot_hosts()
+
+    class SignalledInTeardown(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if command.endswith(" teardown"):
+                os.kill(os.getpid(), signal.SIGTERM)
+            return super().run(host, command, timeout)
+
+    code, _ = _verify(SignalledInTeardown(hosts), tmp_path, handle_signals=True)
+    assert code == 128 + signal.SIGTERM.value
+    assert hosts["pool-c-slot-1"].ran[-2:] == ["teardown", "snap-post"]
+    assert hosts["pool-c-slot-1"].lease is None
+
+
 def test_local_transport_is_this_host_loopback() -> None:
     current_user = pwd.getpwuid(os.getuid()).pw_name
     assert pool.is_this_host(f"{current_user}@127.0.0.1") is True

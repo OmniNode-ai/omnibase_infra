@@ -2120,9 +2120,15 @@ def _run_stack(
         # teardown below must run whatever failed above
         log(f"run aborted before teardown: {exc}")
     finally:
-        for phase in ("teardown", "snap-post"):
-            phase_run(phase, 600)
-        transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
+        # a signal that lands here waits until the cleanup ends: raised inside a
+        # phase it would skip the rest of teardown and snap-post (OMN-20085 AC7)
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, VERIFY_SIGNALS)
+        try:
+            for phase in ("teardown", "snap-post"):
+                phase_run(phase, 600)
+            transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
     return outputs
 
 

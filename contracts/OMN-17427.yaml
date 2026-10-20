@@ -315,6 +315,8 @@ requirements:
     acceptance:
       - id: AC104
         statement: 'AC104: a running e2fc03e50cd0_omnibase-infra-redpanda in the lane project is renamed to omnibase-infra-redpanda when that name is free, before the compose up argv runs; an occupied real name, a plain name or a failed listing renames nothing; no docker rm, stop or restart is issued -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "recreate_renames or running_recreate or finishes_a_running_recreate"'
+      - id: AC105
+        statement: 'AC105: a SIGTERM, SIGHUP or SIGINT that reaches a pre-PR slot verify run during its teardown phase waits until teardown and snap-post have both run, then ends the run INTERRUPTED with exit 128 plus the signal number and the lease released -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k verify_signal'
 evidence_requirements:
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
@@ -1451,3 +1453,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC104
+  - id: dod-omn-17427-ac105-signal-in-teardown
+    description: A signal sent to the verify driver while its teardown phase runs is held until teardown and snap-post finish. The test fails on origin/dev 4aca83b62, where the teardown phase ended at the signal with no snap-post, as the 2026-10-20 live slot 2 run did.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k verify_signal
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC105
