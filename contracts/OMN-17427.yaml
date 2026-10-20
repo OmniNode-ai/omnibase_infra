@@ -243,6 +243,11 @@ requirements:
     acceptance:
       - id: AC50
         statement: 'AC50: the exited-0 poll returns at once on a one-shot that exited non-zero and still waits for a running one, and the preflight failure names the exit code and the redacted log tail -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_cloud_oneshot_exit_report_omn18496.py -q'
+  - id: req-omn17427-live-contact-local-carrier
+    statement: Local CI-tooling admission reads an exception from the staged .github/live-contact-exception.md while CI reads the PR body and clean-root continues to refuse root PR_BODY.md.
+    acceptance:
+      - id: AC54
+        statement: 'AC54: the bus node accepts a valid staged local carrier, refuses absent, unstaged, stale and invalid exceptions, CI still requires the PR body, and clean-root refuses root PR_BODY.md -- falsifier: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"'
   - id: req-omn17427-rebind-wait-honours-timeout
     statement: A dev-bus onex delegate run whose caller declares --timeout waits at most half of it for a consumer group to bind, and its terminal wait gets only the part of --timeout the probe left, so a lane that is unbound refuses with a receipt before the caller's own kill.
     acceptance:
@@ -321,6 +326,9 @@ requirements:
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
 evidence_requirements:
+  - kind: tests
+    description: Local exception admission and clean-root controls run through the existing bus node and validator.
+    command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
     command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/ci/test_core_pin_compat_omn17427.py -q
@@ -473,6 +481,42 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC61
+  - id: dod-omn-17427-ac54-carrier-integration
+    description: Integration tests read the contract-declared bus terminal verdict from workflow_result.json in real temporary Git repositories, including staged-index, stale-carrier and committed-head PR-body controls, and run the unchanged clean-root validator.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-integration-deploy-check
+    description: Hosted-runner check reads admission results from the local runtime bus and checks clean-root in temporary Git repositories. The refused root carrier and unstaged, stale and working-copy-only exceptions are negative controls. No container, credential or external service is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/test_ci_live_contact_carrier_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-live-contact-carrier
+    description: Temporary Git repositories exercise the pre-commit bus node and clean-root validator with staged, absent, unstaged, stale and invalid local exceptions; committed-head controls continue to read the PR body. No external service or credential is used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
+  - id: dod-omn-17427-ac54-carrier-deploy-check
+    description: Hosted-runner check exercises the same contract-declared admission bus node and clean-root validator in temporary Git repositories; no deployed service is changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC54
   - id: dod-omn-17427-ac97-slot-runtime-connect
     description: The provisioner test asserts the slot runtime principal CONNECT grant and its readback on the slot omnidash database; it fails at the merge base and passes after the change. Reads repository files only.
     source: manual
