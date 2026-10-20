@@ -298,6 +298,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
+  - id: req-omn17427-prepr-pool-local-transport
+    statement: The pre-PR pool driver runs a pool host's commands in a local shell when that host is this machine and the target's user is the current user, so a lane on the slot host reaches its own slots without an ssh key to itself (OMN-20085 AC7 prerequisite; no credential is changed).
+    acceptance:
+      - id: AC100
+        statement: 'AC100: is_this_host matches a bindable local address and the current user only, LocalTransport runs in the home directory with a minimal environment and kills the whole process group on a timeout, HostRoutingTransport routes each target once, and main() builds HostRoutingTransport when no transport is given -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q'
   - id: req-omn17427-runtime-node-selection
     statement: A deployment that sets ONEX_RUNTIME_NODE_SELECTION attaches, subscribes and provisions only the contracts it names; unset, every discovered contract is attached and every contract topic is provisioned as before.
     acceptance:
@@ -473,6 +478,9 @@ evidence_requirements:
   - kind: tests
     description: The committed TLC results of the pre-PR slot lease model bind to the model digest, and the release runs under the guard in real shells.
     command: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - kind: tests
+    description: The pool driver's local-shell route for a pool host that is this machine, with no ssh and no network; the existing pool and lease tests still pass over the routing transport.
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
   - kind: tests
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
@@ -1416,6 +1424,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC53
+  - id: dod-omn-17427-ac100-prepr-local-transport
+    description: 'The local transport tests fail at the merge base, where the driver has no is_this_host, LocalTransport or HostRoutingTransport (10 failed), and pass with the change. Unit tests over 127.0.0.1 and a TEST-NET address; no ssh, no lab host.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-local-transport-deploy
+    description: Hosted-runner deploy check -- the local transport runs a real bash command on the runner itself, and routes a loopback target to the local shell; the ssh pool tests read the lab lane census, which the hosted runner lacks, so this check runs only the local transport tests. It does not claim a run on a lab pre-PR slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
   - id: dod-omn-17427-ac61-node-selection
     description: The ownership filter and the topic provisioner honour ONEX_RUNTIME_NODE_SELECTION and leave every contract in place when it is unset.
     source: manual
