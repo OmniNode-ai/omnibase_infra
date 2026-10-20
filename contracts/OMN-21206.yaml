@@ -67,6 +67,9 @@ dod_evidence:
       The infrastructure delivery half of AC1-AC4: both SQL files match the source commit's checksums, have exact tenant ledger identities and are classified forward-only. At the base these new files are absent. SQL behavior must separately pass the source PR's hosted PostgreSQL tests.
     source: manual
     checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn21206_savings_views_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: |-
           set -eu
