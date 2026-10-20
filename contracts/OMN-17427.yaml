@@ -283,6 +283,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
+  - id: req-omn17427-dependabot-sibling-pins
+    statement: Dependabot opens no github-actions update for an OmniNode-ai sibling workflow or action pin, which moves only through .github/sibling-pins.yaml or a deliberate pin PR; third-party actions keep their weekly updates.
+    acceptance:
+      - id: AC100
+        statement: 'AC100: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The recorded incompatible pair is refused, compatible floors are accepted, and the current override and lock satisfy every recorded floor and agree.
@@ -1260,3 +1265,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC53
+  - id: dod-omn-17427-ac100-dependabot-sibling-pins
+    description: Reads the committed .github/dependabot.yml and workflow files; checks the OmniNode-ai/* ignore and that actions/setup-node still updates. It does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-dependabot-deploy-check
+    description: Hosted-runner deploy check -- the committed dependabot.yml ignore and the sibling pin tests; it does not claim a Dependabot run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
