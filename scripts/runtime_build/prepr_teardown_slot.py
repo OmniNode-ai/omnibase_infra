@@ -379,9 +379,12 @@ class _Teardown:
         # Containers first: a live consumer keeps its group from being deleted
         # and its pool keeps sessions open on the slot's databases.
         if planned["containers"]:
+            before = len(self.errors)
             self._checked(
                 ["docker", "rm", "-f", *planned["containers"]], "remove containers"
             )
+            if len(self.errors) != before:
+                return
         for chunk in _chunks(planned["groups"], DELETE_CHUNK):
             self._checked(
                 self._exec(BROKER_CONTAINER, RPK_ENV, "rpk", "group", "delete", *chunk),
@@ -416,8 +419,15 @@ class _Teardown:
             )
         if planned["images"]:
             self._checked(["docker", "rmi", "-f", *planned["images"]], "remove images")
+        # Keep the compose files and tenant credential for a rerun if any
+        # earlier step failed.
+        if self.errors:
+            return
         if staging_root.exists():
-            shutil.rmtree(staging_root, ignore_errors=False)
+            try:
+                shutil.rmtree(staging_root, ignore_errors=False)
+            except OSError as exc:
+                self.errors.append(f"remove staging root: {str(exc)[:300]}")
 
     def revoke_tenant(self, staging_root: Path) -> bool:
         credential = staging_root / "tenant-state" / "credential.env"
