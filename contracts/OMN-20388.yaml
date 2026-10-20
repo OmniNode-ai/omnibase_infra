@@ -39,7 +39,7 @@ dod_evidence:
   checks:
   - check_type: command
     check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse
-      HEAD)" --jq .content | base64 -d | grep -qF ''ESTIMATOR_FERNET_KEY: ${ESTIMATOR_FERNET_KEY:-}'''
+      HEAD)" --jq .content | base64 -d | grep -F ''ESTIMATOR_FERNET_KEY: ${ESTIMATOR_FERNET_KEY:-}'' >/dev/null'
     cwd: ${OMNI_HOME}/omnibase_infra
   binds_ac:
   - AC6

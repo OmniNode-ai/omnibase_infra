@@ -4,7 +4,7 @@
 
 onex-api encrypts every estimator upload, prompt and lead under
 ``ESTIMATOR_FERNET_KEY`` and refuses an upload it could not encrypt. The k8s
-manifests carry the key from Infisical; the ``.201`` compose dev lane spells
+manifests carry the key from Infisical; the compose dev lane spells
 onex-api's environment explicitly, so without this entry the lane's estimator
 answers 503 whatever the operator env file holds.
 """
