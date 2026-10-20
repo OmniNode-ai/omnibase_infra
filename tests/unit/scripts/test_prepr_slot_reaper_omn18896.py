@@ -406,7 +406,9 @@ def test_an_orphan_teardown_child_keeps_the_lane_locked(
     try:
         with reaper.locked(path) as fd:
             child = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(.3)"], pass_fds=(fd,)
+                [sys.executable, "-c", "import time; time.sleep(.3)"],
+                pass_fds=(fd,),
+                start_new_session=True,
             )
         with pytest.raises(reaper.LeaseRefusedError):
             with reaper.locked(path):
@@ -416,7 +418,7 @@ def test_an_orphan_teardown_child_keeps_the_lane_locked(
             pass
     finally:
         if child is not None and child.poll() is None:
-            child.kill()
+            os.killpg(child.pid, 9)
             child.wait(timeout=10)
 
 
@@ -482,6 +484,7 @@ def test_killed_command_owner_leaves_a_reapable_lease(
             str(child_started),
         ],
         env=env,
+        start_new_session=True,
     )
     child_pid = None
     try:
@@ -517,7 +520,7 @@ def test_killed_command_owner_leaves_a_reapable_lease(
         )
     finally:
         if proc.poll() is None:
-            proc.kill()
+            os.killpg(proc.pid, 9)
             proc.wait(timeout=10)
         if child_pid is not None:
             try:
