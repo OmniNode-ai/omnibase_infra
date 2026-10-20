@@ -273,6 +273,11 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-prepr-tenant-state-writable
+    statement: The pre-PR slot's tenant-state directory, bind-mounted into the slot gateway, admits the gateway's container user, which is neither the operator nor in its group, so the tenant mint can write its credential.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: prepr_verify_lane.sh creates the tenant-state directory with write and search for others, no listing for others, the sticky bit set, and the slot env directory still 0700 -- falsifier: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q'
   - id: req-omn17427-lane-lock-contended-outcome
     statement: A deploy-agent job refused by a contended lane lock carries its own typed outcome on the job record and on the terminal completion event, distinguishable from a build failure.
     acceptance:
@@ -293,6 +298,11 @@ requirements:
     acceptance:
       - id: AC53
         statement: 'AC53: a dangling image 12 h old is removed, one 2 h old is kept, one referenced by a container is kept at any age, and a tagged image 12 h old is still kept by min_age_days -- falsifier: uv run pytest tests/unit/scripts/test_disk_gc_dangling_hours_floor.py -q'
+  - id: req-omn17427-prepr-pool-local-transport
+    statement: The pre-PR pool driver runs a pool host's commands in a local shell when that host is this machine and the target's user is the current user, so a lane on the slot host reaches its own slots without an ssh key to itself (OMN-20085 AC7 prerequisite; no credential is changed).
+    acceptance:
+      - id: AC100
+        statement: 'AC100: is_this_host matches a bindable local address and the current user only, LocalTransport runs in the home directory with a minimal environment and kills the whole process group on a timeout, HostRoutingTransport routes each target once, and main() builds HostRoutingTransport when no transport is given -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q'
   - id: req-omn17427-runtime-node-selection
     statement: A deployment that sets ONEX_RUNTIME_NODE_SELECTION attaches, subscribes and provisions only the contracts it names; unset, every discovered contract is attached and every contract topic is provisioned as before.
     acceptance:
@@ -300,6 +310,11 @@ requirements:
         statement: 'AC63: the ownership filter attaches only selected contracts, records a discovery error for a selected name no contract has, the raw ownership path honours the selection, and the topic provisioner keeps only selected contracts'' topics -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py -q'
       - id: AC62
         statement: 'AC62: against the real discovered manifest a selection of real main-profile contracts wires exactly those with zero failures -- falsifier: uv run pytest tests/integration/test_auto_wiring_real_manifest.py -q -k node_selection'
+  - id: req-omn17427-issuer-rpk-container
+    statement: The lab principal issuer's apply-grants and audit-grants can reach the broker through the running issuer container's own rpk, so the grants derived from the current grant file can be applied and read back without a superuser identity in the caller's environment and without setting a password.
+    acceptance:
+      - id: AC64
+        statement: 'AC64: with --rpk-container NAME, apply-grants and audit-grants run every rpk call as docker exec NAME rpk, read users with rpk security user list and never the admin API, need no RPK_USER, RPK_PASS or RPK_ADMIN_HOSTS, never set a password, and serve and check refuse the flag -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q'
   - id: req-omn17427-r1-probe-caller-timeout
     statement: The daily R1 front-door probe passes --timeout to onex delegate so the CLI caps its consumer rebind wait and grades an unbound lane itself, and a probe that still kills the CLI keeps the CLI's partial output and names its last line.
     acceptance:
@@ -325,7 +340,15 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: the github-actions entry of .github/dependabot.yml ignores OmniNode-ai/* at every version, covers every OmniNode-ai uses: in .github/workflows and .github/actions, and does not ignore actions/setup-node -- falsifier: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py -q'
+  - id: req-omn17427-unit-drift-rendered-disk-gc
+    statement: The installed-unit drift checker compares onex-disk-gc.service to the unit its installer renders for the declared registry root, so a correct install reads OK and a stale or unrendered one reads DRIFT.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: with UNIT_DRIFT_REGISTRY_ROOT set, an installed onex-disk-gc.service rendered for that root checks OK and the unrendered tracked text checks DRIFT, the comparison uses the render heredoc of install-disk-gc.sh itself for a root carrying percent, quote and backslash, and a missing or relative root or a unit with no OMNI_HOME default refuses -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"'
 evidence_requirements:
+  - kind: tests
+    description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
     command: uv run pytest tests/ci/test_ci_live_contact.py -q -k "local_exception or ci_uses_pr_body"
@@ -456,8 +479,14 @@ evidence_requirements:
     description: The committed TLC results of the pre-PR slot lease model bind to the model digest, and the release runs under the guard in real shells.
     command: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
   - kind: tests
+    description: The pool driver's local-shell route for a pool host that is this machine, with no ssh and no network; the existing pool and lease tests still pass over the routing transport.
+    command: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
+  - kind: tests
     description: The node selection filter and the provisioner keep only selected contracts and their topics; unset keeps all; a real-manifest selection wires with zero failures.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_selection_omn17427.py tests/integration/test_auto_wiring_real_manifest.py -q -k "node_selection or selection"
+  - kind: tests
+    description: apply-grants and audit-grants reach the broker through the issuer container's own rpk with no superuser identity in the caller's environment.
+    command: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
   - kind: tests
     description: Stubbed-subprocess tests check the R1 probe argv carries --timeout, its kill timeout outlasts the CLI bound from the CLI's own wait functions, and a timeout keeps the CLI's partial output; they do not claim a scheduled run.
     command: uv run pytest tests/ci/test_r1_front_door_probe_omn19445.py -q
@@ -470,11 +499,32 @@ evidence_requirements:
   - kind: tests
     description: Developer principals derive produce-only grants on the hook edge's evt topics and nothing on its command topics.
     command: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+  - kind: tests
+    description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac141-prepr-tenant-state-writable
+    description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-prepr-tenant-state-deploy
+    description: Hosted-runner deploy check -- the tenant-state mode test; it does not claim a live mint on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
   - id: dod-omn-17427-ac61-docker-proof-hosts
     description: The committed registry is loaded through its typed loader; the tests derive the script-only host from existing profile data, inspect all five Docker selectors and retain both three-host script selectors. No host address is hard-coded in the tests.
     source: manual
@@ -1374,6 +1424,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC53
+  - id: dod-omn-17427-ac100-prepr-local-transport
+    description: 'The local transport tests fail at the merge base, where the driver has no is_this_host, LocalTransport or HostRoutingTransport (10 failed), and pass with the change. Unit tests over 127.0.0.1 and a TEST-NET address; no ssh, no lab host.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
+  - id: dod-omn-17427-ac100-local-transport-deploy
+    description: Hosted-runner deploy check -- the local transport runs a real bash command on the runner itself, and routes a loopback target to the local shell; the ssh pool tests read the lab lane census, which the hosted runner lacks, so this check runs only the local transport tests. It does not claim a run on a lab pre-PR slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC100
   - id: dod-omn-17427-ac61-node-selection
     description: The ownership filter and the topic provisioner honour ONEX_RUNTIME_NODE_SELECTION and leave every contract in place when it is unset.
     source: manual
@@ -1410,6 +1478,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC63
+  - id: dod-omn-17427-ac64-issuer-rpk-container
+    description: Unit tests drive ContainerBroker and the apply-grants and audit-grants commands with a recording fake runner; no broker, container, credential or lab service is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
+  - id: dod-omn17427-ac64-issuer-rpk-container-deploy
+    description: Hosted-runner deploy check -- the issuer script's apply-grants and audit-grants accept --rpk-container and run every rpk call inside the named container, with the superuser environment unset. Reads repository files and a fake runner; does not claim a live broker change.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q -k "needs_no_superuser_environment or reports_exact_missing_and_extra"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC64
   - id: dod-omn-17427-ac100-r1-probe-caller-timeout
     description: The R1 probe passes --timeout, its kill timeout outlasts the CLI wall-time bound for that timeout, and a killed CLI's partial output is kept and its last line named.
     source: manual
@@ -1488,6 +1574,24 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/ci/test_dependabot_sibling_pins_omn17427.py tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-disk-gc-render
+    description: Unit tests drive check_units over the shipped manifest's onex-disk-gc.service entry with a tmp registry root and an installed-override file, and run the installer's own render heredoc into a tmp file; no unit is installed and no systemctl call is made. The live readback on the lab host is recorded in the pull request body, not by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-unit-drift-deploy-check
+    description: Hosted-runner deploy check -- the same drift-checker unit tests over repository files and tmp paths; it reads no installed unit on any host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
