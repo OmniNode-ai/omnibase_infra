@@ -350,6 +350,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-dev-takes-certifi-bump
+    statement: The dev uv.lock locks certifi 2026.10.19, the fixed version for GHSA-6q48-6c7w-9gw2, and the runner image lock is regenerated from that uv.lock, so the Lockfile CVE Scan of dev reads no blocking advisory on certifi.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: uv.lock locks certifi 2026.10.19, uv lock --check passes, and docker/runners/runner-image.lock.json verifies against the tree -- falsifier: grep -A1 -x ''name = "certifi"'' uv.lock | grep -qx ''version = "2026.10.19"'' && uv lock --check && python3 scripts/ci/runner_image_identity.py --mode verify'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -507,6 +512,9 @@ evidence_requirements:
   - kind: tests
     description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+  - kind: tests
+    description: uv.lock locks certifi 2026.10.19 and the runner image lock verifies against the tree; this does not run osv-scanner.
+    command: grep -A1 -x 'name = "certifi"' uv.lock | grep -qx 'version = "2026.10.19"' && uv lock --check && python3 scripts/ci/runner_image_identity.py --mode verify
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1618,3 +1626,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
+  - id: dod-omn-17427-ac142-certifi-bump
+    description: uv.lock locks certifi 2026.10.19, the lock agrees with pyproject.toml, and the runner image lock verifies against the tree. Does not run osv-scanner; the Lockfile CVE Scan job of CI does.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -A1 -x 'name = "certifi"' uv.lock | grep -qx 'version = "2026.10.19"' && uv lock --check && python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac142-certifi-deploy-check
+    description: Hosted-runner deploy check -- uv.lock no longer locks the advisory version certifi 2026.1.4 and locks 2026.10.19. No container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: '! grep -qx ''version = "2026.1.4"'' uv.lock && grep -A1 -x ''name = "certifi"'' uv.lock | grep -qx ''version = "2026.10.19"'''
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
