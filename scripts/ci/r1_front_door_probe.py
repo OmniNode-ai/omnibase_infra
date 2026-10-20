@@ -77,16 +77,25 @@ from pydantic import BaseModel, ConfigDict, Field
 # code alone -- this probe does not parse or score the response text.
 PROBE_PROMPT = "Reply with exactly the word: ok"
 PROBE_LANE = "dev"
-# `onex delegate` waits for the lane's terminal for up to the 240 s task-class
-# ceiling plus the 60 s delivery margin, and its SIGALRM backstop adds a grace
-# window (cli_delegate._HARD_TIMEOUT_GRACE_SECONDS). The probe must outlast all
-# of it, so a lane that is only queued is graded by the CLI's own terminal and
-# not killed here as `probe-timeout` ("could not run the probe"). The scheduled
-# run of 2026-10-15T05:28Z was killed at 90 s by exactly that mismatch.
-CLI_TERMINAL_WAIT_S = 300.0
+# With no --timeout, `onex delegate` may first wait up to 300 s for a consumer
+# to rebind to the command topic, and only then wait for the lane's terminal
+# for up to the 240 s task-class ceiling plus the 60 s delivery margin, with a
+# 10 s SIGALRM grace on top. The scheduled run of 2026-10-15T05:28Z was killed
+# at 90 s; run 39375143558 of 2026-10-20T05:29Z was killed at 330 s, a bound
+# that counted the terminal wait but not the rebind window. Passing --timeout
+# caps the rebind wait at half the requested time and charges the locus probe
+# against it (OMN-17427), so the CLI's wall time is bounded by the requested
+# time, the delivery margin and the grace. The probe outlasts that plus a
+# startup and teardown margin, so the CLI names its own terminal instead of
+# being killed here as `probe-timeout`.
+CLI_REQUESTED_TIMEOUT_S = 240
+CLI_DELIVERY_MARGIN_S = 60
 CLI_HARD_TIMEOUT_GRACE_S = 10
-_TIMEOUT_MARGIN_S = 20.0
-DEFAULT_TIMEOUT_S = CLI_TERMINAL_WAIT_S + CLI_HARD_TIMEOUT_GRACE_S + _TIMEOUT_MARGIN_S
+_STARTUP_MARGIN_S = 60.0
+DEFAULT_TIMEOUT_S = (
+    float(CLI_REQUESTED_TIMEOUT_S + CLI_DELIVERY_MARGIN_S + CLI_HARD_TIMEOUT_GRACE_S)
+    + _STARTUP_MARGIN_S
+)
 _TAIL_CHARS = 2000
 LEG_PROBE_CANNOT_RUN = "probe-cannot-run"
 LEG_PROBE_TIMEOUT = "probe-timeout"
@@ -191,8 +200,19 @@ def build_argv(onex_bin: str = "onex") -> list[str]:
     (OMN-18349's fix, the same one `tests/delegation_golden/runner.py` in
     omnimarket relies on). `--lane dev` is what makes that resolution correct
     for THIS probe -- the front door, not the stability-test proof lane.
+    `--timeout` bounds the consumer rebind wait and includes locus-probe time.
     """
-    return [onex_bin, "delegate", PROBE_PROMPT, "--bus", "kafka", "--lane", PROBE_LANE]
+    return [
+        onex_bin,
+        "delegate",
+        PROBE_PROMPT,
+        "--bus",
+        "kafka",
+        "--lane",
+        PROBE_LANE,
+        "--timeout",
+        str(CLI_REQUESTED_TIMEOUT_S),
+    ]
 
 
 class ModelR1ProbeResult(BaseModel):
@@ -224,6 +244,13 @@ def _default_runner(
     )
 
 
+def _decode_partial(output: bytes | str | None) -> str:
+    """Decode captured timeout output, which may be bytes even in text mode."""
+    if isinstance(output, bytes):
+        return output.decode(errors="replace")
+    return output or ""
+
+
 def run_probe(
     *,
     onex_bin: str = "onex",
@@ -245,14 +272,30 @@ def run_probe(
             timeout_reason=str(exc) if is_timeout else None,
             spawn_error=not is_timeout,
         )
+        stdout = ""
+        stderr = ""
+        if isinstance(exc, subprocess.TimeoutExpired):
+            stdout = _decode_partial(exc.stdout)
+            stderr = _decode_partial(exc.stderr)
+            lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+            evidence = [
+                line
+                for line in lines
+                if not line.startswith(("drift_guard:", "identity:", "controller:"))
+            ]
+            if lines:
+                last_line = " ".join((evidence[-1] if evidence else lines[-1]).split())
+                named_cause = (
+                    f"probe killed the CLI after {exc.timeout}s; its last line: {last_line}"
+                )[:240]
         return ModelR1ProbeResult(
             argv=argv,
             lane=PROBE_LANE,
             exit_code=2,
             ok=False,
             duration_s=duration,
-            stdout_tail="",
-            stderr_tail="",
+            stdout_tail=stdout[-_TAIL_CHARS:],
+            stderr_tail=stderr[-_TAIL_CHARS:],
             timeout_reason=str(exc),
             leg=leg,
             named_cause=named_cause,
