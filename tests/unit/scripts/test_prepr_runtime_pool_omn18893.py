@@ -16,6 +16,7 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -2645,3 +2646,74 @@ def test_verify_signal_a_second_signal_during_cleanup_does_not_cut_it_short(
     assert code == 128 + signal.SIGTERM.value
     assert hosts["pool-c-slot-1"].ran[-2:] == ["teardown", "snap-post"]
     assert hosts["pool-c-slot-1"].lease is None
+
+
+def test_local_transport_is_this_host_loopback() -> None:
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    assert pool.is_this_host(f"{current_user}@127.0.0.1") is True
+
+
+def test_local_transport_is_this_host_other_user() -> None:
+    assert pool.is_this_host("someone-else-xyz@127.0.0.1") is False
+
+
+def test_local_transport_is_this_host_foreign_address() -> None:
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    assert pool.is_this_host(f"{current_user}@192.0.2.1") is False
+    assert pool.is_this_host("nohost.invalid") is False
+
+
+def test_local_transport_runs_locally_without_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_run = pool.subprocess.run
+    calls: list[list[str]] = []
+
+    def recording_run(
+        argv: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(pool.subprocess, "run", recording_run)
+    command = "pwd; echo marker"
+    rc, output = pool.SshTransport(local_check=lambda t: True).run(
+        CFG.host("pool-a"), command, 30
+    )
+    assert rc == 0
+    assert str(Path.home()) in output
+    assert "marker" in output
+    assert all(argv[0] != "ssh" for argv in calls)
+    assert calls[0] == ["bash", "-c", command]
+    assert calls[0][2] == command
+
+
+def test_local_transport_put_copies_file(tmp_path: Path) -> None:
+    local = tmp_path / "source.txt"
+    remote = tmp_path / "destination.txt"
+    local.write_text("local transport copy\n", encoding="utf-8")
+    transport = pool.SshTransport(local_check=lambda t: True)
+    host = CFG.host("pool-a")
+    assert transport.put(host, local, str(remote)) == 0
+    assert remote.read_text(encoding="utf-8") == local.read_text(encoding="utf-8")
+    assert transport.put(host, local, str(tmp_path / "missing" / "file.txt")) == 1
+
+
+def test_local_transport_remote_host_still_uses_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "ok", "")
+
+    monkeypatch.setattr(pool.subprocess, "run", fake_run)
+    host = CFG.host("pool-a")
+    command = "echo marker"
+    assert pool.SshTransport(local_check=lambda t: False).run(host, command, 30) == (
+        0,
+        "ok",
+    )
+    assert calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
+    assert calls[0][-2:] == [host.ssh_target, pool.REMOTE_PATH + command]
