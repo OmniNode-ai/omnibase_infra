@@ -320,6 +320,11 @@ requirements:
     acceptance:
       - id: AC140
         statement: 'AC140: the derived developer-principal grants carry WRITE and DESCRIBE on exactly the 29 onex.evt.omniclaude.* hook topics, onex.evt.omniclaude.hook-event.v1 among them, no READ on any of them and no omniintelligence topic, and the committed derived file is the derivation node''s output -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "hook_edge or writable or committed_derived"'
+  - id: req-omn17427-dev-broker-8g-step
+    statement: The dev lane's Redpanda broker takes the second staged OMN-19077 step, its declared default reservation going from 12G to 8G in docker/docker-compose.infra.yml for both the broker command and the profile service that logs it, while the stability lane's broker keeps its own 12G dial.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: docker-compose.infra.yml declares --memory ${DEV_REDPANDA_MEMORY:-8G} and REDPANDA_PROFILE_MEMORY ${DEV_REDPANDA_MEMORY:-8G}, the stability lane still declares ${STABILITY_TEST_REDPANDA_MEMORY:-12G}, and no two lanes share a dial -- falsifier: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q'
 evidence_requirements:
   - kind: tests
     description: Local exception admission and clean-root controls run through the existing bus node and validator.
@@ -1468,3 +1473,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC140
+  - id: dod-omn-17427-ac100-dev-broker-8g
+    description: Unit tests read docker-compose.infra.yml and every lane's broker compose file; the dev broker command and its profile service both default to 8G, the stability lane keeps 12G, and no lane shares a dial. Red at the merge base, which declares 12G. Does not claim the live broker runs 8G; that is read from /proc after the dev-lane deploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac100-dev-broker-8g-deploy-check
+    description: Hosted-runner deploy check -- the published dev-lane compose declares the 8G dev broker default for the broker and its profile service. Reads repository files only; no Docker daemon, broker or lab host is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q -k "dev_broker_takes_the_staged_8g_step or dev_lane_reads_its_own_memory_dial"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142

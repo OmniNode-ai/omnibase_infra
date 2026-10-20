@@ -48,13 +48,17 @@ _ComposeLoader.add_constructor("!override", _construct_compose_value)
 _ComposeLoader.add_constructor("!reset", _construct_compose_value)
 
 
-def _memory_arg(compose_path: Path) -> str:
-    """Return the token following --memory in that file's redpanda command."""
+def _load_compose(compose_path: Path) -> dict[str, Any]:
     raw = compose_path.read_text(encoding="utf-8")
     # _ComposeLoader extends SafeLoader; the extra constructors only unwrap
     # compose merge/override tags.
     compose: dict[str, Any] = yaml.load(raw, Loader=_ComposeLoader)  # noqa: S506
-    command = compose["services"]["redpanda"]["command"]
+    return compose
+
+
+def _memory_arg(compose_path: Path) -> str:
+    """Return the token following --memory in that file's redpanda command."""
+    command = _load_compose(compose_path)["services"]["redpanda"]["command"]
     # Two spellings are in use across these files: "--memory" and its value as
     # separate list entries, or a single "--memory <value>" entry. Handle both
     # rather than asserting one, so this test pins the VALUE and not the style.
@@ -71,7 +75,7 @@ def test_dev_lane_reads_its_own_memory_dial() -> None:
     """The dev lane must not read the shared variable."""
     value = _memory_arg(_DOCKER_DIR / "docker-compose.infra.yml")
 
-    assert value == "${DEV_REDPANDA_MEMORY:-12G}"
+    assert value == "${DEV_REDPANDA_MEMORY:-8G}"
     assert "REDPANDA_MEMORY:-" not in value.replace("DEV_REDPANDA_MEMORY:-", "")
 
 
@@ -187,7 +191,9 @@ def test_stability_test_dial_is_12g_by_default_and_needs_no_env_edit() -> None:
     file. If this lane still read that variable, or read a new one with no
     default or a ``:?`` guard, the next governed recreate would either keep 24G
     or need an untracked host edit. Assert the lane's own variable, its default,
-    and that the default is the dev lane's level.
+    and that the default stays 12G: the dev lane's later 12G -> 8G step
+    (OMN-19077 AC-5, staged) is the dev lane's alone and must not carry this
+    lane with it.
     """
     value = _memory_arg(_DOCKER_DIR / "docker-compose.stability-test.yml")
 
@@ -196,9 +202,29 @@ def test_stability_test_dial_is_12g_by_default_and_needs_no_env_edit() -> None:
         "stability-test reads the shared variable again; the operator env's 24G "
         "would come back at the next recreate"
     )
-    dev_default = _memory_arg(_DOCKER_DIR / "docker-compose.infra.yml").split(":-", 1)[
-        1
-    ]
-    assert value.split(":-", 1)[1] == dev_default, (
-        "the stability-test default no longer matches the dev lane's level"
+
+
+def _partition_cap_profile_memory(compose_path: Path) -> str:
+    return str(
+        _load_compose(compose_path)["services"]["redpanda-partition-cap"][
+            "environment"
+        ]["REDPANDA_PROFILE_MEMORY"]
     )
+
+
+@pytest.mark.unit
+def test_dev_broker_takes_the_staged_8g_step() -> None:
+    """OMN-19077 AC-5: the dev broker's second staged step is 12G -> 8G.
+
+    The 12G step soaked from 2026-10-11 to 2026-10-20 on the lab host. Read on
+    2026-10-20T06:33Z, 7 h after the dev broker's last recreate, it held
+    1.33 GB resident and 10.89 GB swapped: it fills its whole arena with
+    cache and the kernel pages it out, so most of the 12G reservation lands in
+    swap. The judge broker serves 1537 partitions on 2G. The broker command and
+    the profile service that logs it must carry the same default, or the
+    profile's logged memory would disagree with the running broker.
+    """
+    infra = _DOCKER_DIR / "docker-compose.infra.yml"
+
+    assert _memory_arg(infra) == "${DEV_REDPANDA_MEMORY:-8G}"
+    assert _partition_cap_profile_memory(infra) == "${DEV_REDPANDA_MEMORY:-8G}"
