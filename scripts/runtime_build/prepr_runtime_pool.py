@@ -74,9 +74,11 @@ import base64
 import concurrent.futures
 import contextlib
 import datetime as dt
+import getpass
 import gzip
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -355,7 +357,7 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 
 
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -390,6 +392,97 @@ class SshTransport:
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
         ).returncode
+
+
+def _bindable(addr: str) -> bool:
+    """Whether a literal IP belongs to this machine."""
+    try:
+        ipaddress.ip_address(addr)
+        family = socket.AF_INET6 if ":" in addr else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((addr, 0))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def is_this_host(
+    ssh_target: str,
+    user: str | None = None,
+    bind: Callable[[str], bool] | None = None,
+) -> bool:
+    """Whether the target names this machine and the current user."""
+    target_user, sep, addr = ssh_target.rpartition("@")
+    if sep and target_user != (getpass.getuser() if user is None else user):
+        return False
+    return (bind or _bindable)(addr)
+
+
+class LocalTransport:
+    """Run pool commands as the current user on this machine."""
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        env = {
+            key: os.environ[key]
+            for key in ("HOME", "USER", "LOGNAME", "SHELL", "LANG")
+            if key in os.environ
+        }
+        # the PATH a non-interactive sshd session starts with, so a local run
+        # finds the same tools an ssh one does
+        env["PATH"] = (
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+        )
+        proc = subprocess.Popen(
+            ["bash", "-c", REMOTE_PATH + command],
+            cwd=Path.home(),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+            return 124, stdout + stderr + f"\n[timeout after {timeout:.0f}s]"
+        return proc.returncode, stdout + stderr
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        try:
+            shutil.copyfile(local, remote)
+            return 0
+        except OSError:
+            return 1
+
+
+class HostRoutingTransport:
+    """Choose a local shell or ssh once per target."""
+
+    def __init__(
+        self,
+        ssh: Transport | None = None,
+        local: Transport | None = None,
+        is_local: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._ssh = ssh if ssh is not None else SshTransport()
+        self._local = local if local is not None else LocalTransport()
+        self._is_local = is_local if is_local is not None else is_this_host
+        self._targets: dict[str, bool] = {}
+
+    def _transport(self, host: PoolHost) -> Transport:
+        target = host.ssh_target
+        if target not in self._targets:
+            self._targets[target] = self._is_local(target)
+        return self._local if self._targets[target] else self._ssh
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        return self._transport(host).run(host, command, timeout)
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        return self._transport(host).put(host, local, remote)
 
 
 # --------------------------------------------------------------------------- ledger
@@ -2631,7 +2724,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
                 ),
             )
         return EXIT_USAGE
-    tp = transport or SshTransport()
+    tp = transport or HostRoutingTransport()
     now = _utcnow()
     if args.cmd in ("status", "pick"):
         holds = live_surface_holds(_ledger_lines(args.ledger), now)
