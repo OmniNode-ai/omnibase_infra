@@ -267,7 +267,9 @@ def test_dev_105_lane_boundary_broker_is_sized_for_the_host() -> None:
     assert f"- {DEV_202_REDPANDA_MEMORY_DEFAULT}" in dev_202, "positive control"
     block = re.search(r"^  redpanda-partition-cap:\n((?:    .*\n)+)", raw, re.MULTILINE)
     assert block is not None
+    # OMN-17427: the lane declares its own image so a dev pin move never reaches it.
     assert block.group(1).strip() == (
+        "image: redpandadata/redpanda:v24.2.7\n    "
         "container_name: omnibase-infra-dev-105-redpanda-partition-cap\n"
         "    environment:\n"
         f"      REDPANDA_PROFILE_MEMORY: {REDPANDA_MEMORY_DEFAULT}"
