@@ -18,6 +18,7 @@ units:
     installed: ~/.config/systemd/user/onex-disk-gc.service
     hosts:
       - omninode-pc
+    render_registry_root_env: OMNI_HOME
   - name: onex-disk-gc.timer
     tracked: deploy/disk-gc/onex-disk-gc.timer
     installed: ~/.config/systemd/user/onex-disk-gc.timer

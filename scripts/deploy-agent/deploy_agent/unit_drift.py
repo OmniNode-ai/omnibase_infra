@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -22,7 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 INDETERMINATE_REASON = "no unit-drift provider is configured"
 
@@ -47,6 +48,8 @@ class ModelUnitEntry(BaseModel):
     hosts: list[str]
     render_script: str | None = None
     render_args: list[str] = Field(default_factory=list)
+    # An installer that writes the registry root over this Environment= default.
+    render_registry_root_env: str | None = None
 
     @field_validator("tracked", "render_script")
     @classmethod
@@ -57,6 +60,13 @@ class ModelUnitEntry(BaseModel):
         ):
             raise ValueError("source paths must be repo-root-relative")
         return value
+
+    @model_validator(mode="after")
+    def one_renderer(self) -> ModelUnitEntry:
+        """A unit is rendered by its script or by the registry root, never both."""
+        if self.render_script is not None and self.render_registry_root_env is not None:
+            raise ValueError("render_script and render_registry_root_env are exclusive")
+        return self
 
 
 class ModelUnitResult(BaseModel):
@@ -86,6 +96,34 @@ def _hostname(hostname: str) -> str:
     return hostname.lower().removesuffix(".local")
 
 
+def _registry_root() -> str:
+    registry_root = os.environ.get("UNIT_DRIFT_REGISTRY_ROOT", "")
+    if not registry_root or not Path(registry_root).is_absolute():
+        raise ValueError(
+            "registry-bound installed paths require absolute UNIT_DRIFT_REGISTRY_ROOT"
+        )
+    return registry_root
+
+
+def _render_registry_root(tracked: bytes, variable: str) -> bytes:
+    """Write the registry root over the variable's default, as its installer does.
+
+    The installer escapes the root for systemd's quoted Environment= value
+    (backslash, double quote) and for its percent specifiers (OMN-20210).
+    """
+    default = re.search(
+        rb'^Environment="' + re.escape(variable.encode()) + rb'=([^"]+)"$',
+        tracked,
+        re.MULTILINE,
+    )
+    if default is None:
+        raise ValueError(f"tracked unit declares no {variable} default to render")
+    escaped = (
+        _registry_root().replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    )
+    return tracked.replace(default.group(1), escaped.encode())
+
+
 def _installed_path(
     entry: ModelUnitEntry, home: Path, *, resolve_registry: bool = True
 ) -> Path:
@@ -94,18 +132,16 @@ def _installed_path(
     if entry.installed.startswith("~/"):
         return home / entry.installed[2:]
     if entry.installed.startswith("{registry_root}/") and resolve_registry:
-        registry_root = os.environ.get("UNIT_DRIFT_REGISTRY_ROOT", "")
-        if not registry_root or not Path(registry_root).is_absolute():
-            raise ValueError(
-                "registry-bound installed paths require absolute UNIT_DRIFT_REGISTRY_ROOT"
-            )
-        return Path(registry_root) / entry.installed.removeprefix("{registry_root}/")
+        return Path(_registry_root()) / entry.installed.removeprefix("{registry_root}/")
     return Path(entry.installed)
 
 
 def _tracked_bytes(entry: ModelUnitEntry, repo_root: Path, home: Path) -> bytes:
     if entry.render_script is None:
-        return (repo_root / entry.tracked).read_bytes()
+        tracked = (repo_root / entry.tracked).read_bytes()
+        if entry.render_registry_root_env is None:
+            return tracked
+        return _render_registry_root(tracked, entry.render_registry_root_env)
     return subprocess.run(
         [
             "bash",

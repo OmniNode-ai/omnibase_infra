@@ -249,6 +249,13 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-completed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -263,6 +270,13 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omniclaude.agent-actions.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -663,6 +677,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omniclaude.tool-executed.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omniintelligence.llm-call-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omniintelligence.llm-call-completed.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
