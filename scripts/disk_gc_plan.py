@@ -51,7 +51,8 @@ Safety invariants (enforced + tested in tests/unit/scripts/test_disk_gc_plan.py)
   - never remove an image whose repo matches a keep_image_repos substring
   - never remove an image whose tag matches keep_image_tags exactly
   - never remove an image referenced by any container when protect_running is true
-  - never remove anything younger than min_age_days
+  - never remove anything younger than min_age_days; dangling images use
+    dangling_min_age_hours instead
   - retain the newest superseded_image_keep_generations of each kept repo
 
 In-use matching (OMN-15804): `inuse_refs` entries can be a repo:tag string OR an
@@ -132,6 +133,7 @@ DEFAULT_GENERATION_TAG_PATTERNS: tuple[str, ...] = (
 # generations permanently ineligible and a keep-newest-N window never bites.
 DEFAULT_GENERATION_KEEP = 3
 DEFAULT_GENERATION_MIN_AGE_HOURS = 6
+DEFAULT_DANGLING_MIN_AGE_HOURS = 6
 
 # docker prints SI sizes ("3.66GB", "611MB", "24.73kB").
 _SIZE_RE = re.compile(r"^\s*([0-9.]+)\s*([a-zA-Z]*B)\s*$")
@@ -330,6 +332,9 @@ def build_plan(
     protect_running: bool = bool(keep_list.get("protect_running", True))
     keep_generations: int = int(keep_list.get("superseded_image_keep_generations", 2))
     min_age_days: int = int(keep_list.get("min_age_days", 3))
+    dangling_min_age_hours: float = float(
+        keep_list.get("dangling_min_age_hours", DEFAULT_DANGLING_MIN_AGE_HOURS)
+    )
     # OMN-16367: single source of truth for the builder-cache ceiling. Default
     # sized to the lab's working set, NOT to the 3.6 TB disk -- BuildKit's own
     # default derives a 341.8 GiB reserved floor from volume size, which is
@@ -441,19 +446,28 @@ def build_plan(
             generations_by_repo.setdefault(repo, []).append((age, image_id))
             continue
 
-        # --- Age gate (applies to all remaining images) ---
+        # OMN-20210: on h202 on 2026-10-19, the second dev lane's hourly deploy-agent
+        # rebuilds left 1,617 dangling images younger than 3 days and root at
+        # 97 percent. A dangling image has no tag, so no compose file names it
+        # as a rollback target.
+        is_dangling = repo == "<none>" or repo == "" or tag == "<none>"
+
+        if is_dangling:
+            if age * 24.0 < dangling_min_age_hours:
+                kept_reasons[image_id] = (
+                    f"younger than dangling_min_age_hours "
+                    f"({age * 24.0:.1f}h<{dangling_min_age_hours}h)"
+                )
+            else:
+                remove_image_ids.append(image_id)
+            continue
+
+        # --- Age gate (applies to all remaining tagged images) ---
 
         if age < min_age_days:
             kept_reasons[image_id] = (
                 f"younger than min_age_days ({age:.1f}<{min_age_days})"
             )
-            continue
-
-        is_dangling = repo == "<none>" or repo == "" or tag == "<none>"
-
-        if is_dangling:
-            # Dangling + old + not in use → safe to remove.
-            remove_image_ids.append(image_id)
             continue
 
         if _repo_protected(repo, keep_repos):
