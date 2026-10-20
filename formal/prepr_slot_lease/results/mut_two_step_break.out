@@ -1,0 +1,124 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Warning: Please run the Java VM, which executes TLC with a throughput optimized garbage collector, by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 75 and seed 8363811640953645247 with 2 workers on 12 cores with 8192MB heap and 64MB offheap memory [pid: 40654] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file PreprSlotLease.tla
+Parsing file Naturals.tla (jar:tla2tools.jar!Naturals.tla)
+Parsing file FiniteSets.tla (jar:tla2tools.jar!FiniteSets.tla)
+Parsing file _TLCTrace.tla (jar:tla2tools.jar!_TLCTrace.tla)
+Parsing file Sequences.tla (jar:tla2tools.jar!Sequences.tla)
+Parsing file TLC.tla (jar:tla2tools.jar!TLC.tla)
+Parsing file TLCExt.tla (jar:tla2tools.jar!TLCExt.tla)
+Parsing file Integers.tla (jar:tla2tools.jar!Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module PreprSlotLease
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module PreprSlotLease
+Starting... (2026-10-19 20:12:36)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-19 20:12:36.
+Error: Invariant OneHolder is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ seen = (a1 :> "absent" @@ a2 :> "absent" @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "try" @@ a2 :> "try" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 2: <Try(a1) line 72, col 3 to line 76, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> "absent" @@ a2 :> "absent" @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "read" @@ a2 :> "try" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 3: <Read(a1) line 85, col 3 to line 88, col 40 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> "absent" @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "decide" @@ a2 :> "try" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 4: <Decide(a1) line 92, col 3 to line 96, col 46 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> "absent" @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "brm" @@ a2 :> "try" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 5: <Try(a2) line 72, col 3 to line 76, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> "absent" @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "brm" @@ a2 :> "read" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 6: <Read(a2) line 85, col 3 to line 88, col 40 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "brm" @@ a2 :> "decide" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = old
+
+State 7: <BRm(a1) line 111, col 3 to line 114, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "bmkdir" @@ a2 :> "decide" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = "absent"
+
+State 8: <BMkdir(a1) line 117, col 3 to line 122, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "bwrite" @@ a2 :> "decide" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = "empty"
+
+State 9: <BWrite(a1) line 125, col 3 to line 128, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "hold" @@ a2 :> "decide" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = a1
+
+State 10: <Decide(a2) line 92, col 3 to line 96, col 46 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "hold" @@ a2 :> "brm" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = a1
+
+State 11: <BRm(a2) line 111, col 3 to line 114, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "hold" @@ a2 :> "bmkdir" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = "absent"
+
+State 12: <BMkdir(a2) line 117, col 3 to line 122, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "hold" @@ a2 :> "bwrite" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = "empty"
+
+State 13: <BWrite(a2) line 125, col 3 to line 128, col 39 of module PreprSlotLease>
+/\ seen = (a1 :> old @@ a2 :> old @@ a3 :> "absent" @@ old :> "absent")
+/\ expired = {old}
+/\ guard = FALSE
+/\ pc = (a1 :> "hold" @@ a2 :> "hold" @@ a3 :> "try" @@ old :> "hold")
+/\ lease = a2
+
+15551 states generated, 7045 distinct states found, 3089 states left on queue.
+The depth of the complete state graph search is 13.
+Finished in 00s at (2026-10-19 20:12:36)
+Trace exploration spec path: ./PreprSlotLease_TTrace_1792455156.tla

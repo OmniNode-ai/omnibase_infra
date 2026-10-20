@@ -123,6 +123,16 @@ class FakeTransport:
                 f"CORES={h.cores}\nLOAD={h.load}\nSLOT={h.slot}\nLISTEN={h.listen}\n"
                 f"PROJECTS=omnibase-infra-dogfood:7,\nLEASE={h.lease or ''}\n"
             )
+        if "RELEASED" in command:  # release
+            if h.lease is None:
+                return 0, "ABSENT"
+            found = re.search(r'"holder": "([^"]+)"', command)
+            assert found is not None
+            holder = found.group(1)
+            if json.loads(h.lease)["holder"] == holder:
+                h.lease = None
+                return 0, "RELEASED"
+            return 0, "FOREIGN"
         if ".break" in command:  # break an expired lease, guarded and compared
             body = re.search(r"printf '%s' '(\{.*?\})'", command)
             assert body is not None
@@ -137,16 +147,6 @@ class FakeTransport:
                 h.lease = body.group(1)
                 return 0, "ACQUIRED"
             return 0, "HELD\n" + h.lease
-        if "RELEASED" in command:  # release
-            if h.lease is None:
-                return 0, "ABSENT"
-            found = re.search(r'"holder": "([^"]+)"', command)
-            assert found is not None
-            holder = found.group(1)
-            if json.loads(h.lease)["holder"] == holder:
-                h.lease = None
-                return 0, "RELEASED"
-            return 0, "FOREIGN"
         if command.startswith("rm -rf $HOME/"):
             h.lease = None
             return 0, ""
