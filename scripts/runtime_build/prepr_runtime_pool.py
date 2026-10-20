@@ -41,11 +41,11 @@ The lease
 The unit of leasing is the host, because the slot's project name and ports are
 fixed. The lease is a directory on the host (``mkdir`` is atomic on macOS and
 Linux) holding ``lease.json`` with the holder and an absolute expiry. An
-expired lease is broken; a live one held by someone else is refused. The ledger
-is read, never written: a live ``HOLD`` naming the host's surface, placed by
-another lane, makes the host busy. The HOLD and RELEASE rows themselves are
-the calling lane's to write through ``/omni:ledger-msg``; this file prints the
-text for them.
+expired lease is broken; a live one held by someone else is refused. Release
+runs under the same guard as the break. The ledger is read, never written: a
+live ``HOLD`` naming the host's surface, placed by another lane, makes the host
+busy. The HOLD and RELEASE rows themselves are the calling lane's to write
+through ``/omni:ledger-msg``; this file prints the text for them.
 
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
@@ -669,16 +669,26 @@ def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
     lease = f"$HOME/{host.lease_dir}"
+    # An expired holder can read its lease before a breaker replaces it, then
+    # remove the breaker's fresh lease. Guard the read and removal with the same
+    # directory the break holds, so release cannot erase a new holder (OMN-20085).
+    guard = f"{lease}.break"
     cmd = (
+        "GOTGUARD=0; i=0; while [ $i -lt 100 ]; do "
+        f"if mkdir {guard} 2>/dev/null; then GOTGUARD=1; break; fi; "
+        'i=$((i+1)); sleep 0.1; done; if [ "$GOTGUARD" = 1 ]; then '
         f"H=$(cat {lease}/lease.json 2>/dev/null); "
         f'case "$H" in *\'"holder": "{holder}"\'*) rm -rf {lease} && echo RELEASED;; '
-        "'') echo ABSENT;; *) echo FOREIGN;; esac"
+        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
+        "else echo GUARDBUSY; fi"
     )
     rc, out = transport.run(host, cmd, timeout=30)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
         return True, "no lease was present"
+    if "GUARDBUSY" in out:
+        return False, f"lease guard {guard} held past the wait; lease left to expire"
     return False, f"lease is not this holder's (rc={rc}): {out.strip()[:200]}"
 
 
