@@ -424,6 +424,38 @@ class TestOmnidashPrincipalCanCreateTheLedgerSchema:
         )
 
 
+class TestIntelligencePrincipalCanCreateItsExtensions:
+    """The intelligence corpus opens with CREATE EXTENSION, which needs CREATE on the database.
+
+    Live slot bring-up (2026-10-19, slot 1): the intelligence migration
+    stopped with 'permission denied to create extension "pgcrypto"' against the
+    fresh omniintelligence_prepr1, before the runtime came up. Every extension
+    the corpus names is trusted, and a trusted extension waives SUPERUSER but
+    still needs CREATE on the database, which the slot principal did not hold.
+    """
+
+    def test_the_intelligence_corpus_creates_extensions(self) -> None:
+        corpus = REPO_ROOT / "docker" / "migrations" / "intelligence"
+        assert any(
+            re.search(r"^\s*CREATE EXTENSION", f.read_text(encoding="utf-8"), re.M)
+            for f in corpus.glob("*.sql")
+        )
+
+    def test_apply_grants_create_on_the_slot_intelligence_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omniintelligence)"' in text
+        assert 'derive role_omniintelligence)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_intel_db}\\" TO \\"${_intel_role}\\";'
+            in text
+        )
+        assert (
+            "has_database_privilege('${_intel_role}', '${_intel_db}', 'CREATE')" in text
+        )
+
+
 class TestSeamsAreFenced:
     """Both password-resetting seams refuse an out-of-fence role under a slot."""
 
