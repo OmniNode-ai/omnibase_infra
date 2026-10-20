@@ -1008,6 +1008,19 @@ def reap_slot(
         return {**result, "reason": type(exc).__name__}
 
 
+RUN_GATE = """import os, sys
+fd = int(sys.argv[1])
+if os.read(fd, 1) != b"1":
+    sys.exit(125)
+os.close(fd)
+try:
+    os.execvp(sys.argv[2], sys.argv[2:])
+except OSError as exc:
+    print(f"prepr lease run: cannot exec {sys.argv[2]}: {exc}", file=sys.stderr)
+    sys.exit(127)
+"""
+
+
 def run_command(args: argparse.Namespace) -> int:
     root, token = state_root(), args.token or uuid.uuid4().hex
     staging = args.staging_root or str(STAGING_PARENT / f"slot-{args.slot}")
@@ -1016,11 +1029,25 @@ def run_command(args: argparse.Namespace) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise LeaseRefusedError("run requires a command after --")
-    child = subprocess.Popen(command, env=env, start_new_session=True)
-    with locked(record_path(root, args.slot).with_suffix(".guard"), wait=True):
-        record = read_record(root, args.slot)
-        record.update(child_pid=child.pid, child_start=process_start(child.pid))
-        write_record(root, args.slot, record)
+    # The child waits on a pipe until its pid is in the lease, then execs the
+    # command (same pid and start time). An owner killed before recording it
+    # closes the pipe, and the command never runs untracked by the reaper.
+    gate_read, gate_write = os.pipe()
+    try:
+        child = subprocess.Popen(
+            [sys.executable, "-c", RUN_GATE, str(gate_read), *command],
+            env=env,
+            start_new_session=True,
+            pass_fds=(gate_read,),
+        )
+        os.close(gate_read)
+        with locked(record_path(root, args.slot).with_suffix(".guard"), wait=True):
+            record = read_record(root, args.slot)
+            record.update(child_pid=child.pid, child_start=process_start(child.pid))
+            write_record(root, args.slot, record)
+        os.write(gate_write, b"1")
+    finally:
+        os.close(gate_write)
 
     def forward(signum: int, _frame: Any) -> None:
         if child.poll() is None:

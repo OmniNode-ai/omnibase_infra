@@ -566,3 +566,33 @@ def test_installer_propagates_systemd_enable_failure(tmp_path: Path) -> None:
     )
     assert proc.returncode != 0
     assert '"enabled": true' not in proc.stdout
+
+
+def test_run_command_starts_only_after_its_pid_is_in_the_lease(
+    reaper: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ONEX_PREPR_LEASE_DIR", str(tmp_path))
+    monkeypatch.setattr(reaper, "STAGING_PARENT", tmp_path.resolve() / "staging")
+    real_start = reaper.process_start
+
+    def slow_start(pid: int) -> str:
+        if pid != os.getpid():
+            time.sleep(0.5)
+        return str(real_start(pid))
+
+    monkeypatch.setattr(reaper, "process_start", slow_start)
+    check = (
+        "import json, os, sys; "
+        "r = json.load(open(sys.argv[1])); "
+        "sys.exit(0 if r.get('child_pid') == os.getpid() else 9)"
+    )
+    args = reaper.lease_main.__globals__["argparse"].Namespace(
+        slot=1,
+        holder="gate-proof",
+        token="gate-run",
+        staging_root=None,
+        ttl=30.0,
+        interval=0.05,
+        command=["--", sys.executable, "-c", check, str(tmp_path / "slot-1.json")],
+    )
+    assert reaper.run_command(args) == 0
