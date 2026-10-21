@@ -245,20 +245,21 @@ def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     assert lane_spec["compose_file"] == "docker/docker-compose.lakshman.yml"
     # The governed lanes must NOT have become optional along the way.
     #
-    # OMN-18320 retired exactly one lab compose lane: `prod`. The governance
-    # constant stays wider than the manifest on purpose so unattributed prod
-    # mutations still refuse. This pins the split exactly, so a future partial
-    # erosion of stability-test or judge cannot hide behind a non-empty
-    # intersection.
+    # OMN-18320 retired the lab compose lane `prod`, and on 2026-10-21 the
+    # `judge` compose project was taken down and removed from the census too
+    # (omnibase_internal#949). The governance constant stays wider than the
+    # manifest on purpose so unattributed mutations of either still refuse.
+    # This pins the split exactly, so a future partial erosion of
+    # stability-test cannot hide behind a non-empty intersection.
     declared_governed = GOVERNED_LANES & manifest["lanes"].keys()
     retired_from_manifest = GOVERNED_LANES - manifest["lanes"].keys()
-    assert declared_governed == frozenset({"stability-test", "judge"}), (
-        "only the retired lab compose prod lane may be absent from the census "
-        f"manifest; declared governed lanes are {sorted(declared_governed)}"
+    assert declared_governed == frozenset({"stability-test"}), (
+        "only the retired lab compose prod and judge lanes may be absent from "
+        f"the census manifest; declared governed lanes are {sorted(declared_governed)}"
     )
-    assert retired_from_manifest == frozenset({"prod"}), (
-        "the only governed lane missing from the census manifest must be the "
-        f"retired lab compose prod lane; got {sorted(retired_from_manifest)}"
+    assert retired_from_manifest == frozenset({"prod", "judge"}), (
+        "the only governed lanes missing from the census manifest must be the "
+        f"retired lab compose prod and judge lanes; got {sorted(retired_from_manifest)}"
     )
     for governed in declared_governed:
         assert not manifest["lanes"][governed].get("optional", False), (
