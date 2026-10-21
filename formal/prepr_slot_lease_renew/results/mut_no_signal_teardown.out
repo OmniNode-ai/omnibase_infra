@@ -1,0 +1,97 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 122 and seed 3913523300885939069 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/PreprSlotLease.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PreprSlotLease
+Starting... (2026-10-19 13:42:40)
+Implied-temporal checking--satisfiability problem has 12 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-19 13:42:40.
+Error: Invariant NoSoftKillAbandon is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 0
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 2: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 3: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 4: <Attempt line 161, col 5 to line 170, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "between" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 5], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 5: <SoftKill line 258, col 5 to line 268, col 68 of module PreprSlotLease>
+/\ killsLeft = 0
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "dead" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 5], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> TRUE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+29 states generated, 29 distinct states found, 20 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 4 (minimum is 4, the maximum 4 and the 95th percentile is 4).
+Finished in 00s at (2026-10-19 13:42:40)

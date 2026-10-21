@@ -263,6 +263,11 @@ requirements:
     acceptance:
       - id: AC99
         statement: 'AC99: a refused container removal leaves the containers, topics, databases and staging root in place and ends INCOMPLETE, and a staging root that cannot be removed ends INCOMPLETE with a report -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q'
+  - id: req-omn17427-prepr-verify-lease-renew
+    statement: The pre-PR verify driver renews its slot lease before every phase in the same remote command that starts the phase, stops without teardown when the lease is no longer its own, and the TLA+ model of the slot lease (OMN-20085 AC3 formal half) is committed with its TLC results under formal/prepr_slot_lease_renew.
+    acceptance:
+      - id: AC55
+        statement: 'AC55: every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k, a peer taking the lease stops the run with no teardown and exit 2, a renewal racing seven breakers of its expired lease leaves one holder in 25 rounds, and the committed TLC results pass the model and fail every mutation -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_renew_model.py -q -k "renew or model or mutation"'
   - id: req-omn17427-cve-autobump-keeps-contract
     statement: The lockfile CVE autobump refresh carries the open PR's contracts/<ticket>.yaml forward when it rebuilds the bot branch from the base, so a scheduled refresh no longer force-pushes the evidence contract away.
     acceptance:
@@ -1392,6 +1397,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC99
+  - id: dod-omn-17427-ac55-prepr-lease-renew
+    description: 'The verify driver prefixes every phase, teardown and snap-post included, with a guarded renewal of its own lease and a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown. Real-shell tests run the renewal and release commands, and one races a renewal against seven breakers of its expired lease for 25 rounds with exactly one holder each round. 15 of the renew and budget tests fail against the merge-base driver. The model test binds the committed TLC output (Model passes about 1.9 million distinct states; nine mutations each fail) to the spec and cfg digest.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/formal/test_prepr_slot_lease_renew_model.py -q -k "renew or model or mutation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC55
+  - id: dod-omn-17427-ac55-lease-renew-deploy-check
+    description: Hosted-runner deploy check -- the renewal and phase-command tests run the real renewal command in bash against a lease directory on local disk; no pre-PR slot is touched and no live slot run (OMN-20085 AC7) is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_lease_omn18893.py tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k renew
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC55
   - id: dod-omn-17427-ac60-autobump-keeps-contract
     description: Fake-runner tests check that the autobump refresh carries the open PR's contract forward and adds nothing when there is none; they do not claim a scheduled run.
     source: manual
