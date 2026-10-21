@@ -38,6 +38,11 @@ ROOT = f"{TICKET}.yaml"
 CHECK = "python -c 'assert 1 + 1 == 2'"
 
 
+def criterion(scope: str) -> str:
+    """Use distinct numeric labels accepted by the pinned ticket model."""
+    return "AC1" + "".join(f"{ord(char):03d}" for char in scope) + "0001"
+
+
 def contribution(scope: str) -> dict:
     return {
         "schema_version": "1.0.0",
@@ -48,7 +53,7 @@ def contribution(scope: str) -> dict:
                 "statement": "An independently authored requirement.",
                 "acceptance": [
                     {
-                        "id": f"AC.{scope.replace('-', '.')}.1",
+                        "id": criterion(scope),
                         "statement": "The check succeeds.",
                     }
                 ],
@@ -59,7 +64,7 @@ def contribution(scope: str) -> dict:
                 "id": f"dod-{scope}-1",
                 "description": "An executable check bound to the branch's criterion.",
                 "source": "manual",
-                "binds_ac": [f"AC.{scope.replace('-', '.')}.1"],
+                "binds_ac": [criterion(scope)],
                 "checks": [{"check_type": "command", "check_value": CHECK}],
             }
         ],
@@ -161,7 +166,7 @@ def test_two_branch_contract_additions_merge_without_textual_conflict(
         )
         for item in output["dod_evidence"]:
             assert item["checks"][0]["check_value"] == CHECK
-            assert item["binds_ac"] == [f"AC.{item['id'][4:-2]}.1"]
+            assert item["binds_ac"] == [criterion(item["id"][4:-2])]
         outputs.append(output)
     assert outputs[0] == outputs[1]
 
@@ -229,13 +234,28 @@ def test_branch_names_remain_distinct_after_verifier_label_normalization(
     )
     composed = load_composed(tmp_path)
     labels = [item["binds_ac"][0] for item in composed["dod_evidence"]]
-    assert labels == ["AC.existing.1", "AC.alpha.one.1", "AC.alphaone.1"]
+    assert labels == [
+        criterion(scope) for scope in ("existing", "alpha-one", "alphaone")
+    ]
     # This is the pinned verifier's label rule. In particular, plain hyphen
     # namespaces AC-alpha-one-1 and AC-alphaone-1 would both become ACALPHAONE1.
     canonical = [
         label.strip().upper().replace("-", "").replace("_", "") for label in labels
     ]
     assert len(set(canonical)) == len(labels)
+
+
+def test_fragment_cannot_reuse_a_normalized_legacy_criterion(tmp_path: Path) -> None:
+    root = root_contract()
+    legacy = criterion("alpha").replace("AC", "ac-")
+    root["requirements"][0]["acceptance"][0]["id"] = legacy
+    root["dod_evidence"][0]["binds_ac"] = [legacy]
+    write_contracts(
+        tmp_path, {ROOT: root, f"{TICKET}.d/alpha.yaml": contribution("alpha")}
+    )
+    result = compose(tmp_path)
+    assert not result.success
+    assert "duplicate acceptance id" in result.error_message
 
 
 def test_appending_to_the_shared_root_reproduces_the_textual_conflict(
@@ -269,7 +289,7 @@ def test_appending_to_the_shared_root_reproduces_the_textual_conflict(
         ("ticket", "ticket_id"),
         ("schema", "schema_version"),
         ("metadata", "unsupported fragment fields"),
-        ("namespace", "prefix"),
+        ("namespace", "acceptance id"),
         ("unbound", "unbound"),
         ("foreign_binding", "unknown criterion"),
         ("empty_checks", "checks"),
@@ -287,11 +307,11 @@ def test_invalid_fragment_is_refused(tmp_path: Path, change: str, message: str) 
     elif change == "metadata":
         fragment["title"] = "Overwrite the root"
     elif change == "namespace":
-        fragment["requirements"][0]["acceptance"][0]["id"] = "AC1"
+        fragment["requirements"][0]["acceptance"][0]["id"] = "AC.alpha.1"
     elif change == "unbound":
         fragment["dod_evidence"][0]["binds_ac"] = []
     elif change == "foreign_binding":
-        fragment["dod_evidence"][0]["binds_ac"] = ["AC.existing.1"]
+        fragment["dod_evidence"][0]["binds_ac"] = [criterion("existing")]
     elif change == "empty_checks":
         fragment["dod_evidence"][0]["checks"] = []
     elif change == "bad_requirements":

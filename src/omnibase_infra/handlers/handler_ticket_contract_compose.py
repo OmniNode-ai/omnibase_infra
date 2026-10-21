@@ -3,7 +3,7 @@
 """Compose additive, branch-scoped ticket fragments into ordinary contract YAML.
 
 Preparation for shared-ticket evidence gates; this does not enable fragments in
-the external reusable workflows. See docs/ci/shared-ticket-contracts.md before
+the external reusable workflows. See CLAUDE.md, "Shared ticket contract fragments", before
 authoring a fragment. Output is returned as YAML, never written to the root.
 """
 
@@ -31,6 +31,12 @@ _TICKET = re.compile(r"OMN-[0-9]+")
 _SCOPE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _LIST_FIELDS = ("requirements", "evidence_requirements", "dod_evidence")
 _FRAGMENT_FIELDS = {"schema_version", "ticket_id", *_LIST_FIELDS}
+
+
+def _identity_key(field: str, identity: str) -> str:
+    if field == "acceptance":
+        return re.sub(r"[-_ .]", "", identity).upper()
+    return identity
 
 
 def _items(document: dict[str, object], field: str) -> list[dict[str, object]]:
@@ -92,9 +98,6 @@ def _validate_fragment(fragment: dict[str, object], scope: str) -> None:
     identities = _identities(fragment)
     for field, prefix in (
         ("requirements", f"req-{scope}-"),
-        # The verifier canonicalizes labels by removing hyphens/underscores.
-        # Dots preserve the scope's boundaries, including its internal hyphens.
-        ("acceptance", f"AC.{scope.replace('-', '.')}."),
         ("dod_evidence", f"dod-{scope}-"),
     ):
         seen = set()
@@ -103,10 +106,6 @@ def _validate_fragment(fragment: dict[str, object], scope: str) -> None:
                 not isinstance(identity, str)
                 or not identity.startswith(prefix)
                 or identity == prefix
-                or (
-                    field == "acceptance"
-                    and not re.fullmatch(r"[1-9][0-9]*", identity[len(prefix) :])
-                )
             ):
                 raise ValueError(
                     f"{scope}: {field} id must have prefix {prefix!r} and a suffix"
@@ -114,6 +113,15 @@ def _validate_fragment(fragment: dict[str, object], scope: str) -> None:
             if identity in seen:
                 raise ValueError(f"{scope}: duplicate {field} id {identity!r}")
             seen.add(identity)
+    # ModelTicketContract accepts bare numeric criterion labels. Scope names
+    # belong on requirement/evidence IDs; dotted AC labels fail that schema.
+    seen_criteria: set[str] = set()
+    for identity in identities["acceptance"]:
+        if not re.fullmatch(r"AC[1-9][0-9]*", identity):
+            raise ValueError(f"{scope}: acceptance id must be AC<positive integer>")
+        if identity in seen_criteria:
+            raise ValueError(f"{scope}: duplicate acceptance id {identity!r}")
+        seen_criteria.add(identity)
     criteria = set(identities["acceptance"])
     if not criteria:
         raise ValueError(f"{scope}: requirements must declare acceptance criteria")
@@ -172,7 +180,10 @@ def compose_ticket_contract(contracts_dir: Path, ticket: str) -> dict[str, objec
         )
     if not fragments.exists():
         return root
-    known = {field: set(ids) for field, ids in _identities(root).items()}
+    known = {
+        field: {_identity_key(field, identity) for identity in ids}
+        for field, ids in _identities(root).items()
+    }
     for path in sorted(fragments.iterdir()):
         if (
             path.suffix != ".yaml"
@@ -189,12 +200,13 @@ def compose_ticket_contract(contracts_dir: Path, ticket: str) -> dict[str, objec
             )
         _validate_fragment(fragment, path.stem)
         for field, identities in _identities(fragment).items():
-            duplicates = known[field].intersection(identities)
+            keys = {_identity_key(field, identity) for identity in identities}
+            duplicates = known[field].intersection(keys)
             if duplicates:
                 raise ValueError(
                     f"{path.name}: duplicate {field} id {sorted(duplicates)}"
                 )
-            known[field].update(identities)
+            known[field].update(keys)
         for field in _LIST_FIELDS:
             if field in fragment:
                 root[field] = [*_items(root, field), *_items(fragment, field)]

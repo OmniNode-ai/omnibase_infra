@@ -390,8 +390,8 @@ requirements:
   - id: req-omn17427-shared-ticket-contract-composer
     statement: Repository-side preparation composes independent branch fragments without shared root edits; hosted adoption remains blocked on the external gate owners.
     acceptance:
-      - id: AC-shared-ticket-contract-1
-        statement: 'Independent branch trees each add one bound criterion under contracts/OMN-17427.d, validate separately, and merge in either order with no textual conflict and no root change; malformed fragments are refused -- falsifier: uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py -q'
+      - id: AC17427001
+        statement: 'Independent branch trees each add one bound criterion under contracts/OMN-17427.d, validate separately, and merge in either order with no textual conflict and no root change; malformed fragments are refused -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1841,11 +1841,11 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py -q
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC-shared-ticket-contract-1
-  - id: dod-omn17427-shared-ticket-contract-composer-deploy
+      - AC17427001
+  - id: dod-omn17427-contract-compose-deploy
     description: Hosted-runner source and routing smoke. Loads the head-side node contract through the explicit contract path, validates the request, dispatches the real filesystem composer over the repository contract and persists its typed terminal verdict. Fails when the node, handler, input model or routing is absent or broken; requires no broker, credentials or running lane.
     source: manual
     checks:
@@ -1853,4 +1853,4 @@ dod_evidence:
         check_value: env PYTHONPATH=src onex node node_ticket_contract_compose_effect --contract src/omnibase_infra/nodes/node_ticket_contract_compose_effect/contract.yaml --input tests/ci/fixtures/ticket_contract_compose_request_omn17427.json --backend event_bus=inmemory --state-root .onex_state/ticket-contract-compose-deploy
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC-shared-ticket-contract-1
+      - AC17427001
