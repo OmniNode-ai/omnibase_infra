@@ -360,6 +360,13 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
+  - id: req-omn17427-teardown-broker-paced-deletes
+    statement: Slot teardown deletes topics in small batches paced by the shared broker's health, leaving remaining topics for a later teardown when health does not recover.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: topic deletes use batches of at most 25 names and each batch is followed by a broker health read -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k topic_deletes_are_small_chunks'
+      - id: AC143
+        statement: 'AC143: a broker that stops reporting healthy halts further topic deletes, returns INCOMPLETE and reports remaining topics while preserving other namespaces -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k a_broker_that_stops_reporting_healthy'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -525,6 +532,34 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac142-teardown-small-batches
+    description: Fake-host teardown of 120 slot topics checks multiple bounded delete batches and an immediately following broker health read for each batch. The head tests fail on the merge-base product, which has no broker health pacing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k topic_deletes_are_small_chunks
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac143-teardown-unhealthy-stop
+    description: A fake broker becomes unhealthy after the first delete batch; teardown must stop deleting topics, report INCOMPLETE with residue and preserve other namespaces. No live broker is contacted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k a_broker_that_stops_reporting_healthy
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC143
+  - id: dod-omn-17427-teardown-paced-deploy-check
+    description: Hosted-runner deploy check of the committed teardown's bounded topic batches and unhealthy-broker stop. Docker and broker responses are faked; no containers, credentials or live lane are required and no live deployment is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k "topic_deletes_are_small_chunks or a_broker_that_stops_reporting_healthy"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+      - AC143
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual
