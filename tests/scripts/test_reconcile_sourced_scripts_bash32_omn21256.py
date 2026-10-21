@@ -15,8 +15,8 @@ CI has no bash 3.2, so the guard here is static: in each sourced script, an
 array that is ever assigned empty may only be expanded through the
 ``${A[@]+"${A[@]}"}`` form, or at a line listed in ``_GUARDED_ELSEWHERE`` with
 the reason it cannot be empty there. That list is the AC2 sweep. The runtime
-test runs the real ``/bin/bash`` when it is 3.2 (any stock Mac), and is skipped
-elsewhere.
+test runs the real ``/bin/bash`` on every platform, including 3.2 on stock
+Macs. The static guard covers the empty-array rule on newer bash versions.
 """
 
 from __future__ import annotations
@@ -97,21 +97,7 @@ def test_bash32_detector_positive_control(tmp_path: Path) -> None:
     assert _unguarded_empty_expansions(script) == ['sample.sh:2: B=(x "${A[@]}")']
 
 
-def _bin_bash_is_32() -> bool:
-    try:
-        out = subprocess.run(
-            ["/bin/bash", "-c", "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-    except OSError:
-        return False
-    return out == "3.2"
-
-
 @pytest.mark.unit
-@pytest.mark.skipif(not _bin_bash_is_32(), reason="/bin/bash is not 3.2 here")
 def test_bash32_manifest_sources_under_bin_bash_nounset() -> None:
     result = subprocess.run(
         ["/bin/bash", "-euc", 'source "$1"', "_", str(MANIFEST)],

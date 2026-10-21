@@ -24,7 +24,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn21256-manifest-sources-bash32"
-    description: "The manifest sources under /bin/bash 3.2 with set -u (runtime test on a Mac whose /bin/bash is 3.2, skipped elsewhere), and the static bash 3.2 guard finds no unguarded empty-array expansion; at origin/dev 6a184d8323 both fail."
+    description: "The manifest sources under /bin/bash with set -u on every platform (including bash 3.2 on stock Macs), and the static bash 3.2 guard finds no unguarded empty-array expansion."
     source: "manual"
     checks:
       - check_type: "test_passes"
@@ -39,3 +39,11 @@ dod_evidence:
         check_value: "uv run pytest tests/scripts/test_reconcile_sourced_scripts_bash32_omn21256.py -q -p no:cacheprovider -k \"sourced_set or no_unguarded\""
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC2]
+  - id: "dod-omn21256-proof-root-guarded-array"
+    description: "Proof-root staging resolves guarded empty and populated array expansions as bash does, and the dogfood dry-run accepts a pinned root using the updated manifest. These checks use temporary local repositories and require no deployed lane."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_stage_pinned_proof_root_omn19086.py tests/scripts/test_cut_lab_ref.py -q -p no:cacheprovider -k 'bash32_guarded or dogfood_lane_is_isolated'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]
