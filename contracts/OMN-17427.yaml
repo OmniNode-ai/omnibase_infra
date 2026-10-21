@@ -377,6 +377,13 @@ requirements:
         statement: 'AC142: topic deletes use batches of at most 25 names and each batch is followed by a broker health read -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k topic_deletes_are_small_chunks'
       - id: AC143
         statement: 'AC143: a broker that stops reporting healthy halts further topic deletes, returns INCOMPLETE and reports remaining topics while preserving other namespaces -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k a_broker_that_stops_reporting_healthy'
+  - id: req-omn17427-hostile-review-thread-disposition
+    statement: On a PR into dev every hostile-reviewer finding thread ends in a recorded disposition, a reply fixed-in <sha> whose commit is in the PR and touched the cited lines or rejected with a reason, CI Summary holds the PR until the Hostile Review Thread Gate is green, the gate passes with no threads so a reviewer outage never holds a merge, and the poster creates the threads the gate reads.
+    acceptance:
+      - id: AC180
+        statement: 'AC180: a resolved hostile-reviewer thread with no disposition reply blocks, an outdated open one blocks, a fixed-in commit that is not in the PR or did not touch the carried-forward cited lines blocks, a valid reply clears and resolves the thread, no threads passes, and each finding is recorded per voter model -- falsifier: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
+      - id: AC181
+        statement: 'AC181: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -537,11 +544,53 @@ evidence_requirements:
   - kind: tests
     description: The runtime-profile fold attaches the folded roles' contracts in one process and one failing node stops no other.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
+  - kind: tests
+    description: The thread gate's disposition rule against fake thread payloads and a real temporary git history, and the recorded GitHub 422 and 20-head admission replays; no live GitHub call.
+    command: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+  - kind: tests
+    description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
+    command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-ac180-thread-disposition
+    description: The gate tests drive classify_threads, GitFixVerifier on a temporary git repository and run_gate with the thread fetch replaced; the live-contact tests replay GitHub's recorded 422 to the old create-review payload and the thread gate check-runs of the 20 latest merged dev heads. They fail on the merge base, whose gate ignores resolved threads and has no disposition rule.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC180
+  - id: dod-omn17427-ac180-thread-disposition-deploy-check
+    description: Hosted-runner deploy check -- the thread gate and live-contact replay tests; they do not claim a live PR thread.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC180
+  - id: dod-omn17427-ac181-dev-only-ci-summary
+    description: CI Summary evaluated over synthetic check-run rows for a dev PR and a main PR, and the poster's publish() over a recording transport. They fail on the merge base, whose CI Summary asserts no thread gate and whose poster has no publish().
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
+  - id: dod-omn17427-ac181-dev-only-ci-summary-deploy-check
+    description: Hosted-runner deploy check -- the CI Summary and poster tests; they do not claim a live CI Summary run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
   - id: dod-omn-17427-ac142-teardown-small-batches
     description: Fake-host teardown of 120 slot topics checks multiple bounded delete batches and an immediately following broker health read for each batch. The head tests fail on the merge-base product, which has no broker health pacing.
     source: manual
