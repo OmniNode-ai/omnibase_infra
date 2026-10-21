@@ -191,3 +191,42 @@ def test_the_fixed_poster_made_threads_and_the_gate_held_them(
         "correctness": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
         "sonnet": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
     }
+
+
+@pytest.mark.live_contact(
+    "tests/fixtures/omn17427/infra-pr5234-job-119316797666-resolve-thread-forbidden.json"
+)
+def test_the_gate_does_not_depend_on_resolving_a_thread(
+    recorded_response: dict[str, object],
+) -> None:
+    """GitHub refuses resolveReviewThread to the workflow token, so the reply is the record."""
+    response = cast("dict[str, Any]", recorded_response["response"])
+    lines = cast("list[str]", response["log_lines"])
+    assert len(lines) == 2
+    for line in lines:
+        assert "'type': 'FORBIDDEN', 'path': ['resolveReviewThread']" in line
+        assert "Resource not accessible by integration" in line
+    # The gate sends no GraphQL mutation at all any more.
+    assert "mutation" not in _GATE.read_text(encoding="utf-8")
+    # The same two threads, open, with the rejected reply they carried: cleared.
+    thread = {
+        "id": "PRRT_kwDOPuAjtM6u01K4",
+        "isResolved": False,
+        "isOutdated": False,
+        "path": ".github/workflows/hostile-review-thread-gate.yml",
+        "originalLine": None,
+        "subjectType": "FILE",
+        "comments": {
+            "nodes": [
+                {"body": f"<!-- {gate.MARKER} fp=0b75b492dc2a -->\nfinding"},
+                {"body": "rejected: the fixed-in check needs this PR's commit history"},
+            ]
+        },
+    }
+
+    def no_fix_check(sha: str, cited: object) -> tuple[bool, str]:
+        raise AssertionError("a rejected disposition runs no fix check")
+
+    blocking, cleared = gate.classify_threads([thread], no_fix_check)
+    assert blocking == []
+    assert cleared[0].disposition == "rejected"

@@ -610,7 +610,7 @@ jobs:
             } else if (errors + warnings > 0) {
               note = '\n\n> **Action required**: findings were posted as review threads. ' +
                 'Reply on each thread with `fixed-in <sha>` (the commit of this PR that changed the cited lines) ' +
-                'or `rejected: <reason>`; the `Hostile Review Thread Gate` checks the reply and resolves the thread, ' +
+                'or `rejected: <reason>`; the reply re-runs the `Hostile Review Thread Gate`, which checks it ' +
                 'and fails while any finding has no accepted reply (OMN-17427).';
             }
 

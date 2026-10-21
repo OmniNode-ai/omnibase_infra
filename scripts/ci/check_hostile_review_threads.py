@@ -32,11 +32,14 @@ replaces an earlier one. A marker thread blocks when:
     history to the fix commit's parent; a file-level thread needs the fix
     commit to touch the file.
 
-A thread with a valid disposition that is still open is resolved by this gate
-itself, so replying is the one action an author takes: the reply fires the
-gate (``hostile-review-thread-gate.yml``), the gate checks it and closes the
-thread. GitHub emits no workflow event when a thread is resolved, which is
-why the reply, not the click, is the trigger.
+An accepted disposition clears its thread whether or not the thread has been
+resolved in the review UI, so replying is the one action an author takes: the
+reply fires the gate (``hostile-review-thread-gate.yml``) and the gate checks
+it. The disposition is the record; "resolved" alone is not. Two GitHub facts
+force this shape: resolving a thread fires no workflow event, so a gate that
+waited for the click would never re-run; and the workflow token cannot resolve
+a thread itself (resolveReviewThread answers FORBIDDEN, "Resource not
+accessible by integration", measured on omnibase_infra#5234 run 39626556756).
 
 The disposition rule holds PRs into ``dev`` (CI Summary requires this check
 there only). On any other base the gate keeps its earlier rule: an open,
@@ -133,14 +136,6 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
 }
 """
 
-_RESOLVE_MUTATION = """
-mutation($threadId: ID!) {
-  resolveReviewThread(input: {threadId: $threadId}) {
-    thread { id isResolved }
-  }
-}
-"""
-
 
 def _graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
     payload = json.dumps({"query": query, "variables": variables}).encode()
@@ -176,14 +171,6 @@ def fetch_review_threads(repo: str, pr_number: int, token: str) -> list[dict[str
         if not conn["pageInfo"]["hasNextPage"]:
             return threads
         cursor = conn["pageInfo"]["endCursor"]
-
-
-def resolve_thread(thread_id: str, token: str) -> None:
-    """Mark one review thread resolved (raises on any failure)."""
-    data = _graphql(_RESOLVE_MUTATION, {"threadId": thread_id}, token)
-    thread = data["data"]["resolveReviewThread"]["thread"]
-    if not thread.get("isResolved"):
-        raise RuntimeError(f"thread {thread_id} still unresolved after the mutation")
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +475,29 @@ class ThreadVerdict:
     fix_verified: bool | None = None
     blocking: bool = True
     reason: str = ""
-    needs_resolve: bool = False
+    finding: str = ""
+
+
+FINDING_CHARS = 300
+
+
+def finding_text(first_body: str) -> str:
+    """The finding's own words from the thread's first comment, bounded.
+
+    Drops the marker comment, the severity/model label and the italic footer,
+    so a job-log reader can tell which finding a verdict is about without a
+    GitHub read.
+    """
+    lines = []
+    for line in first_body.splitlines():
+        text = line.strip()
+        if not text or text.startswith("<!--") or _LABEL_RE.search(text):
+            continue
+        if text.startswith("_") and text.endswith("_"):
+            continue
+        lines.append(text)
+    joined = " ".join(lines)
+    return joined if len(joined) <= FINDING_CHARS else joined[:FINDING_CHARS] + " …"
 
 
 def evaluate_thread(
@@ -514,6 +523,7 @@ def evaluate_thread(
         line_end=cited.end,
         original_commit=cited.original_commit,
         fingerprint=fp.group(1) if fp else "",
+        finding=finding_text(first_body),
         model=label.group("model") if label else "unknown",
         severity=label.group("severity") if label else "UNKNOWN",
         resolved=resolved,
@@ -546,8 +556,6 @@ def evaluate_thread(
             require_disposition or (not resolved and not verdict.outdated)
         )
         verdict.reason = why
-    accepted = disposition.kind == "rejected" or bool(verdict.fix_verified)
-    verdict.needs_resolve = accepted and not resolved
     return verdict
 
 
@@ -574,7 +582,6 @@ def record(
     verdict: ThreadVerdict, *, repo: str, pr_number: int, head_sha: str
 ) -> dict[str, Any]:
     row = asdict(verdict)
-    row.pop("needs_resolve", None)
     row.update({"repo": repo, "pr": pr_number, "head_sha": head_sha})
     return row
 
@@ -700,24 +707,10 @@ def run_gate() -> int:
         threads, verifier, require_disposition=base_ref in ("dev", "")
     )
 
-    for verdict in cleared:
-        if not verdict.needs_resolve:
-            continue
-        try:
-            resolve_thread(verdict.thread_id, token)
-            verdict.resolved = True
-            verdict.resolved_by = "hostile-review-thread-gate"
-        except (OSError, RuntimeError, KeyError, TypeError, ValueError) as exc:
-            # The thread stays open, so it blocks.
-            verdict.blocking = True
-            verdict.reason = f"{verdict.reason}; could not resolve the thread: {exc}"
-    still_cleared = [v for v in cleared if not v.blocking]
-    blocking += [v for v in cleared if v.blocking]
-
     record_path = os.environ.get("DISPOSITION_RECORD_PATH")
     rows = [
         record(v, repo=repo, pr_number=pr_number, head_sha=head_sha)
-        for v in blocking + still_cleared
+        for v in blocking + cleared
     ]
     for row in rows:
         print(DISPOSITION_LINE_PREFIX + json.dumps(row, sort_keys=True))
@@ -726,15 +719,15 @@ def run_gate() -> int:
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
             encoding="utf-8",
         )
-    _write_summary(blocking, still_cleared)
+    _write_summary(blocking, cleared)
 
     if blocking:
         print(
             f"::error::{len(blocking)} hostile-reviewer finding(s) have no accepted "
             "disposition. Reply on each thread with a line `fixed-in <sha>` (a commit "
             "of this PR that changes the cited lines) or `rejected: <reason>`; the "
-            "reply re-runs this gate, which checks it and resolves the thread "
-            "(OMN-17427). A thread resolved without that reply blocks."
+            "reply re-runs this gate (OMN-17427). A thread resolved without that "
+            "reply blocks."
         )
         for verdict in blocking:
             print(
@@ -743,7 +736,7 @@ def run_gate() -> int:
         return 1
 
     print(
-        f"Hostile Review Thread Gate PASSED — {len(still_cleared)} finding(s) with an "
+        f"Hostile Review Thread Gate PASSED — {len(cleared)} finding(s) with an "
         "accepted disposition, 0 blocking."
     )
     return 0

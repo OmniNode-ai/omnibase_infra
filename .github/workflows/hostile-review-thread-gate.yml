@@ -12,8 +12,8 @@
 # `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
 # `rejected: <reason>`. Resolving a thread fires no workflow event, so the
 # reply is the trigger: this workflow runs the same script on the reply, the
-# script checks it, resolves the thread and publishes a fresh check-run of the
-# same name on the PR head. A review the reviewer bot posts with GITHUB_TOKEN
+# script checks it and publishes a fresh check-run of the same name on the PR
+# head. A review the reviewer bot posts with GITHUB_TOKEN
 # fires nothing here (GitHub does not start workflows from GITHUB_TOKEN
 # events), so this never loops on its own output.
 #
@@ -28,10 +28,10 @@ on:
   pull_request_review:
     types: [submitted, edited, dismissed]
 
+# Read-only: the gate reads thread state and writes nothing to the PR.
 permissions:
   contents: read
-  # resolveReviewThread on a thread whose disposition the gate accepted.
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

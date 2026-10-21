@@ -134,7 +134,6 @@ class TestClassifyThreads:
         assert blocking == []
         assert cleared[0].disposition == "rejected"
         assert cleared[0].disposition_author == "someone"
-        assert not cleared[0].needs_resolve
 
     def test_rejected_without_a_real_reason_does_not_count(self) -> None:
         blocking, _ = gate.classify_threads(
@@ -142,14 +141,16 @@ class TestClassifyThreads:
         )
         assert len(blocking) == 1
 
-    def test_open_thread_with_a_valid_disposition_is_cleared_and_resolved(
-        self,
-    ) -> None:
-        _, cleared = gate.classify_threads(
+    def test_open_thread_with_a_valid_disposition_is_cleared(self) -> None:
+        # The reply is the record; the workflow token cannot resolve a thread
+        # (resolveReviewThread is FORBIDDEN for it), so an open thread with an
+        # accepted disposition clears as it is.
+        blocking, cleared = gate.classify_threads(
             [_thread(replies=("rejected: false positive, see the guard above",))],
             _never,
         )
-        assert cleared[0].needs_resolve
+        assert blocking == []
+        assert not cleared[0].resolved
 
     def test_fixed_in_is_verified(self) -> None:
         seen: list[tuple[str, Any]] = []
@@ -387,35 +388,18 @@ class TestRunGate:
         monkeypatch.setattr(gate, "fetch_review_threads", boom)
         assert gate.main([]) == 1
 
-    def test_a_valid_open_disposition_is_resolved_and_recorded(
+    def test_a_valid_open_disposition_passes_and_is_recorded(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         record = self._env(monkeypatch, tmp_path)
         thread = _thread(replies=("rejected: the reviewer misread the retry loop",))
         monkeypatch.setattr(gate, "fetch_review_threads", lambda *a: [thread])
-        resolved: list[str] = []
-        monkeypatch.setattr(
-            gate, "resolve_thread", lambda tid, tok: resolved.append(tid)
-        )
         assert gate.main([]) == 0
-        assert resolved == ["T1"]
         row = json.loads(record.read_text().splitlines()[0])
         assert row["disposition"] == "rejected"
-        assert row["resolved_by"] == "hostile-review-thread-gate"
+        assert row["resolved"] is False
         assert row["model"] == "sonnet"
-
-    def test_a_failed_resolve_keeps_the_thread_blocking(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        self._env(monkeypatch, tmp_path)
-        thread = _thread(replies=("rejected: the reviewer misread the retry loop",))
-        monkeypatch.setattr(gate, "fetch_review_threads", lambda *a: [thread])
-
-        def refuse(tid: str, tok: str) -> None:
-            raise RuntimeError("Resource not accessible by integration")
-
-        monkeypatch.setattr(gate, "resolve_thread", refuse)
-        assert gate.main([]) == 1
+        assert row["finding"] == "the finding"
 
     def test_a_resolved_thread_without_a_reply_fails_the_gate(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -511,7 +495,7 @@ class TestOffDevBase:
             [_thread(outdated=True)], _never, require_disposition=False
         )
         assert blocking == []
-        assert not cleared[0].needs_resolve
+        assert cleared[0].disposition == "none"
 
     def test_open_current_thread_still_blocks_off_dev(self) -> None:
         blocking, _ = gate.classify_threads(
@@ -519,11 +503,11 @@ class TestOffDevBase:
         )
         assert len(blocking) == 1
 
-    def test_a_refused_fix_on_an_outdated_thread_is_not_auto_resolved(self) -> None:
+    def test_a_refused_fix_on_an_outdated_thread_does_not_block_off_dev(self) -> None:
         blocking, cleared = gate.classify_threads(
             [_thread(outdated=True, replies=("fixed-in abcdef1",))],
             _refuse,
             require_disposition=False,
         )
         assert blocking == []
-        assert not cleared[0].needs_resolve
+        assert cleared[0].fix_verified is False

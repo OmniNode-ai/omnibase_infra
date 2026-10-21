@@ -282,8 +282,8 @@ def format_finding_body(finding: dict[str, Any]) -> str:
         f"{message}\n\n"
         "_Reply on this thread with a line `fixed-in <sha>` (the commit of "
         "this PR that changed these lines) or `rejected: <reason>`. The "
-        "`Hostile Review Thread Gate` checks the reply, resolves the thread, "
-        "and blocks a merge to dev while any finding has no accepted reply "
+        "`Hostile Review Thread Gate` re-runs on the reply, checks it, and "
+        "blocks a merge to dev while any finding has no accepted reply "
         "(OMN-17427)._"
     )
 
