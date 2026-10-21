@@ -355,6 +355,11 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal without trace_id or queue_wait_ms in the request payload -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
+  - id: req-omn17427-nightly-live-adapter-deselect
+    statement: The nightly Slow & Chaos job deselects the live LLM adapter documentation suite, which carries slow and fails closed without LLM_DEEPSEEK_R1_URL (OMN-21147), so the job no longer errors on that suite's fixture when no endpoint is configured; the OMN-20317 two-way registration deselect stays.
+    acceptance:
+      - id: AC163
+        statement: 'AC163: the slow-tests pytest command in nightly-tests.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the two-way registration deselect, the workflow''s own arguments with -m "slow or chaos" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1641,3 +1646,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC142
+  - id: dod-omn-17427-ac163-nightly-live-adapter-deselect
+    description: Reads the slow-tests step of nightly-tests.yml and runs pytest --collect-only with that step's own arguments over tests/integration/adapters/llm; the same test fails on dev before the deselect, where the selection collects the suite's 6 tests. It does not run the nightly workflow or any live LLM endpoint.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC163
+  - id: dod-omn-17427-ac163-nightly-live-adapter-deploy-check
+    description: Hosted-runner deploy check -- the same workflow-argument collection test over repository files with LLM_DEEPSEEK_R1_URL removed from the environment; no credentials, lab host or live endpoint is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC163
