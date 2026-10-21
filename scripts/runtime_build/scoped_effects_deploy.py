@@ -40,13 +40,13 @@ _FILES_LABEL = "com.docker.compose.project.config_files"
 _VERSION_LABEL = "com.docker.compose.version"
 _CONFIG_HASH_LABEL = "com.docker.compose.config-hash"
 _PROCESS_TERM_GRACE = 15
-# The in-image probe's former fixed 120 s bound took 497.9 s on .201 at a load
-# ratio (load1 / cpus) of 1.5 to 2.0, 4.15 times the bound (OMN-17991). Scaling
-# the 120 s base by 4 per unit of load ratio gives 720 s to 960 s there.
+# The in-image probe's former fixed 120 s bound took 497.9 s on a loaded lab host
+# at a load ratio (load1 / cpus) of 1.5 to 2.0, 4.15 times the bound
+# (OMN-17991). Scaling the 120 s base by 4 per unit of load ratio gives 720 s to
+# 960 s there.
 _PROBE_BASE_SECONDS = 120
 _PROBE_LOAD_FACTOR = 4
 _PROBE_MAX_SECONDS = 1800
-_DEV_LANE_ENV = "ONEX_RUNTIME_LANE=compose-dev"
 _SASL_MECHANISMS = frozenset({"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"})
 # Credentials arrive on stdin, never argv: the script reads them and execs rpk.
 _TOPIC_CHECK_SCRIPT = (
@@ -290,11 +290,17 @@ def _health_reading(container: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _admission(plan: ModelEffectsDeployPlan, target: Mapping[str, Any]) -> str:
+    """Admit a healthy target, or an unhealthy one only on the plan's flag.
+
+    Dev-lane confinement of ``admit_unhealthy_target`` is the compose project:
+    the plan model can only name the dev project, and the shell entrypoint
+    refuses any other lane before this runs. The target must still be running
+    with an unhealthy or starting health check; restarting or stopped refuses.
+    """
     if _healthy(target):
         return "healthy"
     if (
         plan.admit_unhealthy_target
-        and _DEV_LANE_ENV in (target.get("Config", {}).get("Env") or [])
         and _running(target)
         and target.get("State", {}).get("Health", {}).get("Status")
         in {"unhealthy", "starting"}
@@ -302,8 +308,8 @@ def _admission(plan: ModelEffectsDeployPlan, target: Mapping[str, Any]) -> str:
         return "unhealthy-admitted"
     raise RuntimeError(
         "current effects service must already be healthy; an unhealthy target is"
-        " admitted only with admit_unhealthy_target on the dev lane"
-        f" ({_DEV_LANE_ENV}) while running with an unhealthy or starting health check"
+        " admitted only with admit_unhealthy_target (dev compose project only)"
+        " while running with an unhealthy or starting health check"
     )
 
 

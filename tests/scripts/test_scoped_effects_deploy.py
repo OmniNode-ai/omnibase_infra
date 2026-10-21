@@ -913,8 +913,8 @@ def test_compose_environment_order_is_not_a_settings_change(executor: Any) -> No
 
 
 def test_probe_timeout_is_declared_or_scaled_to_host_load(executor: Any) -> None:
-    # A fixed 120 s bound refused two .201 rollouts whose probe took 497.9 s at
-    # load1 48 to 63 on 32 cores (OMN-17991).
+    # A fixed 120 s bound refused two rollouts on a loaded 32-core lab host whose
+    # probe took 497.9 s at load1 48 to 63 (OMN-17991).
     assert executor.probe_timeout(900, loadavg=lambda: (99.0, 0, 0)) == {
         "seconds": 900,
         "source": "declared",
@@ -1007,7 +1007,7 @@ def test_topic_check_authenticates_as_the_runtime_does(
     executor: Any, scenario: tuple[Any, DockerBoundary, Path]
 ) -> None:
     # The dev broker enables SASL; an unauthenticated rpk read refused every
-    # rollout on .201 (OMN-17991).
+    # rollout on the lab dev host (OMN-17991).
     _, docker, _ = scenario
     docker.mode = "sasl_required"
     docker.add_target_env(**_SASL_ENV)
@@ -1082,7 +1082,6 @@ def test_dev_lane_plan_replaces_an_unhealthy_effects_container(
     executor: Any, scenario: tuple[Any, DockerBoundary, Path]
 ) -> None:
     _, docker, _ = scenario
-    docker.add_target_env(ONEX_RUNTIME_LANE="compose-dev")
     _make_unhealthy(docker)
     result = _execute(executor, _admitting(scenario))
     assert result["status"] == "PASSED", result.get("error")
@@ -1098,13 +1097,11 @@ def test_dev_lane_plan_replaces_an_unhealthy_effects_container(
     assert "secret-bearing health output" not in receipt_text
 
 
-@pytest.mark.parametrize("case", ["no_flag", "no_dev_lane", "restarting", "stopped"])
+@pytest.mark.parametrize("case", ["no_flag", "restarting", "stopped"])
 def test_unhealthy_target_refuses_outside_its_admission(
     executor: Any, scenario: tuple[Any, DockerBoundary, Path], case: str
 ) -> None:
     _, docker, _ = scenario
-    if case != "no_dev_lane":
-        docker.add_target_env(ONEX_RUNTIME_LANE="compose-dev")
     if case == "restarting":
         _make_unhealthy(docker, Restarting=True)
     elif case == "stopped":
@@ -1120,7 +1117,6 @@ def test_admitted_unhealthy_rollback_restores_the_prior_settled_state(
     executor: Any, scenario: tuple[Any, DockerBoundary, Path]
 ) -> None:
     _, docker, _ = scenario
-    docker.add_target_env(ONEX_RUNTIME_LANE="compose-dev")
     _make_unhealthy(docker)
     docker.mode = "admitted_rollback"
     result = _execute(executor, _admitting(scenario))

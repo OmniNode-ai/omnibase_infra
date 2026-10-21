@@ -464,7 +464,7 @@ def test_in_image_proof_resolves_the_editable_project_tree(builder: Any) -> None
 def test_loaded_host_scales_both_probe_bounds(
     builder: Any, plan: Any, tmp_path: Path
 ) -> None:
-    # A fixed 120 s probe bound timed out on .201 at load1 48 to 63 on 32 cores
+    # A fixed 120 s probe bound timed out on a loaded 32-core lab host at load1 48 to 63
     # (497.9 s measured, OMN-17991).
     boundary = BuildBoundary(builder, plan)
     output = tmp_path / "candidate"
