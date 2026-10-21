@@ -96,7 +96,10 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # the lane manifest's pool comment, which is where a reader who meets them
     # will be. This is the lab compose lane only; production is the AWS
     # `onex-prod` namespace and has no row here in the first place.
-    "judge": _PORTS_NONE,
+    # The `judge` row left on 2026-10-21 for the same reason: its compose
+    # project was taken down and removed from the lane census
+    # (omnibase_internal#949), so a row here is an orphan the census guard
+    # refuses.
     # OMN-17143 — collaborator lane for Lakshman Patel. This block was verified free
     # on .201 by read-only `ss -ltn` on 2026-08-30 and is BOUND by that lane as of
     # 2026-09-02 (OMN-17532 — the lane is built and running). Note the near-miss: the
@@ -164,7 +167,6 @@ _LANE_BOUNDARY: dict[str, str] = {
         "that breaks delegation here is a defect"
     ),
     "stability-test": "preferred proof lane for synthetic integration evidence",
-    "judge": "NOT authorized for mutation — read-only",
     "lakshman": (
         "collaborator lane — owned by Lakshman; mutable by him; NOT a proof "
         "lane; never sourced for stability/prod grants"
