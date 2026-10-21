@@ -162,9 +162,17 @@ class FakeHost:
     """
 
     def __init__(
-        self, *, leave_topic: bool = False, dev_topics: int = 2, refuse_rm: bool = False
+        self,
+        *,
+        leave_topic: bool = False,
+        dev_topics: int = 2,
+        refuse_rm: bool = False,
+        slot_topics: int = 0,
+        unhealthy_after_topic_deletes: int | None = None,
     ) -> None:
         self.calls: list[list[str]] = []
+        self.unhealthy_after_topic_deletes = unhealthy_after_topic_deletes
+        self.topic_deletes = 0
         self.envs: list[dict[str, str] | None] = []
         self.leave_topic = leave_topic
         self.refuse_rm = refuse_rm
@@ -179,6 +187,7 @@ class FakeHost:
             "prepr1.onex.b",
             "prepr2.onex.a",
         }
+        self.topics |= {f"prepr1.onex.bulk{i:04d}" for i in range(slot_topics)}
         self.groups = {"local.g", "prepr1.g", "prepr2.g"}
         self.valkey = {0: 5, 1: 3, 2: 1}
         self.databases = {
@@ -233,7 +242,15 @@ class FakeHost:
         if "rpk" in argv and "topic" in argv and "list" in argv:
             rows = "\n".join(f"{t} 1 1" for t in sorted(self.topics))
             return self._ok("NAME PARTITIONS REPLICAS\n" + rows + "\n")
+        if "rpk" in argv and "cluster" in argv and "health" in argv:
+            bound = self.unhealthy_after_topic_deletes
+            healthy = bound is None or self.topic_deletes < bound
+            return self._ok(
+                "CLUSTER HEALTH OVERVIEW\n=======================\n"
+                f"Healthy:                          {str(healthy).lower()}\n"
+            )
         if "rpk" in argv and "topic" in argv and "delete" in argv:
+            self.topic_deletes += 1
             doomed = set(argv[argv.index("delete") + 1 :])
             if self.leave_topic:
                 doomed = set(sorted(doomed)[1:])
@@ -463,3 +480,50 @@ def test_the_wrapper_refuses_a_slot_outside_the_pool(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == policy.EXIT_USAGE, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# OMN-17427: a slot's topic deletes are paced by the shared broker's health.
+#
+# 2026-10-20 15:18Z: slot 2's teardown deleted ~1845 prepr2 topics from the
+# SHARED dev broker in back-to-back chunks of 200. Partition removal stalled,
+# the broker (Redpanda v24.2.7, smp 1) crashed at ~15:19:15Z and asserted on
+# every restart after, taking the dev bus down. A teardown must never push the
+# dev lane's own broker past the point where it stops answering.
+# ---------------------------------------------------------------------------
+
+
+def _topic_delete_calls(host: FakeHost) -> list[list[str]]:
+    return [c for c in host.calls if "rpk" in c and "topic" in c and "delete" in c]
+
+
+def test_topic_deletes_are_small_chunks_each_followed_by_a_broker_health_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(teardown, "BROKER_HEALTH_POLL_SECONDS", 0.0)
+    host = FakeHost(slot_topics=120)
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_OK, report
+    deletes = _topic_delete_calls(host)
+    assert len(deletes) > 1
+    for call in deletes:
+        names = call[call.index("delete") + 1 :]
+        assert 0 < len(names) <= teardown.TOPIC_DELETE_CHUNK
+    for i, call in enumerate(host.calls):
+        if call in deletes:
+            nxt = host.calls[i + 1]
+            assert "cluster" in nxt and "health" in nxt, (call, nxt)
+    assert not any(t.startswith("prepr1.") for t in host.topics)
+
+
+def test_a_broker_that_stops_reporting_healthy_halts_the_topic_deletes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(teardown, "BROKER_HEALTH_POLL_SECONDS", 0.0)
+    host = FakeHost(slot_topics=120, unhealthy_after_topic_deletes=1)
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE, report
+    assert report["verdict"] == "INCOMPLETE"
+    assert len(_topic_delete_calls(host)) == 1
+    assert report["residue"]["topics"] > 0
+    assert {"onex.dev.t0", "onex.dev.t1", "prepr2.onex.a"} <= host.topics
