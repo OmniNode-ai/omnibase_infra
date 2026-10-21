@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,6 +42,7 @@ from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
 from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
     discover_runtime_local_ingress_routes,
+    local_ingress_contract_fingerprint,
     parse_active_runtime_packages,
 )
 from omnibase_infra.runtime.service_pattern_b_broker import RuntimePatternBBroker
@@ -255,14 +258,63 @@ class RuntimeDelegationDispatchPort:
         self._command_topic = command_topic
         self._response_topic = response_topic
         self._terminal_evidence_sink = terminal_evidence_sink
+        # OMN-21271: discovery parses every installed node contract. Run per
+        # dispatch on the event loop it read 1014 contracts in 4.2-7.7 s and
+        # stalled the loop for up to 7.7 s on the dev effects container. The
+        # installed contract set changes only on an install (RULING
+        # 2026-10-20T14:05:12Z, D2: hot-loaded contracts are limited to those
+        # installed in the runtime image), so the stat-only fingerprint of that
+        # set is the invalidation: (package_names, fingerprint, routes).
+        self._route_cache: (
+            tuple[
+                tuple[str, ...],
+                tuple[tuple[str, int, int], ...],
+                dict[str, ModelRuntimeLocalIngressRoute],
+            ]
+            | None
+        ) = None
+        self._route_cache_lock = threading.Lock()
 
-    def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
+    async def _resolved_routes(self) -> dict[str, ModelRuntimeLocalIngressRoute]:
         if self._routes is not None:
             return dict(self._routes)
         package_names = parse_active_runtime_packages(
             self._package_names or ModelPatternBBrokerConfig().package_names
         )
-        return discover_runtime_local_ingress_routes(package_names)
+        return await asyncio.to_thread(self._discover_routes_cached, package_names)
+
+    def _discover_routes_cached(
+        self, package_names: tuple[str, ...]
+    ) -> dict[str, ModelRuntimeLocalIngressRoute]:
+        """Resolve routes in a worker thread, re-reading contracts only on change.
+
+        The fingerprint is taken before the parse, so a contract that changes in
+        between costs one extra reload on the next call and never a stale hit.
+        """
+        fingerprint: tuple[tuple[str, int, int], ...] | None
+        try:
+            fingerprint = local_ingress_contract_fingerprint(package_names)
+        except (ImportError, OSError, ValueError):
+            # What resolving a package root or stat-ing a contract raises. Keep
+            # no cache: discovery below then fails exactly as it did uncached.
+            logger.debug(
+                "local ingress contract fingerprint unavailable; resolving uncached",
+                exc_info=True,
+            )
+            fingerprint = None
+        with self._route_cache_lock:
+            cache = self._route_cache
+            if (
+                fingerprint is not None
+                and cache is not None
+                and cache[0] == package_names
+                and cache[1] == fingerprint
+            ):
+                return dict(cache[2])
+            routes = discover_runtime_local_ingress_routes(package_names)
+            if fingerprint is not None:
+                self._route_cache = (package_names, fingerprint, dict(routes))
+            return routes
 
     async def dispatch(
         self,
@@ -355,7 +407,7 @@ class RuntimeDelegationDispatchPort:
             raise ValueError("execution_timeout_seconds must be positive")
         if terminal_delivery_margin_seconds <= 0:
             raise ValueError("terminal_delivery_margin_seconds must be positive")
-        routes = self._resolved_routes()
+        routes = await self._resolved_routes()
         selected = _select_delegation_route(routes)
         # OMN-18933 (K6): on a bounded lane the declared row, the runtime's broker
         # identity and the selected consumer contract must agree BEFORE the
