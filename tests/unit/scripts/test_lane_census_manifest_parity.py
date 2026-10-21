@@ -58,7 +58,7 @@ _MANIFEST_PATH = LAB_MANIFEST
 # never declared), so the scrape sees exactly the lane's set.
 # OMN-19543: `dev-200` joins on exactly dev-202's terms.
 # OMN-19544: `dev-105` joins on the same terms as dev-202, whose overlay it copies.
-# `judge` left on 2026-10-21 on prod's terms: its compose project was taken down
+# `judge` left on 2026-10-21 on prod's terms: its compose project was retired
 # and removed from the lane census (omnibase_internal#949), so it has no manifest
 # entry to diff against, although docker/docker-compose.judge.yml is still in the tree.
 _COMPOSE_LANES = (
