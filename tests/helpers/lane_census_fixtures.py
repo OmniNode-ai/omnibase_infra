@@ -26,8 +26,8 @@ NEUTRAL_MANIFEST = NEUTRAL_CENSUS_DIR / "lane-manifest.yaml"
 NEUTRAL_SNAPSHOT = NEUTRAL_CENSUS_DIR / "census-snapshot.json"
 
 #: The required lane on :data:`NEUTRAL_HOSTNAME`, and its network.
-NEUTRAL_LANE = "judge"
-NEUTRAL_LANE_NETWORK = "example-judge-network"
+NEUTRAL_LANE = "stability-test"
+NEUTRAL_LANE_NETWORK = "example-stability-test-network"
 #: An optional lane on the same host.
 NEUTRAL_OPTIONAL_LANE = "dev"
 #: A lane declared for the other host only.
