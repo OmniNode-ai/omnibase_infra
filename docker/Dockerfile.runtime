@@ -901,6 +901,9 @@ COPY --chown=omniinfra:omniinfra LICENSE /app/LICENSE
 # Copy contracts directory (must exist in build context)
 COPY --chown=omniinfra:omniinfra contracts/ /app/contracts/
 
+# The local environment observer resolves the shipped service catalog.
+COPY --chown=omniinfra:omniinfra docker/catalog/ /app/docker/catalog/
+
 # Copy node contracts (contract.yaml with metadata.transport_type) into contracts dir
 # These are required by ContractConfigExtractor for Infisical config prefetch
 # and ProtocolEventBusPublisher wiring. Without them, no events are published.
