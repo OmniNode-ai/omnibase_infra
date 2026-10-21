@@ -58,9 +58,11 @@ _MANIFEST_PATH = LAB_MANIFEST
 # never declared), so the scrape sees exactly the lane's set.
 # OMN-19543: `dev-200` joins on exactly dev-202's terms.
 # OMN-19544: `dev-105` joins on the same terms as dev-202, whose overlay it copies.
+# `judge` left on 2026-10-21 on prod's terms: its compose project was taken down
+# and removed from the lane census (omnibase_internal#949), so it has no manifest
+# entry to diff against, although docker/docker-compose.judge.yml is still in the tree.
 _COMPOSE_LANES = (
     "stability-test",
-    "judge",
     "lakshman",
     "dogfood",
     "sim-202",
@@ -264,7 +266,7 @@ def test_runtime_worker_declared_in_every_runtime_lane() -> None:
         assert worker_spec.get("replicas", 1) >= 1, (
             f"lane {lane!r} runtime-worker must require at least one replica"
         )
-    assert no_worker_lanes == {"dev", "dogfood", "judge", "lakshman", "sim-202"}, (
+    assert no_worker_lanes == {"dev", "dogfood", "lakshman", "sim-202"}, (
         "a runtime lane without a runtime-worker must be explicitly accounted "
         f"for; got {sorted(no_worker_lanes)}"
     )
