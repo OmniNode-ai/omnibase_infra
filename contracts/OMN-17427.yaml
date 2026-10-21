@@ -611,7 +611,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py tests/unit/nodes/node_secret_seed_effect/test_secret_seed_contract.py tests/unit/nodes/node_secret_seed_effect/test_handler_secret_seed.py tests/integration/runtime/test_provider_key_redaction_process_omn17427.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC142
