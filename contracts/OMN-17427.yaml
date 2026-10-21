@@ -1353,6 +1353,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC60
+  - id: dod-omn-17427-ac60-lockfile-certifi-floor
+    description: The test reads uv.lock and fails when certifi is below the first fixed release 2026.10.19 (PYSEC-2026-4320); it refuses the recorded 2026.1.4 pin as its positive control. No scheduled run is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_certifi_floor_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC60
   - id: dod-omn-17427-ac60-autobump-deploy-check
     description: Hosted-runner deploy check -- fake-runner tests of the autobump contract carry-forward; they do not claim a scheduled run.
     source: manual
