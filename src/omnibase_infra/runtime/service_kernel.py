@@ -3658,6 +3658,19 @@ async def bootstrap() -> int:
                     runtime_profile=runtime_profile,
                 )
                 manifest = ownership_result.manifest
+                if ownership_result.folded_profiles:
+                    # OMN-17427: this runtime carries other roles' nodes too.
+                    logger.info(
+                        "Auto-wiring folded roles: profile=%s folded=%s "
+                        "folded_contracts=%d (correlation_id=%s)",
+                        ownership_result.runtime_profile,
+                        list(ownership_result.folded_profiles),
+                        len(ownership_result.folded_contracts),
+                        correlation_id,
+                        extra={
+                            "folded_contracts": list(ownership_result.folded_contracts),
+                        },
+                    )
                 if ownership_result.skipped_contracts:
                     logger.info(
                         "Auto-wiring runtime profile ownership: profile=%s "
@@ -5982,6 +5995,53 @@ def configure_logging() -> None:
     )
 
 
+# Linux refuses a soft RLIMIT_NOFILE of infinity above fs.nr_open, so an
+# unlimited hard limit is raised to this finite target instead.
+_NOFILE_INFINITY_CAP: int = 1_048_576
+
+
+def raise_nofile_soft_limit() -> None:
+    """Raise the soft RLIMIT_NOFILE to the hard limit before the runtime boots.
+
+    OMN-17427. A container started without compose ``ulimits`` runs at 1024
+    soft open files under a far higher hard limit (h201 dev lane, 2026-10-20:
+    1024 / 524288), and the kernel's boot then fails with ``OSError: [Errno
+    24] Too many open files`` until the entrypoint's retry bound gives up. The
+    hard limit is the ceiling the container or host grants; Python never
+    raises the soft limit on its own. A refused raise is logged and never
+    stops the boot, and a platform without ``resource`` is skipped.
+    """
+    try:
+        import resource
+    except ImportError:
+        return
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = _NOFILE_INFINITY_CAP if hard == resource.RLIM_INFINITY else hard
+    if soft == resource.RLIM_INFINITY or soft >= target:
+        logger.info(
+            "RLIMIT_NOFILE soft limit %d already at its target (hard %d)", soft, hard
+        )
+        return
+
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+    except (ValueError, OSError) as e:
+        logger.warning(
+            "RLIMIT_NOFILE soft limit left at %d (hard %d): %s: %s",
+            soft,
+            hard,
+            type(e).__name__,
+            e,
+        )
+        return
+
+    raised, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    logger.info(
+        "RLIMIT_NOFILE soft limit raised from %d to %d (hard %d)", soft, raised, hard
+    )
+
+
 def main() -> None:
     """Entry point for the ONEX runtime kernel.
 
@@ -5992,8 +6052,9 @@ def main() -> None:
     Execution Flow:
         1. Configure logging from environment variables
         2. Log kernel version for startup identification
-        3. Run async bootstrap function in event loop
-        4. Exit with appropriate exit code (0=success, 1=error)
+        3. Raise the open-file soft limit to the hard limit
+        4. Run async bootstrap function in event loop
+        5. Exit with appropriate exit code (0=success, 1=error)
 
     Exit Codes:
         0: Successful startup and clean shutdown
@@ -6017,6 +6078,11 @@ def main() -> None:
     configure_logging()
     logger.info("ONEX Kernel v%s initializing...", KERNEL_VERSION)
 
+    # OMN-17427: before anything opens a file, socket or Kafka consumer. This
+    # shared bootstrap covers omninode-runtime, -effects and -worker, so the
+    # boot no longer depends on every compose file declaring ulimits.
+    raise_nofile_soft_limit()
+
     # OMN-3811: Opt-in OTEL tracing — silently skips if no endpoint configured
     from omnibase_infra.runtime.tracing import configure_tracing
 
@@ -6036,4 +6102,5 @@ __all__: list[str] = [
     "bootstrap",
     "load_runtime_config",
     "main",
+    "raise_nofile_soft_limit",
 ]

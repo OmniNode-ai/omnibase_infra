@@ -70,9 +70,11 @@ markers = [
     "unit: unit tests in isolation",
     "promotion_guard: test controls the prod promotion-lineage guard stub itself (OMN-12626)",
     "gateway_lane: test controls the gateway-lane deploy stub itself (OMN-18134)",
+    "recreate_renames: test drives the real pre-compose-up recreate rename pass (OMN-17427)",
     "deps_recreate: test drives the real supervised deps recreate (OMN-18692)",
     "deps_convergence: test drives the real deps-convergence observation (OMN-18640)",
     "real_settle_pool: test drives the real settle worker thread instead of the inline stand-in (OMN-19501)",
+    "real_docker: test drives real docker compose in a throwaway project; skips without a daemon or a local postgres:16-alpine (OMN-18496)",
     "lab_overlay: test reads the lab's own lane manifest, private config under ONEX_WORKSPACE_CONFIG_ROOT (OMN-20934); deselected from the deploy-agent unit job and selected by the Lane Census Staleness job, which fetches the overlay",
 ]
 

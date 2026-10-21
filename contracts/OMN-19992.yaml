@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19992
+title: The container in-memory kernel publishes runtime errors through RuntimeLogEventBridge, so a kernel on the in-memory bus shows error fingerprints
+summary: >-
+  The kernel change shipped in omnibase_infra#4495 (d9a8c87d4): the container kernel on the in-memory bus starts RuntimeLogEventBridge with a producer that publishes through the selected bus. This change carries the AC2 falsifier at the path the criterion names, under tests/unit/runtime, and forces the handler exception through the real projection dispatch callback inside the bootstrapped kernel instead of calling the logger directly. AC1 was withdrawn on the ticket and moved to OMN-20529.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19992-ac2-inmemory-kernel-runtime-error
+    statement: >-
+      A container kernel booted on the in-memory bus publishes a runtime-error event, with a 16-character fingerprint, on that bus when a handler raises.
+    acceptance:
+      - id: AC2
+        statement: "AC2: A forced handler exception in a container kernel booted on the in-memory bus publishes a runtime-error event with a 16-character fingerprint on that bus within 10 s -- falsifier: the omnibase_infra test run with uv run pytest on tests/unit/runtime/test_kernel_runtime_log_bridge_native_omn19992.py finds no runtime-error event"
+evidence_requirements:
+  - kind: tests
+    description: The real bootstrap() on the in-memory bus, a handler raising through the projection dispatch callback, and the runtime-error event read back from the same bus within 10 s with a 16-character fingerprint.
+    command: uv run pytest tests/unit/runtime/test_kernel_runtime_log_bridge_native_omn19992.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19992-ac2-inmemory-runtime-error
+    description: The test passes at this head and fails with the bridge gated back to the Kafka transport only (no runtime-error event within 10.0 s).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_kernel_runtime_log_bridge_native_omn19992.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

@@ -83,45 +83,6 @@ change_control_companion:
     - "drift/occ_bindings/**"
     - "evidence/**"
 profiles:
-  - profile_key: omnimarket.runtime_image
-    # 2 (OMN-19566): changed_path_live moved from mandatory to conditional.
-    profile_version: 2
-    repo: OmniNode-ai/omnimarket
-    exempt_classes: [docs_only]
-    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
-    enforce: false
-    variants:
-      - variant_key: runtime
-        proof_kind: runtime_image
-        status: live
-        status_reason: "the provers' current method: the laptop-bundle runtime image built with OMNIMARKET_REF at the PR head"
-        execution: manual_recipe
-        recipe_ref: "interim-recipes.md section A"
-        match:
-          base_branches: [dev]
-          include_globs: ["**"]
-        host_selector:
-          allowed_hosts: ["192.168.86.202", "192.168.86.101", "192.168.86.105"]
-          required_tools: [git, docker, uv]
-          min_free_mem_mib: 8192
-          max_load_ratio: 1.0
-        mandatory_checks:
-          - runtime_image_identity
-          - migration_gate_healthy
-          - runtime_main_healthy
-          - runtime_effects_healthy
-          - focused_tests
-        conditional_checks:
-          - check: changed_path_live
-            when_changed: ["src/omnimarket/nodes/*/**"]
-            reason: >-
-              the PR changes a node, and the prover reads every runtime's log for each changed node that exists at the head running (its consumer group or its own logger, never its discovery line; LIVE_GREP derived from the diff); a pin, lock, workflow or test-only PR changes no node of this repository, and identity, health and wiring carry it
-        negative_control:
-          kind: base_rerun
-        timeout_minutes: 45
-        budget_minutes: 16
-        budget_basis: measured
-        budget_source: "STATUS ledger:3897 and TERMINAL ledger:3839 (13 to 16 min on .202 and .101)"
   - profile_key: omnibase_infra.runtime_and_scripts
     # 2 (OMN-19566): changed_path_live and forwarder_refused_topic moved from
     # mandatory to conditional on the PR's changed paths.
@@ -141,7 +102,7 @@ profiles:
           base_branches: [dev]
           include_globs: ["**"]
           predicate: runtime_affecting
-        host_selector:
+        host_selector: &docker_runtime_hosts
           allowed_hosts: ["192.168.86.202", "192.168.86.101"]
           required_tools: [git, docker, uv]
           min_free_mem_mib: 8192
@@ -205,6 +166,41 @@ profiles:
         timeout_minutes: 20
         budget_minutes: 8
         budget_basis: estimate
+  - profile_key: omnimarket.runtime_image
+    # OMN-17427: Docker proofs share the existing runtime host selector.
+    profile_version: 3
+    repo: OmniNode-ai/omnimarket
+    exempt_classes: [docs_only]
+    docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
+    enforce: false
+    variants:
+      - variant_key: runtime
+        proof_kind: runtime_image
+        status: live
+        status_reason: "the provers' current method: the laptop-bundle runtime image built with OMNIMARKET_REF at the PR head"
+        execution: manual_recipe
+        recipe_ref: "interim-recipes.md section A"
+        match:
+          base_branches: [dev]
+          include_globs: ["**"]
+        host_selector: *docker_runtime_hosts
+        mandatory_checks:
+          - runtime_image_identity
+          - migration_gate_healthy
+          - runtime_main_healthy
+          - runtime_effects_healthy
+          - focused_tests
+        conditional_checks:
+          - check: changed_path_live
+            when_changed: ["src/omnimarket/nodes/*/**"]
+            reason: >-
+              the PR changes a node, and the prover reads every runtime's log for each changed node that exists at the head running (its consumer group or its own logger, never its discovery line; LIVE_GREP derived from the diff); a pin, lock, workflow or test-only PR changes no node of this repository, and identity, health and wiring carry it
+        negative_control:
+          kind: base_rerun
+        timeout_minutes: 45
+        budget_minutes: 16
+        budget_basis: measured
+        budget_source: "STATUS ledger:3897 and TERMINAL ledger:3839 (13 to 16 min)"
   - profile_key: omnibase_core.foundation_override
     profile_version: 1
     repo: OmniNode-ai/omnibase_core

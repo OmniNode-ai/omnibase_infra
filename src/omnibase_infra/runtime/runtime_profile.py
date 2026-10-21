@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -82,6 +83,10 @@ _VALID_PREFETCH_POLICIES = frozenset({"disabled", "best_effort", "required"})
 # OMN-20590: lane-scoped switch for the runtime tick producer. See
 # resolve_runtime_scheduler_enabled().
 _RUNTIME_SCHEDULER_ENABLED_ENV_VAR = "ONEX_RUNTIME_SCHEDULER_ENABLED"
+
+# OMN-17427: the roles a lane folds into this process. See
+# resolve_runtime_folded_profiles().
+_FOLDED_PROFILES_ENV_VAR = "ONEX_RUNTIME_FOLDED_PROFILES"
 _TRUE_SPELLINGS = frozenset({"true", "1", "yes", "on"})
 _FALSE_SPELLINGS = frozenset({"false", "0", "no", "off"})
 
@@ -265,6 +270,55 @@ def resolve_runtime_profile_name() -> str:
     return _resolve_profile(raw).name
 
 
+def resolve_runtime_folded_profiles(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Return the roles a lane folds into this runtime (OMN-17427).
+
+    ``RUNTIME_PROFILE`` stays this process's one role identity. A lane that runs
+    one runtime container instead of a container per role names the other roles
+    in ``ONEX_RUNTIME_FOLDED_PROFILES`` (comma-separated), and the auto-wiring
+    ownership filter then attaches the contracts those roles own as well, in
+    this process. The lane's runtime policy contract declares the list
+    (``folded_profiles``) and the renderer writes it.
+
+    Consumer groups are derived from each node's identity, not from the role, so
+    a folded node joins the group the role's own container used: a fold that
+    still has the role's container running shares the partitions with it rather
+    than processing each record twice.
+
+    Unset or blank folds nothing. Each name is validated on the same terms as
+    ``RUNTIME_PROFILE``; an unregistered name is refused, because it would fold
+    nothing while the lane believes the role is carried.
+
+    Args:
+        environ: Override for the process environment. Injected by tests; the
+            default reads ``os.environ``.
+
+    Returns:
+        The normalized, registered folded profile names, in declared order and
+        without duplicates.
+
+    Raises:
+        ProtocolConfigurationError: If a name is not a registered profile.
+    """
+    env = os.environ if environ is None else environ
+    raw = env.get(_FOLDED_PROFILES_ENV_VAR, "")
+    folded: list[str] = []
+    for entry in raw.split(","):
+        if not entry.strip():
+            continue
+        try:
+            name = _resolve_profile(entry).name
+        except ProtocolConfigurationError as exc:
+            raise ProtocolConfigurationError(
+                f"{_FOLDED_PROFILES_ENV_VAR} names {entry.strip()!r}: {exc}"
+            ) from exc
+        if name not in folded:
+            folded.append(name)
+    return tuple(folded)
+
+
 def load_runtime_profile(profile_name: str | None = None) -> ModelRuntimeProfile:
     """Return the ``ModelRuntimeProfile`` for *profile_name*.
 
@@ -376,6 +430,7 @@ def resolve_secret_resolver_config_path() -> str:
 __all__ = [
     "ModelRuntimeProfile",
     "load_runtime_profile",
+    "resolve_runtime_folded_profiles",
     "resolve_runtime_profile_name",
     "resolve_runtime_scheduler_enabled",
     "resolve_secret_resolver_config_path",

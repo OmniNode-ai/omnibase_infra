@@ -41,11 +41,11 @@ The lease
 The unit of leasing is the host, because the slot's project name and ports are
 fixed. The lease is a directory on the host (``mkdir`` is atomic on macOS and
 Linux) holding ``lease.json`` with the holder and an absolute expiry. An
-expired lease is broken; a live one held by someone else is refused. The ledger
-is read, never written: a live ``HOLD`` naming the host's surface, placed by
-another lane, makes the host busy. The HOLD and RELEASE rows themselves are
-the calling lane's to write through ``/omni:ledger-msg``; this file prints the
-text for them.
+expired lease is broken; a live one held by someone else is refused. Release
+runs under the same guard as the break. The ledger is read, never written: a
+live ``HOLD`` naming the host's surface, placed by another lane, makes the host
+busy. The HOLD and RELEASE rows themselves are the calling lane's to write
+through ``/omni:ledger-msg``; this file prints the text for them.
 
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
@@ -74,9 +74,11 @@ import base64
 import concurrent.futures
 import contextlib
 import datetime as dt
+import getpass
 import gzip
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -180,6 +182,10 @@ class PoolConfig:
     model_endpoint: str
     max_load_ratio: float
     hosts: tuple[PoolHost, ...]
+    # the lane overlays beside the pool table (config/lab/lane-overlays), where
+    # a pre-PR slot's own Bifrost overlay is read from (OMN-19064); where the
+    # table was read, not what it says, so two reads of one table compare equal
+    lane_overlay_dir: Path | None = field(default=None, compare=False)
 
     def host(self, name: str) -> PoolHost:
         for h in self.hosts:
@@ -313,6 +319,7 @@ def load_pool_config(path: Path | None = None) -> PoolConfig:
         work_root_prefix=slot["work_root_prefix"],
         model_endpoint=slot["model_endpoint"],
         max_load_ratio=float(slot["max_load_ratio"]),
+        lane_overlay_dir=path.parent / "lane-overlays",
         hosts=tuple(hosts),
     )
 
@@ -349,8 +356,39 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
+def _bindable(addr: str) -> bool:
+    """Whether an IP, or the IPv4 address a name resolves to, belongs to this machine."""
+    try:
+        try:
+            ipaddress.ip_address(addr)
+        except ValueError:
+            addr = socket.gethostbyname(addr)
+        family = socket.AF_INET6 if ":" in addr else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((addr, 0))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def is_this_host(
+    ssh_target: str,
+    user: str | None = None,
+    bind: Callable[[str], bool] | None = None,
+) -> bool:
+    """Whether the target names this machine and the current user.
+
+    A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
+    target_user, sep, addr = ssh_target.rpartition("@")
+    if sep and target_user != (getpass.getuser() if user is None else user):
+        return False
+    return (bind or _bindable)(addr)
+
+
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -358,7 +396,13 @@ class Transport(Protocol):
 
 
 class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
         self._opts = [
             "-o",
             "BatchMode=yes",
@@ -366,25 +410,115 @@ class SshTransport:
             f"ConnectTimeout={connect_timeout}",
         ]
 
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
         try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
             return 124, out + f"\n[timeout after {timeout:.0f}s]"
         return proc.returncode, proc.stdout + proc.stderr
 
     def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
         return subprocess.run(
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
         ).returncode
+
+
+class LocalTransport:
+    """Run pool commands as the current user on this machine."""
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        env = {
+            key: os.environ[key]
+            for key in ("HOME", "USER", "LOGNAME", "SHELL", "LANG")
+            if key in os.environ
+        }
+        # the PATH a non-interactive sshd session starts with, so a local run
+        # finds the same tools an ssh one does
+        env["PATH"] = (
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+        )
+        proc = subprocess.Popen(
+            ["bash", "-c", REMOTE_PATH + command],
+            cwd=Path.home(),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+            return 124, stdout + stderr + f"\n[timeout after {timeout:.0f}s]"
+        return proc.returncode, stdout + stderr
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        try:
+            shutil.copyfile(local, remote)
+            return 0
+        except OSError:
+            return 1
+
+
+class HostRoutingTransport:
+    """Choose a local shell or ssh once per target."""
+
+    def __init__(
+        self,
+        ssh: Transport | None = None,
+        local: Transport | None = None,
+        is_local: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._ssh = (
+            ssh if ssh is not None else SshTransport(local_check=lambda _target: False)
+        )
+        self._local = local if local is not None else LocalTransport()
+        self._is_local = is_local if is_local is not None else is_this_host
+        self._targets: dict[str, bool] = {}
+
+    def _transport(self, host: PoolHost) -> Transport:
+        target = host.ssh_target
+        if target not in self._targets:
+            self._targets[target] = self._is_local(target)
+        return self._local if self._targets[target] else self._ssh
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        return self._transport(host).run(host, command, timeout)
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        return self._transport(host).put(host, local, remote)
 
 
 # --------------------------------------------------------------------------- ledger
@@ -664,16 +798,26 @@ def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
     lease = f"$HOME/{host.lease_dir}"
+    # An expired holder can read its lease before a breaker replaces it, then
+    # remove the breaker's fresh lease. Guard the read and removal with the same
+    # directory the break holds, so release cannot erase a new holder (OMN-20085).
+    guard = f"{lease}.break"
     cmd = (
+        "GOTGUARD=0; i=0; while [ $i -lt 100 ]; do "
+        f"if mkdir {guard} 2>/dev/null; then GOTGUARD=1; break; fi; "
+        'i=$((i+1)); sleep 0.1; done; if [ "$GOTGUARD" = 1 ]; then '
         f"H=$(cat {lease}/lease.json 2>/dev/null); "
         f'case "$H" in *\'"holder": "{holder}"\'*) rm -rf {lease} && echo RELEASED;; '
-        "'') echo ABSENT;; *) echo FOREIGN;; esac"
+        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
+        "else echo GUARDBUSY; fi"
     )
     rc, out = transport.run(host, cmd, timeout=30)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
         return True, "no lease was present"
+    if "GUARDBUSY" in out:
+        return False, f"lease guard {guard} held past the wait; lease left to expire"
     return False, f"lease is not this holder's (rc={rc}): {out.strip()[:200]}"
 
 
@@ -1064,6 +1208,72 @@ def judge(
 EXERCISE_TAIL_LINES = 15
 
 
+def neighbour_projects(host: PoolHost) -> str:
+    """The declared lanes a pre-PR slot's run reads by container id (OMN-19064).
+
+    The slot policy's declared-lane table, pipe-joined for the on-host script;
+    empty for an isolated member, whose snapshot already covers the whole host.
+    """
+    if host.kind != "prepr-slot":
+        return ""
+    return "|".join(sorted(_slot_policy().DECLARED_LANE_PROJECTS))
+
+
+def judge_slot_isolation(rb: Readback, outputs: Mapping[str, str]) -> None:
+    """Hold a pre-PR slot's run to its reserved ports and read its neighbours.
+
+    OMN-19064 AC-2: the slot's project publishes only its reserved block. The
+    probe's ``slot-published-ports`` line decides it, and a missing line, or a
+    slot that published nothing, is a fail, never a quiet pass.
+
+    OMN-19064 AC-1: no container of a declared lane was recreated or restarted
+    during the run, read by id, start time and restart count in snap-pre and
+    snap-post. That reading is a note and not a check: the declared lanes
+    redeploy on their own schedule, so a change there is not the slot's by
+    this readback alone, and the changed lines ride in the readback to be read.
+    """
+    probe = outputs.get("probe", "")
+    m = re.search(r"^slot-published-ports=(\S+) outside-block=(\S+)$", probe, re.M)
+    rb.checks["slot_ports_in_block"] = (
+        m is not None and m.group(1) != "none" and m.group(2) == "none"
+    )
+    if m is None:
+        rb.notes.append("slot ports: the probe printed no slot-published-ports line")
+    elif m.group(1) == "none":
+        rb.notes.append("slot ports: the slot's project published no host port")
+    elif m.group(2) != "none":
+        rb.notes.append(
+            f"slot ports: published {m.group(2)} outside the reserved block"
+        )
+    else:
+        rb.notes.append(
+            f"slot ports: published {m.group(1)}, all in the reserved block"
+        )
+    post = outputs.get("snap-post", "")
+    n = re.search(r"^neighbour-diff=(\d+) neighbours=(\d+)$", post, re.M)
+    if n is None:
+        rb.notes.append("neighbours: snap-post printed no neighbour readback")
+    elif n.group(2) == "0":
+        rb.notes.append(
+            "neighbours: no declared-lane container was read before the run, "
+            "so an unchanged readback shows nothing"
+        )
+    elif n.group(1) == "0":
+        rb.notes.append(
+            f"neighbours: {n.group(2)} declared-lane containers, none recreated "
+            "or restarted during the run (id, start time and restart count unchanged)"
+        )
+    else:
+        rb.notes.append(
+            f"neighbours: {n.group(1)} changed lines across {n.group(2)} "
+            "declared-lane containers during the run; the declared lanes "
+            "redeploy on their own, so read them before attributing them to the slot"
+        )
+        rb.notes.extend(
+            ln for ln in post.splitlines() if ln.startswith("neighbour-changed ")
+        )
+
+
 def judge_exercise(rb: Readback, output: str) -> None:
     """Hold the readback to the post-up command's exit code (the exercise phase).
 
@@ -1308,6 +1518,10 @@ def _check_map(
             _lines(probe, r"^\S+ lines=\d+ autowire-fail=.*$"),
         ),
         "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
+        "slot_ports_in_block": (
+            "slot_ports_in_reserved_block",
+            _lines(probe, r"^slot-published-ports=.*$"),
+        ),
         "post_bringup": (
             "post_bringup",
             _lines(outputs.get("post-bringup", ""), r"^post-bringup .*$"),
@@ -1812,6 +2026,8 @@ def run_proof(
         log(f"lease {host.name}: {rwhy}")
     if not released:
         rb.notes.append(f"lease not released: {rwhy}")
+    if host.kind == "prepr-slot":
+        judge_slot_isolation(rb, outputs)
     if post_up_command is not None:
         judge_exercise(rb, outputs.get("exercise", ""))
     finished_at = now_fn()
@@ -1859,10 +2075,31 @@ RESERVED_PARAMS = (
     "EFFECTS_PORT",
     "SLOT_PORTS",
     "POSITIVE_CONTROL",
+    "NEIGHBOUR_PROJECTS",
     "REASON",
     "OVERLAY_FILE",
     "POST_UP_COMMAND",
 )
+
+
+def slot_lane_overlay(cfg: PoolConfig, host: PoolHost) -> Path | None:
+    """A pre-PR slot's own Bifrost overlay on the launching host (OMN-19064).
+
+    Lab lane overlays live in the private workspace config (OMN-20932), and the
+    slot entrypoint refuses a slot with none before any build. The pool runs its
+    on-host script over a non-login ssh shell that names no config root, so the
+    driver ships the slot's overlay itself, read where the compose helper reads
+    it: ``$ONEX_LANE_OVERLAY_DIR``, else the lane-overlays directory beside the
+    pool table. None when the file is absent, and the on-host refusal names it.
+    """
+    if host.kind != "prepr-slot":
+        return None
+    configured = os.environ.get("ONEX_LANE_OVERLAY_DIR", "").strip()
+    root = Path(configured) if configured else cfg.lane_overlay_dir
+    if root is None:
+        return None
+    candidate = root / f"{host.compose_project}.bifrost.yaml"
+    return candidate if candidate.is_file() else None
 
 
 def _run_stack(
@@ -1885,6 +2122,8 @@ def _run_stack(
     ``overlay`` replaces the stack's Bifrost overlay; ``post_up_command`` runs
     once against the live stack after the probe (the ``exercise`` phase).
     """
+    if overlay is None:
+        overlay = slot_lane_overlay(cfg, host)
     # A path on the REMOTE host, private to this run and removed at the end.
     remote_dir = f"/tmp/{tag}"  # noqa: S108
     # keyed by member as well as holder: one lane may hold both .201 slots at
@@ -1906,6 +2145,7 @@ def _run_stack(
         f"EFFECTS_PORT={host.effects_port}",
         f"SLOT_PORTS={shlex.quote('|'.join(str(p) for p in host.ports))}",
         f"POSITIVE_CONTROL={shlex.quote(host.positive_control)}",
+        f"NEIGHBOUR_PROJECTS={shlex.quote(neighbour_projects(host))}",
         f"REASON={shlex.quote(f'lab pool run {tag} by {holder} (OMN-18893)')}",
     ]
     if overlay is not None:
@@ -2306,6 +2546,8 @@ def _verify_steps(
             released, rwhy = release_lease(cfg, transport, host, facts.holder)
             log(f"lease {host.name}: {rwhy}")
         rb = judge(outputs, None, ports)
+        if host.kind == "prepr-slot":
+            judge_slot_isolation(rb, outputs)
         facts.readback = rb
         if not released:
             rb.notes.append(f"lease not released: {rwhy}")
@@ -2518,7 +2760,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
                 ),
             )
         return EXIT_USAGE
-    tp = transport or SshTransport()
+    tp = transport or HostRoutingTransport()
     now = _utcnow()
     if args.cmd in ("status", "pick"):
         holds = live_surface_holds(_ledger_lines(args.ledger), now)

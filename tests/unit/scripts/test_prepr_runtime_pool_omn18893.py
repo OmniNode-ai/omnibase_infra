@@ -16,6 +16,7 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import pwd
 import re
 import shlex
 import shutil
@@ -123,6 +124,16 @@ class FakeTransport:
                 f"CORES={h.cores}\nLOAD={h.load}\nSLOT={h.slot}\nLISTEN={h.listen}\n"
                 f"PROJECTS=omnibase-infra-dogfood:7,\nLEASE={h.lease or ''}\n"
             )
+        if "RELEASED" in command:  # release
+            if h.lease is None:
+                return 0, "ABSENT"
+            found = re.search(r'"holder": "([^"]+)"', command)
+            assert found is not None
+            holder = found.group(1)
+            if json.loads(h.lease)["holder"] == holder:
+                h.lease = None
+                return 0, "RELEASED"
+            return 0, "FOREIGN"
         if ".break" in command:  # break an expired lease, guarded and compared
             body = re.search(r"printf '%s' '(\{.*?\})'", command)
             assert body is not None
@@ -137,16 +148,6 @@ class FakeTransport:
                 h.lease = body.group(1)
                 return 0, "ACQUIRED"
             return 0, "HELD\n" + h.lease
-        if "RELEASED" in command:  # release
-            if h.lease is None:
-                return 0, "ABSENT"
-            found = re.search(r'"holder": "([^"]+)"', command)
-            assert found is not None
-            holder = found.group(1)
-            if json.loads(h.lease)["holder"] == holder:
-                h.lease = None
-                return 0, "RELEASED"
-            return 0, "FOREIGN"
         if command.startswith("rm -rf $HOME/"):
             h.lease = None
             return 0, ""
@@ -1167,6 +1168,11 @@ SLOT_GOOD = {
         "omninode-prepr-1-runtime-effects lines=800 autowire-fail=0 dup-dispatcher=0 ERROR=0 Traceback=0\n"
         "failed-contracts omninode-prepr-1-runtime: \n"
         "failed-contracts omninode-prepr-1-runtime-effects: \n"
+        "slot-published-ports=23002,28085,28086,28090 outside-block=none\n"
+    ),
+    "snap-post": (
+        "snapshot-diff=0\nneighbour-diff=0 neighbours=40\n"
+        "snap-post lines=50 local-containers=0 listeners=0"
     ),
     "teardown": (
         "prepr_teardown_slot rc=0\nslot-teardown verdict=CLEAN\n"
@@ -1234,6 +1240,113 @@ def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> Non
     ):
         assert line in env.splitlines(), line
     assert hosts["pool-c-slot-1"].lease is None
+    assert (
+        "NEIGHBOUR_PROJECTS="
+        + shlex.quote(pool.neighbour_projects(CFG.host("pool-c-slot-1")))
+        in env.splitlines()
+    )
+    assert (
+        "slot ports: published 23002,28085,28086,28090, all in the reserved block"
+        in text
+    )
+    assert "40 declared-lane containers, none recreated or restarted" in text
+
+
+def _pool_with_overlays(tmp_path: Path, projects: tuple[str, ...]) -> Any:
+    lab = tmp_path / "config" / "lab"
+    (lab / "lane-overlays").mkdir(parents=True)
+    table = lab / "prepr_runtime_pool.yaml"
+    table.write_text(POOL_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    for project in projects:
+        (lab / "lane-overlays" / f"{project}.bifrost.yaml").write_text(
+            "providers: []\n", encoding="utf-8"
+        )
+    return pool.load_pool_config(table)
+
+
+def test_a_slot_run_ships_the_slot_s_own_lane_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-19064, found live 2026-10-19 on a pre-PR slot: lane overlays left the repo
+    # (OMN-20932) and the pool's non-login ssh shell names no config root, so the
+    # slot entrypoint refused "no lane overlay for the slot's compose project"
+    # before any build. The driver now ships the overlay beside the pool table.
+    monkeypatch.delenv("ONEX_LANE_OVERLAY_DIR", raising=False)
+    slot = CFG.host("pool-c-slot-1")
+    cfg = _pool_with_overlays(tmp_path, (slot.compose_project,))
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
+    hosts["pool-c-slot-1"].phases = dict(SLOT_GOOD)
+    tp = FakeTransport(hosts)
+    work = tmp_path / "work"
+    work.mkdir()
+    code, text = pool.run_proof(
+        cfg,
+        tp,
+        _params(work),
+        "me",
+        150,
+        "pool-c-slot-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    assert any(r.endswith("/overlay.bifrost.yaml") for _, r in tp.puts), tp.puts
+    env = next(work.glob("*.resolved.env")).read_text(encoding="utf-8")
+    assert any(ln.startswith("OVERLAY_FILE=") for ln in env.splitlines())
+
+
+def test_the_slot_overlay_is_read_from_the_pool_table_s_config_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_LANE_OVERLAY_DIR", raising=False)
+    slot = CFG.host("pool-c-slot-1")
+    cfg = _pool_with_overlays(tmp_path, (slot.compose_project,))
+    found = pool.slot_lane_overlay(cfg, cfg.host("pool-c-slot-1"))
+    assert found == (
+        tmp_path / "config/lab/lane-overlays" / f"{slot.compose_project}.bifrost.yaml"
+    )
+    # an isolated member mounts its own stack's overlay, never a slot's
+    isolated = next(h for h in cfg.hosts if h.kind != "prepr-slot")
+    assert pool.slot_lane_overlay(cfg, isolated) is None
+    # a slot with no overlay file ships none; the on-host refusal names it
+    other = next(h for h in cfg.hosts if h.kind == "prepr-slot" and h.slot != slot.slot)
+    assert pool.slot_lane_overlay(cfg, other) is None
+    # ONEX_LANE_OVERLAY_DIR outranks the config root, as in compose_files.sh
+    alt = tmp_path / "alt"
+    alt.mkdir()
+    (alt / f"{other.compose_project}.bifrost.yaml").write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(alt))
+    assert (
+        pool.slot_lane_overlay(cfg, other)
+        == alt / f"{other.compose_project}.bifrost.yaml"
+    )
+    assert pool.slot_lane_overlay(cfg, cfg.host("pool-c-slot-1")) is None
+
+
+def test_a_slot_run_publishing_outside_its_block_fails(tmp_path: Path) -> None:
+    # OMN-19064 AC-2: a slot whose project publishes a port outside its reserved
+    # block is a FAIL, even with every other check green
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
+    hosts["pool-c-slot-1"].phases = {
+        **SLOT_GOOD,
+        "probe": SLOT_GOOD["probe"].replace(
+            "outside-block=none", "outside-block=28098"
+        ),
+    }
+    code, text = pool.run_proof(
+        CFG,
+        FakeTransport(hosts),
+        _params(tmp_path),
+        "me",
+        150,
+        "pool-c-slot-1",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_FAIL, text
+    assert "published 28098 outside the reserved block" in text
 
 
 def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) -> None:
@@ -2533,3 +2646,74 @@ def test_verify_signal_a_second_signal_during_cleanup_does_not_cut_it_short(
     assert code == 128 + signal.SIGTERM.value
     assert hosts["pool-c-slot-1"].ran[-2:] == ["teardown", "snap-post"]
     assert hosts["pool-c-slot-1"].lease is None
+
+
+def test_local_transport_is_this_host_loopback() -> None:
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    assert pool.is_this_host(f"{current_user}@127.0.0.1") is True
+
+
+def test_local_transport_is_this_host_other_user() -> None:
+    assert pool.is_this_host("someone-else-xyz@127.0.0.1") is False
+
+
+def test_local_transport_is_this_host_foreign_address() -> None:
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    assert pool.is_this_host(f"{current_user}@192.0.2.1") is False
+    assert pool.is_this_host("nohost.invalid") is False
+
+
+def test_local_transport_runs_locally_without_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_run = pool.subprocess.run
+    calls: list[list[str]] = []
+
+    def recording_run(
+        argv: list[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(pool.subprocess, "run", recording_run)
+    command = "pwd; echo marker"
+    rc, output = pool.SshTransport(local_check=lambda t: True).run(
+        CFG.host("pool-a"), command, 30
+    )
+    assert rc == 0
+    assert str(Path.home()) in output
+    assert "marker" in output
+    assert all(argv[0] != "ssh" for argv in calls)
+    assert calls[0] == ["bash", "-c", command]
+    assert calls[0][2] == command
+
+
+def test_local_transport_put_copies_file(tmp_path: Path) -> None:
+    local = tmp_path / "source.txt"
+    remote = tmp_path / "destination.txt"
+    local.write_text("local transport copy\n", encoding="utf-8")
+    transport = pool.SshTransport(local_check=lambda t: True)
+    host = CFG.host("pool-a")
+    assert transport.put(host, local, str(remote)) == 0
+    assert remote.read_text(encoding="utf-8") == local.read_text(encoding="utf-8")
+    assert transport.put(host, local, str(tmp_path / "missing" / "file.txt")) == 1
+
+
+def test_local_transport_remote_host_still_uses_ssh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "ok", "")
+
+    monkeypatch.setattr(pool.subprocess, "run", fake_run)
+    host = CFG.host("pool-a")
+    command = "echo marker"
+    assert pool.SshTransport(local_check=lambda t: False).run(host, command, 30) == (
+        0,
+        "ok",
+    )
+    assert calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
+    assert calls[0][-2:] == [host.ssh_target, pool.REMOTE_PATH + command]
