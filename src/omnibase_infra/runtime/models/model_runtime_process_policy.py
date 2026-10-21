@@ -8,6 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_core.constants.constants_runtime_profiles import (
+    REGISTERED_RUNTIME_PROFILES,
+)
 from omnibase_infra.runtime.models.model_secret_namespace_rule import (
     ModelSecretNamespaceRule,
 )
@@ -61,6 +64,27 @@ class ModelRuntimeProcessPolicy(BaseModel):
     # profile-level config stays the house-only one every lane that borrows
     # this profile keeps.
     secret_resolver_namespaces: tuple[ModelSecretNamespaceRule, ...] = ()
+    # OMN-17427: the roles this process carries besides its own, so a lane runs
+    # one runtime container instead of a container per role. Rendered as
+    # `{PROFILE}_RUNTIME_{PROCESS}_FOLDED_PROFILES` only when declared; the
+    # runtime reads it as ONEX_RUNTIME_FOLDED_PROFILES and the auto-wiring
+    # ownership filter attaches the folded roles' contracts in this process.
+    folded_profiles: tuple[str, ...] = ()
+
+    @field_validator("folded_profiles")
+    @classmethod
+    def _folded_profiles_are_registered(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            msg = "runtime process folded_profiles must be unique"
+            raise ValueError(msg)
+        unknown = sorted(set(value) - REGISTERED_RUNTIME_PROFILES)
+        if unknown:
+            msg = (
+                f"runtime process folded_profiles {unknown} are not registered "
+                f"runtime profiles: {sorted(REGISTERED_RUNTIME_PROFILES)}"
+            )
+            raise ValueError(msg)
+        return value
 
     @field_validator("capabilities")
     @classmethod

@@ -97,10 +97,9 @@ class ProtocolDelegationDispatchPort(Protocol):
         # carries it inline on the command (OMN-17427) and refuses a spec that
         # points at the caller's workspace, which the lane cannot read.
         named_tests: BaseModel | None = None,
-        # OMN-19448 (omnimarket#4252): the terminal trace and the measured
-        # queue wait the consumer passes when the port declares them. Evidence
-        # only, defaulted per the note above, and the same types and defaults
-        # as the consumer protocol.
+        # OMN-17427: the OmniMarket consumer protocol declares these since
+        # omnimarket#4252 and passes them to a port whose dispatch declares
+        # them. Defaulted, per the note above.
         trace_id: UUID | None = None,
         queue_wait_ms: int | None = None,
     ) -> dict[str, object]: ...

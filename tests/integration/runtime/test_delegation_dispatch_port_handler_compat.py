@@ -9,7 +9,7 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -419,6 +419,8 @@ async def _dispatch_through_real_broker(
     reply: _ConsumerReply | None,
     execution_timeout_seconds: int = 5,
     terminal_delivery_margin_seconds: int = 1,
+    trace_id: UUID | None = None,
+    queue_wait_ms: int | None = None,
 ) -> tuple[dict[str, object], list[bytes], list[ModelDelegationRequest]]:
     """Dispatch through the port and the real broker, with a byte-level consumer.
 
@@ -478,6 +480,8 @@ async def _dispatch_through_real_broker(
             temperature=None,
             response_format=None,
             model=None,
+            trace_id=trace_id,
+            queue_wait_ms=queue_wait_ms,
         )
     finally:
         await unsubscribe()
@@ -493,6 +497,37 @@ def _completed_reply(
         "content": '{"summary": "ok", "labels": ["bug"]}',
         "quality_passed": True,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("trace_id", "queue_wait_ms"),
+    [
+        (None, None),
+        (UUID("11111111-1111-4111-8111-111111111111"), 42),
+        (UUID("11111111-1111-4111-8111-111111111111"), None),
+        (None, 0),
+    ],
+    ids=["unset", "both", "trace-only", "zero-queue-wait"],
+)
+async def test_terminal_measure_kwargs_cross_the_real_broker_without_wire_extras(
+    trace_id: UUID | None, queue_wait_ms: int | None
+) -> None:
+    """OMN-17427: caller-local evidence must not invalidate the strict bus wire."""
+    result, published_bytes, decoded = await _dispatch_through_real_broker(
+        response_contract=None,
+        reply=_completed_reply,
+        trace_id=trace_id,
+        queue_wait_ms=queue_wait_ms,
+    )
+
+    assert result["status"] == "completed"
+    assert len(published_bytes) == len(decoded) == 1
+    assert decoded[0].prompt == "Classify the changelog entry."
+    envelope = json.loads(published_bytes[0])
+    for name in ("trace_id", "queue_wait_ms"):
+        assert name not in envelope["payload"]
+        assert name not in decoded[0].model_dump()
 
 
 @pytest.mark.asyncio
