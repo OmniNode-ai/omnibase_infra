@@ -1792,3 +1792,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac145-census-restart-integration
+    description: The real Docker HTTP client reads an isolated Unix socket and feeds the collector envelope to the planner CLI. Historical restarts and the 1800-second boundary pass; a recent start, zero start time, exited container and missing census time retain drift. No live Docker daemon or lab credentials are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_lane_census_restart_window_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_lane_census_restart_window_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC145
