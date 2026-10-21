@@ -581,7 +581,7 @@ dod_evidence:
       - AC146
       - AC147
       - AC148
-  - id: dod-omn-17427-deploy-agent-health-convergence-deploy
+  - id: dod-omn-17427-deploy-agent-convergence-deploy
     description: Hosted-runner deploy check using the real executor with a fake Docker runner and clock, including recovery after the old 600-second ceiling. No host, broker or credential is required.
     source: manual
     checks:
