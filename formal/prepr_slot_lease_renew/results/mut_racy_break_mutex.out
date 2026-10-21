@@ -1,0 +1,186 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 52 and seed -2293988368113260073 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/PreprSlotLease.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PreprSlotLease
+Starting... (2026-10-19 13:47:13)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-19 13:47:14.
+Error: Invariant MutualExclusion is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 0
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 2: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 3: <RacyRead line 175, col 5 to line 185, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "between" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 4], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 4: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "between" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 4], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 5: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 3
+/\ pc = (r1 :> "between" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 4], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 6: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "between" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 4], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 7: <RacyRead line 175, col 5 to line 185, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "between" @@ r2 :> "saw" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 4], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> r1, until |-> 4] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 8: <Begin line 214, col 5 to line 229, col 66 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> TRUE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 4 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "run" @@ r2 :> "saw" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r1, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> r1, until |-> 4] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 9: <RacyBreak line 188, col 5 to line 196, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> TRUE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 4 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "run" @@ r2 :> "broke" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> r1, until |-> 4] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 0 @@ r3 :> 0)
+
+State 10: <RacyMkdir line 199, col 5 to line 206, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> TRUE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 4 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "run" @@ r2 :> "between" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> r1, until |-> 4] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 2 @@ r3 :> 0)
+
+State 11: <Begin line 214, col 5 to line 229, col 66 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> TRUE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 4 @@ r2 :> 4 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "run" @@ r2 :> "run" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "s1" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> r1, until |-> 4] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 2 @@ r2 :> 2 @@ r3 :> 0)
+
+49247 states generated, 25191 distinct states found, 14285 states left on queue.
+The depth of the complete state graph search is 12.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 8 and the 95th percentile is 5).
+Finished in 03s at (2026-10-19 13:47:15)
