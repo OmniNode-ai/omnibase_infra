@@ -43,6 +43,6 @@ def test_a_retired_lane_has_no_port_or_boundary_row(retired: str) -> None:
 
 def test_the_maps_still_cover_the_live_lanes() -> None:
     """Positive control: the maps are not empty, so the absence is real."""
-    for live in ("dev", "stability-test", "lakshman", "dogfood"):
+    for live in ("dev", "dogfood", "principal-issuer"):
         assert live in _LANE_PORT_MAP, live
         assert live in _LANE_BOUNDARY, live
