@@ -28,6 +28,9 @@ evidence_requirements:
   - kind: tests
     description: A stub uv that writes the committed lock back produces changed=false.
     command: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
+  - kind: tests
+    description: uv.lock is revision 5 or later and most registry artifacts carry upload-time; it fails on the merge base's revision 1 lock.
+    command: uv run pytest tests/ci/test_uv_lock_revision_omn13902.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -66,6 +69,9 @@ dod_evidence:
         cwd: .
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_lockfile_certifi_floor_omn17427.py -q
+        cwd: .
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_uv_lock_revision_omn13902.py -q
         cwd: .
     binds_ac:
       - AC4
