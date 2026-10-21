@@ -175,6 +175,40 @@ def test_missing_cli_inspect_reading_is_not_a_clean_inventory(
         )
 
 
+def test_inspect_reads_the_last_start_time(inventory: Any) -> None:
+    """OMN-17427: the planner grades a restart count against the last start."""
+    readings = inventory._inspect_readings(
+        {
+            "State": {"Health": None, "StartedAt": "2026-10-20T17:45:04.1Z"},
+            "Config": {},
+            "RestartCount": 201,
+        }
+    )
+    assert readings["StartedAt"] == "2026-10-20T17:45:04.1Z"
+    assert (
+        inventory._inspect_readings(
+            {"State": {"Health": None}, "Config": {}, "RestartCount": 0}
+        )["StartedAt"]
+        == ""
+    )
+
+
+def test_cli_fallback_inspect_carries_the_start_time(inventory: Any) -> None:
+    assert ".State.StartedAt" in inventory._CLI_INSPECT_FORMAT
+
+
+def test_envelope_carries_when_the_census_looked(inventory: Any) -> None:
+    envelope = inventory.build_envelope(
+        lane=None,
+        runtime_tag=None,
+        containers=[],
+        networks=[],
+        source="engine_api",
+        observed_at="2026-10-20T18:49:18+00:00",
+    )
+    assert envelope["observed_at"] == "2026-10-20T18:49:18+00:00"
+
+
 def test_inspect_uses_docker_default_interval_when_zero(inventory: Any) -> None:
     readings = inventory._inspect_readings(
         {
@@ -387,6 +421,7 @@ def test_recorded_api_envelope_drives_the_planner(inventory: Any, planner: Any) 
         containers=inventory.normalize_api_containers(api_rows),
         networks=["omnibase-infra-stability-test-network"],
         source="engine_api",
+        observed_at="2026-07-30T05:45:00+00:00",
     )
     # OMN-19088: the collector does not name the host; the driver does.
     plan = planner.build_plan(

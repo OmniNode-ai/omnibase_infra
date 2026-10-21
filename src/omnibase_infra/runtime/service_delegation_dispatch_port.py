@@ -313,11 +313,10 @@ class RuntimeDelegationDispatchPort:
         terminal. Only omnimarket's in-process port writes an evidence terminal
         of its own and needs it.
 
-        ``trace_id`` and ``queue_wait_ms`` (OMN-19448, omnimarket#4252) are
-        accepted and unused for the same reason: they are evidence for the
-        in-process port's own terminal, and the canonical delegation request
-        wire (``ModelDelegationRequest``, ``extra="forbid"``) carries neither,
-        so publishing them would be rejected by the lane.
+        ``trace_id`` and ``queue_wait_ms`` (OMN-17427) are accepted and unused
+        on the same terms: omnimarket#4252 writes them onto the in-process
+        port's own evidence terminal, and this port's request wire does not
+        carry them.
         """
         del attribution, trace_id, queue_wait_ms
 
