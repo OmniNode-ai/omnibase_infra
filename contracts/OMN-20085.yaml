@@ -1,7 +1,7 @@
 schema_version: 1.0.0
 ticket_id: OMN-20085
 title: One call verifies a branch or sha on the pre-PR slots
-summary: 'The pool driver gains a verify subcommand: verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha> takes the first free pre-PR slot under a lease, builds it from the ref with no PR, runs the named tests or the repo unit suite, tears the slot down on every catchable exit, and writes one onex.prepr.verify-result.v1 file for every outcome. The expired-lease break is made atomic (a guard directory plus a re-read) so two acquirers cannot both hold a slot. The TLA+ model of the lease (AC3 formal half) followed in a later change, with release_lease moved under the break''s guard after the model found an expired holder''s release could remove a breaker''s fresh lease. Not delivered here: the live slot run (AC7), which needs a pre-PR slot hold.'
+summary: 'The pool driver gains a verify subcommand: verify --repo <omnibase_infra|omnimarket> --ref <branch or 40-hex sha> takes the first free pre-PR slot under a lease, builds it from the ref with no PR, runs the named tests or the repo unit suite, tears the slot down on every catchable exit, and writes one onex.prepr.verify-result.v1 file for every outcome. The expired-lease break is made atomic (a guard directory plus a re-read) so two acquirers cannot both hold a slot. The TLA+ model of the lease (AC3 formal half) followed in a later change, with release_lease moved under the break''s guard after the model found an expired holder''s release could remove a breaker''s fresh lease. A further change renews the lease before every phase in the command that starts it, with a TLA+ model of the renewal under formal/prepr_slot_lease_renew. Not delivered here: the live slot run (AC7), which needs a pre-PR slot hold.'
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -80,3 +80,15 @@ dod_evidence:
         check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q
     binds_ac:
       - "AC3"
+  - id: dod-omn-20085-lease-renew-every-phase
+    description: 'The lease renewal (AC3, the property the model checks). Every verify phase command renews this holder''s lease under the break guard and runs under a host-side timeout -k; a peer lease found at a renewal stops the run INCONCLUSIVE with no teardown; a renewal racing seven breakers of its expired lease leaves one holder in each of 25 rounds. Unbound corroboration (no binds_ac).'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q -k renew
+  - id: dod-omn-20085-lease-renew-tla-model
+    description: 'The TLA+ model of the lease renewal: formal/prepr_slot_lease_renew/PreprSlotLease.tla with its committed TLC output; the model passes MutualExclusion, OperatingOwnsLiveLease, NoSoftKillAbandon, AbandonedReusable and DeadSlotCleaned, and each of nine mutations fails its named property, bound to the spec and cfg digest. Unbound corroboration (no binds_ac).'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_prepr_slot_lease_renew_model.py -q
