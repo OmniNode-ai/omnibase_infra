@@ -246,7 +246,7 @@ def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     # The governed lanes must NOT have become optional along the way.
     #
     # OMN-18320 retired the lab compose lane `prod`, and on 2026-10-21 the
-    # `judge` compose project was taken down and removed from the census too
+    # `judge` compose project was retired and removed from the census too
     # (omnibase_internal#949). The governance constant stays wider than the
     # manifest on purpose so unattributed mutations of either still refuse.
     # This pins the split exactly, so a future partial erosion of
