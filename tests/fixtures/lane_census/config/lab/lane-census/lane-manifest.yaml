@@ -12,7 +12,7 @@
 # block generator already declares, so a clean census of this file is clean
 # for every checker.
 #
-# Shape: host-a runs `judge` (required) and `dev` (optional, with declared
+# Shape: host-a runs `stability-test` (required) and `dev` (optional, with declared
 # restart bounds, the lane the lab alarm reads); host-b runs `dogfood`
 # (optional), which is therefore not applicable on host-a.
 schema_version: "1.0.0"
@@ -25,30 +25,30 @@ hosts:
     aliases: [box-b]
 
 lanes:
-  judge:
+  stability-test:
     hosts: [host-a]
-    compose_file: docker/docker-compose.example-judge.yml
-    compose_project: example-judge
-    network: example-judge-network
+    compose_file: docker/docker-compose.example-stability-test.yml
+    compose_project: example-stability-test
+    network: example-stability-test-network
     image_tag_pattern: '.+'
     services:
-      - name: example-judge-postgres
+      - name: example-stability-test-postgres
         kind: service
         replicas: 1
-      - name: example-judge-redpanda
+      - name: example-stability-test-redpanda
         kind: service
         replicas: 1
-      - name: example-judge-forward-migration
+      - name: example-stability-test-forward-migration
         kind: oneshot
-      - name: example-judge-migration-gate
+      - name: example-stability-test-migration-gate
         kind: keepalive
-      - name: example-judge-runtime
+      - name: example-stability-test-runtime
         kind: service
         replicas: 1
-      - name: example-judge-runtime-effects
+      - name: example-stability-test-runtime-effects
         kind: service
         replicas: 1
-      - name: example-judge-agent-actions-consumer
+      - name: example-stability-test-agent-actions-consumer
         kind: profile_gated
   dev:
     optional: true
