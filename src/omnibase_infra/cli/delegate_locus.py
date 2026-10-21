@@ -65,6 +65,7 @@ __all__ = [
     "contract_downstream_chain",
     "contract_terminal_topic",
     "orchestrator_distribution",
+    "rebind_wait_for_timeout",
     "resolve_delegate_locus",
 ]
 
@@ -110,6 +111,10 @@ DOWNSTREAM_CHAIN_STAGE = "downstream-delegation-chain"
 # refuses exactly as it did before, because a lane that is still unbound after
 # five minutes is down, not rebinding.
 _REBIND_WAIT_SECONDS = 300.0
+
+# OMN-17427: reserve half the caller's --timeout so a rebinding lane refuses
+# in time for fallback instead of being killed with no terminal.
+_REBIND_SHARE_OF_TIMEOUT = 0.5
 
 # Seconds between re-probes inside that window. Each admin request has the
 # ``_LIVENESS_TIMEOUT_SECONDS`` bound; transport failures also incur the
@@ -411,6 +416,13 @@ def orchestrator_distribution() -> str:
     return f"{_ORCHESTRATOR_DISTRIBUTION} {version} ({location})"
 
 
+def rebind_wait_for_timeout(timeout_seconds: int | None) -> float | None:
+    """Cap the rebind wait at half the caller's timeout (OMN-17427)."""
+    if timeout_seconds is None:
+        return None
+    return min(_REBIND_WAIT_SECONDS, timeout_seconds * _REBIND_SHARE_OF_TIMEOUT)
+
+
 def resolve_delegate_locus(
     *,
     requested: EnumDelegateLocus,
@@ -418,6 +430,7 @@ def resolve_delegate_locus(
     kafka_bootstrap: str | None,
     contract_path: Path,
     shared_bus_value: str,
+    rebind_wait_seconds: float | None = None,
 ) -> ModelDelegateLocusDecision:
     """Decide the locus and, for a dispatched run, prove it is viable.
 
@@ -429,6 +442,8 @@ def resolve_delegate_locus(
         shared_bus_value: The bus value that denotes a shared broker, passed
             in rather than hardcoded so this module never becomes a second
             place that knows the transport vocabulary.
+        rebind_wait_seconds: Optional caller bound for the consumer rebind wait;
+            ``None`` retains the full rebind window.
 
     Raises:
         DelegateLocusRefusedError: an incoherent request (a deployed lane over
@@ -536,6 +551,7 @@ def resolve_delegate_locus(
         kafka_bootstrap=kafka_bootstrap,
         owner=owner,
         downstream=downstream,
+        rebind_wait_seconds=rebind_wait_seconds,
     )
     broker = kafka_bootstrap
     logger.info(
@@ -600,6 +616,7 @@ def _assert_dispatch_viable(
     kafka_bootstrap: str,
     owner: ModelConsumerGroupOwner,
     downstream: ModelDelegateDownstreamChain | None = None,
+    rebind_wait_seconds: float | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], float]:
     """Refuse unless the first hop and any declared downstream chain are live.
 
@@ -631,7 +648,25 @@ def _assert_dispatch_viable(
         kafka_bootstrap: Broker address resolved for this run.
         owner: Contract service and node whose live groups are required.
         downstream: Optional declared chain sharing the same rebind wait bound.
+        rebind_wait_seconds: Optional caller bound, capped at the rebind window.
     """
+    bound = (
+        _REBIND_WAIT_SECONDS
+        if rebind_wait_seconds is None
+        else min(rebind_wait_seconds, _REBIND_WAIT_SECONDS)
+    )
+    capped = (
+        rebind_wait_seconds is not None and rebind_wait_seconds < _REBIND_WAIT_SECONDS
+    )
+    timeout_cap = (
+        " (capped at half the caller's --timeout, OMN-17427)" if capped else ""
+    )
+    # A capped wait cannot tell a down lane from a slow rebind (OMN-17427).
+    verdict = (
+        "a lane that is down or still rebinding past the caller's share"
+        if capped
+        else "a lane that is down, not one that is rebinding"
+    )
     started = _monotonic()
     probes = 0
     while True:
@@ -725,7 +760,7 @@ def _assert_dispatch_viable(
                     REBIND_WINDOW_FAILURE_CLASS,
                 )
             return groups, downstream_groups, waited
-        if waited + _REBIND_POLL_SECONDS > _REBIND_WAIT_SECONDS:
+        if waited + _REBIND_POLL_SECONDS > bound:
             if groups and downstream is not None:
                 raise DelegateDownstreamChainRefusedError(
                     f"no live consumer group is bound at {DOWNSTREAM_CHAIN_STAGE} "
@@ -734,11 +769,11 @@ def _assert_dispatch_viable(
                     f"live: {', '.join(groups)}. Waited {waited:.1f} s over "
                     f"{probes} probes, the bound for the "
                     f"{REBIND_WINDOW_FAILURE_CLASS} class "
-                    f"({_REBIND_WAIT_SECONDS:.0f} s). The deployed orchestrator "
+                    f"({bound:.0f} s). The deployed orchestrator "
                     "would accept the command and then wait its whole execution "
                     "budget, reported to the caller as a hang. Start the runtime "
                     "that hosts that consumer, or pass --bus inmemory --locus "
-                    "in-process to run it here on purpose."
+                    f"in-process to run it here on purpose.{timeout_cap}"
                 )
             raise DelegateNoConsumerRefusedError(
                 f"no live consumer group is bound to '{command_topic}' for "
@@ -747,10 +782,9 @@ def _assert_dispatch_viable(
                 "decision. The command would be published and nothing would "
                 f"answer it. Waited {waited:.1f} s over {probes} probes, the "
                 f"bound for the {REBIND_WINDOW_FAILURE_CLASS} class "
-                f"({_REBIND_WAIT_SECONDS:.0f} s, OMN-18843), so this is a lane "
-                "that is down, not one that is rebinding. Start the runtime "
+                f"({bound:.0f} s, OMN-18843), so this is {verdict}. Start the runtime "
                 "that consumes this topic, or pass --bus inmemory --locus in-process to run "
-                "it here on purpose.",
+                f"it here on purpose.{timeout_cap}",
                 command_topic=command_topic,
                 consumer=f"{owner.service}.{owner.node}",
                 waited_seconds=waited,
@@ -764,7 +798,7 @@ def _assert_dispatch_viable(
                 downstream.consumer_contract,
                 REBIND_WINDOW_FAILURE_CLASS,
                 waited,
-                _REBIND_WAIT_SECONDS,
+                bound,
                 _REBIND_POLL_SECONDS,
             )
         else:
@@ -774,7 +808,7 @@ def _assert_dispatch_viable(
                 command_topic,
                 REBIND_WINDOW_FAILURE_CLASS,
                 waited,
-                _REBIND_WAIT_SECONDS,
+                bound,
                 _REBIND_POLL_SECONDS,
             )
         _sleep(_REBIND_POLL_SECONDS)

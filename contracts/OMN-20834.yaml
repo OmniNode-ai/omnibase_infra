@@ -1,0 +1,96 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20834
+title: Generation runs on an unpriced model record a null cost, not 0.0
+summary: Vendors omnimarket node_projection_delegation migration 0063, which drops NOT NULL and DEFAULT 0 on generation_events.cost_inference_usd so an unpriced generation run is stored as NULL, bound to the omnimarket source's checksum and declared forward-only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20834-generation-cost-null-on-postgres
+    statement: The generation_events projection on Postgres can hold null for a run the pricing surface could not price.
+    acceptance:
+      - id: AC2
+        statement: "AC2: The `generation_events` projection stores null for that run and a priced run's cost unchanged -- falsifier: uv run pytest on the projection finds 0 for the unpriced run, or a priced run's stored cost changes"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0063 matches the omnimarket source's checksum, has its ledger row and forward-only class, and drops the column's NOT NULL and DEFAULT without rewriting a row.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn20834_generation_cost_null_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20834-vendored-generation-cost-null-test
+    description: The vendored 0063 matches the omnimarket source's checksum, has its omninode_internal ledger row and forward-only class, and drops NOT NULL and DEFAULT on generation_events.cost_inference_usd without rewriting any row. At the merge base the file is absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn20834_generation_cost_null_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20834-postgres-null-readback
+    description: Apply the shipped generation migrations on an isolated PostgreSQL 16 container, then assert that unpriced and omitted costs are NULL while existing zero and priced costs retain their values. Readiness is checked over TCP so the image's socket-only init server cannot answer, and a server that never answers fails the run. The hosted runner needs Docker only; no lane credentials or remote database is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          bash -eu -o pipefail <<'PROBE'
+          migrations=docker/migrations/forward/nodes/node_projection_delegation
+
+          name="omn20834-readback-$$"
+          docker run --detach --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine >/dev/null
+          trap 'docker rm -f "$name" >/dev/null' EXIT
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "postgres did not accept TCP connections within 60s" >&2
+            exit 1
+          fi
+
+          {
+            cat "$migrations/0008_generation_events.sql"
+            cat <<'SQL'
+          INSERT INTO generation_events (correlation_id, cost_inference_usd) VALUES ('existing-priced', 1.234567), ('existing-free', 0);
+          SQL
+            cat "$migrations/0063_generation_events_cost_inference_usd_nullable.sql"
+            cat <<'SQL'
+          INSERT INTO generation_events (correlation_id, cost_inference_usd) VALUES ('unpriced', NULL), ('priced', 2.345678);
+          INSERT INTO generation_events (correlation_id) VALUES ('omitted');
+          DO $$ BEGIN
+            IF (SELECT count(*) FROM generation_events WHERE correlation_id IN ('unpriced', 'omitted') AND cost_inference_usd IS NULL) <> 2 THEN RAISE EXCEPTION 'unpriced cost is not NULL'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'existing-priced') IS DISTINCT FROM 1.234567::numeric THEN RAISE EXCEPTION 'existing priced cost changed'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'existing-free') IS DISTINCT FROM 0::numeric THEN RAISE EXCEPTION 'existing zero changed'; END IF;
+            IF (SELECT cost_inference_usd FROM generation_events WHERE correlation_id = 'priced') IS DISTINCT FROM 2.345678::numeric THEN RAISE EXCEPTION 'priced cost changed'; END IF;
+          END $$;
+          SELECT correlation_id, cost_inference_usd FROM generation_events ORDER BY correlation_id;
+          SQL
+          } | docker exec -i "$name" psql -X -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1
+          PROBE
+    binds_ac:
+      - AC2
+  - id: dod-omn20834-infra-manifest-and-class
+    description: The application migration manifest binds the vendored 0063 to the omnimarket source's checksum, and the migration class check declares it forward-only.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && uv run --frozen python scripts/validation/check_migration_class.py && grep -F 'nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql' docker/migrations/forward/_ledger/application-migrations.tsv | grep -qF 'baf6c484400d471535117c76493bae4763da501237d58f1a504350fe2294e16a'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20834-readback-waits-for-tcp
+    description: The readback probe checks readiness and runs psql over TCP and fails when the server never answers. On the merge base the probe asks over the unix socket and falls through to psql, so the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn20834_readback_waits_for_tcp.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

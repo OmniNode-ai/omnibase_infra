@@ -100,6 +100,48 @@ def test_committed_registry_has_the_two_exempt_documentation_repos() -> None:
     ]
 
 
+def test_docker_profiles_exclude_the_script_only_host() -> None:
+    registry = load_lab_proof_profile_registry(REGISTRY)
+    runtime = registry.profile_for("OmniNode-ai/omnibase_infra").variants[0]
+    scripts = registry.profile_for(registry.change_control_companion.repo).variants[0]
+    assert runtime.host_selector is not None
+    assert scripts.host_selector is not None
+    script_only_hosts = set(scripts.host_selector.allowed_hosts) - set(
+        runtime.host_selector.allowed_hosts
+    )
+    assert len(script_only_hosts) == 1
+    checked = 0
+    for profile in registry.profiles:
+        for variant in profile.variants:
+            selector = variant.host_selector
+            if selector is not None and "docker" in selector.required_tools:
+                assert selector.allowed_hosts
+                assert not script_only_hosts.intersection(selector.allowed_hosts), (
+                    profile.profile_key,
+                    variant.variant_key,
+                )
+                checked += 1
+    assert checked == 5
+
+
+def test_runtime_profile_reuses_hosts_without_changing_script_profiles() -> None:
+    registry = load_lab_proof_profile_registry(REGISTRY)
+    market = registry.profile_for("OmniNode-ai/omnimarket")
+    infra = registry.profile_for("OmniNode-ai/omnibase_infra")
+    assert market.profile_version == 3
+    assert market.variants[0].host_selector == infra.variants[0].host_selector
+    script_selectors = [
+        variant.host_selector
+        for profile in registry.profiles
+        for variant in profile.variants
+        if variant.proof_kind == "script_replay"
+        and variant.host_selector is not None
+        and len(variant.host_selector.allowed_hosts) == 3
+    ]
+    assert len(script_selectors) == 2
+    assert script_selectors[0].allowed_hosts == script_selectors[1].allowed_hosts
+
+
 def test_script_exits_zero_on_the_committed_registry() -> None:
     result = _run_script(REGISTRY)
     assert result.returncode == 0, result.stdout + result.stderr

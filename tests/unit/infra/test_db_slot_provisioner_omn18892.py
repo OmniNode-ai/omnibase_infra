@@ -350,6 +350,64 @@ class TestTenantProjectionWriterReachesTheSlotOmnidashDatabase:
         assert "tenant_projection_writer_prepr1" in _scope_values(result.stdout, "role")
 
 
+class TestRuntimePrincipalReachesTheSlotOmnidashDatabase:
+    """The slot runtime opens its savings pool as omninode_runtime_<slot> (OMN-17427).
+
+    Live bring-up of pre-PR slot 2 (2026-10-19): the runtime died 5/5 boots on
+    "HandlerSavingsCorrelation requires constructor parameters ['pool']" because
+    its OMNINODE_INTERNAL_DB_URL pool was refused with "permission denied for
+    database omnidash_analytics_prepr2". The only flat migration that grants
+    omninode_runtime CONNECT is 099, which a slot skips as undeliverable, so the
+    slot provisioner owns that grant.
+    """
+
+    def test_the_only_flat_runtime_connect_grant_is_undeliverable_under_a_slot(
+        self,
+    ) -> None:
+        forward = REPO_ROOT / "docker" / "migrations" / "forward"
+        grant = re.compile(
+            r"GRANT\s+CONNECT\s+ON\s+DATABASE\s+omnidash_analytics\s+TO\s+omninode_runtime\b"
+        )
+        granting = sorted(
+            path.name
+            for path in forward.glob("*.sql")
+            if grant.search(path.read_text(encoding="utf-8"))
+        )
+        manifest = yaml.safe_load(
+            (forward / "cross-database-flat-migrations.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        undeliverable = {
+            entry["file"]
+            for entry in manifest["entries"]
+            if entry.get("disposition") == "undeliverable"
+        }
+        assert granting, "no flat migration grants omninode_runtime CONNECT"
+        assert set(granting) <= undeliverable, (
+            f"{granting} now deliver the runtime CONNECT grant under a slot; "
+            "the provisioner grant may be redundant"
+        )
+
+    def test_apply_grants_connect_to_the_slot_runtime_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omninode_runtime)"' in text
+        assert (
+            'GRANT CONNECT ON DATABASE \\"${_tpw_db}\\" TO \\"${_runtime_role}\\";'
+            in text
+        )
+        assert (
+            "SELECT has_database_privilege('${_runtime_role}', '${_tpw_db}', 'CONNECT')"
+            in text
+        )
+
+    def test_the_runtime_principal_is_inside_the_slot_fence(self) -> None:
+        result = _run_scope("prepr1")
+        assert "omninode_runtime_prepr1" in _scope_values(result.stdout, "role")
+
+
 class TestOmnidashPrincipalCanCreateTheLedgerSchema:
     """The ledger convergence opens with CREATE SCHEMA, which needs CREATE on the database (OMN-19064)."""
 
@@ -363,6 +421,38 @@ class TestOmnidashPrincipalCanCreateTheLedgerSchema:
         )
         assert (
             "has_database_privilege('${_dash_role}', '${_dash_db}', 'CREATE')" in text
+        )
+
+
+class TestIntelligencePrincipalCanCreateItsExtensions:
+    """The intelligence corpus opens with CREATE EXTENSION, which needs CREATE on the database.
+
+    Live slot bring-up (2026-10-19, slot 1): the intelligence migration
+    stopped with 'permission denied to create extension "pgcrypto"' against the
+    fresh omniintelligence_prepr1, before the runtime came up. Every extension
+    the corpus names is trusted, and a trusted extension waives SUPERUSER but
+    still needs CREATE on the database, which the slot principal did not hold.
+    """
+
+    def test_the_intelligence_corpus_creates_extensions(self) -> None:
+        corpus = REPO_ROOT / "docker" / "migrations" / "intelligence"
+        assert any(
+            re.search(r"^\s*CREATE EXTENSION", f.read_text(encoding="utf-8"), re.M)
+            for f in corpus.glob("*.sql")
+        )
+
+    def test_apply_grants_create_on_the_slot_intelligence_database_and_reads_it_back(
+        self,
+    ) -> None:
+        text = PROVISIONER.read_text(encoding="utf-8")
+        assert 'derive omniintelligence)"' in text
+        assert 'derive role_omniintelligence)"' in text
+        assert (
+            'GRANT CREATE ON DATABASE \\"${_intel_db}\\" TO \\"${_intel_role}\\";'
+            in text
+        )
+        assert (
+            "has_database_privilege('${_intel_role}', '${_intel_db}', 'CREATE')" in text
         )
 
 

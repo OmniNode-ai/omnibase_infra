@@ -41,11 +41,11 @@ The lease
 The unit of leasing is the host, because the slot's project name and ports are
 fixed. The lease is a directory on the host (``mkdir`` is atomic on macOS and
 Linux) holding ``lease.json`` with the holder and an absolute expiry. An
-expired lease is broken; a live one held by someone else is refused. The ledger
-is read, never written: a live ``HOLD`` naming the host's surface, placed by
-another lane, makes the host busy. The HOLD and RELEASE rows themselves are
-the calling lane's to write through ``/omni:ledger-msg``; this file prints the
-text for them.
+expired lease is broken; a live one held by someone else is refused. Release
+runs under the same guard as the break. The ledger is read, never written: a
+live ``HOLD`` naming the host's surface, placed by another lane, makes the host
+busy. The HOLD and RELEASE rows themselves are the calling lane's to write
+through ``/omni:ledger-msg``; this file prints the text for them.
 
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
@@ -74,9 +74,11 @@ import base64
 import concurrent.futures
 import contextlib
 import datetime as dt
+import getpass
 import gzip
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -354,8 +356,39 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
+def _bindable(addr: str) -> bool:
+    """Whether an IP, or the IPv4 address a name resolves to, belongs to this machine."""
+    try:
+        try:
+            ipaddress.ip_address(addr)
+        except ValueError:
+            addr = socket.gethostbyname(addr)
+        family = socket.AF_INET6 if ":" in addr else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((addr, 0))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def is_this_host(
+    ssh_target: str,
+    user: str | None = None,
+    bind: Callable[[str], bool] | None = None,
+) -> bool:
+    """Whether the target names this machine and the current user.
+
+    A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
+    target_user, sep, addr = ssh_target.rpartition("@")
+    if sep and target_user != (getpass.getuser() if user is None else user):
+        return False
+    return (bind or _bindable)(addr)
+
+
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -363,7 +396,13 @@ class Transport(Protocol):
 
 
 class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
         self._opts = [
             "-o",
             "BatchMode=yes",
@@ -371,25 +410,115 @@ class SshTransport:
             f"ConnectTimeout={connect_timeout}",
         ]
 
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
         try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
             return 124, out + f"\n[timeout after {timeout:.0f}s]"
         return proc.returncode, proc.stdout + proc.stderr
 
     def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
         return subprocess.run(
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
         ).returncode
+
+
+class LocalTransport:
+    """Run pool commands as the current user on this machine."""
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        env = {
+            key: os.environ[key]
+            for key in ("HOME", "USER", "LOGNAME", "SHELL", "LANG")
+            if key in os.environ
+        }
+        # the PATH a non-interactive sshd session starts with, so a local run
+        # finds the same tools an ssh one does
+        env["PATH"] = (
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+        )
+        proc = subprocess.Popen(
+            ["bash", "-c", REMOTE_PATH + command],
+            cwd=Path.home(),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+            return 124, stdout + stderr + f"\n[timeout after {timeout:.0f}s]"
+        return proc.returncode, stdout + stderr
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        try:
+            shutil.copyfile(local, remote)
+            return 0
+        except OSError:
+            return 1
+
+
+class HostRoutingTransport:
+    """Choose a local shell or ssh once per target."""
+
+    def __init__(
+        self,
+        ssh: Transport | None = None,
+        local: Transport | None = None,
+        is_local: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._ssh = (
+            ssh if ssh is not None else SshTransport(local_check=lambda _target: False)
+        )
+        self._local = local if local is not None else LocalTransport()
+        self._is_local = is_local if is_local is not None else is_this_host
+        self._targets: dict[str, bool] = {}
+
+    def _transport(self, host: PoolHost) -> Transport:
+        target = host.ssh_target
+        if target not in self._targets:
+            self._targets[target] = self._is_local(target)
+        return self._local if self._targets[target] else self._ssh
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        return self._transport(host).run(host, command, timeout)
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        return self._transport(host).put(host, local, remote)
 
 
 # --------------------------------------------------------------------------- ledger
@@ -669,16 +798,26 @@ def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
     lease = f"$HOME/{host.lease_dir}"
+    # An expired holder can read its lease before a breaker replaces it, then
+    # remove the breaker's fresh lease. Guard the read and removal with the same
+    # directory the break holds, so release cannot erase a new holder (OMN-20085).
+    guard = f"{lease}.break"
     cmd = (
+        "GOTGUARD=0; i=0; while [ $i -lt 100 ]; do "
+        f"if mkdir {guard} 2>/dev/null; then GOTGUARD=1; break; fi; "
+        'i=$((i+1)); sleep 0.1; done; if [ "$GOTGUARD" = 1 ]; then '
         f"H=$(cat {lease}/lease.json 2>/dev/null); "
         f'case "$H" in *\'"holder": "{holder}"\'*) rm -rf {lease} && echo RELEASED;; '
-        "'') echo ABSENT;; *) echo FOREIGN;; esac"
+        f"'') echo ABSENT;; *) echo FOREIGN;; esac; rmdir {guard}; "
+        "else echo GUARDBUSY; fi"
     )
     rc, out = transport.run(host, cmd, timeout=30)
     if "RELEASED" in out:
         return True, "released"
     if "ABSENT" in out:
         return True, "no lease was present"
+    if "GUARDBUSY" in out:
+        return False, f"lease guard {guard} held past the wait; lease left to expire"
     return False, f"lease is not this holder's (rc={rc}): {out.strip()[:200]}"
 
 
@@ -2621,7 +2760,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
                 ),
             )
         return EXIT_USAGE
-    tp = transport or SshTransport()
+    tp = transport or HostRoutingTransport()
     now = _utcnow()
     if args.cmd in ("status", "pick"):
         holds = live_surface_holds(_ledger_lines(args.ledger), now)
