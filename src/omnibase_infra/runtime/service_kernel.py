@@ -3658,6 +3658,19 @@ async def bootstrap() -> int:
                     runtime_profile=runtime_profile,
                 )
                 manifest = ownership_result.manifest
+                if ownership_result.folded_profiles:
+                    # OMN-17427: this runtime carries other roles' nodes too.
+                    logger.info(
+                        "Auto-wiring folded roles: profile=%s folded=%s "
+                        "folded_contracts=%d (correlation_id=%s)",
+                        ownership_result.runtime_profile,
+                        list(ownership_result.folded_profiles),
+                        len(ownership_result.folded_contracts),
+                        correlation_id,
+                        extra={
+                            "folded_contracts": list(ownership_result.folded_contracts),
+                        },
+                    )
                 if ownership_result.skipped_contracts:
                     logger.info(
                         "Auto-wiring runtime profile ownership: profile=%s "

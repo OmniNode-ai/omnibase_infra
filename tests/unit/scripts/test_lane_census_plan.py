@@ -1077,6 +1077,89 @@ def test_restart_loop_uses_manifest_bound(restarts: int, expected: bool) -> None
     )
 
 
+# OMN-17427: RestartCount is cumulative over the container's life, so a past
+# loop reads as a present one until the container is recreated. The dev broker
+# census of 2026-10-20T18:49:18Z: 201 restarts, up and healthy since 17:45:04Z.
+_BROKER_OBSERVED_AT = "2026-10-20T18:49:18.941827+00:00"
+_BROKER_STARTED_AT = "2026-10-20T17:45:04.123456789Z"
+
+
+def _restart_loop_plan(
+    *,
+    restarts: int,
+    started_at: str | None,
+    observed_at: str | None = _BROKER_OBSERVED_AT,
+    state: str = "running",
+) -> list[dict[str, str]]:
+    fixture = _fixture(_FIXTURES / "inventory_clean.json")
+    if observed_at is not None:
+        fixture["envelope"]["observed_at"] = observed_at
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omnimarket-projection-savings-writer":
+            row["RestartCount"] = restarts
+            row["State"] = state
+            if state != "running":
+                row["Status"] = f"{state.capitalize()} (1) 5 seconds ago"
+            if started_at is not None:
+                row["StartedAt"] = started_at
+    return [
+        f
+        for f in _plan_with_desired(fixture)["findings"]
+        if f["kind"] == "container_restart_loop"
+    ]
+
+
+def test_restart_loop_past_loop_up_since_its_last_start_is_not_a_finding() -> None:
+    assert _restart_loop_plan(restarts=201, started_at=_BROKER_STARTED_AT) == []
+
+
+def test_restart_loop_restarted_within_the_window_is_a_finding() -> None:
+    # The control: a real loop. Docker's restart backoff caps at one minute, so
+    # a looping container was always started moments before the census looked.
+    findings = _restart_loop_plan(restarts=202, started_at="2026-10-20T18:48:48Z")
+    assert len(findings) == 1
+    assert "within the last" in findings[0]["detail"]
+
+
+@pytest.mark.parametrize(
+    ("up_seconds", "expected"), [(1799, True), (1800, False), (1801, False)]
+)
+def test_restart_loop_window_boundary(up_seconds: int, expected: bool) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    observed = datetime(2026, 10, 20, 18, 49, 18, tzinfo=UTC)
+    started = (observed - timedelta(seconds=up_seconds)).isoformat()
+    findings = _restart_loop_plan(
+        restarts=201, started_at=started, observed_at=observed.isoformat()
+    )
+    assert bool(findings) is expected
+
+
+@pytest.mark.parametrize(
+    ("started_at", "observed_at", "state"),
+    [
+        (None, _BROKER_OBSERVED_AT, "running"),
+        (_BROKER_STARTED_AT, None, "running"),
+        ("", _BROKER_OBSERVED_AT, "running"),
+        ("0001-01-01T00:00:00Z", _BROKER_OBSERVED_AT, "running"),
+        ("not-a-time", _BROKER_OBSERVED_AT, "running"),
+        (_BROKER_STARTED_AT, _BROKER_OBSERVED_AT, "restarting"),
+        (_BROKER_STARTED_AT, _BROKER_OBSERVED_AT, "exited"),
+    ],
+)
+def test_restart_loop_unprovable_quiet_stays_a_finding(
+    started_at: str | None, observed_at: str | None, state: str
+) -> None:
+    """A count past the bound is a finding unless the census can SHOW it is old."""
+    assert _restart_loop_plan(
+        restarts=201, started_at=started_at, observed_at=observed_at, state=state
+    )
+
+
+def test_restart_loop_under_the_bound_ignores_start_time() -> None:
+    assert _restart_loop_plan(restarts=2, started_at="2026-10-20T18:49:00Z") == []
+
+
 def _event_over(fixture: dict[str, Any]) -> dict[str, Any]:
     """The drift event a T1.2 planner would publish for this fixture."""
     events = _load_event_module()
