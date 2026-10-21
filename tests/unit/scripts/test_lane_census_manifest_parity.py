@@ -59,7 +59,7 @@ _MANIFEST_PATH = LAB_MANIFEST
 # OMN-19543: `dev-200` joins on exactly dev-202's terms.
 # OMN-19544: `dev-105` joins on the same terms as dev-202, whose overlay it copies.
 # `judge` left on 2026-10-21 on prod's terms: its compose project was retired
-# and removed from the lane census (omnibase_internal#949), so it has no manifest
+# and removed from the private lane census, so it has no manifest
 # entry to diff against, although docker/docker-compose.judge.yml is still in the tree.
 _COMPOSE_LANES = (
     "stability-test",
@@ -266,7 +266,9 @@ def test_runtime_worker_declared_in_every_runtime_lane() -> None:
         assert worker_spec.get("replicas", 1) >= 1, (
             f"lane {lane!r} runtime-worker must require at least one replica"
         )
-    assert no_worker_lanes == {"dev", "dogfood", "lakshman", "sim-202"}, (
+    # The compose lanes that run no runtime-worker are _COMPOSE_LANES[1:4];
+    # dev runs none either. judge left with its census entry on 2026-10-21.
+    assert no_worker_lanes == {"dev", *_COMPOSE_LANES[1:4]}, (
         "a runtime lane without a runtime-worker must be explicitly accounted "
         f"for; got {sorted(no_worker_lanes)}"
     )
