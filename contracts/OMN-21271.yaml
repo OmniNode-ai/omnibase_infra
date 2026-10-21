@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: "Read counts, resolution thread, loop heartbeat, concurrency, and re-resolution after an edit, an addition and a removal, against a fake package under tmp_path."
-    command: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
+    command: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/integration/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -42,3 +42,12 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC2]
+  - id: "dod-omn21271-deploy"
+    description: "Post-merge deploy smoke -- the deployed effects runtime carries the cached async route resolution. It fails on the image built before this change, where _resolved_routes is synchronous and local_ingress_contract_fingerprint does not exist."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime-effects} python -c \"import asyncio; from omnibase_infra.runtime.service_delegation_dispatch_port import RuntimeDelegationDispatchPort as P; from omnibase_infra.runtime.runtime_local_ingress import local_ingress_contract_fingerprint; assert asyncio.iscoroutinefunction(P._resolved_routes); print('deploy smoke ok')\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]
