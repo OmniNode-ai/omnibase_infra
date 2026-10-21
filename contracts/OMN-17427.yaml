@@ -1646,7 +1646,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC142
-  - id: dod-omn-17427-ac171-branch-protection-audit-setup-uv
+  - id: dod-omn-17427-ac171-audit-setup-uv
     description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
     source: manual
     checks:
