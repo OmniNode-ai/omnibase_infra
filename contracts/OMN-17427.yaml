@@ -355,6 +355,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: a main runtime folding the roles loads every folded node and nothing else changes without a fold, the fold reaches every effects and worker contract of this repo on disk, the policy contract renders a declared fold and refuses an unregistered one, and one crashing subscriber leaves the other nodes receiving every record -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q'
+  - id: req-omn17427-patched-runtime-trust
+    statement: The runtime lock resolves certifi at or above the release fixing PYSEC-2026-4320 and GHSA-6q48-6c7w-9gw2, and its CA bundle loads into a verifying TLS context.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1662,3 +1667,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
+  - id: dod-omn17427-ac142-patched-runtime-trust
+    description: Hosted-runner check of the committed certifi resolution and its installed CA bundle; runs without a broker, container or lab credential.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import certifi, ssl, tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open('uv.lock', 'rb'))['package'] if p['name'] == 'certifi'); assert Version(p['version']) >= Version('2026.10.19'); assert certifi.__version__ == p['version']; c = ssl.create_default_context(cafile=certifi.where()); assert c.verify_mode == ssl.CERT_REQUIRED and c.check_hostname and c.get_ca_certs()"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
