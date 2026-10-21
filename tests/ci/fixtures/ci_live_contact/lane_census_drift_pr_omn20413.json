@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "source": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/39575542775/job/119140027707",
+    "captured_utc": "2026-10-21T09:24:25Z",
+    "note": "Failing step 'Check census-vs-manifest drift (OMN-18949)' of check 'Lane Census Staleness + E-5 Env Drift (OMN-13034)', attempt 1, on pull request omnibase_infra#5146 at head 8b741d91af67c05191f1f393df952622932381da; read by the landing controller host (OMN-20911). The same red failed omnibase_infra#5148, #5187, #5206 and #5207."
+  },
+  "response": {
+    "event_name": "pull_request",
+    "pull_request": 5146,
+    "head_sha": "8b741d91af67c05191f1f393df952622932381da",
+    "check": "Lane Census Staleness + E-5 Env Drift (OMN-13034)",
+    "failed_step": "Check census-vs-manifest drift (OMN-18949)",
+    "conclusion": "failure",
+    "completed_at": "2026-10-21T09:15:53Z",
+    "census_emitted_at": "2026-10-21T06:59:13.432660+00:00",
+    "summary_line": "lane census drift gate (OMN-18949): read 13 manifest lane(s), 212 declared container(s), 1 snapshot finding(s) emitted 2026-10-21T06:59:13.432660+00:00",
+    "finding_line": "[nonzero_drift_count] lane=dev subject=drift_count",
+    "error_line": "##[error]Process completed with exit code 1."
+  }
+}

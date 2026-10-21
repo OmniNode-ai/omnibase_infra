@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: CI Summary admits a successful rehearsal, refuses failure, skipped and neutral rehearsals, and waits on a missing rehearsal; the recorded watcher rows show the context reported before merge on sixteen recent dev PRs -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn20413-lane-census-drift-pr-advisory
+    statement: The Lane Census Staleness + E-5 Env Drift (OMN-13034) check reports a nonzero_drift_count in the private overlay census as a warning on pull requests, because no pull request in this repository can move it, and still fails on push, workflow_dispatch and every other drift finding.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: check_lane_census_drift.py exits 1 on the recorded omnibase_infra#5146 drift red under GITHUB_EVENT_NAME=push and 0 with a warning under pull_request, still exits 1 on a finding_count_mismatch on a pull request, and the staleness workflow step does not override GITHUB_EVENT_NAME -- falsifier: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn20413.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -52,6 +57,9 @@ evidence_requirements:
   - kind: tests
     description: The rehearsal workflow's sibling clone step is read from the workflow and run in bash with a stub git, and the deploy-scope resolver is run against the OMNI_HOME it exports.
     command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+  - kind: tests
+    description: The drift checker's pull-request advisory on the recorded red, read from GITHUB_EVENT_NAME, and its push refusal.
+    command: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn20413.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -111,3 +119,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn20413-ac7-lane-census-drift-pr-advisory
+    description: AC7 tests drive check_lane_census_drift.py on the recorded drift red as a pull request and as a push; the pull-request cases fail at the merge base, where drift refuses every event.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn20413.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
