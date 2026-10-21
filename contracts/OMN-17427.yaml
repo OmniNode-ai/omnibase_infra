@@ -355,7 +355,15 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal without trace_id or queue_wait_ms in the request payload -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
+  - id: req-omn17427-nightly-e2e-live-adapter
+    statement: The isolated nightly e2e stack selects tests for its supplied dependencies and leaves the explicitly selected live LLM adapter suite fail-closed.
+    acceptance:
+      - id: AC170
+        statement: 'AC170: the nightly integration selector deselects the live documentation adapter module while retaining unrelated slow integration tests and excluding bastion tests; explicit live selection still requires an endpoint -- falsifier: uv run pytest tests/ci/test_nightly_e2e_live_adapter_selection_omn17427.py -q'
 evidence_requirements:
+  - kind: tests
+    description: Replay the nightly workflow marker and path selection through real pytest over an isolated test corpus; no lab stack or LLM call is claimed.
+    command: uv run pytest tests/ci/test_nightly_e2e_live_adapter_selection_omn17427.py -q
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
     command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
@@ -517,6 +525,57 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-parent-plan
+    description: Parent-ticket criterion, outside this fix-forward lane. The plan owner must supply the committed-plan evidence; this lane makes no completion claim.
+    source: linear
+    linear_dod_text: Plan committed at the path above.
+    execution_scope: local_done_gate
+    status: pending
+    checks: []
+  - id: dod-omn17427-parent-automation
+    description: Parent-ticket criterion, outside this fix-forward lane. The automation owner must supply scheduler and first-report evidence; this lane does not arm automation.
+    source: linear
+    linear_dod_text: Nightly automation armed and confirmed firing (first report on disk).
+    execution_scope: local_done_gate
+    status: pending
+    checks: []
+  - id: dod-omn17427-parent-pass-zero
+    description: Parent-ticket criterion, outside this fix-forward lane. The integration-pass owner must supply the bounded report and probes in the owning repository.
+    source: linear
+    linear_dod_text: Pass 0 report exists, bounded to 48h, every row carrying a probe.
+    execution_scope: local_done_gate
+    status: pending
+    checks: []
+  - id: dod-omn17427-parent-ledger
+    description: Parent-ticket criterion, outside this fix-forward lane. The launching host owns ledger writes; this lane does not claim pass-zero ledger completion.
+    source: linear
+    linear_dod_text: Ledger claim + terminal rows present for pass 0, appended through the mutex.
+    execution_scope: local_done_gate
+    status: pending
+    checks: []
+  - id: dod-omn17427-parent-graduation
+    description: Parent-ticket criterion, outside this fix-forward lane. The integration-pass owner must record the week-long graduation review on Linear; no review is claimed here.
+    source: linear
+    linear_dod_text: 'After one week: the graduation review recorded on this ticket — falsified-claim rate, defect tickets filed vs. accepted, whether any pass produced zero rows (a silent-failure signal).'
+    execution_scope: local_done_gate
+    status: pending
+    checks: []
+  - id: dod-omn17427-ac170-nightly-e2e
+    description: Real pytest replays the shipped nightly selector over an isolated corpus with a refusing live suite, an unrelated slow integration test and a bastion test. No e2e stack or inference request is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_nightly_e2e_live_adapter_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC170]
+  - id: dod-omn17427-ac170-nightly-e2e-deploy
+    description: Hosted-runner deploy check for the committed workflow selection. Uses temporary files and local pytest only, without a lab host, Docker, credentials or an LLM.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_nightly_e2e_live_adapter_selection_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC170]
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual

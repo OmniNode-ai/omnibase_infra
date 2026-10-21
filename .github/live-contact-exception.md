@@ -1,0 +1,1 @@
+Live-contact exception: This change narrows the isolated nightly e2e test selection because that stack provides no LLM endpoint. Tests execute the shipped selector through real pytest over temporary files; no GitHub API, live runner, e2e stack, or inference contact is claimed.
