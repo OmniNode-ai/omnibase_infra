@@ -23,7 +23,7 @@ _SCRIPTS = str(Path(__file__).resolve().parents[3] / "scripts")
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
 
-from generate_claude_lane_block import (  # noqa: E402
+from generate_claude_lane_block import (
     _LANE_BOUNDARY,
     _LANE_PORT_MAP,
 )
