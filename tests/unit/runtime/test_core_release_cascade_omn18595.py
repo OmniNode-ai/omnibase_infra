@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The core 0.47.48 cascade reaches the resolved runtime (OMN-18595)."""
+"""The core 0.47.51 cascade reaches the resolved runtime (OMN-18595)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from omnibase_infra.runtime.version_compatibility import check_version_compatibi
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RELEASE_FLOOR = Version("0.47.48")
+RELEASE_FLOOR = Version("0.47.51")
 
 
 def test_core_cascade_resolves_at_least_the_triggering_release() -> None:
