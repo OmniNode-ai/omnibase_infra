@@ -6,6 +6,23 @@ summary: |-
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19817-ac1-accepted-20261021t2335z:
+      - label: AC1
+        criterion_hash: 202f2c64300c71fe055c974702c7ec30e95b99fbba491911f4c97010339255a2
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2335Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2335Z-c2
+    dod-omn19817-ac2-accepted-20261021t2335z:
+      - label: AC2
+        criterion_hash: 1eb8bb21032ac9fd56206cbc1ba17dfd20b1ddd3155431cb61a6c64cefa75597
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2335Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2335Z-c2
+    dod-omn19817-ac3-accepted-20261021t2335z:
+      - label: AC3
+        criterion_hash: 888efdde45f8393f3424fe5acdd9aa9e44c0eb791721ff6b16f40c52773972b9
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2335Z-c2
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2335Z-c2
 requirements:
   - id: req-transcribed-acceptance-criteria
     statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
@@ -55,6 +72,36 @@ dod_evidence:
       - check_type: command
         check_value: |-
           bash -c 'set -euo pipefail; T=$(mktemp --suffix=.py); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=66b3323b9eef5dfd9320996a8dafcabb442527be" --jq .content | base64 -d > "$T"; ONEX_DELEGATION_CONSUMER_SOURCE="$T" uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn19817-ac1-accepted-20261021t2335z
+    description: 'AC1: the protocol and runtime dispatch both declare a keyword-only no_escalation with a False default. Exits 1 (KeyError: no_escalation) with src/omnibase_infra/runtime/protocols/protocol_delegation_dispatch_port.py reverted to the parent of 15ec305f7.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          env -u PYTHONPATH uv run python -c "import inspect; from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import ProtocolDelegationDispatchPort as P; from omnibase_infra.runtime.service_delegation_dispatch_port import RuntimeDelegationDispatchPort as R; p=inspect.signature(P.dispatch).parameters['no_escalation']; r=inspect.signature(R.dispatch).parameters['no_escalation']; assert p.default is False and r.default is False and p.kind is r.kind is inspect.Parameter.KEYWORD_ONLY, (p, r); print('protocol', p, '| runtime', r)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19817-ac2-accepted-20261021t2335z
+    description: 'AC2: run against the omnimarket dev consumer source, the splat cases pass (14 passed, 5 deselected), including the TypedDict-helper case and the 11 fail-closed cases. With the protocol fix reverted the protocol splat case fails (1 failed, 13 passed).'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c 'set -euo pipefail; D=$(mktemp -d); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=dev" --jq .content | base64 -d > "$D/handler_delegate_skill.py"; ONEX_DELEGATION_CONSUMER_SOURCE="$D/handler_delegate_skill.py" env -u PYTHONPATH uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider -k splat'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19817-ac3-accepted-20261021t2335z
+    description: 'AC3: the hook entry (this pytest file) passes against the omnimarket dev consumer source (19 passed). With the protocol fix reverted it reports 2 failed.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -c 'set -euo pipefail; D=$(mktemp -d); gh api "repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_delegate_skill_orchestrator/handlers/handler_delegate_skill.py?ref=dev" --jq .content | base64 -d > "$D/handler_delegate_skill.py"; ONEX_DELEGATION_CONSUMER_SOURCE="$D/handler_delegate_skill.py" env -u PYTHONPATH uv run pytest tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py -q -p no:cacheprovider'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
