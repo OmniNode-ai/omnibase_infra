@@ -355,6 +355,11 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal without trace_id or queue_wait_ms in the request payload -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
+  - id: req-omn17427-deploy-gate-fires-on-edit
+    statement: A workflow whose job reads the pull request body fires when the body is edited, so a body fixed after the first run clears the red it caused; deploy-gate.yml gains the edited type and a CI test holds every body-reading workflow to it.
+    acceptance:
+      - id: AC143
+        statement: 'AC143: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -512,6 +517,9 @@ evidence_requirements:
   - kind: tests
     description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+  - kind: tests
+    description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
+    command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1641,3 +1649,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC142
+  - id: dod-omn-17427-ac143-edit-trigger
+    description: The test parses every committed workflow, finds the ones that read the pull request body, and requires edited in their pull_request types; synthetic workflows are the positive and negative controls. Does not claim a live rerun on a pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC143
+  - id: dod-omn-17427-ac143-edit-trigger-deploy
+    description: Hosted-runner deploy check -- the same test over the committed workflow files; it reads no live pull request.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC143
