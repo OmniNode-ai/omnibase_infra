@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_ticket_contract_compose_effect
+contract_name: node_ticket_contract_compose_effect
+node_name: node_ticket_contract_compose_effect
+node_type: EFFECT_GENERIC
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-17427: read additive branch fragments and emit ordinary ticket-contract YAML without writing the tracked root or executing checks."
+input_model:
+  name: ModelTicketContractComposeRequest
+  module: omnibase_infra.models.model_ticket_contract_compose_request
+  description: "Contracts directory and exact ticket identity."
+output_model:
+  name: ModelTicketContractComposeResult
+  module: omnibase_infra.models.model_ticket_contract_compose_result
+  description: "Composed YAML or a named structural refusal; never an evidence verdict."
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.ticket-contract-compose.v1"]
+  publish_topics: ["onex.evt.platform.ticket-contract-composed.v1"]
+terminal_event: "onex.evt.platform.ticket-contract-composed.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: ticket_contract.compose
+      handler:
+        name: HandlerTicketContractCompose
+        module: omnibase_infra.handlers.handler_ticket_contract_compose
+      event_model:
+        name: ModelTicketContractComposeRequest
+        module: omnibase_infra.models.model_ticket_contract_compose_request
+      output_events: [ModelTicketContractComposeResult]
+capabilities:
+  - name: ticket_contract.compose
+    description: "Read and compose one root contract with its branch fragments."
+metadata:
+  ticket: OMN-17427
+  author: OmniNode Team
+  description: "Repository-side preparation; external evidence gates require separate adoption."
+  tags: [effect, filesystem, contracts]
