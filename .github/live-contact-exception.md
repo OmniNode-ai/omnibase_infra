@@ -1,0 +1,1 @@
+Live-contact exception: merging origin/dev 39e52ccb2078677a6755450c7f3c44d32c862a8f into this Dependabot branch carries only workflow changes already merged and reviewed on dev; this PR's own change stays the docker/setup-buildx-action v4.4.1 version reference in four workflow files, whose PR-body exception CI Live Contact accepted at 4b840c72e893431c04078c1111ec2a322cf518a0.

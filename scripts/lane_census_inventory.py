@@ -194,7 +194,12 @@ def normalize_cli_networks(text: str) -> list[str]:
 
 
 def _inspect_readings(payload: dict[str, Any]) -> dict[str, Any]:
-    """OMN-19416: keep only health counters, interval and restarts, never env/logs."""
+    """OMN-19416: keep only health counters, interval and restarts, never env/logs.
+
+    OMN-17427: ``StartedAt`` too, so a restart count is graded against the
+    container's last start; empty when inspect carries none, which the planner
+    reads as a start it cannot place.
+    """
     state = payload.get("State")
     config = payload.get("Config")
     if not isinstance(state, dict) or not isinstance(config, dict):
@@ -213,6 +218,7 @@ def _inspect_readings(payload: dict[str, Any]) -> dict[str, Any]:
     count = payload.get("RestartCount")
     if type(count) is not int or count < 0:
         raise InventoryProbeError("container inspect missing or invalid RestartCount")
+    started_at = state.get("StartedAt")
     interval_ns = healthcheck.get("Interval")
     interval_seconds = None
     if health is not None:
@@ -236,13 +242,15 @@ def _inspect_readings(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "HealthcheckIntervalSeconds": interval_seconds,
         "RestartCount": count,
+        "StartedAt": started_at if isinstance(started_at, str) else "",
     }
 
 
 _CLI_INSPECT_FORMAT = (
     '{"Names":{{json .Name}},"State":{"Health":'
     '{{if .State.Health}}{"Status":{{json .State.Health.Status}},'
-    '"FailingStreak":{{json .State.Health.FailingStreak}}}{{else}}null{{end}}},'
+    '"FailingStreak":{{json .State.Health.FailingStreak}}}{{else}}null{{end}},'
+    '"StartedAt":{{json .State.StartedAt}}},'
     '"Config":{"Healthcheck":{{if .Config.Healthcheck}}'
     '{"Interval":{{json .Config.Healthcheck.Interval}}}{{else}}null{{end}}},'
     '"RestartCount":{{json .RestartCount}}}'
@@ -373,10 +381,16 @@ def build_envelope(
     containers: list[dict[str, Any]],
     networks: list[str],
     source: str,
+    observed_at: str,
 ) -> dict[str, Any]:
-    """Assemble the planner's stdin envelope."""
+    """Assemble the planner's stdin envelope.
+
+    ``observed_at`` is when the inventory was read; the planner measures each
+    container's last start against it (OMN-17427).
+    """
     return {
         "lane": lane or None,
+        "observed_at": observed_at,
         "containers": containers,
         "networks": networks,
         "runtime_tag": runtime_tag or None,
@@ -875,6 +889,9 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.get("LANE_CENSUS_CLI_TIMEOUT_S", DEFAULT_CLI_TIMEOUT_S)
     )
 
+    # Read before the inventory, so a container's time up since its last start
+    # is never overstated (OMN-17427).
+    observed_at = datetime.now(tz=UTC).isoformat()
     try:
         containers, networks, source, warnings = collect_inventory(
             socket_path=socket_path,
@@ -900,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
             containers=containers,
             networks=networks,
             source=source,
+            observed_at=observed_at,
         ),
         sys.stdout,
     )
