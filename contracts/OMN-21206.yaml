@@ -1,0 +1,105 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21206
+title: "Vendor the reconciled savings populations and row choice"
+summary: >-
+  Deliver byte-identical forward migrations 097 and 098 from omnimarket commit 2d0d699487b3020191c7cd9a46f0e78d54a80611, with exact checksum ledger rows and forward-only classes. Runtime PostgreSQL semantics and their RED/GREEN proof belong to omnimarket PR 4262. This contract proves delivery only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21206-ac1-delivery
+    statement: "Deliver the source SQL implementing AC1; runtime semantics are proved by the source repository, not by a checksum."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: projection_cost_savings_overview serves tokens_total and its run count over every combined row of the tenant, and total_cost_usd and total_savings_usd over measured rows only, with an excluded unknown-cost run count beside them -- falsifier: a real-Postgres pytest over a fixture holding measured, estimated and unknown rows fails when the token total leaves out the unknown rows or the savings total includes them
+  - id: req-omn21206-ac2-delivery
+    statement: "Deliver the source SQL implementing AC2; runtime semantics are proved by the source repository, not by a checksum."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: projection_delegation_savings serves cumulative_savings_usd and cumulative_local_cost_usd over measured rows only, with the same excluded count -- falsifier: the same pytest run against delegation.savings
+  - id: req-omn21206-ac3-delivery
+    statement: "Deliver the source SQL implementing AC3; runtime semantics are proved by the source repository, not by a checksum."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: both views take a run's tokens from delegation_events tokens_input plus tokens_output, so Overview's token total equals delegation.token-usage total_tokens for the same tenant -- falsifier: the same pytest asserting equality, and the OMN-21203 reconciliation SQL re-run on the development lane showing equal token headlines
+  - id: req-omn21206-ac4-delivery
+    statement: "Deliver the source SQL implementing AC4; runtime semantics are proved by the source repository, not by a checksum."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: when several savings_estimates rows share a session, both views pick the same row on every read -- falsifier: a real-Postgres pytest with two tied rows that differ in tokens reads each view 20 times and finds one value
+evidence_requirements:
+  - kind: tests
+    description: "Verify byte-identical delivery, deterministic tenant ledger declarations and forward-only classes; this does not execute SQL."
+    command: |-
+      set -eu
+      uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete
+      uv run --frozen python scripts/validation/check_migration_class.py
+      uv run --frozen python - <<'PY'
+      import hashlib
+      from pathlib import Path
+      import yaml
+      expected = {
+          "097_savings_overview_all_runs.sql": "920506d0fa24de62fee31341bba986da13485531a2c80263f17db7b93e7c90d1",
+          "098_delegation_savings_measured_population.sql": "4a818362a4784690d38b8e832bdc99c7a94eef149f3e5e8c31c42706eba30cc2",
+      }
+      root = Path("docker/migrations/forward")
+      rows = [line.split("\t") for line in (root / "_ledger/application-migrations.tsv").read_text().splitlines()]
+      classes = yaml.safe_load(Path("config/migration_classes.yaml").read_text())["migrations"]
+      node = "node:node_projection_savings"
+      for name, digest in expected.items():
+          relative = "nodes/node_projection_savings/" + name
+          assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest, relative
+          assert [row for row in rows if row[0] == relative] == [[relative, node, node, "tenant", node + ":" + name, digest]], relative
+          assert classes["forward/" + relative] == "forward-only", relative
+      print("OMN21206-VENDOR-OK source=2d0d699487b3020191c7cd9a46f0e78d54a80611 files=2")
+      PY
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21206-vendor-delivery
+    description: >-
+      The infrastructure delivery half of AC1-AC4: both SQL files match the source commit's checksums, have exact tenant ledger identities and are classified forward-only. At the base these new files are absent. SQL behavior must separately pass the source PR's hosted PostgreSQL tests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn21206_savings_views_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |-
+          set -eu
+          uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete
+          uv run --frozen python scripts/validation/check_migration_class.py
+          uv run --frozen python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import yaml
+          expected = {
+              "097_savings_overview_all_runs.sql": "920506d0fa24de62fee31341bba986da13485531a2c80263f17db7b93e7c90d1",
+              "098_delegation_savings_measured_population.sql": "4a818362a4784690d38b8e832bdc99c7a94eef149f3e5e8c31c42706eba30cc2",
+          }
+          root = Path("docker/migrations/forward")
+          rows = [line.split("\t") for line in (root / "_ledger/application-migrations.tsv").read_text().splitlines()]
+          classes = yaml.safe_load(Path("config/migration_classes.yaml").read_text())["migrations"]
+          node = "node:node_projection_savings"
+          for name, digest in expected.items():
+              relative = "nodes/node_projection_savings/" + name
+              assert hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest, relative
+              assert [row for row in rows if row[0] == relative] == [[relative, node, node, "tenant", node + ":" + name, digest]], relative
+              assert classes["forward/" + relative] == "forward-only", relative
+          print("OMN21206-VENDOR-OK source=2d0d699487b3020191c7cd9a46f0e78d54a80611 files=2")
+          PY
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2, AC3, AC4]
+context:
+  vendor_provenance:
+    repository: OmniNode-ai/omnimarket
+    source_commit: 2d0d699487b3020191c7cd9a46f0e78d54a80611
+    pull_request: 4262
+    scope: "delivery only; runtime evidence and its limitations are tracked in source PR 4262"
+    ac3_statement_redaction: "Private host reference replaced with development lane; no criterion hash pin."

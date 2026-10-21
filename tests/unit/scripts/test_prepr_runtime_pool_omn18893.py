@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import itertools
 import json
 import os
 import pwd
@@ -116,6 +117,15 @@ class FakeTransport:
             return 255, "ssh: connect to host: Operation timed out"
         m = re.search(r"prove\.sh \S+ (\S+)$", command)
         if m:
+            if pool.LEASE_LOST in command:
+                found = re.search(r'"holder": "([^"]+)"', command)
+                assert found is not None
+                if h.lease is None or json.loads(h.lease)["holder"] != found.group(1):
+                    h.ran.append("lost:" + m.group(1))
+                    return 97, "LEASE-LOST " + (h.lease or "")
+                body = re.search(r"printf '%s' '(\{.*?\})'", command)
+                assert body is not None
+                h.lease = body.group(1)
             base = "-base-" in command
             h.ran.append(("base:" if base else "") + m.group(1))
             return 0, (h.base_phases if base else h.phases)[m.group(1)]
@@ -2205,6 +2215,136 @@ def _verify(tp: Any, tmp_path: Path, **over: Any) -> tuple[int, str]:
     return pool.run_verify(CFG, tp, **args)
 
 
+@pytest.mark.parametrize("suite", [False, True])
+def test_verify_lease_renew_every_phase_has_host_and_ssh_timeouts(
+    tmp_path: Path, suite: bool
+) -> None:
+    tp = TimedTransport(_slot_hosts())
+    code, text = _verify(
+        tp,
+        tmp_path,
+        suite=suite,
+        tests=() if suite else ("omnibase_infra:tests/x.py",),
+        suite_budget_s=5400,
+    )
+    assert code == pool.EXIT_PASS, text
+    budgets = {
+        "snap-pre": 120,
+        "clone": 900,
+        "build": 7200,
+        "probe": 1800,
+        "tests": 5400 if suite else 2400,
+        "teardown": 600,
+        "snap-post": 600,
+    }
+    commands = [(c, t) for c, t in tp.timed if "/prove.sh " in c]
+    assert len(commands) == len(pool.PHASES)
+    for (command, ssh_timeout), phase in zip(commands, pool.PHASES, strict=True):
+        budget = budgets[phase]
+        assert command.endswith(f" {phase}")
+        renewal = pool.renew_lease_command(
+            CFG.host("pool-c-slot-1"),
+            "me",
+            NOW + dt.timedelta(seconds=budget + pool.RENEW_MARGIN_S),
+            NOW,
+        )
+        assert command.startswith(f"{renewal} && timeout -k 30 {budget} bash ")
+        assert ssh_timeout == budget + 60
+
+
+def test_verify_lease_renew_until_advances_with_each_phase(tmp_path: Path) -> None:
+    current = NOW
+    seen: list[tuple[str, dt.datetime, dict[str, str]]] = []
+
+    class AdvancingTransport(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            nonlocal current
+            rc, out = super().run(host, command, timeout)
+            match = re.search(r"timeout -k 30 (\d+) bash .* (\S+)$", command)
+            if match:
+                seen.append(
+                    (match.group(2), current, json.loads(self.hosts[host.name].lease))
+                )
+                current += dt.timedelta(seconds=int(match.group(1)))
+            return rc, out
+
+    code, text = _verify(
+        AdvancingTransport(_slot_hosts()), tmp_path, now_fn=lambda: current
+    )
+    assert code == pool.EXIT_PASS, text
+    assert [phase for phase, _, _ in seen] == list(pool.PHASES)
+    expiries = [pool._parse_ts(lease["until"]) for _, _, lease in seen]
+    assert all(a < b for a, b in itertools.pairwise(expiries))
+    for phase, started, lease in seen:
+        assert pool._parse_ts(lease["taken"]) == started
+        if phase == "tests":
+            assert pool._parse_ts(lease["until"]) >= started + dt.timedelta(
+                seconds=2400
+            )
+
+
+@pytest.mark.parametrize(
+    ("take_after", "lost_before"),
+    [("build", "probe"), ("tests", "teardown"), ("teardown", "snap-post")],
+)
+def test_verify_lease_renew_peer_takeover_stops_without_teardown(
+    tmp_path: Path, take_after: str, lost_before: str
+) -> None:
+    hosts = _slot_hosts()
+    peer_lease = _lease("peer", NOW + dt.timedelta(hours=3))
+
+    class PeerTakesLease(TimedTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            rc, out = super().run(host, command, timeout)
+            if command.endswith(f" {take_after}"):
+                self.hosts[host.name].lease = peer_lease
+            return rc, out
+
+    tp = PeerTakesLease(hosts)
+    logs: list[str] = []
+    result_out = tmp_path / "result.json"
+    code, text = _verify(tp, tmp_path, result_out=result_out, log=logs.append)
+    assert code == pool.EXIT_INCONCLUSIVE
+    assert text.startswith("LAB PROOF INCONCLUSIVE:")
+    assert (
+        f"lease lost before {lost_before}: the slot was left to its new holder, not torn down"
+        in text
+    )
+    expected = list(pool.PHASES[: pool.PHASES.index(lost_before)])
+    assert hosts["pool-c-slot-1"].ran == [*expected, f"lost:{lost_before}"]
+    assert hosts["pool-c-slot-1"].lease == peer_lease
+    assert any(c.startswith("rm -rf /tmp/verify-") for c, _ in tp.timed)
+    assert sum(line.startswith("lease lost before ") for line in logs) == 1
+    result = json.loads(result_out.read_text(encoding="utf-8"))
+    assert result["outcome"] == "INCONCLUSIVE"
+    assert result["exit_code"] == pool.EXIT_INCONCLUSIVE
+
+
+def test_verify_lease_renew_run_proof_keeps_original_commands_and_timeouts(
+    tmp_path: Path,
+) -> None:
+    tp = TimedTransport({"pool-a": FakeHost()})
+    code, text = pool.run_proof(
+        CFG,
+        tp,
+        _params(tmp_path),
+        "me",
+        60,
+        "pool-a",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_PASS, text
+    commands = [(c, t) for c, t in tp.timed if "/prove.sh " in c]
+    assert len(commands) == len(pool.PHASES)
+    assert [t for _, t in commands] == [120, 900, 3600, 1800, 2400, 600, 600]
+    for command, _ in commands:
+        assert command.startswith("bash /tmp/pool-")
+        assert "timeout -k" not in command
+        assert pool.LEASE_LOST not in command
+
+
 def test_verify_ref_builds_the_slot_from_a_branch_with_no_pr(tmp_path: Path) -> None:
     hosts = _slot_hosts()
     code, text = _verify(FakeTransport(hosts), tmp_path)
@@ -2397,14 +2537,14 @@ def test_verify_suite_runs_the_unit_suite_under_its_own_budget(tmp_path: Path) -
     )
     assert "SUITE_REPO=omnibase_infra" in env and "SUITE_WORKERS=6" in env
     assert not any(line.startswith("TESTS=") for line in env)
-    assert tp.tests_budgets() == [5400]
+    assert tp.tests_budgets() == [5460]
 
 
 def test_a_focused_run_keeps_the_default_tests_budget(tmp_path: Path) -> None:
     hosts = _slot_hosts()
     tp = TimedTransport(hosts)
     assert _verify(tp, tmp_path)[0] == pool.EXIT_PASS
-    assert tp.tests_budgets() == [2400]
+    assert tp.tests_budgets() == [2460]
 
 
 def test_verify_suite_judges_a_failing_suite_and_bounds_the_dev_control() -> None:
