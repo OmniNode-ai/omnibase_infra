@@ -95,6 +95,8 @@ Input envelope (stdin JSON):
     ],
     "networks": ["omnibase-infra-prod-network", ...],  # `docker network ls`
     "runtime_tag": "0.37.0" | null, # resolved runtime tag (optional)
+    "observed_at": "<ISO-8601>",    # when the inventory was read; a row's
+                                    # StartedAt is measured against it (OMN-17427)
     "desired_state": {...} | [{...}] | null,  # lab-desired-state.v1 (optional)
     "desired_state_error": "why it could not be read"  # optional, with null
   }
@@ -130,6 +132,7 @@ import os
 import re
 import socket
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -142,6 +145,14 @@ DEFAULT_UNHEALTHY_AFTER_SECONDS = 1800
 #: service to declare a ``restart_bound``, and E7 was a restart loop (6051
 #: restarts) in exactly such a project. The bound the lab alarm used for it.
 DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND = 5
+
+#: OMN-17427: ``RestartCount`` is cumulative over a container's life, so a loop
+#: that ended hours ago read as a live one until the container was recreated
+#: (the dev broker: 201 restarts, up and healthy since its last start, held the
+#: census red). A count past the bound is a loop only while the container was
+#: last started inside this window. Docker's restart backoff caps at one minute,
+#: so a container still looping is never up this long between starts.
+RESTART_LOOP_WINDOW_SECONDS = 1800
 
 ENV_DESIRED_STATE = "LANE_CENSUS_DESIRED_STATE"
 IMAGE_REVISION_LABEL = "org.opencontainers.image.revision"
@@ -420,8 +431,52 @@ def restart_bounds_for_lane(manifest: dict[str, Any], lane: str) -> dict[str, in
     return bounds
 
 
+def _parse_instant(value: Any) -> datetime | None:
+    """An RFC 3339 instant as Docker and the collector write it, else None.
+
+    Docker writes nanoseconds, which ``fromisoformat`` refuses, so the fraction
+    is cut to microseconds. Docker's zero time (never started) reads as None.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = re.sub(r"(\.\d{6})\d+", r"\1", value.strip()).replace("Z", "+00:00")
+    try:
+        instant = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if instant.tzinfo is None or instant.year < 2000:
+        return None
+    return instant
+
+
+def _restart_loop_detail(
+    actual: dict[str, Any], observed_at: datetime | None
+) -> str | None:
+    """Why a count past the bound is a live loop, or None when it is history.
+
+    History only when the census can show it: the container is running and was
+    last started at least ``RESTART_LOOP_WINDOW_SECONDS`` before the census
+    looked. A missing or unreadable start time or census time stays a loop.
+    """
+    started_at = _parse_instant(actual.get("StartedAt"))
+    if not _running(actual.get("State", ""), actual.get("Status", "")):
+        return f"it is {actual.get('State') or 'not running'}"
+    if started_at is None or observed_at is None:
+        return "its last start time cannot be read"
+    up_seconds = (observed_at - started_at).total_seconds()
+    if up_seconds >= RESTART_LOOP_WINDOW_SECONDS:
+        return None
+    return (
+        f"it last started {up_seconds:g}s before the census looked, within the "
+        f"last {RESTART_LOOP_WINDOW_SECONDS}s"
+    )
+
+
 def _container_health_findings(
-    lane: str, service: dict[str, Any], actual: dict[str, Any]
+    lane: str,
+    service: dict[str, Any],
+    actual: dict[str, Any],
+    observed_at: datetime | None,
 ) -> list[dict[str, str]]:
     """Grade declared containers using inspect readings, never the uptime string."""
     findings: list[dict[str, str]] = []
@@ -431,13 +486,15 @@ def _container_health_findings(
         count = actual.get("RestartCount")
         if type(count) is not int or count < 0:
             raise ValueError(f"{name}: RestartCount is missing or invalid")
-        if count > bound:
+        loop = _restart_loop_detail(actual, observed_at) if count > bound else None
+        if loop is not None:
             findings.append(
                 _finding(
                     lane,
                     "container_restart_loop",
                     name,
-                    f"container {name!r} has restarted {count} times, past its declared bound of {bound}",
+                    f"container {name!r} has restarted {count} times, past its "
+                    f"declared bound of {bound}, and {loop}",
                 )
             )
     health = actual.get("Health")
@@ -940,7 +997,10 @@ def _allowed_by(entry: dict[str, Any], row: _LabRow) -> bool:
 
 
 def _undeclared_sync_findings(
-    documents: list[dict[str, Any]], manifest: dict[str, Any], rows: list[_LabRow]
+    documents: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    rows: list[_LabRow],
+    observed_at: datetime | None,
 ) -> list[dict[str, str]]:
     """Containers nothing declares and no ``allowed_undeclared`` entry admits.
 
@@ -997,7 +1057,12 @@ def _undeclared_sync_findings(
         count = data.get("RestartCount")
         if type(count) is not int or count < 0:
             raise ValueError(f"{name}: RestartCount is missing or invalid")
-        if count > DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND:
+        loop = (
+            _restart_loop_detail(data, observed_at)
+            if count > DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND
+            else None
+        )
+        if loop is not None:
             findings.append(
                 _finding(
                     "",
@@ -1007,7 +1072,7 @@ def _undeclared_sync_findings(
                     f"{admitted.get('name')!r}, owner {admitted.get('owner')}) has "
                     f"restarted {count} times, past the "
                     f"{DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND} an admitted "
-                    "container may",
+                    f"container may, and {loop}",
                 )
             )
     return findings
@@ -1048,7 +1113,11 @@ def lab_sync_findings(
         findings.extend(
             _runner_sync_findings(document, by_name, envelope.get("github_runners"))
         )
-    findings.extend(_undeclared_sync_findings(documents, manifest, rows))
+    findings.extend(
+        _undeclared_sync_findings(
+            documents, manifest, rows, _parse_instant(envelope.get("observed_at"))
+        )
+    )
     return findings
 
 
@@ -1088,6 +1157,7 @@ def reconcile_lane(
     lane_labeled_names: set[str],
     default_tag_pattern: str,
     runtime_tag: str | None,
+    observed_at: datetime | None,
 ) -> list[dict[str, str]]:
     """Diff one lane's desired state against the actual inventory."""
     findings: list[dict[str, str]] = []
@@ -1156,7 +1226,9 @@ def reconcile_lane(
             continue
 
         if actual is not None:
-            findings.extend(_container_health_findings(lane_name, svc, actual))
+            findings.extend(
+                _container_health_findings(lane_name, svc, actual, observed_at)
+            )
 
         if kind in ("oneshot", "keepalive"):
             # Run-to-completion container. Absence (compose removed it) is fine.
@@ -1320,6 +1392,7 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
                 lane_labeled_names=lane_labels.get(lane_name, set()),
                 default_tag_pattern=default_pattern,
                 runtime_tag=runtime_tag,
+                observed_at=_parse_instant(envelope.get("observed_at")),
             )
         )
 
