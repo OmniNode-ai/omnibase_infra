@@ -300,6 +300,8 @@ class RuntimeDelegationDispatchPort:
         attribution: Mapping[str, str] | None = None,
         model: str | None = None,
         named_tests: BaseModel | None = None,
+        trace_id: UUID | None = None,
+        queue_wait_ms: int | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -310,8 +312,13 @@ class RuntimeDelegationDispatchPort:
         to a deployed lane whose own handler stamps the caller onto its
         terminal. Only omnimarket's in-process port writes an evidence terminal
         of its own and needs it.
+
+        ``trace_id`` and ``queue_wait_ms`` (OMN-17427) are accepted and unused
+        on the same terms: omnimarket#4252 writes them onto the in-process
+        port's own evidence terminal, and this port's request wire does not
+        carry them.
         """
-        del attribution
+        del attribution, trace_id, queue_wait_ms
 
         # Refuse a spec the lane cannot run before any route is resolved or
         # anything is published.

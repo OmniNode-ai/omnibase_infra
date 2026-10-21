@@ -29,6 +29,19 @@ lane-health projection folds rows for the class's own lane and would consume
 and drop everything on an instance. A selection that cannot be honoured is a
 discovery error, never a silent skip.
 
+A deployment may also select the nodes it loads at all (OMN-17427):
+``ONEX_RUNTIME_NODE_SELECTION`` names contracts, and every other discovered
+contract is left unattached before profile or lane ownership is decided. Unset,
+nothing is excluded. A named contract that no discovered contract is becomes a
+discovery error, never a silent zero.
+
+A lane may fold other roles into one runtime (OMN-17427):
+``ONEX_RUNTIME_FOLDED_PROFILES`` names the profiles whose contracts this
+process attaches in addition to its own role's, so one runtime container
+carries the effects, worker and projection-writer nodes instead of a container
+per role. The role identity (``RUNTIME_PROFILE``) is unchanged; lane scope and
+node selection apply to a folded contract exactly as to an owned one.
+
 Both the kernel's wiring and the health monitor's expectations read this one
 filter, so what is attached and what health expects cannot disagree.
 """
@@ -37,7 +50,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -47,6 +60,10 @@ from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import
 )
 from omnibase_infra.models.runtime.model_runtime_lane_class_selection import (
     ModelRuntimeLaneClassSelection,
+)
+from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_SELECTION,
+    ModelRuntimeNodeSelection,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -60,6 +77,7 @@ from omnibase_infra.runtime.health.runtime_lane_identity import (
     describe_undeclared_runtime_lane,
     resolve_declared_runtime_lane,
 )
+from omnibase_infra.runtime.runtime_profile import resolve_runtime_folded_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +191,19 @@ def _runtime_lane_admits_raw_contract(
     ).admits(name, scope)
 
 
+def _profile_owns(
+    contract_profiles: Sequence[str],
+    owned_profiles: tuple[str, ...],
+) -> bool:
+    """Whether any profile this process carries owns a contract's subscriptions.
+
+    A contract with no ``runtime_profiles`` belongs to ``main``.
+    """
+    if contract_profiles:
+        return any(profile in contract_profiles for profile in owned_profiles)
+    return "main" in owned_profiles
+
+
 def runtime_profile_owns_contract(
     raw_contract: Mapping[str, object],
     runtime_profile: str,
@@ -185,19 +216,24 @@ def runtime_profile_owns_contract(
     mirrors auto-wiring ownership filtering for legacy runtime-host subscription
     paths that operate on raw contract dictionaries, including the
     ``runtime_lanes`` scope (OMN-19408): a lane-scoped contract is owned only
-    on a runtime whose declared lane is in the scope.
+    on a runtime whose declared lane is in the scope. A contract the
+    deployment's node selection (OMN-17427) does not name is never owned. A
+    contract a folded profile owns (``ONEX_RUNTIME_FOLDED_PROFILES``,
+    OMN-17427) is owned as well.
 
     Args:
         environ: Override for the process environment the runtime lane is read
             from. Injected by tests; the default reads ``os.environ``.
     """
     normalized_profile = _normalize_runtime_profile(runtime_profile)
+    name = raw_contract.get("name")
+    if not ModelRuntimeNodeSelection.from_env(environ).admits(
+        name if isinstance(name, str) else ""
+    ):
+        return False
+    owned_profiles = (normalized_profile, *resolve_runtime_folded_profiles(environ))
     runtime_profiles = extract_runtime_profiles_from_contract(raw_contract)
-    if runtime_profiles:
-        profile_owns = normalized_profile in runtime_profiles
-    else:
-        profile_owns = normalized_profile == "main"
-    if not profile_owns:
+    if not _profile_owns(runtime_profiles, owned_profiles):
         return False
     return _runtime_lane_admits_raw_contract(raw_contract, environ)
 
@@ -240,6 +276,29 @@ class ModelRuntimeProfileOwnershipResult(BaseModel):
         description=(
             "Contracts attached because the deployment selected them from the "
             "runtime's lane class, though its own lane is outside their scope."
+        ),
+    )
+    node_selection_excluded_contracts: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Contracts left unattached because the deployment's node selection "
+            "(ONEX_RUNTIME_NODE_SELECTION) does not name them (OMN-17427). "
+            "Empty when no selection is set."
+        ),
+    )
+
+    folded_profiles: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Roles this runtime carries besides its own, from "
+            "ONEX_RUNTIME_FOLDED_PROFILES (OMN-17427). Empty when none is folded."
+        ),
+    )
+    folded_contracts: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Attached contracts that this runtime's own role does not own and a "
+            "folded profile does (OMN-17427)."
         ),
     )
 
@@ -303,17 +362,45 @@ def filter_manifest_for_runtime_profile(
     discovered contract has, and a selected contract whose scope excludes the
     class each add a discovery error.
 
+    A contract a folded profile (``ONEX_RUNTIME_FOLDED_PROFILES``, OMN-17427)
+    owns is kept on the same lane terms and listed in ``folded_contracts``.
+
+    Before any of that, a deployment node selection (OMN-17427) drops every
+    contract it does not name, listed in ``node_selection_excluded_contracts``;
+    a name it carries that no discovered contract has adds a discovery error.
+
     Args:
         environ: Override for the process environment the runtime lane is read
             from. Injected by tests; the default reads ``os.environ``.
     """
     normalized_profile = _normalize_runtime_profile(runtime_profile)
+    folded_profiles = tuple(
+        profile
+        for profile in resolve_runtime_folded_profiles(environ)
+        if profile != normalized_profile
+    )
     runtime_lane = resolve_declared_runtime_lane(environ)
     owned_contracts: list[ModelDiscoveredContract] = []
+    folded_contracts: list[str] = []
     skipped_contracts: list[str] = []
     lane_excluded_contracts: list[str] = []
     lane_errors: list[ModelDiscoveryError] = []
     lane_class_admitted: list[str] = []
+    node_selection = ModelRuntimeNodeSelection.from_env(environ)
+    node_selection_excluded: list[str] = []
+    discovered_names = {contract.name for contract in manifest.contracts}
+    for name in node_selection.contracts:
+        if name not in discovered_names:
+            record = ModelDiscoveryError(
+                entry_point_name=name,
+                error=(
+                    f"{ENV_RUNTIME_NODE_SELECTION} names {name!r}, which no "
+                    "discovered contract is; nothing attached for it, "
+                    "fail-closed (OMN-17427)."
+                ),
+            )
+            logger.error("Auto-wiring node selection: %s", record.error)
+            lane_errors.append(record)
     selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
     if selection.refusal:
         lane_errors.append(_lane_class_error(ENV_RUNTIME_LANE_CLASS, selection.refusal))
@@ -330,13 +417,14 @@ def filter_manifest_for_runtime_profile(
                 )
 
     for contract in manifest.contracts:
-        if contract.runtime_profiles:
-            profile_owns = normalized_profile in contract.runtime_profiles
-        else:
-            profile_owns = normalized_profile == "main"
-        if not profile_owns:
-            skipped_contracts.append(contract.name)
+        if not node_selection.admits(contract.name):
+            node_selection_excluded.append(contract.name)
             continue
+        if not _profile_owns(contract.runtime_profiles, (normalized_profile,)):
+            if not _profile_owns(contract.runtime_profiles, folded_profiles):
+                skipped_contracts.append(contract.name)
+                continue
+            folded_contracts.append(contract.name)
 
         scope = contract.runtime_lanes
         if scope is not None and not scope.admits(runtime_lane):
@@ -366,6 +454,21 @@ def filter_manifest_for_runtime_profile(
             continue
         owned_contracts.append(contract)
 
+    if folded_contracts:
+        logger.info(
+            "Auto-wiring folded profiles: profile=%s folded=%s carries %d "
+            "contract(s) of the folded roles (OMN-17427)",
+            normalized_profile,
+            list(folded_profiles),
+            len(folded_contracts),
+        )
+    if node_selection_excluded:
+        logger.info(
+            "Auto-wiring node selection: attached only %s; excluded %d other "
+            "contract(s) (OMN-17427)",
+            list(node_selection.contracts),
+            len(node_selection_excluded),
+        )
     if lane_class_admitted:
         logger.info(
             "Auto-wiring runtime lane scope: lane=%s class=%s attached_by_class=%s "
@@ -393,6 +496,13 @@ def filter_manifest_for_runtime_profile(
         lane_excluded_contracts=tuple(lane_excluded_contracts),
         runtime_lane_class=selection.lane_class,
         lane_class_admitted_contracts=tuple(lane_class_admitted),
+        node_selection_excluded_contracts=tuple(node_selection_excluded),
+        folded_profiles=folded_profiles,
+        folded_contracts=tuple(
+            name
+            for name in folded_contracts
+            if name in {contract.name for contract in owned_contracts}
+        ),
     )
 
 

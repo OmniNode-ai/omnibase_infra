@@ -26,11 +26,20 @@ from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_g
 from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_group_prefix import (
     ModelBrokerGroupPrefix,
 )
+from omnibase_infra.runtime.gateway_forwarder import (
+    build_gateway_transports,
+    load_gateway_forwarder_runtime_config,
+)
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).parents[4]
 BINDINGS = ROOT / "deploy/lab/developer-principal-bindings.yaml"
 DERIVED = ROOT / "deploy/lab/developer-principal-derived-grants.json"
+LANE_MIRROR_OVERLAY = ROOT / "docker/lane-overlays/local.lane-mirror.example.yaml"
+LANE_MIRROR_CREDENTIALS = (
+    ROOT / "docker/lane-overlays/local.lane-credentials.example.yaml"
+)
+LANE_MIRROR_BROKER = "lane.dev.kafka.broker"
 
 # The grants `deploy/lab/developer-principal-grants.yaml` typed by hand until
 # OMN-19975, spelled here as that file spelled them: (resource, name, pattern,
@@ -132,6 +141,8 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 # the delegation request and the reply under the morning_phase reply group.
 # The DoD closeout proof (OMN-21048) publishes the decide command and reads
 # its decided event under its own group prefix.
+# The laptop lane mirror (OMN-19983) writes, as the machine's issued principal, the
+# delegation topic set its overlay selects onto the dev lane.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "topic",
@@ -236,6 +247,64 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "literal",
         ("read", "describe"),
     ),
+    (
+        "topic",
+        "onex.evt.omnibase-infra.delegation-completed.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnibase-infra.delegation-failed.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omniintelligence.llm-call-completed.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+)
+# The Claude Code hook edge (OMN-17427): a developer machine's emit drainer publishes
+# its own hook events to the dev lane, so the lab projections (claude_hook_events among
+# them) see every person's sessions and not only the operator's. These are the
+# `onex.evt.omniclaude.*` observability topics the operator's own hook principal holds,
+# produce only. No READ, and no `onex.cmd.*` hook topic: the command topics carry full
+# prompts and content and stay a separate, consented grant.
+HOOK_EDGE_TOPICS: tuple[str, ...] = (
+    "onex.evt.omniclaude.agent-actions.v1",
+    "onex.evt.omniclaude.agent-status.v1",
+    "onex.evt.omniclaude.correlation-trace.v1",
+    "onex.evt.omniclaude.delegation-shadow-comparison.v1",
+    "onex.evt.omniclaude.dod-guard-fired.v1",
+    "onex.evt.omniclaude.friction-observed.v1",
+    "onex.evt.omniclaude.hook-event.v1",
+    "onex.evt.omniclaude.hook-health-error.v1",
+    "onex.evt.omniclaude.intent-commit-bound.v1",
+    "onex.evt.omniclaude.llm-routing-decision.v1",
+    "onex.evt.omniclaude.llm-routing-fallback.v1",
+    "onex.evt.omniclaude.pattern-enforcement.v1",
+    "onex.evt.omniclaude.phase-metrics.v1",
+    "onex.evt.omniclaude.prompt-submitted.v1",
+    "onex.evt.omniclaude.pr-validation-rollup.v1",
+    "onex.evt.omniclaude.routing-decision.v1",
+    "onex.evt.omniclaude.routing-feedback.v1",
+    "onex.evt.omniclaude.session-ended.v1",
+    "onex.evt.omniclaude.session-outcome.v1",
+    "onex.evt.omniclaude.session-started.v1",
+    "onex.evt.omniclaude.skill-completed.v1",
+    "onex.evt.omniclaude.skill-invoked.v1",
+    "onex.evt.omniclaude.skill-started.v1",
+    "onex.evt.omniclaude.static-context-edit-detected.v1",
+    "onex.evt.omniclaude.team-evidence-written.v1",
+    "onex.evt.omniclaude.team-task-assigned.v1",
+    "onex.evt.omniclaude.team-task-completed.v1",
+    "onex.evt.omniclaude.team-task-progress.v1",
+    "onex.evt.omniclaude.tool-executed.v1",
+)
+HOOK_EDGE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tuple(
+    ("topic", topic, "literal", ("write", "describe")) for topic in HOOK_EDGE_TOPICS
 )
 BROKER = "dev"
 
@@ -243,7 +312,9 @@ BROKER = "dev"
 def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
-        for resource, name, pattern, operations in TYPED_GRANTS + DECLARED_GRANTS
+        for resource, name, pattern, operations in (
+            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
+        )
         for operation in operations
     }
 
@@ -261,6 +332,51 @@ def shipped_bindings() -> ModelBrokerGrantBindings:
 
 def test_bindings_derive_exactly_the_grants_that_were_typed_by_hand() -> None:
     assert derive(shipped_bindings()) == typed_rows()
+
+
+def lane_mirror_rows() -> set[tuple[str, str, str, str, str]]:
+    """The grants the shipped laptop lane-mirror overlay derives on the dev lane broker."""
+    config = load_gateway_forwarder_runtime_config(
+        LANE_MIRROR_OVERLAY,
+        broker_ref_map_path=None,
+        lane_credential_map_path=LANE_MIRROR_CREDENTIALS,
+    )
+    resolved, _ = build_gateway_transports(config)
+    return {
+        (BROKER, g.resource_type, g.resource, g.pattern, g.operation)
+        for g in HandlerBrokerGrantDerive().handle(resolved).grants
+        if g.broker == LANE_MIRROR_BROKER
+    }
+
+
+def test_the_issued_principal_holds_every_dev_grant_the_laptop_lane_mirror_derives() -> (
+    None
+):
+    """The laptop forwarder writes the lab lane as the machine's issued principal.
+
+    Falsifier: drop a delegation produce binding from the bindings file and the
+    mirrored topic it covers is named missing here.
+    """
+    mirror = lane_mirror_rows()
+    config = load_gateway_forwarder_runtime_config(
+        LANE_MIRROR_OVERLAY,
+        broker_ref_map_path=None,
+        lane_credential_map_path=LANE_MIRROR_CREDENTIALS,
+    )
+    assert config.forwarder.lane_mirror is not None
+    mirrored = set(config.forwarder.lane_mirror.topics)
+    # Positive control: the overlay derives a write for every mirrored topic, so an
+    # empty derivation cannot pass the subset check below.
+    assert {r[2] for r in mirror if r[4] == "WRITE"} == mirrored
+    assert sorted(mirror - derive(shipped_bindings())) == []
+
+
+def test_the_laptop_lane_mirror_writes_only_the_mirrored_topics() -> None:
+    """The lane-mirror grants are topic WRITE and DESCRIBE, never a read or a group."""
+    assert {(r[1], r[3], r[4]) for r in lane_mirror_rows()} == {
+        ("TOPIC", "LITERAL", "WRITE"),
+        ("TOPIC", "LITERAL", "DESCRIBE"),
+    }
 
 
 def test_the_memory_lifecycle_grants_are_declared_and_nothing_wider() -> None:
@@ -308,15 +424,25 @@ def test_the_pr_polish_grants_start_it_and_read_both_phases_and_nothing_more() -
 def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
     """The run may start the node, read and write its terminals, and delegate its phases."""
     rows = derive(shipped_bindings())
-    morning = {
-        (resource_type, resource, operation)
-        for _, resource_type, resource, _, operation in rows
-        if "morning" in resource or "delegation" in resource
-    } - {
-        (resource_type, resource, operation)
-        for _, resource_type, resource, _, operation in rows
-        if "delegate-skill" in resource or "projection-delegation" in resource
-    }
+    morning = (
+        {
+            (resource_type, resource, operation)
+            for _, resource_type, resource, _, operation in rows
+            if "morning" in resource or "delegation" in resource
+        }
+        - {
+            (resource_type, resource, operation)
+            for _, resource_type, resource, _, operation in rows
+            if "delegate-skill" in resource
+            or "projection-delegation" in resource
+            or resource in HOOK_EDGE_TOPICS
+        }
+        - {
+            (resource_type, resource, operation)
+            for _, resource_type, resource, _, operation in lane_mirror_rows()
+            if operation == "WRITE"
+        }
+    )
     assert morning == {
         ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "WRITE"),
         ("TOPIC", "onex.cmd.omnimarket.morning-ground-state-start.v1", "DESCRIBE"),
@@ -477,3 +603,27 @@ def test_the_delegation_terminal_readback_grants_read_one_topic_and_write_none()
         ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "READ"),
         ("TOPIC", "onex.evt.omnimarket.projection-delegation-applied.v1", "DESCRIBE"),
     }
+
+
+def test_the_hook_edge_grants_produce_metadata_only() -> None:
+    """A developer machine may publish its hook events and read none of them back."""
+    rows = derive(shipped_bindings())
+    hook_edge = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource_type == "TOPIC" and ".omniclaude." in resource
+    }
+    assert hook_edge == {
+        ("TOPIC", topic, operation)
+        for topic in HOOK_EDGE_TOPICS
+        for operation in ("WRITE", "DESCRIBE")
+    }
+    assert "onex.evt.omniclaude.hook-event.v1" in HOOK_EDGE_TOPICS
+    # The laptop lane mirror (OMN-19983) is the one producer of an omniintelligence
+    # topic; the hook edge adds none.
+    mirror = {(r[1], r[2]) for r in lane_mirror_rows()}
+    assert not any(
+        "omniintelligence" in resource
+        for _, resource_type, resource, _, _ in rows
+        if resource_type == "TOPIC" and (resource_type, resource) not in mirror
+    )

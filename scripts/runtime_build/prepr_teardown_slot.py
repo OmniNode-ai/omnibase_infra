@@ -53,6 +53,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -92,6 +93,16 @@ SLOT_TOKEN_RE = re.compile(r"^prepr[1-9][0-9]*$")
 #: rpk accepts many names per delete; chunked so one argv stays well inside
 #: ARG_MAX on a slot that provisioned ~1700 topics.
 DELETE_CHUNK = 200
+#: OMN-17427: topic deletes run against the SHARED dev broker, so they go in
+#: small chunks and each chunk waits for the broker to report healthy before
+#: the next. On 2026-10-20 ~1845 prepr2 topics deleted in back-to-back chunks
+#: of 200 stalled partition removal and crashed the dev broker (Redpanda
+#: v24.2.7, smp 1), which then asserted on every restart and took the dev bus
+#: down. A broker that does not come back healthy stops the deletes: the
+#: remaining topics are residue the readback reports, never a reason to push on.
+TOPIC_DELETE_CHUNK = 25
+BROKER_HEALTH_ATTEMPTS = 12
+BROKER_HEALTH_POLL_SECONDS = 5.0
 
 RPK_ENV = ("RPK_USER", "RPK_PASS", "RPK_SASL_MECHANISM")
 VALKEY_ENV = ("REDISCLI_AUTH",)
@@ -339,6 +350,21 @@ class _Teardown:
             self.errors.append(f"rpk {kind} list unreadable: {exc}")
             return None
 
+    def broker_healthy(self) -> bool:
+        """The shared broker reports ``Healthy: true``, polled a bounded number of times."""
+        argv = self._exec(BROKER_SERVICE, RPK_ENV, "rpk", "cluster", "health")
+        if argv is None:
+            return False
+        for attempt in range(BROKER_HEALTH_ATTEMPTS):
+            result = self.run(argv, self.env)
+            if result.returncode == 0 and re.search(
+                r"^Healthy:\s+true\s*$", result.stdout or "", re.MULTILINE
+            ):
+                return True
+            if attempt + 1 < BROKER_HEALTH_ATTEMPTS:
+                time.sleep(BROKER_HEALTH_POLL_SECONDS)
+        return False
+
     def topics(self) -> list[str] | None:
         return self._rpk_names("topic", "NAME")
 
@@ -426,19 +452,29 @@ class _Teardown:
         # Containers first: a live consumer keeps its group from being deleted
         # and its pool keeps sessions open on the slot's databases.
         if planned["containers"]:
+            before = len(self.errors)
             self._checked(
                 ["docker", "rm", "-f", *planned["containers"]], "remove containers"
             )
+            if len(self.errors) != before:
+                return
         for chunk in _chunks(planned["groups"], DELETE_CHUNK):
             self._checked(
                 self._exec(BROKER_SERVICE, RPK_ENV, "rpk", "group", "delete", *chunk),
                 "delete groups",
             )
-        for chunk in _chunks(planned["topics"], DELETE_CHUNK):
+        for chunk in _chunks(planned["topics"], TOPIC_DELETE_CHUNK):
             self._checked(
                 self._exec(BROKER_SERVICE, RPK_ENV, "rpk", "topic", "delete", *chunk),
                 "delete topics",
             )
+            if not self.broker_healthy():
+                self.errors.append(
+                    "delete topics: stopped, the shared broker did not report "
+                    f"healthy within {BROKER_HEALTH_ATTEMPTS} reads after a chunk; "
+                    "the remaining slot topics are left for a later teardown"
+                )
+                break
         self._checked(
             self._exec(
                 VALKEY_SERVICE,
@@ -463,8 +499,15 @@ class _Teardown:
             )
         if planned["images"]:
             self._checked(["docker", "rmi", "-f", *planned["images"]], "remove images")
+        # Keep the compose files and tenant credential for a rerun if any
+        # earlier step failed.
+        if self.errors:
+            return
         if staging_root.exists():
-            shutil.rmtree(staging_root, ignore_errors=False)
+            try:
+                shutil.rmtree(staging_root, ignore_errors=False)
+            except OSError as exc:
+                self.errors.append(f"remove staging root: {str(exc)[:300]}")
 
     def revoke_tenant(self, staging_root: Path) -> bool:
         credential = staging_root / "tenant-state" / "credential.env"

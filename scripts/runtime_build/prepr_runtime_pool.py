@@ -46,6 +46,9 @@ runs under the same guard as the break. The ledger is read, never written: a
 live ``HOLD`` naming the host's surface, placed by another lane, makes the host
 busy. The HOLD and RELEASE rows themselves are the calling lane's to write
 through ``/omni:ledger-msg``; this file prints the text for them.
+The verify driver renews the lease before every phase inside the same remote
+command that starts it, and stops without teardown when the lease is no longer
+its own. Each phase is killed on the host when its budget ends.
 
 Exit status: 0 PASS, 1 FAIL, 2 INCONCLUSIVE (the stack never became
 provable for a reason outside the PR), 3 no free host, 4 lease refused,
@@ -74,9 +77,11 @@ import base64
 import concurrent.futures
 import contextlib
 import datetime as dt
+import getpass
 import gzip
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -121,6 +126,10 @@ EXIT_INCONCLUSIVE = 2
 EXIT_NO_FREE_HOST = 3
 EXIT_LEASE_REFUSED = 4
 EXIT_USAGE = 5
+LEASE_LOST = "LEASE-LOST"
+EXIT_LEASE_LOST_REMOTE = 97
+RENEW_MARGIN_S = 300
+HOST_KILL_GRACE_S = 30
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
@@ -354,8 +363,39 @@ def declared_lane_projects(path: Path | None = None) -> set[str]:
 # --------------------------------------------------------------------------- transport
 
 
+def _bindable(addr: str) -> bool:
+    """Whether an IP, or the IPv4 address a name resolves to, belongs to this machine."""
+    try:
+        try:
+            ipaddress.ip_address(addr)
+        except ValueError:
+            addr = socket.gethostbyname(addr)
+        family = socket.AF_INET6 if ":" in addr else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((addr, 0))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def is_this_host(
+    ssh_target: str,
+    user: str | None = None,
+    bind: Callable[[str], bool] | None = None,
+) -> bool:
+    """Whether the target names this machine and the current user.
+
+    A host may not accept its own key over loopback ssh; reaching it locally
+    needs no credential.
+    """
+    target_user, sep, addr = ssh_target.rpartition("@")
+    if sep and target_user != (getpass.getuser() if user is None else user):
+        return False
+    return (bind or _bindable)(addr)
+
+
 class Transport(Protocol):
-    """How the driver reaches a host. The real one is ssh; tests pass a fake."""
+    """Reach a host over ssh, or a local shell for a pool host that is this machine."""
 
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]: ...
 
@@ -363,7 +403,13 @@ class Transport(Protocol):
 
 
 class SshTransport:
-    def __init__(self, connect_timeout: int = 10) -> None:
+    def __init__(
+        self,
+        connect_timeout: int = 10,
+        local_check: Callable[[str], bool] = is_this_host,
+    ) -> None:
+        self._local_check = local_check
+        self._local_cache: dict[str, bool] = {}
         self._opts = [
             "-o",
             "BatchMode=yes",
@@ -371,25 +417,115 @@ class SshTransport:
             f"ConnectTimeout={connect_timeout}",
         ]
 
+    def _local(self, host: PoolHost) -> bool:
+        if host.ssh_target not in self._local_cache:
+            self._local_cache[host.ssh_target] = self._local_check(host.ssh_target)
+        return self._local_cache[host.ssh_target]
+
     def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
         try:
-            proc = subprocess.run(
-                ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
+            if self._local(host):
+                proc = subprocess.run(
+                    ["bash", "-c", command],
+                    cwd=Path.home(),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            else:
+                proc = subprocess.run(
+                    ["ssh", *self._opts, host.ssh_target, REMOTE_PATH + command],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
             return 124, out + f"\n[timeout after {timeout:.0f}s]"
         return proc.returncode, proc.stdout + proc.stderr
 
     def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        if self._local(host):
+            try:
+                shutil.copyfile(local, remote)
+            except OSError:
+                return 1
+            return 0
         return subprocess.run(
             ["scp", "-q", *self._opts, str(local), f"{host.ssh_target}:{remote}"],
             check=False,
         ).returncode
+
+
+class LocalTransport:
+    """Run pool commands as the current user on this machine."""
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        env = {
+            key: os.environ[key]
+            for key in ("HOME", "USER", "LOGNAME", "SHELL", "LANG")
+            if key in os.environ
+        }
+        # the PATH a non-interactive sshd session starts with, so a local run
+        # finds the same tools an ssh one does
+        env["PATH"] = (
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+        )
+        proc = subprocess.Popen(
+            ["bash", "-c", REMOTE_PATH + command],
+            cwd=Path.home(),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+            return 124, stdout + stderr + f"\n[timeout after {timeout:.0f}s]"
+        return proc.returncode, stdout + stderr
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        try:
+            shutil.copyfile(local, remote)
+            return 0
+        except OSError:
+            return 1
+
+
+class HostRoutingTransport:
+    """Choose a local shell or ssh once per target."""
+
+    def __init__(
+        self,
+        ssh: Transport | None = None,
+        local: Transport | None = None,
+        is_local: Callable[[str], bool] | None = None,
+    ) -> None:
+        self._ssh = (
+            ssh if ssh is not None else SshTransport(local_check=lambda _target: False)
+        )
+        self._local = local if local is not None else LocalTransport()
+        self._is_local = is_local if is_local is not None else is_this_host
+        self._targets: dict[str, bool] = {}
+
+    def _transport(self, host: PoolHost) -> Transport:
+        target = host.ssh_target
+        if target not in self._targets:
+            self._targets[target] = self._is_local(target)
+        return self._local if self._targets[target] else self._ssh
+
+    def run(self, host: PoolHost, command: str, timeout: float) -> tuple[int, str]:
+        return self._transport(host).run(host, command, timeout)
+
+    def put(self, host: PoolHost, local: Path, remote: str) -> int:
+        return self._transport(host).put(host, local, remote)
 
 
 # --------------------------------------------------------------------------- ledger
@@ -665,6 +801,34 @@ def acquire_lease(
     return False, f"held by {held.get('holder', '?')} until {held.get('until', '?')}"
 
 
+def renew_lease_command(
+    host: PoolHost, holder: str, until: dt.datetime, now: dt.datetime
+) -> str:
+    """Renew only our lease under the break guard, before starting a phase."""
+    lease = f"$HOME/{host.lease_dir}"
+    guard = f"{lease}.break"
+    body = json.dumps(
+        {
+            "holder": holder,
+            "until": until.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "taken": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    )
+    return (
+        f"(i=0; until mkdir {guard} 2>/dev/null; do "
+        'i=$((i + 1)); if [ "$i" -ge 20 ]; then '
+        f"echo '{LEASE_LOST} guard busy'; exit {EXIT_LEASE_LOST_REMOTE}; "
+        "fi; sleep 0.5; done; "
+        f"H=$(cat {lease}/lease.json 2>/dev/null); "
+        f'case "$H" in *\'"holder": "{holder}"\'*) '
+        f"printf '%s' {shlex.quote(body)} > {lease}/lease.json.tmp && "
+        f"mv {lease}/lease.json.tmp {lease}/lease.json; "
+        f'R=$?; rmdir {guard}; exit "$R";; '
+        f"*) rmdir {guard}; printf '%s %s\\n' {LEASE_LOST} \"$H\"; "
+        f"exit {EXIT_LEASE_LOST_REMOTE};; esac)"
+    )
+
+
 def release_lease(
     cfg: PoolConfig, transport: Transport, host: PoolHost, holder: str
 ) -> tuple[bool, str]:
@@ -674,6 +838,7 @@ def release_lease(
     # directory the break holds, so release cannot erase a new holder (OMN-20085).
     guard = f"{lease}.break"
     cmd = (
+        f"mkdir -p $(dirname {lease}); "
         "GOTGUARD=0; i=0; while [ $i -lt 100 ]; do "
         f"if mkdir {guard} 2>/dev/null; then GOTGUARD=1; break; fi; "
         'i=$((i+1)); sleep 0.1; done; if [ "$GOTGUARD" = 1 ]; then '
@@ -1987,8 +2152,9 @@ def _run_stack(
     post_up_command: str | None = None,
     tests_budget: float = 2400,
     outputs_sink: dict[str, str] | None = None,
+    renew: Callable[[float], str] | None = None,
 ) -> dict[str, str]:
-    """One stack on the leased host: every phase, then ALWAYS teardown.
+    """One stack on the leased host: every phase, then teardown unless lease lost.
 
     ``overlay`` replaces the stack's Bifrost overlay; ``post_up_command`` runs
     once against the live stack after the probe (the ``exercise`` phase).
@@ -2047,13 +2213,25 @@ def _run_stack(
     outputs: dict[str, str] = outputs_sink if outputs_sink is not None else {}
 
     def phase_run(phase: str, timeout: float) -> int:
+        command = f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}"
+        if renew is not None:
+            command = (
+                f"{renew(timeout)} && timeout -k {HOST_KILL_GRACE_S} "
+                f"{int(timeout)} {command}"
+            )
+            timeout += 2 * HOST_KILL_GRACE_S
         rc, out = transport.run(
             host,
-            f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}",
+            command,
             timeout=timeout,
         )
         outputs[phase] = out
         log(f"[{host.name} {tag} {phase} rc={rc}]\n{out.rstrip()}")
+        if LEASE_LOST in out:
+            outputs["lease-lost"] = phase
+            log(
+                f"lease lost before {phase}: the slot was left to its new holder, not torn down"
+            )
         return rc
 
     try:
@@ -2067,16 +2245,16 @@ def _run_stack(
         ):
             raise RuntimeError("copy of the overlay to host failed")
         for phase in phases:
-            if phase_run(phase, budget.get(phase, 120)) != 0 and phase in (
-                "clone",
-                "build",
-            ):
+            rc = phase_run(phase, budget.get(phase, 120))
+            if "lease-lost" in outputs or (rc != 0 and phase in ("clone", "build")):
                 break
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         # teardown below must run whatever failed above
         log(f"run aborted before teardown: {exc}")
     finally:
         for phase in ("teardown", "snap-post"):
+            if "lease-lost" in outputs:
+                break
             phase_run(phase, 600)
         transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
     return outputs
@@ -2408,6 +2586,12 @@ def _verify_steps(
                 log=log,
                 tests_budget=suite_budget_s if facts.suite else 2400,
                 outputs_sink=outputs,
+                renew=lambda budget: renew_lease_command(
+                    host,
+                    facts.holder,
+                    now_fn() + dt.timedelta(seconds=budget + RENEW_MARGIN_S),
+                    now_fn(),
+                ),
             )
         except VerifyInterrupted:
             # the stack's own finally has torn the slot down; keep its readback
@@ -2420,17 +2604,24 @@ def _verify_steps(
         if host.kind == "prepr-slot":
             judge_slot_isolation(rb, outputs)
         facts.readback = rb
+        outcome = "INCONCLUSIVE" if "lease-lost" in outputs else rb.outcome
         if not released:
             rb.notes.append(f"lease not released: {rwhy}")
         finished = _utc_text(now_fn())
         text = render_readback(rb, host, params, facts.started, finished)
-        release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
+        if "lease-lost" in outputs:
+            text = text.replace(f"LAB PROOF {rb.outcome}:", f"LAB PROOF {outcome}:", 1)
+            text += (
+                f"\n  lease lost before {outputs['lease-lost']}: "
+                "the slot was left to its new holder, not torn down"
+            )
+        release_result = outcome if outcome in ("PASS", "FAIL") else "ABORTED"
         text += (
             f"\n  ledger: RELEASE re=<your HOLD id> surface={host.surface} "
             f"result={release_result} restored={'yes' if rb.restored else 'no'}"
         )
-        code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(rb.outcome, EXIT_INCONCLUSIVE)
-        return rb.outcome, code, text
+        code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(outcome, EXIT_INCONCLUSIVE)
+        return outcome, code, text
     finally:
         if own_dir:
             shutil.rmtree(work, ignore_errors=True)
@@ -2631,7 +2822,7 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
                 ),
             )
         return EXIT_USAGE
-    tp = transport or SshTransport()
+    tp = transport or HostRoutingTransport()
     now = _utcnow()
     if args.cmd in ("status", "pick"):
         holds = live_surface_holds(_ledger_lines(args.ledger), now)
