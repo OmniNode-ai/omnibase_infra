@@ -105,6 +105,7 @@ class BuildBoundary:
 
     def __init__(self, builder: Any, plan: Any, mode: str = "ok") -> None:
         self.calls: list[list[str]] = []
+        self.probe_timeouts: list[int] = []
         self.mode = mode
         self.plan = plan
         self.digests = builder.validate_sources(plan)
@@ -118,7 +119,7 @@ class BuildBoundary:
 
     def __call__(self, command: list[str], stdin: str | None, timeout: int) -> str:
         self.calls.append(command)
-        assert timeout <= 900
+        assert timeout <= 1800
         if command[:3] == ["docker", "image", "inspect"]:
             reference = command[-1]
             found = self.aliases[reference]
@@ -150,6 +151,7 @@ class BuildBoundary:
                 and command[command.index("--network") + 1] == "none"
             )
             assert stdin and "package_digests" in stdin
+            self.probe_timeouts.append(timeout)
             is_candidate = CANDIDATE in command
             result = {
                 "package_digests": dict(self.digests),
@@ -381,10 +383,11 @@ def test_offline_image_probe_needs_no_writable_filesystem(builder: Any) -> None:
 
     def runner(args: list[str], stdin: str | None, timeout: int) -> str:
         seen.append(args)
+        assert timeout == 720
         assert stdin and "namespace['installed_package_root']" in stdin
         return json.dumps({"package_digests": {}})
 
-    builder._probe(runner, "sha256:" + "1" * 64)
+    builder._probe(runner, "sha256:" + "1" * 64, timeout=720)
     (args,) = seen
     assert "--read-only" in args
     assert args[args.index("--entrypoint") + 1] == "/app/.venv/bin/python"
@@ -455,3 +458,49 @@ def test_in_image_proof_resolves_the_editable_project_tree(builder: Any) -> None
     assert "installed_package_root(proof['repo'])" in builder._INSTALLER
     assert "locate_file(proof['repo'])" not in builder._INSTALLER
     assert "scoped_image_probe.py" in builder.PROOF_TOOLS
+
+
+@pytest.mark.unit
+def test_loaded_host_scales_both_probe_bounds(
+    builder: Any, plan: Any, tmp_path: Path
+) -> None:
+    # A fixed 120 s probe bound timed out on .201 at load1 48 to 63 on 32 cores
+    # (497.9 s measured, OMN-17991).
+    boundary = BuildBoundary(builder, plan)
+    output = tmp_path / "candidate"
+    result = builder.build_candidate(
+        plan,
+        output,
+        execute=True,
+        runner=boundary,
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert result["status"] == "BUILT"
+    assert boundary.probe_timeouts == [720, 720]
+    receipt = json.loads((output / "candidate-receipt.json").read_text())
+    assert receipt["probe_timeout"]["seconds"] == 720
+    assert receipt["probe_timeout"]["source"] == "host-load"
+    preview = builder.build_candidate(
+        plan,
+        tmp_path / "preview",
+        runner=BuildBoundary(builder, plan),
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert preview["probe_timeout"]["seconds"] == 720
+
+
+@pytest.mark.unit
+def test_declared_probe_bound_wins(builder: Any, plan: Any, tmp_path: Path) -> None:
+    declared = plan.model_copy(update={"probe_timeout_seconds": 900})
+    boundary = BuildBoundary(builder, declared)
+    builder.build_candidate(
+        declared,
+        tmp_path / "candidate",
+        execute=True,
+        runner=boundary,
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert boundary.probe_timeouts == [900, 900]

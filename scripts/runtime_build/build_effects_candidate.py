@@ -39,8 +39,13 @@ from deploy_source_ref import (
     validate_immutable_selections,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from scoped_effects_deploy import _IMAGE_CONFIG_FIELDS, _run_command
-from scoped_effects_plan import ImageId, SourceRepo, SourceSha
+from scoped_effects_deploy import (
+    _IMAGE_CONFIG_FIELDS,
+    CommandProcessUnfencedError,
+    _run_command,
+    probe_timeout,
+)
+from scoped_effects_plan import ImageId, ProbeTimeoutSeconds, SourceRepo, SourceSha
 
 CommandRunner = Callable[[list[str], str | None, int], str]
 SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
@@ -59,6 +64,7 @@ class ModelEffectsCandidatePlan(BaseModel):
     source_pins: dict[SourceRepo, SourceSha]
     infra_source_root: Path
     infra_source_sha: SourceSha
+    probe_timeout_seconds: ProbeTimeoutSeconds | None = None
 
     @model_validator(mode="after")
     def check_boundary(self) -> Self:
@@ -77,7 +83,7 @@ def validate_sources(plan: ModelEffectsCandidatePlan) -> dict[str, str]:
     selections = (
         *validate_immutable_selections(
             {name: str(plan.source_root / name) for name in SIBLINGS},
-            dict(plan.source_pins),
+            {str(repo): sha for repo, sha in plan.source_pins.items()},
         ),
         RepoRefSelection(
             "omnibase_infra", plan.infra_source_root.resolve(), plan.infra_source_sha
@@ -128,7 +134,7 @@ def _image(runner: CommandRunner, reference: str, expected_id: str) -> dict[str,
     return value
 
 
-def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
+def _probe(runner: CommandRunner, image: str, *, timeout: int) -> dict[str, Any]:
     probe = (
         Path(__file__).with_name("scoped_image_probe.py").read_text(encoding="utf-8")
     )
@@ -141,8 +147,8 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
         "for name in ('omnibase_core', 'omnibase_compat', 'omnimarket', 'omnibase_infra')}\n"
         "print(json.dumps(evidence, sort_keys=True))\n"
     )
-    result = json.loads(
-        runner(
+    try:
+        output = runner(
             [
                 "docker",
                 "run",
@@ -158,9 +164,13 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
                 "-",
             ],
             script,
-            120,
+            timeout,
         )
-    )
+    except CommandProcessUnfencedError:
+        raise  # Callers dispatch on this type; never rewrap it.
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}; image probe bound {timeout} s") from exc
+    result = json.loads(output)
     if not isinstance(result, dict) or not isinstance(
         result.get("package_digests"), dict
     ):
@@ -337,7 +347,13 @@ def build_candidate(
     *,
     execute: bool = False,
     runner: CommandRunner = _run_command,
+    loadavg: Callable[[], tuple[float, float, float]] = os.getloadavg,
+    cpu_count: Callable[[], int | None] = os.cpu_count,
 ) -> dict[str, Any]:
+    bound = probe_timeout(
+        plan.probe_timeout_seconds, loadavg=loadavg, cpu_count=cpu_count
+    )
+    timeout = bound["seconds"]
     digests = validate_sources(plan)
     base = _image(runner, plan.base_image_id, plan.base_image_id)
     if not execute:
@@ -345,6 +361,7 @@ def build_candidate(
             "status": "PREVIEW",
             "base_image_id": plan.base_image_id,
             "source_digests": digests,
+            "probe_timeout": bound,
         }
     # No hidden networked backend install. uv build uses this already-provisioned
     # environment with isolation disabled, with its backend version recorded.
@@ -366,7 +383,7 @@ def build_candidate(
         for root in (plan.source_root.resolve(), plan.infra_source_root.resolve())
     ):
         raise ValueError("candidate output must not be inside a source clone root")
-    baseline = _probe(runner, plan.base_image_id)
+    baseline = _probe(runner, plan.base_image_id, timeout=timeout)
     infra_ref = baseline.get("infra_source_ref")
     if (
         not isinstance(infra_ref, str)
@@ -393,6 +410,7 @@ def build_candidate(
         "started_at": datetime.now(UTC).isoformat(),
         "artifact_actions": [],
         "build_toolchain": {"python": sys.version, "hatchling": backend},
+        "probe_timeout": bound,
     }
     _write(output / "plan.json", plan.model_dump(mode="json"))
     try:
@@ -530,7 +548,7 @@ def build_candidate(
             for key in _IMAGE_CONFIG_FIELDS
         ):
             raise RuntimeError("candidate changed baseline runtime image configuration")
-        after = _probe(runner, candidate_id)
+        after = _probe(runner, candidate_id, timeout=timeout)
         if (
             after["package_digests"] != digests
             or after.get("source_pins") != plan.source_pins
