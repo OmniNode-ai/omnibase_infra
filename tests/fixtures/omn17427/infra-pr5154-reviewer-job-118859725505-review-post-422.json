@@ -1,0 +1,20 @@
+{
+ "_provenance": {
+  "source": "onex scm job-log OmniNode-ai/omnibase_infra --job-id 118859725505 --bus-lane dev (node_github_repo_gateway_effect over the dev bus); the 'Hostile Reviewer (adversarial gate)' job of run 39489828404 on omnibase_infra#5154 head e895af928c3536fd8d593dc346b36939809fbbdc. Lines are verbatim from the job log; the 422 body is GitHub's own response to POST /repos/OmniNode-ai/omnibase_infra/pulls/5154/reviews.",
+  "captured_utc": "2026-10-21T13:51:33Z",
+  "source_sha256": "928e075d16e366e2bc900d53dff0319e24179553376e033253e55e35fb31684a",
+  "bus_correlation_id": "7dff98ac-3cab-473a-b726-88d917247786",
+  "ticket": "OMN-17427",
+  "command": "onex scm job-log OmniNode-ai/omnibase_infra --job-id 118859725505 --tail-bytes 65536 --bus-lane dev --source bus"
+ },
+ "response": {
+  "job_id": 118859725505,
+  "run_id": 39489828404,
+  "pr": 5154,
+  "log_lines": [
+   "2026-10-20T20:21:13.8495363Z thread-poster stats: {\"posted_threads\": 4, \"body_findings\": 0, \"deduped\": 0, \"truncated\": 0, \"suppressed_hints\": 2, \"below_quorum\": 101}",
+   "2026-10-20T20:21:13.8753241Z ##[warning]review POST failed (422): {\"message\":\"Unprocessable Entity\",\"errors\":[\"Variable $comments of type [DraftPullRequestReviewComment] was provided invalid value for 0.subjectType (Field is not defined on DraftPullRequestReviewComment), 0.position (Expected value to not be null), 1.subjectType (Field is not defined on DraftPullRequestReviewComment), 1.position (Expected value to not be null), 2.subjectType (Field is not defined on DraftPullRequestReviewComment), 2.position (Expected value to not be null), 3.subjectType (Field is not defined on DraftPullRequestReviewComment), 3.position (Expected value to not be null)\"],\"documentation_url\":\"https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request\",\"status\":\"422\"} \u2014 retrying with all findings demoted to the review body",
+   "2026-10-20T20:21:13.8791708Z Posted hostile review (REQUEST_CHANGES) with 4 thread comment(s)."
+  ]
+ }
+}
