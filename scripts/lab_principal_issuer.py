@@ -83,12 +83,17 @@ HOW IT TALKS TO THE BROKER
     never in an argv), ACLs through ``rpk security acl create`` (no secret in its
     argv; ``rpk`` reads the superuser identity from ``RPK_USER``/``RPK_PASS``).
 
+    With ``--rpk-container NAME`` (apply-grants and audit-grants only), every rpk
+    call runs as ``docker exec NAME rpk ...`` and users are read with
+    ``rpk security user list``. The caller's environment needs no ``RPK_USER``,
+    ``RPK_PASS`` or ``RPK_ADMIN_HOSTS``, and this path never sets a password.
+
 Usage::
 
     lab_principal_issuer.py check --grants FILE [--overlay FILE]
     lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
-    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...]
-    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...]
+    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
+    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
     lab_principal_issuer.py health --socket PATH
 """
 
@@ -640,6 +645,48 @@ class Broker:
         return result.stdout
 
 
+class ContainerBroker(Broker):
+    """Reach the broker through the running issuer container's own rpk (OMN-17427).
+
+    The caller's environment carries no superuser identity. This broker never
+    issues or rotates a password.
+    """
+
+    def __init__(
+        self,
+        container: str,
+        run: Callable[[Sequence[str]], subprocess.CompletedProcess[str]] | None = None,
+    ) -> None:
+        if not container.strip():
+            raise IssuerError(
+                HTTPStatus.BAD_REQUEST, "a container name must not be blank"
+            )
+        inner = run or (
+            lambda argv: subprocess.run(
+                argv, capture_output=True, text=True, check=False
+            )
+        )
+        super().__init__(
+            BrokerConfig(admin_url="", superuser="", superuser_password=""),
+            run=lambda argv: inner(["docker", "exec", container, *argv]),
+        )
+
+    def user_exists(self, name: str) -> bool:
+        result = self._run(["rpk", "security", "user", "list"])
+        if result.returncode != 0:
+            raise IssuerError(
+                HTTPStatus.BAD_GATEWAY,
+                f"the broker refused the user listing: {result.stderr.strip()[:300]}",
+            )
+        return name in (line.strip() for line in result.stdout.splitlines()[1:])
+
+    def set_user(self, name: str, password: str, *, exists: bool) -> None:
+        raise IssuerError(
+            HTTPStatus.BAD_REQUEST,
+            "a container broker never sets or rotates a password",
+        )
+
+
 class Ledger:
     """Append-only record of issuances and grant applications. Never holds a password."""
 
@@ -977,6 +1024,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply.add_argument("--ledger", type=Path, required=True)
     apply.add_argument("--principal", action="extend", nargs="+")
     apply.add_argument("--overlay", type=Path)
+    apply.add_argument(
+        "--rpk-container",
+        metavar="NAME",
+        help="run every rpk call inside this running issuer container, which holds the broker identity",
+    )
     audit = sub.add_parser(
         "audit-grants",
         help="compare each principal's live ACLs with the rows the grant file derives",
@@ -985,6 +1037,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     audit.add_argument("--ledger", type=Path, required=True)
     audit.add_argument("--principal", action="extend", nargs="+")
     audit.add_argument("--overlay", type=Path)
+    audit.add_argument(
+        "--rpk-container",
+        metavar="NAME",
+        help="run every rpk call inside this running issuer container, which holds the broker identity",
+    )
     health_parser = sub.add_parser(
         "health", help="check the Unix socket health endpoint"
     )
@@ -1012,7 +1069,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{args.overlay}: {len(overlay.rows)} developer principals")
         return 0
 
-    broker = Broker(_broker_from_environment())
+    try:
+        broker = (
+            ContainerBroker(args.rpk_container)
+            if args.command in {"apply-grants", "audit-grants"}
+            and getattr(args, "rpk_container", None)
+            else Broker(_broker_from_environment())
+        )
+    except IssuerError as exc:
+        print(f"lab_principal_issuer: {exc}", file=sys.stderr)
+        return 2
     ledger = Ledger(args.ledger)
     if args.command == "apply-grants":
         try:
