@@ -582,7 +582,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC181
-  - id: dod-omn17427-ac181-dev-only-ci-summary-deploy-check
+  - id: dod-omn17427-ac181-ci-summary-deploy-check
     description: Hosted-runner deploy check -- the CI Summary and poster tests; they do not claim a live CI Summary run.
     source: manual
     checks:
