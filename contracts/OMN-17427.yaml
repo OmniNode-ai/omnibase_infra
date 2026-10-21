@@ -392,6 +392,11 @@ requirements:
     acceptance:
       - id: AC146
         statement: 'AC146: docker/runners/Dockerfile has no add-apt-repository, deadsnakes or launchpad instruction, installs uv before running `uv python install 3.12`, and links python3.12, python3, python, pip3 and pip to the managed interpreter with a 3.12 version assertion -- falsifier: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q'
+  - id: req-omn17427-lockfile-virtualenv-floor
+    statement: uv.lock pins virtualenv at or above 21.14.12, the release the Lockfile CVE Scan reads clean of GHSA-5vjq-rrrf-7h2q, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q and GHSA-vxj4-q4g9-crj7, so the dev merge groups are no longer ejected by that scan.
+    acceptance:
+      - id: AC147
+        statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -561,6 +566,9 @@ evidence_requirements:
   - kind: tests
     description: A text-level read of the runner Dockerfile pins the Python source to uv-managed CPython installed after uv; build-smoke proves the built image.
     command: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+  - kind: tests
+    description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
+    command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1848,3 +1856,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC146
+  - id: dod-omn-17427-ac147-lockfile-virtualenv-floor
+    description: The test reads uv.lock and fails when virtualenv is below 21.14.12; it refuses the recorded 21.7.13 pin as its positive control. No scheduled run is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC147
