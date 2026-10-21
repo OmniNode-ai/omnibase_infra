@@ -1,0 +1,22 @@
+{
+  "_provenance": {
+    "source": "incident replay: rolling work ledger FRICTION 2026-10-21T17:58:33Z lane=infra-release-unblock-1720 (deploy-agent job f19ec60c, compose-dev deployed_revision FAIL for 54ca4ac5f at 11:22:25Z)",
+    "captured_utc": "2026-10-21T17:58:33Z",
+    "captured_by": "lane infra-release-unblock-r-fix, from the ledger row's recorded values",
+    "note": "An incident replay, not live bytes. At the time GET /job/{correlation_id} did not serve not_started (the defect OMN-21272 fixes), so the body below is the agent's recorded job state for that incident -- accepted 10:57:06Z, ended failed with not_started=lane_lock_contended at 11:12:06Z -- in the shape the route serves after the fix. Only the first 8 hex digits of the correlation id and of the merge sha were recorded; the remaining digits are padding. The guard's declared budget was 1500 s from acceptance."
+  },
+  "declared_budget_seconds": 1500,
+  "guard_started_at": "2026-10-21T10:56:30+00:00",
+  "fail_written_at": "2026-10-21T11:22:25+00:00",
+  "merge_sha": "54ca4ac5f0000000000000000000000000000000",
+  "response": {
+    "correlation_id": "f19ec60c-0000-4000-8000-000000000000",
+    "status": "failed",
+    "current_phase": "preflight",
+    "phase_results": {},
+    "errors": [],
+    "not_started": "lane_lock_contended",
+    "accepted_at": "2026-10-21T10:57:06+00:00",
+    "completed_at": "2026-10-21T11:12:06+00:00"
+  }
+}
