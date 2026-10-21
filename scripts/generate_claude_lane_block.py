@@ -97,8 +97,8 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # will be. This is the lab compose lane only; production is the AWS
     # `onex-prod` namespace and has no row here in the first place.
     # The `judge` row left on 2026-10-21 for the same reason: its compose
-    # project was retired and removed from the lane census
-    # (omnibase_internal#949), so a row here is an orphan the census guard
+    # project was retired and removed from the private lane census,
+    # so a row here is an orphan the census guard
     # refuses.
     # OMN-17143 — collaborator lane for Lakshman Patel. This block was verified free
     # on .201 by read-only `ss -ltn` on 2026-08-30 and is BOUND by that lane as of
