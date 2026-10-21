@@ -1,0 +1,190 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 125 and seed -2327708969172948789 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/PreprSlotLease.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/FiniteSets.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module PreprSlotLease
+Starting... (2026-10-19 13:38:54)
+Implied-temporal checking--satisfiability problem has 12 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-19 13:38:55.
+Checking 12 branches of temporal properties for the current state space with 304512 total distinct states at (2026-10-19 13:38:58)
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 0
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 2: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 1
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 3: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 2
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 4: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 3
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 5: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "idle" @@ r2 :> "idle" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "none" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> "none", until |-> 0], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+
+State 6: <Attempt line 161, col 5 to line 170, col 54 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 4
+/\ pc = (r1 :> "idle" @@ r2 :> "between" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 7: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 1
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 5
+/\ pc = (r1 :> "idle" @@ r2 :> "between" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 8: <HardKill line 248, col 5 to line 253, col 38 of module PreprSlotLease>
+/\ killsLeft = 0
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 5
+/\ pc = (r1 :> "idle" @@ r2 :> "dead" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 9: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 0
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 6
+/\ pc = (r1 :> "idle" @@ r2 :> "dead" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 10: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 0
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 7
+/\ pc = (r1 :> "idle" @@ r2 :> "dead" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 11: <Tick line 284, col 5 to line 288, col 49 of module PreprSlotLease>
+/\ killsLeft = 0
+/\ dirty = [s1 |-> FALSE, s2 |-> FALSE]
+/\ stepStart = (r1 :> 0 @@ r2 :> 0 @@ r3 :> 0)
+/\ now = 8
+/\ pc = (r1 :> "idle" @@ r2 :> "dead" @@ r3 :> "idle")
+/\ slotOf = (r1 :> "none" @@ r2 :> "s1" @@ r3 :> "none")
+/\ lease = [s1 |-> [h |-> r2, until |-> 7], s2 |-> [h |-> "none", until |-> 0]]
+/\ softKilled = (r1 :> FALSE @@ r2 :> FALSE @@ r3 :> FALSE)
+/\ idx = (r1 :> 1 @@ r2 :> 1 @@ r3 :> 1)
+/\ seen = ( r1 :> [h |-> "none", until |-> 0] @@
+  r2 :> [h |-> "none", until |-> 0] @@
+  r3 :> [h |-> "none", until |-> 0] )
+/\ stepsLeft = (r1 :> 0 @@ r2 :> 2 @@ r3 :> 0)
+
+State 12: Stuttering
+Finished checking temporal properties in 00s at 2026-10-19 13:38:58
+56037 states generated, 25376 distinct states found, 12805 states left on queue.
+Finished in 03s at (2026-10-19 13:38:58)

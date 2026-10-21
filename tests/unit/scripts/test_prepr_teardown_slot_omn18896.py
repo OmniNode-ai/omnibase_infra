@@ -162,11 +162,27 @@ class FakeHost:
     """
 
     def __init__(
-        self, *, leave_topic: bool = False, dev_topics: int = 2, refuse_rm: bool = False
+        self,
+        *,
+        leave_topic: bool = False,
+        dev_topics: int = 2,
+        servers: dict[str, list[str]] | None = None,
+        refuse_rm: bool = False,
+        slot_topics: int = 0,
+        unhealthy_after_topic_deletes: int | None = None,
     ) -> None:
         self.calls: list[list[str]] = []
+        self.unhealthy_after_topic_deletes = unhealthy_after_topic_deletes
+        self.topic_deletes = 0
         self.envs: list[dict[str, str] | None] = []
         self.leave_topic = leave_topic
+        self.servers: dict[str, list[str]] = {
+            "redpanda": ["omnibase-infra-redpanda"],
+            "valkey": ["omnibase-infra-valkey"],
+            "postgres": ["omnibase-infra-postgres"],
+        }
+        if servers is not None:
+            self.servers.update(servers)
         self.refuse_rm = refuse_rm
         self.containers = {
             "omnibase-infra-prepr-1": {"c1", "c2"},
@@ -179,6 +195,7 @@ class FakeHost:
             "prepr1.onex.b",
             "prepr2.onex.a",
         }
+        self.topics |= {f"prepr1.onex.bulk{i:04d}" for i in range(slot_topics)}
         self.groups = {"local.g", "prepr1.g", "prepr2.g"}
         self.valkey = {0: 5, 1: 3, 2: 1}
         self.databases = {
@@ -198,6 +215,18 @@ class FakeHost:
         self.calls.append(list(argv))
         self.envs.append(env)
         joined = " ".join(argv)
+        if argv[:2] == ["docker", "exec"]:
+            container_index = 2
+            while argv[container_index] == "-e":
+                container_index += 2
+            container = argv[container_index]
+            if not any(container in names for names in self.servers.values()):
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    "",
+                    f"Error response from daemon: No such container: {container}",
+                )
         if argv[:2] == ["bash", str(teardown.PROVISION_DB)]:
             assert env is not None
             slot = env["ONEX_DB_SLOT"]
@@ -208,6 +237,25 @@ class FakeHost:
         label = next(
             (a.rsplit("=", 1)[1] for a in argv if a.startswith("label=")), None
         )
+        if argv[:3] == ["docker", "ps", "--filter"]:
+            service = next(
+                a.split("=", 2)[2]
+                for a in argv
+                if a.startswith("label=com.docker.compose.service=")
+            )
+            assert argv == [
+                "docker",
+                "ps",
+                "--filter",
+                "label=com.docker.compose.project=omnibase-infra",
+                "--filter",
+                f"label=com.docker.compose.service={service}",
+                "--filter",
+                "status=running",
+                "--format",
+                "{{.Names}}",
+            ]
+            return self._ok("\n".join(self.servers.get(service, [])))
         if argv[:3] == ["docker", "ps", "-a"]:
             return self._ok("\n".join(sorted(self.containers.get(label, set()))))
         if argv[:3] == ["docker", "rm", "-f"]:
@@ -233,7 +281,15 @@ class FakeHost:
         if "rpk" in argv and "topic" in argv and "list" in argv:
             rows = "\n".join(f"{t} 1 1" for t in sorted(self.topics))
             return self._ok("NAME PARTITIONS REPLICAS\n" + rows + "\n")
+        if "rpk" in argv and "cluster" in argv and "health" in argv:
+            bound = self.unhealthy_after_topic_deletes
+            healthy = bound is None or self.topic_deletes < bound
+            return self._ok(
+                "CLUSTER HEALTH OVERVIEW\n=======================\n"
+                f"Healthy:                          {str(healthy).lower()}\n"
+            )
         if "rpk" in argv and "topic" in argv and "delete" in argv:
+            self.topic_deletes += 1
             doomed = set(argv[argv.index("delete") + 1 :])
             if self.leave_topic:
                 doomed = set(sorted(doomed)[1:])
@@ -310,6 +366,94 @@ def test_a_full_teardown_leaves_zero_slot_residue_and_the_dev_lane_intact(
     assert "omnibase_infra" in host.databases
     assert host.dropped_slot == "prepr1"
     assert not (tmp_path / "slot-1").exists()
+
+
+def test_a_renamed_broker_is_found_by_its_compose_labels(tmp_path: Path) -> None:
+    broker = "e2fc03e50cd0_omnibase-infra-redpanda"
+    host = FakeHost(servers={"redpanda": [broker]})
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_OK, report
+    assert report["verdict"] == "CLEAN"
+    assert all(v == 0 for v in report["residue"].values()), report["residue"]
+    assert host.topics == {"onex.dev.t0", "onex.dev.t1", "prepr2.onex.a"}
+    assert host.groups == {"local.g", "prepr2.g"}
+    rpk_calls = [argv for argv in host.calls if "rpk" in argv]
+    assert rpk_calls
+    assert all(argv[argv.index("rpk") - 1] == broker for argv in rpk_calls)
+
+
+def test_a_renamed_postgres_and_valkey_are_found_by_their_compose_labels(
+    tmp_path: Path,
+) -> None:
+    postgres = "e2fc03e50cd0_omnibase-infra-postgres"
+    valkey = "e2fc03e50cd0_omnibase-infra-valkey"
+    host = FakeHost(servers={"postgres": [postgres], "valkey": [valkey]})
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_OK, report
+    assert report["verdict"] == "CLEAN"
+    assert all(v == 0 for v in report["residue"].values()), report["residue"]
+    assert host.databases == {"omnibase_infra"}
+    assert host.roles == {"postgres"}
+    assert host.valkey == {0: 5, 1: 0, 2: 1}
+    psql_calls = [argv for argv in host.calls if "psql" in argv]
+    valkey_calls = [argv for argv in host.calls if "valkey-cli" in argv]
+    assert psql_calls and valkey_calls
+    assert all(argv[argv.index("psql") - 1] == postgres for argv in psql_calls)
+    assert all(argv[argv.index("valkey-cli") - 1] == valkey for argv in valkey_calls)
+
+
+def test_no_running_broker_refuses_before_any_delete(tmp_path: Path) -> None:
+    host = FakeHost(servers={"redpanda": []})
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE
+    assert report["verdict"] == "INCOMPLETE"
+    assert any(
+        "no running redpanda container in compose project omnibase-infra" in error
+        for error in report["errors"]
+    )
+    assert not any(
+        "delete" in argv
+        or argv[:3] == ["docker", "rm", "-f"]
+        or "FLUSHDB" in argv
+        or argv[:1] == ["bash"]
+        for argv in host.calls
+    )
+    assert (tmp_path / "slot-1").exists()
+
+
+def test_two_running_brokers_are_ambiguous_and_refused(tmp_path: Path) -> None:
+    brokers = ["omnibase-infra-redpanda", "e2fc03e50cd0_omnibase-infra-redpanda"]
+    host = FakeHost(servers={"redpanda": brokers})
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE
+    assert report["verdict"] == "INCOMPLETE"
+    assert any(
+        "redpanda" in error and all(name in error for name in brokers)
+        for error in report["errors"]
+    )
+    assert not any(
+        "delete" in argv
+        or argv[:3] == ["docker", "rm", "-f"]
+        or "FLUSHDB" in argv
+        or argv[:1] == ["bash"]
+        for argv in host.calls
+    )
+    assert (tmp_path / "slot-1").exists()
+
+
+def test_each_server_is_resolved_once_per_run(tmp_path: Path) -> None:
+    host = FakeHost()
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_OK, report
+    for service in ("redpanda", "valkey", "postgres"):
+        assert (
+            sum(
+                argv[:3] == ["docker", "ps", "--filter"]
+                and f"label=com.docker.compose.service={service}" in argv
+                for argv in host.calls
+            )
+            == 1
+        )
 
 
 def test_a_refused_container_removal_stops_before_anything_else_is_deleted(
@@ -463,3 +607,50 @@ def test_the_wrapper_refuses_a_slot_outside_the_pool(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == policy.EXIT_USAGE, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# OMN-17427: a slot's topic deletes are paced by the shared broker's health.
+#
+# 2026-10-20 15:18Z: slot 2's teardown deleted ~1845 prepr2 topics from the
+# SHARED dev broker in back-to-back chunks of 200. Partition removal stalled,
+# the broker (Redpanda v24.2.7, smp 1) crashed at ~15:19:15Z and asserted on
+# every restart after, taking the dev bus down. A teardown must never push the
+# dev lane's own broker past the point where it stops answering.
+# ---------------------------------------------------------------------------
+
+
+def _topic_delete_calls(host: FakeHost) -> list[list[str]]:
+    return [c for c in host.calls if "rpk" in c and "topic" in c and "delete" in c]
+
+
+def test_topic_deletes_are_small_chunks_each_followed_by_a_broker_health_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(teardown, "BROKER_HEALTH_POLL_SECONDS", 0.0)
+    host = FakeHost(slot_topics=120)
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_OK, report
+    deletes = _topic_delete_calls(host)
+    assert len(deletes) > 1
+    for call in deletes:
+        names = call[call.index("delete") + 1 :]
+        assert 0 < len(names) <= teardown.TOPIC_DELETE_CHUNK
+    for i, call in enumerate(host.calls):
+        if call in deletes:
+            nxt = host.calls[i + 1]
+            assert "cluster" in nxt and "health" in nxt, (call, nxt)
+    assert not any(t.startswith("prepr1.") for t in host.topics)
+
+
+def test_a_broker_that_stops_reporting_healthy_halts_the_topic_deletes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(teardown, "BROKER_HEALTH_POLL_SECONDS", 0.0)
+    host = FakeHost(slot_topics=120, unhealthy_after_topic_deletes=1)
+    code, report = _run(host, tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE, report
+    assert report["verdict"] == "INCOMPLETE"
+    assert len(_topic_delete_calls(host)) == 1
+    assert report["residue"]["topics"] > 0
+    assert {"onex.dev.t0", "onex.dev.t1", "prepr2.onex.a"} <= host.topics
