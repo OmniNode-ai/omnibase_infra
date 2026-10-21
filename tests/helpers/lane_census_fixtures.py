@@ -26,12 +26,12 @@ NEUTRAL_MANIFEST = NEUTRAL_CENSUS_DIR / "lane-manifest.yaml"
 NEUTRAL_SNAPSHOT = NEUTRAL_CENSUS_DIR / "census-snapshot.json"
 
 #: The required lane on :data:`NEUTRAL_HOSTNAME`, and its network.
-NEUTRAL_LANE = "stability-test"
-NEUTRAL_LANE_NETWORK = "example-stability-test-network"
+NEUTRAL_LANE = "dogfood"
+NEUTRAL_LANE_NETWORK = "example-dogfood-network"
 #: An optional lane on the same host.
 NEUTRAL_OPTIONAL_LANE = "dev"
 #: A lane declared for the other host only.
-NEUTRAL_OTHER_HOST_LANE = "dogfood"
+NEUTRAL_OTHER_HOST_LANE = "principal-issuer"
 #: The hostname a census on the first host reports, and the id it resolves to.
 NEUTRAL_HOSTNAME = "box-a"
 NEUTRAL_HOST_ID = "host-a"
