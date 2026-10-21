@@ -30,7 +30,43 @@ replaces an earlier one. A marker thread blocks when:
     cited lines. The cited lines are the thread's original range at the
     commit the review was posted on, carried forward through the PR's own
     history to the fix commit's parent; a file-level thread needs the fix
-    commit to touch the file.
+    commit to touch the file;
+  - its disposition is ``rejected: <reason>`` and the review bot has not
+    ACCEPTED that rejection (below).
+
+The review bot judges rejections
+--------------------------------
+A ``rejected:`` reply clears nothing by itself: every agent acts through the
+operator's own GitHub account, so who wrote a rejection proves nothing (on
+omnibase_infra#5234's own review an agent rejected 13 of 14 findings). The
+review bot decides instead (operator, 2026-10-21: "A bot to create the
+review"). It runs only inside the ``Hostile Review Thread Gate (on reply)``
+workflow, in three steps: ``--pending`` (this script) writes each rejection
+awaiting a verdict with the cited lines at the PR head; omniintelligence's
+``cli_review judge-rejections`` (node_review_rejection_judge_compute, the
+reviewer's own overlay loader and model call) asks a model that is not one of
+the voters that raised the finding (by the quorum's reviewer identity) to
+accept or refuse it with one sentence; and ``--post-verdicts`` (this script)
+posts each verdict under the workflow's own token as a reply on the thread
+that begins with
+
+    <!-- hostile-review-judge rejection=<comment id> digest=<sha256/16> verdict=accepted|refused judge=<voter> identity=<model> -->
+
+and this gate honours it only when all of these hold:
+
+  - the reply's author is the workflow identity (:data:`JUDGE_LOGINS`), a
+    login no user account can hold, so a reply any account posts cannot mark
+    a rejection accepted;
+  - it names the database id of the thread's LATEST rejection, and the
+    digest of that rejection's body as it reads now, so a later or an edited
+    rejection is judged again and an old acceptance never carries over.
+
+An accepted rejection clears the thread. A refused one blocks with the
+judge's sentence until a verified ``fixed-in`` or a new rejection the judge
+accepts. A rejection the judge has not answered (it was unavailable, the
+rejection came from an account without write access, or every configured
+judge shares a voter's identity) blocks with that reason: the judge fails
+closed. There is no human override and no other credential.
 
 An accepted disposition clears its thread whether or not the thread has been
 resolved in the review UI, so replying is the one action an author takes: the
@@ -46,26 +82,21 @@ there only). On any other base the gate keeps its earlier rule: an open,
 current marker thread without an accepted disposition blocks; resolved and
 outdated ones do not.
 
-Override: there is none, on purpose. The operator ruling asks for an override
-only a human can apply, and every agent and lane acts through the operator's
-own GitHub account and tokens, so a label, an approval, a reply or a check-run
-from that account proves nothing about who acted. No override is accepted
-until a credential no agent holds exists (a separate human-only account whose
-login this gate would accept, or a touch-required hardware signing key whose
-signature it would verify); the options are recorded on OMN-17427.
-
 No threads means nothing to check: when the reviewer was skipped, degraded or
-down, there is no marker thread and the gate passes. A reviewer outage never
-stops a merge here; only a finding that was posted and not answered does.
+down, there is no marker thread and the gate passes without the judge. A
+reviewer outage never stops a merge here; only a finding that was posted and
+not answered does.
 
 Accuracy record
 ---------------
 Every marker thread is printed as one ``hostile-review-disposition: {json}``
 line (and written to ``DISPOSITION_RECORD_PATH`` when set): the voter model,
 severity, cited path and lines, who resolved the thread, the disposition, its
-author and whether a ``fixed-in`` commit was verified. ``--report FILE...``
+author, whether a ``fixed-in`` commit was verified, and for a rejection the
+judge's verdict, voter, model identity and sentence. ``--report FILE...``
 reads those records back and prints, per voter model, how many findings were
-fixed, rejected and left without a disposition.
+fixed, how many rejections the review bot accepted, refused or has not
+judged, and how many were left without a disposition.
 
 Failure posture: fail closed. An unreachable or malformed GraphQL response is
 a nonzero exit, never a vacuous pass. A git error while checking a
@@ -77,13 +108,15 @@ Reference: OMN-17492, OMN-17427.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -91,6 +124,27 @@ from typing import Any
 MARKER = "hostile-reviewer-thread"
 DISPOSITION_LINE_PREFIX = "hostile-review-disposition: "
 MIN_REJECT_REASON_CHARS = 10
+
+# The review bot's verdict on a rejection (OMN-17427). Posted only by
+# this script's --post-verdicts mode under the workflow token, whose comments
+# GraphQL attributes to the Bot login ``github-actions`` (REST spells it
+# ``github-actions[bot]``). GitHub reserves both: no user account can hold
+# either, so a verdict another account posts is not a verdict.
+JUDGE_MARKER = "hostile-review-judge"
+JUDGE_LOGINS = frozenset({"github-actions", "github-actions[bot]"})
+# Only a rejection from an account with write access is judged. On a public
+# repository anyone can reply on a thread, and each judgement is a paid model
+# call; an outsider's rejection blocks with this reason instead.
+JUDGED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+JUDGE_DIGEST_CHARS = 16
+_JUDGE_MARKER_RE = re.compile(
+    rf"\A<!-- {JUDGE_MARKER} rejection=(?P<rejection>\d+) "
+    rf"digest=(?P<digest>[0-9a-f]{{{JUDGE_DIGEST_CHARS}}}) "
+    r"verdict=(?P<verdict>accepted|refused) "
+    r"judge=(?P<judge>[a-z][a-z0-9-]{0,62}) "
+    r"identity=(?P<identity>[^\s>]+) -->[ \t]*(?:\n|\Z)"
+)
+_JUDGE_SENTENCE_RE = re.compile(r"^> (?P<sentence>\S.*)$", re.MULTILINE)
 
 _REJECTED_RE = re.compile(r"^\s*rejected:\s*(\S.*?)\s*$", re.MULTILINE | re.IGNORECASE)
 _FIXED_ANY_CASE_RE = re.compile(
@@ -122,9 +176,11 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
           comments(first: 100) {
             totalCount
             nodes {
+              databaseId
               body
               url
               createdAt
+              authorAssociation
               author { login }
               originalCommit { oid }
             }
@@ -187,6 +243,9 @@ class Disposition:
     url: str
     sha: str = ""
     reason: str = ""
+    comment_id: int = 0
+    digest: str = ""
+    author_association: str = ""
 
 
 def _comments(thread: dict[str, Any]) -> list[dict[str, Any]]:
@@ -201,6 +260,89 @@ def _login(raw: object) -> str:
 def is_marker_thread(thread: dict[str, Any]) -> bool:
     comments = _comments(thread)
     return bool(comments) and MARKER in str(comments[0].get("body", ""))
+
+
+def body_digest(body: str) -> str:
+    """The digest a judge verdict binds to: the rejection's body as it reads now."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:JUDGE_DIGEST_CHARS]
+
+
+def is_judge_reply(body: str) -> bool:
+    """A reply that begins with the judge marker, whoever posted it.
+
+    Such a reply is never a disposition, so a model's sentence quoted in it
+    can never be read as a ``fixed-in`` or a ``rejected:`` line.
+    """
+    return _JUDGE_MARKER_RE.match(body) is not None
+
+
+def not_judgeable(disposition: Disposition) -> str:
+    """Why the review bot does not judge this rejection, or "" when it does."""
+    if disposition.kind != "rejected":
+        return "not a rejection"
+    if not disposition.comment_id:
+        return "the rejection has no comment id to bind a verdict to"
+    if disposition.author_association not in JUDGED_ASSOCIATIONS:
+        return (
+            f"the rejection's author {disposition.author or '?'} has no write access "
+            f"to this repository (association "
+            f"{disposition.author_association or 'unknown'}), so the review bot does "
+            "not judge it"
+        )
+    return ""
+
+
+@dataclass(frozen=True)
+class JudgeVerdict:
+    """The review bot's accepted or refused verdict on one rejection."""
+
+    verdict: str  # "accepted" | "refused"
+    judge: str
+    identity: str
+    sentence: str
+    url: str
+
+
+def parse_judge_reply(body: str) -> dict[str, str] | None:
+    """The marker fields and sentence of a judge reply, else None."""
+    match = _JUDGE_MARKER_RE.match(body)
+    if match is None:
+        return None
+    sentence = _JUDGE_SENTENCE_RE.search(body[match.end() :])
+    fields = {k: str(v) for k, v in match.groupdict().items()}
+    fields["sentence"] = sentence.group("sentence").strip() if sentence else ""
+    return fields
+
+
+def judge_verdict_for(
+    thread: dict[str, Any], disposition: Disposition
+) -> JudgeVerdict | None:
+    """The latest verdict the WORKFLOW IDENTITY posted on exactly this rejection.
+
+    A reply from any other login is ignored, whatever it claims. The verdict
+    must name the rejection's comment id and the digest of its current body.
+    """
+    if disposition.kind != "rejected" or not disposition.comment_id:
+        return None
+    found: JudgeVerdict | None = None
+    for comment in _comments(thread)[1:]:
+        if _login(comment.get("author")) not in JUDGE_LOGINS:
+            continue
+        fields = parse_judge_reply(str(comment.get("body", "")))
+        if fields is None:
+            continue
+        if int(fields["rejection"]) != disposition.comment_id:
+            continue
+        if fields["digest"] != disposition.digest:
+            continue
+        found = JudgeVerdict(
+            verdict=fields["verdict"],
+            judge=fields["judge"],
+            identity=fields["identity"],
+            sentence=fields["sentence"],
+            url=str(comment.get("url", "")),
+        )
+    return found
 
 
 def parse_disposition(body: str) -> tuple[str, str] | None:
@@ -223,19 +365,29 @@ def parse_disposition(body: str) -> tuple[str, str] | None:
 
 
 def latest_disposition(thread: dict[str, Any]) -> Disposition | None:
-    """The last valid disposition among the replies (the first comment excluded)."""
+    """The last valid disposition among the replies (the first comment excluded).
+
+    A judge reply is never a disposition (:func:`is_judge_reply`).
+    """
     result: Disposition | None = None
     for comment in _comments(thread)[1:]:
-        parsed = parse_disposition(str(comment.get("body", "")))
+        body = str(comment.get("body", ""))
+        if is_judge_reply(body):
+            continue
+        parsed = parse_disposition(body)
         if parsed is None:
             continue
         kind, value = parsed
+        raw_id = comment.get("databaseId")
         result = Disposition(
             kind=kind,
             author=_login(comment.get("author")),
             url=str(comment.get("url", "")),
             sha=value if kind == "fixed" else "",
             reason=value if kind == "rejected" else "",
+            comment_id=raw_id if isinstance(raw_id, int) else 0,
+            digest=body_digest(body),
+            author_association=str(comment.get("authorAssociation") or ""),
         )
     return result
 
@@ -400,6 +552,31 @@ class GitFixVerifier:
             )
         return out.stdout
 
+    def file_at(self, commit: str, path: str) -> str | None:
+        """The file's text at ``commit``, or None when it does not exist there."""
+        out = self._git("show", f"{commit}:{path}")
+        return out.stdout if out.returncode == 0 else None
+
+    def carry_forward(self, cited: CitedLines, commit: str) -> tuple[int, int] | None:
+        """The cited range as it lies at ``commit`` (OMN-17427, the judge's excerpt).
+
+        None for a file-level thread. A range whose reviewed commit is unknown
+        is returned as cited.
+        """
+        if cited.start is None or cited.end is None:
+            return None
+        original = (
+            self._resolve(cited.original_commit) if cited.original_commit else None
+        )
+        target = self._resolve(commit)
+        if original is None or target is None or original == target:
+            return cited.start, cited.end
+        return map_range(
+            parse_hunks(self._diff(original, target, cited.path)),
+            cited.start,
+            cited.end,
+        )
+
     def __call__(self, sha: str, cited: CitedLines) -> tuple[bool, str]:
         fix = self._resolve(sha)
         if fix is None:
@@ -473,6 +650,14 @@ class ThreadVerdict:
     fixed_in: str = ""
     rejected_reason: str = ""
     fix_verified: bool | None = None
+    # OMN-17427: the review bot's verdict on a rejection: "accepted",
+    # "refused", "unjudged" (no verdict on the latest rejection), or "" when
+    # the disposition is not a rejection.
+    judge_verdict: str = ""
+    judge_voter: str = ""
+    judge_identity: str = ""
+    judge_sentence: str = ""
+    judge_url: str = ""
     blocking: bool = True
     reason: str = ""
     finding: str = ""
@@ -480,8 +665,15 @@ class ThreadVerdict:
 
 FINDING_CHARS = 300
 
+# Where a rejection the judge has not answered is judged (OMN-17427).
+UNJUDGED_HINT = (
+    "the review bot judges a rejection in the `Hostile Review Thread Gate (on "
+    "reply)` workflow when the reply is posted or edited; re-run that "
+    "workflow's latest run on this PR, or edit the reply, to judge it again"
+)
 
-def finding_text(first_body: str) -> str:
+
+def finding_text(first_body: str, limit: int = FINDING_CHARS) -> str:
     """The finding's own words from the thread's first comment, bounded.
 
     Drops the marker comment, the severity/model label and the italic footer,
@@ -497,17 +689,25 @@ def finding_text(first_body: str) -> str:
             continue
         lines.append(text)
     joined = " ".join(lines)
-    return joined if len(joined) <= FINDING_CHARS else joined[:FINDING_CHARS] + " …"
+    return joined if len(joined) <= limit else joined[:limit] + " …"
 
 
 def evaluate_thread(
-    thread: dict[str, Any], verifier: Verifier, *, require_disposition: bool = True
+    thread: dict[str, Any],
+    verifier: Verifier,
+    *,
+    require_disposition: bool = True,
+    judge_notes: Mapping[str, str] | None = None,
 ) -> ThreadVerdict:
     """One thread's verdict.
 
     ``require_disposition`` is the dev rule (OMN-17427). Off it, on a PR into
     any other base, the gate keeps its earlier rule: only an open thread that
     is not outdated and has no accepted disposition blocks.
+
+    ``judge_notes`` is what the judge step of this job wrote about rejections
+    it could not answer, keyed by the rejection's comment id (``"*"`` for the
+    whole run); it only words the reason, it never clears a thread.
     """
     comments = _comments(thread)
     first_body = str(comments[0].get("body", "")) if comments else ""
@@ -546,8 +746,42 @@ def evaluate_thread(
     verdict.disposition_url = disposition.url
     if disposition.kind == "rejected":
         verdict.rejected_reason = disposition.reason
-        verdict.blocking = False
-        verdict.reason = "rejected with a reason"
+        judged = judge_verdict_for(thread, disposition)
+        if judged is not None and judged.verdict == "accepted":
+            verdict.judge_verdict = "accepted"
+            verdict.blocking = False
+            verdict.reason = (
+                f"rejection accepted by the review bot ({judged.judge}, "
+                f"{judged.identity}): {judged.sentence}"
+            )
+        else:
+            if judged is not None:
+                verdict.judge_verdict = "refused"
+                verdict.reason = (
+                    f"rejection refused by the review bot ({judged.judge}, "
+                    f"{judged.identity}): {judged.sentence}. Reply `fixed-in <sha>` "
+                    "or a new `rejected: <reason>` that answers it"
+                )
+            else:
+                notes = judge_notes or {}
+                why = (
+                    not_judgeable(disposition)
+                    or notes.get(str(disposition.comment_id))
+                    or notes.get("*")
+                    or UNJUDGED_HINT
+                )
+                verdict.judge_verdict = "unjudged"
+                verdict.reason = (
+                    f"rejection not accepted: the review bot has not judged it ({why})"
+                )
+            verdict.blocking = require_disposition or (
+                not resolved and not verdict.outdated
+            )
+        if judged is not None:
+            verdict.judge_voter = judged.judge
+            verdict.judge_identity = judged.identity
+            verdict.judge_sentence = judged.sentence
+            verdict.judge_url = judged.url
     else:
         verdict.fixed_in = disposition.sha
         ok, why = verifier(disposition.sha, cited)
@@ -564,6 +798,7 @@ def classify_threads(
     verifier: Verifier,
     *,
     require_disposition: bool = True,
+    judge_notes: Mapping[str, str] | None = None,
 ) -> tuple[list[ThreadVerdict], list[ThreadVerdict]]:
     """Split marker threads into (blocking, cleared). Other threads are ignored."""
     blocking: list[ThreadVerdict] = []
@@ -572,7 +807,10 @@ def classify_threads(
         if not is_marker_thread(thread):
             continue
         verdict = evaluate_thread(
-            thread, verifier, require_disposition=require_disposition
+            thread,
+            verifier,
+            require_disposition=require_disposition,
+            judge_notes=judge_notes,
         )
         (blocking if verdict.blocking else cleared).append(verdict)
     return blocking, cleared
@@ -607,11 +845,38 @@ def _read_records(paths: Iterable[Path]) -> list[dict[str, Any]]:
     return rows
 
 
-def accuracy(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """Per voter model: findings fixed, rejected and left without a disposition.
+ACCURACY_BUCKETS: tuple[str, ...] = (
+    "findings",
+    "fixed",
+    "rejection_accepted",
+    "rejection_refused",
+    "rejection_unjudged",
+    "none",
+)
 
-    A finding is counted once per (repo, pr, fingerprint); the latest record
-    read wins, so re-runs of the gate on one PR do not double count.
+
+def _bucket(row: Mapping[str, Any]) -> str:
+    disposition = str(row.get("disposition", "none"))
+    if disposition == "fixed":
+        return "fixed" if row.get("fix_verified") is True else "none"
+    if disposition == "rejected":
+        # OMN-17427: a rejection counts by the review bot's verdict. A record
+        # from before the judge (no judge_verdict) is an unjudged rejection.
+        verdict = str(row.get("judge_verdict") or "unjudged")
+        if verdict in ("accepted", "refused"):
+            return f"rejection_{verdict}"
+        return "rejection_unjudged"
+    return "none"
+
+
+def accuracy(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per voter model: findings fixed, rejections the review bot accepted,
+    refused or has not judged, and findings left without a disposition.
+
+    A bot-accepted rejection is counted apart from a fix (OMN-17427), so the
+    voter's precision reads fixes and accepted rejections separately. A finding
+    is counted once per (repo, pr, fingerprint); the latest record read wins,
+    so re-runs of the gate on one PR do not double count.
     """
     latest: dict[tuple[str, int, str], dict[str, Any]] = {}
     for row in rows:
@@ -624,30 +889,405 @@ def accuracy(rows: Iterable[dict[str, Any]]) -> dict[str, dict[str, int]]:
     table: dict[str, dict[str, int]] = {}
     for row in latest.values():
         model = str(row.get("model", "unknown"))
-        bucket = table.setdefault(
-            model, {"findings": 0, "fixed": 0, "rejected": 0, "none": 0}
-        )
+        bucket = table.setdefault(model, dict.fromkeys(ACCURACY_BUCKETS, 0))
         bucket["findings"] += 1
-        disposition = str(row.get("disposition", "none"))
-        if disposition == "fixed" and row.get("fix_verified") is not True:
-            disposition = "none"
-        bucket[disposition if disposition in bucket else "none"] += 1
+        bucket[_bucket(row)] += 1
     return table
 
 
 def print_report(table: dict[str, dict[str, int]]) -> None:
     print(
-        "model | findings | fixed | rejected | no disposition | fixed share of decided"
+        "model | findings | fixed | rejection accepted | rejection refused | "
+        "rejection unjudged | no disposition | fixed share of decided"
     )
     for model in sorted(table):
         row = table[model]
-        decided = row["fixed"] + row["rejected"]
+        decided = row["fixed"] + row["rejection_accepted"]
         share = f"{row['fixed'] / decided:.0%}" if decided else "n/a"
         print(
-            f"{model} | {row['findings']} | {row['fixed']} | {row['rejected']} | "
-            f"{row['none']} | {share}"
+            f"{model} | {row['findings']} | {row['fixed']} | "
+            f"{row['rejection_accepted']} | {row['rejection_refused']} | "
+            f"{row['rejection_unjudged']} | {row['none']} | {share}"
         )
     print(json.dumps(table, sort_keys=True))
+
+
+# ---------------------------------------------------------------------------
+# The review bot's inputs and replies (OMN-17427)
+# ---------------------------------------------------------------------------
+#
+# The judgement itself is omniintelligence's ``cli_review judge-rejections``
+# (node_review_rejection_judge_compute), run in the reviewer's own model
+# environment by hostile-review-thread-gate.yml. This script keeps what it has
+# always owned, GitHub thread state and the PR's git history: ``--pending``
+# writes the rejections that await a verdict, with the cited lines at the
+# head, and ``--post-verdicts`` turns the verdicts into the judge replies this
+# gate reads, under the workflow token. A judgement model never touches
+# GitHub, and nothing here calls a model.
+
+JUDGE_FINDING_CHARS = 4_000
+JUDGE_EXCERPT_CONTEXT_LINES = 20
+JUDGE_FILE_EXCERPT_LINES = 400
+JUDGE_EXCERPT_CHARS = 16_000
+JUDGE_SENTENCE_CHARS = 400
+JUDGE_VERDICTS = frozenset({"accepted", "refused"})
+_JUDGE_ID_RE = re.compile(r"\A[a-z][a-z0-9-]{0,62}\Z")
+
+FORK_UNAVAILABLE = (
+    "this is a fork pull request: its workflow token is read-only and no model "
+    "key reaches it, so the review bot can neither judge a rejection nor reply; "
+    "fix the finding and reply `fixed-in <sha>`"
+)
+NO_JUDGE_RESULT = (
+    "the review bot's judgement step wrote no result: it failed before judging "
+    "(an install or overlay step, or an omniintelligence without `cli_review "
+    "judge-rejections`); its log names why"
+)
+
+
+@dataclass(frozen=True)
+class PendingRejection:
+    """A rejection the review bot has to judge, and where its verdict goes."""
+
+    key: str
+    top_comment_id: int
+    digest: str
+    rejection_url: str
+    raised_by: str
+    finding: str
+    rejection: str
+    cited: CitedLines
+
+
+def pending_rejections(
+    threads: Iterable[dict[str, Any]],
+) -> tuple[list[PendingRejection], dict[str, str]]:
+    """Rejections still to judge, and notes for those the bot will not judge.
+
+    Only a thread's latest disposition counts, and a rejection that already
+    carries the workflow identity's verdict on its id and current body is done.
+    """
+    pending: list[PendingRejection] = []
+    notes: dict[str, str] = {}
+    for thread in threads:
+        if not is_marker_thread(thread):
+            continue
+        disposition = latest_disposition(thread)
+        if disposition is None or disposition.kind != "rejected":
+            continue
+        if judge_verdict_for(thread, disposition) is not None:
+            continue
+        key = str(disposition.comment_id or thread.get("id", ""))
+        why = not_judgeable(disposition)
+        top = _comments(thread)[0]
+        top_id = top.get("databaseId")
+        if not why and not isinstance(top_id, int):
+            why = "the finding's first comment has no id to reply to"
+        if why:
+            notes[key] = why
+            continue
+        first_body = str(top.get("body", ""))
+        label = _LABEL_RE.search(first_body)
+        pending.append(
+            PendingRejection(
+                key=key,
+                top_comment_id=int(top_id),
+                digest=disposition.digest,
+                rejection_url=disposition.url,
+                raised_by=label.group("model") if label else "unknown",
+                finding=finding_text(first_body, JUDGE_FINDING_CHARS),
+                rejection=disposition.reason,
+                cited=cited_lines(thread),
+            )
+        )
+    return pending, notes
+
+
+def code_excerpt(
+    history: GitFixVerifier, cited: CitedLines, head: str
+) -> tuple[str, str]:
+    """(label, numbered excerpt) of the cited lines as they lie at the head."""
+    text = history.file_at(head, cited.path)
+    if text is None:
+        return (
+            f"{cited.path} (absent at the head)",
+            "(the file does not exist at the pull request head)",
+        )
+    lines = text.splitlines()
+    note = ""
+    try:
+        span = history.carry_forward(cited, head)
+    except RuntimeError as exc:
+        span = (cited.start, cited.end) if cited.start and cited.end else None
+        note = f"; the range could not be carried to the head ({exc})"
+    if span is None:
+        low, high = 1, min(len(lines), JUDGE_FILE_EXCERPT_LINES)
+        label = (
+            f"{cited.path} (a file-level finding; lines {low}-{high} of "
+            f"{len(lines)}){note}"
+        )
+    else:
+        start, end = span
+        low = max(1, start - JUDGE_EXCERPT_CONTEXT_LINES)
+        high = min(len(lines), end + JUDGE_EXCERPT_CONTEXT_LINES)
+        label = (
+            f"{cited.path}:{start}-{end} (shown with "
+            f"{JUDGE_EXCERPT_CONTEXT_LINES} lines of context){note}"
+        )
+    numbered = "\n".join(f"{n:>6}  {lines[n - 1]}" for n in range(low, high + 1))
+    if len(numbered) > JUDGE_EXCERPT_CHARS:
+        numbered = numbered[:JUDGE_EXCERPT_CHARS] + "\n…[excerpt truncated]"
+    return label, numbered or "(the cited range is empty at the head)"
+
+
+def _write_json(path: str | Path, data: object) -> None:
+    Path(path).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", "utf-8")
+
+
+def _read_status(path: str | None) -> dict[str, Any]:
+    status: dict[str, Any] = {"unavailable": "", "notes": {}, "replies": {}}
+    if path and Path(path).is_file():
+        try:
+            loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            status["unavailable"] = f"the judge status file is unreadable: {exc}"
+            return status
+        if isinstance(loaded, dict):
+            status.update(loaded)
+    return status
+
+
+def _set_output(name: str, value: str) -> None:
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as fh:
+            fh.write(f"{name}={value}\n")
+
+
+def run_pending(
+    pending_path: Path,
+    *,
+    fetch: Callable[[str, int, str], list[dict[str, Any]]] | None = None,
+    repo_dir: Path | None = None,
+) -> int:
+    """Write the rejections awaiting the review bot, and ``count=<n>``."""
+    repo = os.environ["REPO"]
+    pr_number = int(os.environ["PR_NUMBER"])
+    head_sha = os.environ["HEAD_SHA"]
+    status_path = os.environ.get("JUDGE_STATUS_PATH")
+    try:
+        threads = (fetch or fetch_review_threads)(
+            repo, pr_number, os.environ["GITHUB_TOKEN"]
+        )
+    except (OSError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+        print(f"::error::could not fetch review threads (fail-closed): {exc}")
+        return 1
+    pending, notes = pending_rejections(threads)
+    unavailable = ""
+    if pending and os.environ.get("HOSTILE_REVIEW_IS_FORK", "false") == "true":
+        unavailable = FORK_UNAVAILABLE
+        pending = []
+    history = GitFixVerifier(repo_dir or Path.cwd(), head_sha, head_sha)
+    items = []
+    for item in pending:
+        lines_label, excerpt = code_excerpt(history, item.cited, head_sha)
+        items.append(
+            {
+                "key": item.key,
+                "raised_by": item.raised_by,
+                "finding": item.finding or "(the finding has no text)",
+                "lines_label": lines_label,
+                "excerpt": excerpt,
+                "rejection": item.rejection,
+            }
+        )
+    _write_json(
+        pending_path,
+        {"repo": repo, "pr": pr_number, "head_sha": head_sha, "items": items},
+    )
+    if status_path:
+        _write_json(
+            status_path,
+            {
+                "unavailable": unavailable,
+                "notes": notes,
+                "replies": {
+                    item.key: {
+                        "top_comment_id": item.top_comment_id,
+                        "digest": item.digest,
+                        "rejection_url": item.rejection_url,
+                        "raised_by": item.raised_by,
+                    }
+                    for item in pending
+                },
+            },
+        )
+    for key, why in notes.items():
+        print(f"rejection {key} is not judged: {why}")
+    if unavailable:
+        print(f"::warning::the review bot cannot judge here: {unavailable}")
+    print(f"{len(items)} rejection(s) await the review bot's judgement.")
+    _set_output("count", str(len(items)))
+    return 0
+
+
+def _flat(text: str, limit: int) -> str:
+    """One bounded line that cannot open markup."""
+    flat = " ".join(str(text).replace("<", " ").replace(">", " ").split())
+    return flat if len(flat) <= limit else flat[:limit].rsplit(" ", 1)[0] + " …"
+
+
+def verdict_body(
+    *,
+    rejection_id: int,
+    digest: str,
+    verdict: str,
+    judge: str,
+    identity: str,
+    sentence: str,
+) -> str:
+    """The judge reply this gate reads: the marker line, the verdict, its sentence."""
+    identity = re.sub(r"[\s>]", "_", identity) or "unknown"
+    marker = (
+        f"<!-- {JUDGE_MARKER} rejection={rejection_id} digest={digest} "
+        f"verdict={verdict} judge={judge} identity={identity} -->"
+    )
+    if verdict == "accepted":
+        tail = (
+            "This finding no longer blocks the `Hostile Review Thread Gate`. The "
+            "judgement is bound to the rejection as written: an edit of it, or a "
+            "later disposition, replaces it."
+        )
+    else:
+        tail = (
+            "This finding still blocks the `Hostile Review Thread Gate`. Reply "
+            "with a line `fixed-in <sha>` (a commit of this PR that changes the "
+            "cited lines), or a new `rejected: <reason>` that answers the "
+            "sentence above; a new or edited rejection is judged again."
+        )
+    return (
+        f"{marker}\n"
+        f"**Review bot: rejection {verdict}** (judge `{judge}`, model "
+        f"`{identity}`, OMN-17427)\n\n"
+        f"> {_flat(sentence, JUDGE_SENTENCE_CHARS)}\n\n"
+        f"{tail}"
+    )
+
+
+def run_post_verdicts(
+    result_path: Path,
+    *,
+    api: Callable[..., Any] | None = None,
+    base: str | None = None,
+) -> int:
+    """Post the judge's verdicts as replies under the workflow token.
+
+    Fails closed: a missing or unreadable result, a malformed verdict or a
+    reply GitHub refuses posts nothing for that rejection, and the reason is
+    written to the status the gate step reads.
+    """
+    repo = os.environ["REPO"]
+    pr_number = int(os.environ["PR_NUMBER"])
+    token = os.environ["GITHUB_TOKEN"]
+    status_path = os.environ.get("JUDGE_STATUS_PATH")
+    status = _read_status(status_path)
+    notes: dict[str, str] = dict(status.get("notes") or {})
+    replies: dict[str, Any] = dict(status.get("replies") or {})
+    judged: list[dict[str, Any]] = []
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        result = {"unavailable": NO_JUDGE_RESULT}
+    if not isinstance(result, dict):
+        result = {"unavailable": NO_JUDGE_RESULT}
+    unavailable = str(status.get("unavailable") or result.get("unavailable") or "")
+    for key, why in (result.get("notes") or {}).items():
+        notes[str(key)] = str(why)
+    if api is None or base is None:
+        # The thread poster's REST call and base: the same origin and token.
+        import post_hostile_review_threads as poster
+
+        api = api or poster._api
+        base = base or poster.repo_api_base(repo)
+    for record in result.get("judgements") or []:
+        key = str(record.get("key", "")) if isinstance(record, dict) else ""
+        target = replies.get(key)
+        if not isinstance(target, dict):
+            notes[key or "?"] = "the judge returned a verdict for no pending rejection"
+            continue
+        verdict = str(record.get("verdict", ""))
+        judge = str(record.get("judge_id", ""))
+        identity = str(record.get("identity", ""))
+        sentence = _flat(str(record.get("sentence", "")), JUDGE_SENTENCE_CHARS)
+        if verdict not in JUDGE_VERDICTS or not _JUDGE_ID_RE.match(judge):
+            notes[key] = f"the judge's verdict is malformed: {record!r}"[:400]
+            continue
+        if not sentence or not identity:
+            notes[key] = "the judge's verdict carries no sentence or identity"
+            continue
+        body = verdict_body(
+            rejection_id=int(key),
+            digest=str(target["digest"]),
+            verdict=verdict,
+            judge=judge,
+            identity=identity,
+            sentence=sentence,
+        )
+        url = (
+            f"{base}/pulls/{pr_number}/comments/{int(target['top_comment_id'])}/replies"
+        )
+        try:
+            api("POST", url, token, {"body": body})
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:300]
+            notes[key] = (
+                f"the judge {verdict} it, but GitHub refused the verdict reply "
+                f"({exc.code}): {detail}"
+            )
+            continue
+        except urllib.error.URLError as exc:
+            notes[key] = f"the judge {verdict} it, but the reply was not sent: {exc}"
+            continue
+        row = {
+            "rejection_comment_id": int(key),
+            "rejection_url": target.get("rejection_url", ""),
+            "voter_model": target.get("raised_by", ""),
+            "judge": judge,
+            "judge_identity": identity,
+            "verdict": verdict,
+            "sentence": sentence,
+        }
+        judged.append(row)
+        print("hostile-review-judgement: " + json.dumps(row, sort_keys=True))
+    unanswered = [
+        key
+        for key in replies
+        if key not in {str(r["rejection_comment_id"]) for r in judged}
+    ]
+    for key in unanswered:
+        if key not in notes and not unavailable:
+            notes[key] = "the judge returned no verdict for it"
+    if status_path:
+        _write_json(
+            status_path,
+            {
+                "unavailable": unavailable,
+                "notes": notes,
+                "replies": replies,
+                "judged": judged,
+            },
+        )
+    for key, why in notes.items():
+        print(f"rejection {key} is not judged: {why}")
+    if unavailable or unanswered:
+        print(
+            f"::error::the review bot could not judge {len(unanswered)} "
+            "rejection(s); their findings stay blocked (fail-closed): "
+            f"{unavailable or 'reasons above'}"
+        )
+        return 1
+    print(f"The review bot judged {len(judged)} rejection(s).")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +1314,8 @@ def _write_summary(blocking: list[ThreadVerdict], cleared: list[ThreadVerdict]) 
         disposition = verdict.disposition + (
             f" {verdict.fixed_in[:12]}" if verdict.fixed_in else ""
         )
+        if verdict.judge_verdict:
+            disposition += f" ({verdict.judge_verdict} by the review bot)"
         state = "BLOCKS" if verdict.blocking else "ok"
         lines.append(
             f"| [{where}]({verdict.url}) | {verdict.model} | {disposition} | "
@@ -681,6 +1323,28 @@ def _write_summary(blocking: list[ThreadVerdict], cleared: list[ThreadVerdict]) 
         )
     with open(summary_path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def read_judge_notes(path: str | None) -> dict[str, str]:
+    """What this job's judge step wrote about rejections it did not answer.
+
+    The file is optional (the judge step runs only when a rejection awaits
+    it, and only in the on-reply workflow); an unreadable one is named, never
+    read as a pass, because these notes only word reasons and clear nothing.
+    """
+    if not path or not Path(path).is_file():
+        return {}
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"*": f"the judge step's status file is unreadable: {exc}"}
+    notes: dict[str, str] = {}
+    if isinstance(data, dict):
+        if data.get("unavailable"):
+            notes["*"] = f"the judge is unavailable: {data['unavailable']}"
+        for key, value in (data.get("notes") or {}).items():
+            notes[str(key)] = str(value)
+    return notes
 
 
 def run_gate() -> int:
@@ -704,7 +1368,10 @@ def run_gate() -> int:
     # OMN-17427: the disposition rule holds PRs into dev (an unknown base is
     # treated as dev, so a missing variable enforces rather than relaxes).
     blocking, cleared = classify_threads(
-        threads, verifier, require_disposition=base_ref in ("dev", "")
+        threads,
+        verifier,
+        require_disposition=base_ref in ("dev", ""),
+        judge_notes=read_judge_notes(os.environ.get("JUDGE_STATUS_PATH")),
     )
 
     record_path = os.environ.get("DISPOSITION_RECORD_PATH")
@@ -726,8 +1393,9 @@ def run_gate() -> int:
             f"::error::{len(blocking)} hostile-reviewer finding(s) have no accepted "
             "disposition. Reply on each thread with a line `fixed-in <sha>` (a commit "
             "of this PR that changes the cited lines) or `rejected: <reason>`; the "
-            "reply re-runs this gate (OMN-17427). A thread resolved without that "
-            "reply blocks."
+            "reply re-runs this gate (OMN-17427). A rejection clears a finding only "
+            "when the review bot accepts it, and a thread resolved without a reply "
+            "blocks."
         )
         for verdict in blocking:
             print(
@@ -751,10 +1419,27 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="print per-model accuracy from disposition records or job logs",
     )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--pending",
+        type=Path,
+        metavar="FILE",
+        help="write the rejections awaiting the review bot (OMN-17427)",
+    )
+    mode.add_argument(
+        "--post-verdicts",
+        type=Path,
+        metavar="FILE",
+        help="post the review bot's verdicts from cli_review judge-rejections",
+    )
     args = parser.parse_args(argv)
     if args.report:
         print_report(accuracy(_read_records(args.report)))
         return 0
+    if args.pending:
+        return run_pending(args.pending)
+    if args.post_verdicts:
+        return run_post_verdicts(args.post_verdicts)
     return run_gate()
 
 

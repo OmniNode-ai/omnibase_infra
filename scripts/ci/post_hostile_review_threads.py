@@ -101,6 +101,11 @@ def _api(
     return json.loads(body) if body else None
 
 
+def repo_api_base(repo: str) -> str:
+    """The REST base of ``repo``: the thread poster's and the review bot's replies (OMN-17427)."""
+    return f"https://api.github.com/repos/{repo}"  # url-authority-ok: GitHub REST API base for the CI thread poster; runs only inside GitHub Actions with GITHUB_TOKEN, same fixed origin every gh CLI call in this repo resolves
+
+
 def _paginate(url: str, token: str) -> list[dict[str, Any]]:
     """Fetch every page of a list endpoint (per_page=100, page=N)."""
     results: list[dict[str, Any]] = []
@@ -283,8 +288,8 @@ def format_finding_body(finding: dict[str, Any]) -> str:
         "_Reply on this thread with a line `fixed-in <sha>` (the commit of "
         "this PR that changed these lines) or `rejected: <reason>`. The "
         "`Hostile Review Thread Gate` re-runs on the reply, checks it, and "
-        "blocks a merge to dev while any finding has no accepted reply "
-        "(OMN-17427)._"
+        "blocks a merge to dev while any finding has no accepted reply; a "
+        "rejection counts once the review bot accepts it (OMN-17427)._"
     )
 
 
@@ -373,7 +378,9 @@ def build_review(
         "The model is the FINDER, never the gate: merge is gated only by the",
         "deterministic `Hostile Review Thread Gate`, which blocks while a",
         "finding thread has no accepted reply. Answer each one with a line",
-        "`fixed-in <sha>` or `rejected: <reason>` (OMN-17427).",
+        "`fixed-in <sha>` or `rejected: <reason>`; the review bot, a model",
+        "that is none of these voters, accepts or refuses each rejection",
+        "(OMN-17427).",
     ]
     if truncated:
         body_parts += [
@@ -453,7 +460,7 @@ def main() -> int:
     # that reached cross-model agreement get one.
     postable, below_quorum = split_by_quorum(review_result, postable)
 
-    base = f"https://api.github.com/repos/{repo}"  # url-authority-ok: GitHub REST API base for the CI thread poster; runs only inside GitHub Actions with GITHUB_TOKEN, same fixed origin every gh CLI call in this repo resolves
+    base = repo_api_base(repo)
 
     # Existing hostile-reviewer fingerprints on this PR: review comments
     # (threads) AND review bodies (summary/body-only findings live there).

@@ -394,6 +394,13 @@ requirements:
         statement: 'AC180: a resolved hostile-reviewer thread with no disposition reply blocks, an outdated open one blocks, a fixed-in commit that is not in the PR or did not touch the carried-forward cited lines blocks, a valid reply clears the thread without needing it resolved, no threads passes, and each finding is recorded per voter model -- falsifier: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
       - id: AC181
         statement: 'AC181: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
+  - id: req-omn17427-review-bot-judges-rejections
+    statement: A rejected reply no longer clears a hostile-reviewer finding by itself. The review bot, run only inside the on-reply thread gate workflow, asks a model that is none of the voters (omniintelligence's cli_review judge-rejections with the CI overlay's rejection judge, called through the reviewer's own model routing and distinct by the quorum's reviewer identity) to accept or refuse the rejection with one sentence, and the gate posts the verdict under the workflow token; the gate honours only that identity's verdict bound to the rejection's id and body, fails closed when the judge is unavailable, and needs no judge on a PR with nothing to judge. There is no human override and no new credential.
+    acceptance:
+      - id: AC182
+        statement: 'AC182: a rejection the judge refused keeps the gate red with its sentence, an accepted one clears it, a verdict reply any other account posts (or an edited or later rejection) is not accepted, the pending file carries the finding, the cited lines at the head and the rejection in the judge''s contract, an unconfigured judge, a judge step that wrote nothing, a judge note, a malformed verdict or a refused reply post fail closed with the reason in the gate, a PR with no rejection counts zero so nothing is installed or called, and the accuracy record counts bot-accepted rejections apart from fixes -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
+      - id: AC183
+        statement: 'AC183: the on-reply workflow reads the CI overlay and omniintelligence through the reviewer job''s own steps (identical apart from their if), installs and calls nothing without a pending rejection, runs omniintelligence''s cli_review judge-rejections with no GitHub token, posts the verdicts and runs the gate step whatever the judge did, passes the model key to the judge step alone and reads no secret the reviewer does not -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -566,6 +573,12 @@ evidence_requirements:
   - kind: tests
     description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
     command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+  - kind: tests
+    description: The gate's pending and post-verdicts modes driven by a recording GitHub and the judge's JSON output, the posted verdicts read back through the gate, a temporary git checkout for the cited lines, and the job-log replay of the rejections the old gate accepted; no live model or GitHub call.
+    command: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+  - kind: tests
+    description: The on-reply workflow's judge wiring read from the workflow files; it does not claim a live judged rejection.
+    command: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -607,6 +620,42 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC181
+  - id: dod-omn17427-ac182-review-bot-judgement
+    description: The gate's pending and post-verdicts modes run against a recording GitHub transport and the judge's JSON, and what is posted is fed back through classify_threads. They fail on the merge base, where a rejected reply clears its thread with no judgement and the gate has neither mode.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC182
+  - id: dod-omn17427-ac182-review-bot-deploy-check
+    description: Hosted-runner deploy check -- the judge and gate tests; they do not claim a live judged rejection.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC182
+  - id: dod-omn17427-ac183-judge-wiring
+    description: The on-reply workflow and the reviewer workflow are parsed and their overlay and omniintelligence steps compared. They fail on the merge base, whose on-reply workflow has no judge step.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC183
+  - id: dod-omn17427-ac183-judge-wiring-deploy-check
+    description: Hosted-runner deploy check -- the workflow wiring tests; they do not claim a live run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC183
   - id: dod-omn-17427-ac142-teardown-small-batches
     description: Fake-host teardown of 120 slot topics checks multiple bounded delete batches and an immediately following broker health read for each batch. The head tests fail on the merge-base product, which has no broker health pacing.
     source: manual
