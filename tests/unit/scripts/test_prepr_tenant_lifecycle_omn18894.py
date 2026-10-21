@@ -187,6 +187,10 @@ def test_teardown_adapter_preserves_resources_when_offboard_fails(
     def runner(
         argv: list[str], env: dict[str, str] | None
     ) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == ["docker", "ps"]:
+            # The dev-lane server lookup by compose label (OMN-17427).
+            service = argv[argv.index("--filter") + 3].rsplit("=", 1)[1]
+            return subprocess.CompletedProcess(argv, 0, f"omnibase-infra-{service}", "")
         commands.append(argv)
         is_revoke = "revoke" in argv
         if is_revoke:
