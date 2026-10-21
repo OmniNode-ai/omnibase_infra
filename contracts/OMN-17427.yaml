@@ -355,6 +355,11 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal without trace_id or queue_wait_ms in the request payload -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
+  - id: req-omn17427-branch-protection-audit-setup-uv
+    statement: 'The Audit Branch Protection job installs uv with a sha-pinned setup-uv step before any uv run, and runs the required-context parity report with uv run --no-project --with the PyYAML version uv.lock pins, so the job on its ubuntu-latest runs-on fallback no longer fails "uv: command not found" (exit 127).'
+    acceptance:
+      - id: AC171
+        statement: 'AC171: the audit job has an astral-sh/setup-uv step pinned to a full sha ahead of every uv run, every uv run in the job is uv run --no-project, the parity step installs pyyaml at the uv.lock version, and the parity CLI and its lib import nothing third-party but yaml; the same tests fail 4 of 6 on the workflow before this change -- falsifier: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1641,3 +1646,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC142
+  - id: dod-omn-17427-ac171-branch-protection-audit-setup-uv
+    description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py tests/ci/test_branch_protection_single_auditor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171
+  - id: dod-omn-17427-ac171-branch-protection-audit-hosted
+    description: Hosted-runner check -- the parity CLI starts under uv run --no-project --with pyyaml==6.0.3 and prints its usage, with no project sync, token or GitHub API call.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --no-project --with pyyaml==6.0.3 python scripts/audit_required_context_parity_cli.py --help
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171

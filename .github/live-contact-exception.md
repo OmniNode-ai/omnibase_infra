@@ -1,0 +1,1 @@
+Live-contact exception: the change only installs uv on the hosted runner and narrows the parity step's uv run to --no-project --with pyyaml; the GitHub API reads both audit steps make, their arguments and the App token are unchanged, so there is no new external contact to record.
