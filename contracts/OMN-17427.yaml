@@ -355,6 +355,16 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-one-runtime-fold
+    statement: A lane folds the effects, worker, tenant-projection and projection-writer roles into its one main runtime by declaring folded_profiles in the runtime policy contract (rendered as ONEX_RUNTIME_FOLDED_PROFILES); the auto-wiring ownership filter then attaches every contract those roles own in that process, an unregistered folded name is refused, and a node whose handler raises does not stop delivery to the other nodes on the shared bus.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: a main runtime folding the roles loads every folded node and nothing else changes without a fold, the fold reaches every effects and worker contract of this repo on disk, the policy contract renders a declared fold and refuses an unregistered one, and one crashing subscriber leaves the other nodes receiving every record -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q'
+  - id: req-omn17427-patched-runtime-trust
+    statement: The runtime lock resolves certifi at or above the release fixing PYSEC-2026-4320 and GHSA-6q48-6c7w-9gw2, and its CA bundle loads into a verifying TLS context.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -512,6 +522,9 @@ evidence_requirements:
   - kind: tests
     description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+  - kind: tests
+    description: The runtime-profile fold attaches the folded roles' contracts in one process and one failing node stops no other.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1641,3 +1654,49 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
+  - id: dod-omn-17427-ac141-one-runtime-fold
+    description: Ownership-filter tests over a fixture manifest and this repo's real node contracts, the policy contract render, and an in-process bus with one crashing subscriber. Does not claim a lab lane running folded.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-one-runtime-fold-deploy-check
+    description: Hosted-runner deploy check -- the same fold tests; no container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-one-runtime-fold-integration
+    description: Render a declared effects/workers fold through the runtime policy model and renderer, discover this repository's real contracts, and compare folded ownership with separate-role ownership and raw-contract readers on every registered runtime lane scope. Includes an unfolded control; starts no lane services.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_runtime_profile_fold_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-fold-integration-deploy
+    description: Hosted-runner check of rendered fold configuration against real repository contracts and every registered runtime lane scope, with no broker, container, credential or running lane required. Refuses missing folded nodes or disagreement between ownership readers.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_runtime_profile_fold_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn17427-ac142-patched-runtime-trust
+    description: Hosted-runner check of the committed certifi resolution and its installed CA bundle; runs without a broker, container or lab credential.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import certifi, ssl, tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open('uv.lock', 'rb'))['package'] if p['name'] == 'certifi'); assert Version(p['version']) >= Version('2026.10.19'); assert certifi.__version__ == p['version']; c = ssl.create_default_context(cafile=certifi.where()); assert c.verify_mode == ssl.CERT_REQUIRED and c.check_hostname and c.get_ca_certs()"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
