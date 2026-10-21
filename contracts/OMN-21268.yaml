@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21268"
 title: "omnibase_infra still declares the judge lane that the lane census dropped, so every PR's lab-overlay parity check fails"
-summary: "omnibase_internal#949 removed the judge lane from the lane census after its compose project was taken down. omnibase_infra still carried judge as a census lane (two lane block generator rows, the compose parity tuple, the runtime-worker accounting and the governed-lane split), so every pull request's Lab-overlay parity tests (OMN-20934) check failed. judge is retired on the terms prod was (OMN-18320): its generator rows and parity entries are dropped, GOVERNED_LANES stays wider so mutations still refuse, the neutral census fixture's stand-in lane is renamed from judge to stability-test, and a split-safe test asserts a retired lane has no generator row. docker/docker-compose.judge.yml stays in the tree."
+summary: "omnibase_internal#949 removed the judge lane from the lane census after its compose project was retired. omnibase_infra still carried judge as a census lane (two lane block generator rows, the compose parity tuple, the runtime-worker accounting and the governed-lane split), so every pull request's Lab-overlay parity tests (OMN-20934) check failed. judge is retired on the terms prod was (OMN-18320): its generator rows and parity entries are dropped, GOVERNED_LANES stays wider so mutations still refuse, the neutral census fixture's stand-in lane is renamed from judge to stability-test, and a split-safe test asserts a retired lane has no generator row. docker/docker-compose.judge.yml stays in the tree."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
