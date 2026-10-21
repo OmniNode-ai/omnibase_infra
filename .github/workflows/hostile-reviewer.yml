@@ -779,7 +779,7 @@ jobs:
       # `fixed-in <sha>` disposition names a commit of this PR that touched
       # the cited lines.
       - name: Checkout (gate script and PR history)
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           filter: blob:none
@@ -797,7 +797,7 @@ jobs:
       # are in this job's log as `hostile-review-disposition:` lines.
       - name: Upload the disposition record
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hostile-review-dispositions-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hostile-review-dispositions.jsonl

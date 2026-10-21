@@ -24,6 +24,7 @@ from __future__ import annotations
 import email.message
 import importlib.util
 import io
+import json
 import sys
 import urllib.error
 from pathlib import Path
@@ -51,6 +52,15 @@ assert _spec is not None and _spec.loader is not None
 poster = importlib.util.module_from_spec(_spec)
 sys.modules["post_hostile_review_threads"] = poster
 _spec.loader.exec_module(poster)
+
+_GATE = _POSTER.parent / "check_hostile_review_threads.py"
+_gate_spec = importlib.util.spec_from_file_location(
+    "check_hostile_review_threads", _GATE
+)
+assert _gate_spec is not None and _gate_spec.loader is not None
+gate = importlib.util.module_from_spec(_gate_spec)
+sys.modules["check_hostile_review_threads"] = gate
+_gate_spec.loader.exec_module(gate)
 
 THREAD_GATE = "Hostile Review Thread Gate"
 
@@ -154,3 +164,30 @@ def test_every_recent_merged_dev_head_carried_a_green_thread_gate(
     ]
     # The bot PRs: the reviewer skipped, the thread gate still ran and passed.
     assert sorted(skipped_reviewer) == [5184, 5198, 5203, 5209, 5219]
+
+
+@pytest.mark.live_contact(
+    "tests/fixtures/omn17427/infra-pr5234-run-39621551864-first-threads-and-gate.json"
+)
+def test_the_fixed_poster_made_threads_and_the_gate_held_them(
+    recorded_response: dict[str, object],
+) -> None:
+    """The first live run of this change, on its own PR, read back from the job logs."""
+    response = cast("dict[str, Any]", recorded_response["response"])
+    reviewer = cast("list[str]", response["reviewer_log_lines"])
+    assert any('"posted_threads": 2' in line for line in reviewer)
+    assert any("with 2 finding thread(s); 0 demoted" in line for line in reviewer)
+
+    gate_lines = cast("list[str]", response["thread_gate_log_lines"])
+    rows = [
+        json.loads(line.split(gate.DISPOSITION_LINE_PREFIX, 1)[1])
+        for line in gate_lines
+        if gate.DISPOSITION_LINE_PREFIX in line
+    ]
+    assert [row["reason"] for row in rows] == ["unresolved, no disposition reply"] * 2
+    assert all(row["blocking"] for row in rows)
+    # Accuracy is read per voter model from exactly these lines.
+    assert gate.accuracy(rows) == {
+        "correctness": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
+        "sonnet": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
+    }
