@@ -40,22 +40,24 @@ THREE PASSES, AND WHY EACH IS NEEDED.
    exception text AFTER the message, outside both passes above, so a token
    inside a traceback escapes 1 and 2 entirely.
 
-WHAT IT DOES NOT DO. A credential in a field named ``note``, or concatenated
-into prose, is reachable by neither a name rule nor a shape rule. That is the
-honest limit: this is defense in depth behind not logging the value at all,
-which is what the ``check_no_credential_in_log`` CI gate enforces at the source.
+WHAT IT DOES NOT DO. An opaque credential without a recognised value shape,
+in an ordinary field such as ``note`` and without a Bearer label, cannot be
+distinguished from ordinary text. This is defense in depth behind not logging
+the value at all, which the ``check_no_credential_in_log`` CI gate enforces at
+the source.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 import traceback
 from collections.abc import Iterable, Mapping
 from typing import Final
 
 from omnibase_infra.utils.util_dlq_credential_redaction import (
+    CREDENTIAL_VALUE_PATTERNS,
     is_credential_field_name,
+    redact_credential_value_patterns,
 )
 
 __all__ = [
@@ -74,21 +76,10 @@ LOG_REDACTION_MARKER: Final[str] = "[REDACTED]"
 # shape. Below the limit the subtree is replaced wholesale -- fail closed.
 _MAX_DEPTH: Final[int] = 10
 
-# Value SHAPES, applied to already-rendered text where no field name survives.
-#   - ``onxk_``: the dashboard API key prefix minted by onex-api.
-#   - ``eyJ``: a JWT header's base64 opening, i.e. every Keycloak access token,
-#     gateway token and session token on this platform.
-CREDENTIAL_VALUE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    re.compile(r"onxk_[A-Za-z0-9_-]{20,}"),
-    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
-)
-
 
 def redact_credential_patterns(text: str) -> str:
     """Replace every credential-shaped value in ``text`` with the marker."""
-    for pattern in CREDENTIAL_VALUE_PATTERNS:
-        text = pattern.sub(LOG_REDACTION_MARKER, text)
-    return text
+    return redact_credential_value_patterns(text, LOG_REDACTION_MARKER)
 
 
 def _redact_value(value: object, depth: int = 0) -> object:

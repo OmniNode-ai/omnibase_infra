@@ -360,7 +360,15 @@ requirements:
     acceptance:
       - id: AC142
         statement: 'AC142: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
+  - id: req-omn17427-provider-key-redaction
+    statement: Runtime logs, DLQ bodies, error sanitizers and refusal or gate receipts share one declared credential-shape list covering the BYOK provider catalogue.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: synthetic OpenAI, project, Anthropic, OpenRouter, Gemini and GLM fixtures are redacted on the shared logging bootstrap and adjacent error, DLQ and receipt paths, ordinary text survives, and the regression file runs in CI and pre-commit -- falsifier: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov'
 evidence_requirements:
+  - kind: tests
+    description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
+    command: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
     command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
@@ -525,6 +533,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-ac142-provider-key-redaction
+    description: Synthetic provider shapes fail before the patch and pass through the shared logging bootstrap and adjacent redaction paths after it; this uses no live credential or external service.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac142-provider-key-redaction-deploy
+    description: Hosted-runner deploy check exercises the runtime logging bootstrap, handler and formatter with every synthetic provider shape and the adjacent DLQ, error and receipt sanitizers; no service deployment or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual
