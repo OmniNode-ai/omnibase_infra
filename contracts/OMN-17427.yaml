@@ -1850,7 +1850,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: env PYTHONPATH=src onex node node_ticket_contract_compose_effect --contract src/omnibase_infra/nodes/node_ticket_contract_compose_effect/contract.yaml --input tests/ci/fixtures/ticket_contract_compose_request_omn17427.json --backend event_bus=inmemory --state-root .onex_state/ticket-contract-compose-deploy
+        check_value: env PYTHONPATH=src uv run --frozen onex node node_ticket_contract_compose_effect --contract src/omnibase_infra/nodes/node_ticket_contract_compose_effect/contract.yaml --input tests/ci/fixtures/ticket_contract_compose_request_omn17427.json --backend event_bus=inmemory --state-root .onex_state/ticket-contract-compose-deploy
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427001
