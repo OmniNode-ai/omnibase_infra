@@ -1653,7 +1653,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
-  - id: dod-omn-17427-ac141-one-runtime-fold-integration-deploy-check
+  - id: dod-omn-17427-ac141-fold-integration-deploy
     description: Hosted-runner check of rendered fold configuration against real repository contracts and every registered runtime lane scope, with no broker, container, credential or running lane required. Refuses missing folded nodes or disagreement between ownership readers.
     source: manual
     checks:
