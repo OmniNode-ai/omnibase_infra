@@ -57,6 +57,7 @@ NAMES=(
   ALPHA_INVITE_ADMIN_SECRET
   STRIPE_API_KEY
   STRIPE_WEBHOOK_SECRET
+  ESTIMATOR_FERNET_KEY
 )
 
 usage() {
@@ -110,6 +111,9 @@ generate() {
     # rather than being tried. `sk_test_` is Stripe's own test prefix.
     STRIPE_API_KEY) printf 'sk_test_onexlab%s' "$(openssl rand -hex 16)" ;;
     STRIPE_WEBHOOK_SECRET) printf 'whsec_onexlab%s' "$(openssl rand -hex 16)" ;;
+    # A Fernet key is 32 random bytes, urlsafe base64 with padding (44
+    # characters); cryptography's Fernet() refuses anything else.
+    ESTIMATOR_FERNET_KEY) openssl rand 32 | base64 | tr '+/' '-_' ;;
     # Hex only: 000_create_multiple_databases.sh validate_password() rejects a
     # non-hex password outright.
     *) openssl rand -hex 32 ;;

@@ -1,0 +1,36 @@
+schema_version: 1.0.0
+ticket_id: OMN-20388
+title: 'Retrospective cost estimator v1: a prospect uploads their prompt history and sees which model each prompt should have gone to and what it would have saved'
+summary: DEV LANE HALF. The compose dev lane's onex-api receives ESTIMATOR_FERNET_KEY from the operator env file (unset leaves only the estimator routes at 503), and render_dev_lane_tenant_path_env.sh provisions a lane-local Fernet key, so the lane's estimator encrypts uploads, prompts and leads at rest.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-estimate
+    statement: An uploaded export is stored encrypted, gated by consent and a lead, and deletable.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: Upload is blocked without consent, download is blocked until name and email are submitted, files are encrypted at rest, and a stored upload can be deleted on request -- falsifier: a download completes with no email, an upload proceeds with no consent, or a delete request leaves the file readable'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20388-lane-estimator-key
+    description: The dev lane's onex-api reads ESTIMATOR_FERNET_KEY from the operator env file, and the render script provisions a key Fernet accepts, so the lane encrypts estimator data at rest (AC6).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_estimator_key_omn20388.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn20388-lane-deploy-probe
+    description: 'Deploy probe: the dev-lane compose at this commit hands onex-api ESTIMATOR_FERNET_KEY from the operator env file (AC6).'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: 'gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F ''ESTIMATOR_FERNET_KEY: ${ESTIMATOR_FERNET_KEY:-}'' >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
