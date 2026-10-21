@@ -22,7 +22,7 @@
 # It takes the same per-slot lane lock the bring-up takes, so a teardown cannot
 # run underneath a bring-up of the same slot, and two teardowns cannot overlap.
 #
-# Not here: the reaper and the heartbeat lease (the rest of Task 7).
+# The reap subcommand of prepr_teardown_slot.py delegates abandoned-slot cleanup to this same entrypoint.
 # Tenant offboard and its authentication proof run before resource removal.
 
 set -euo pipefail
@@ -31,6 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 POLICY_PY="${SCRIPT_DIR}/prepr_slot_policy.py"
 TEARDOWN_PY="${SCRIPT_DIR}/prepr_teardown_slot.py"
+LEASE_PY="${TEARDOWN_PY}"
 
 # Mirrored from prepr_slot_policy.py and pinned equal to it by
 # tests/unit/scripts/test_prepr_teardown_slot_omn18896.py.
@@ -133,6 +134,9 @@ trap cleanup EXIT
 if ! lane_lock_acquire "${COMPOSE_PROJECT}" "${LANE_NAME}" "teardown" "${LOCK_TIMEOUT}" "$0" --slot "${SLOT}"; then
     fail "${EXIT_SLOT_LOCK_CONTENDED}" "slot ${SLOT} is held by another process; the holder was named above."
 fi
+if [[ "${PLAN_ONLY}" != "1" && "${ONEX_PREPR_REAPER_HELD:-}" != "${SLOT}" ]]; then
+    "${PY}" "${LEASE_PY}" authorize-teardown --slot "${SLOT}" || exit $?
+fi
 
 ARGS=(--slot "${SLOT}")
 [[ -n "${STAGING_ROOT}" ]] && ARGS+=(--staging-root "${STAGING_ROOT}")
@@ -142,6 +146,9 @@ ARGS=(--slot "${SLOT}")
 rc=0
 "${PY}" "${TEARDOWN_PY}" "${ARGS[@]}" || rc=$?
 if [[ "${rc}" -eq 0 ]]; then
+    if [[ "${PLAN_ONLY}" != "1" && "${ONEX_PREPR_REAPER_HELD:-}" != "${SLOT}" ]]; then
+        "${PY}" "${LEASE_PY}" clear --slot "${SLOT}" || rc=$?
+    fi
     log "slot ${SLOT}: $([[ "${PLAN_ONLY}" == "1" ]] && echo "plan printed, nothing removed" || echo "CLEAN, every axis read back zero beside a non-zero control")."
 elif [[ "${rc}" -eq "${EXIT_TEARDOWN_INCOMPLETE}" ]]; then
     log "slot ${SLOT}: NOT clean. The report above names the residue or the unproven control."

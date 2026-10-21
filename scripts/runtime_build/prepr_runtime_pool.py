@@ -110,6 +110,7 @@ POOL_CONFIG_RELATIVE = Path("config") / "lab" / "prepr_runtime_pool.yaml"
 # where it is read from.
 LANE_CENSUS_PLAN_PY = SCRIPT_DIR.parent / "lane_census_plan.py"
 PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
+SLOT_LEASE_PY = SCRIPT_DIR / "prepr_teardown_slot.py"
 SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
 # OMN-19566: the receipt module, the fact publisher and the profile registry
 LAB_PASS_RECEIPT_PY = SCRIPT_DIR.parent / "ci" / "lab_pass_receipt.py"
@@ -2115,6 +2116,11 @@ RESERVED_PARAMS = (
     "REASON",
     "OVERLAY_FILE",
     "POST_UP_COMMAND",
+    "ONEX_PREPR_LEASE_TOKEN",
+    "ONEX_PREPR_LEASE_DIR",
+    "ONEX_PREPR_REAPER_HELD",
+    "ONEX_LANE_LOCK_HELD",
+    "ONEX_LANE_LOCK_DIR",
 )
 
 
@@ -2214,6 +2220,18 @@ def _run_stack(
 
     def phase_run(phase: str, timeout: float) -> int:
         command = f"bash {remote_dir}/prove.sh {remote_dir}/params.env {phase}"
+        if host.kind == "prepr-slot" and phase != "snap-post":
+            # A host-local heartbeat survives a lost SSH caller while the
+            # remote phase still runs, then expires after the owner dies.
+            lease_command = (
+                f"exec python3 {remote_dir}/slot-lease.py run --slot {host.slot} "
+                f'--holder {shlex.quote(holder)} --token {shlex.quote(tag)} -- "$@"'
+            )
+            # Keep the phase arguments separate from the lease command, with
+            # bash exec replacing the shell so timeout signals reach its owner.
+            command = (
+                f"bash -c {shlex.quote(lease_command)} slot-resource-lease {command}"
+            )
         if renew is not None:
             command = (
                 f"{renew(timeout)} && timeout -k {HOST_KILL_GRACE_S} "
@@ -2240,6 +2258,13 @@ def _run_stack(
             host, local_env, f"{remote_dir}/params.env"
         ):
             raise RuntimeError("copy to host failed")
+        if host.kind == "prepr-slot":
+            for local, name in (
+                (SLOT_LEASE_PY, "slot-lease.py"),
+                (SLOT_POLICY_PY, "prepr_slot_policy.py"),
+            ):
+                if transport.put(host, local, f"{remote_dir}/{name}"):
+                    raise RuntimeError("copy of the slot resource-lease helper failed")
         if overlay is not None and transport.put(
             host, overlay, f"{remote_dir}/overlay.bifrost.yaml"
         ):
