@@ -345,6 +345,11 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: with UNIT_DRIFT_REGISTRY_ROOT set, an installed onex-disk-gc.service rendered for that root checks OK and the unrendered tracked text checks DRIFT, the comparison uses the render heredoc of install-disk-gc.sh itself for a root carrying percent, quote and backslash, and a missing or relative root or a unit with no OMNI_HOME default refuses -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"'
+  - id: req-omn17427-runtime-nofile-soft-raise
+    statement: The runtime kernel raises its soft RLIMIT_NOFILE to the hard limit at start (capped at 1048576 when the hard limit is unlimited), so a container started without compose ulimits at 1024 soft boots without Errno 24; a refused raise is logged and never stops the boot.
+    acceptance:
+      - id: AC141
+        statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1592,6 +1597,24 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q -k "disk_gc or rendered_unit or one_renderer"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-nofile-soft-raise
+    description: Unit tests over a faked resource module plus one real subprocess that starts at 256 soft and ends at the hard limit, and the kernel ordering test. Does not claim a live dev-lane boot.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC141
+  - id: dod-omn-17427-ac141-nofile-deploy-check
+    description: Hosted-runner deploy check -- the real kernel main and asyncio event loop start in a subprocess at 256 soft open files; a replacement broker-free bootstrap reads the raised limit and opens 512 files concurrently. The hard limit and parent process limits stay unchanged. No container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_service_kernel_nofile_boot_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
