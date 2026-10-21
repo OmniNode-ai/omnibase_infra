@@ -578,6 +578,14 @@ repos:
         pass_filenames: false
         files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
         stages: [pre-commit]
+      - id: deploy-agent-health-convergence
+        require_serial: true
+        name: Deploy-agent health convergence (OMN-17427)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        language: system
+        pass_filenames: false
+        files: ^scripts/(deploy-agent/(deploy_agent/(executor|compose_budget)\.py|tests/unit/(test_verify_convergence_omn17427|conftest)\.py)|runtime_build/runtime_health_wait\.sh)$
+        stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
         name: mypy (type checking)

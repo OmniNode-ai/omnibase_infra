@@ -37,6 +37,7 @@ from deploy_agent.build_budget import (
 )
 from deploy_agent.compose_budget import (
     ModelPhaseBudget,
+    derive_runtime_health_budget,
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
@@ -366,7 +367,7 @@ VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.D
 VERIFY_RECREATE_TIMEOUT_SECONDS = 300
 
 # How often the readiness poll re-probes after the recreate. The wait it is
-# bounded by is DERIVED from the compose model (``runtime_compose_up_budget``),
+# bounded by is DERIVED from the target's own compose healthcheck,
 # never a constant -- a recreated runtime on this lane was measured binding
 # :8085 at t+321s, so a single immediate re-probe would be a vacuous control
 # that always reported the remedy had failed.
@@ -2280,6 +2281,15 @@ def runtime_compose_up_budget(
         lane_config_for(lane).compose_files,
         expected_services,
         margin_seconds=RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+        floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+    )
+
+
+def runtime_health_probe_budget(lane: EnumRuntimeLane, service: str) -> int:
+    """Read the probed service's own healthcheck, irrespective of dependents."""
+    return derive_runtime_health_budget(
+        lane_config_for(lane).compose_files,
+        service,
         floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
     )
 
@@ -6130,7 +6140,9 @@ class DeployExecutor:
             tuple[str, int, ModelHealthCheck, subprocess.TimeoutExpired | None]
         ] = []
         for service, port in lane_config_for(lane).runtime_health_targets:
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             probes.append((service, port, check, timed_out))
 
         settled: list[ModelHealthCheck] = []
@@ -6157,7 +6169,7 @@ class DeployExecutor:
                         check.endpoint,
                     )
                     check, timed_out = self._probe_runtime_health(
-                        service=service, port=port
+                        service=service, port=port, lane=lane
                     )
                     if check.status == "pass":
                         check = check.model_copy(
@@ -6230,7 +6242,7 @@ class DeployExecutor:
         return checks
 
     def _probe_runtime_health(
-        self, *, service: str, port: int
+        self, *, service: str, port: int, lane: EnumRuntimeLane | None = None
     ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
         """Probe one runtime health endpoint, returning the check and any timeout.
 
@@ -6241,12 +6253,14 @@ class DeployExecutor:
         """
         endpoint = f"http://localhost:{port}/health"  # url-authority-ok: see loopback rationale above
         start = time.monotonic()
+        docker_healthy = False
         timed_out: subprocess.TimeoutExpired | None = None
         reason = ""
         try:
             result = _run(
                 [
                     "curl",
+                    "--fail",
                     "-sS",
                     "--max-time",
                     str(RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS),
@@ -6263,6 +6277,24 @@ class DeployExecutor:
             self._last_answering_degraded[port] = None
         else:
             reason = _runtime_health_reason(result)
+            # Docker executes the compose-declared healthcheck, including its
+            # policy and consecutive-failure threshold. A separate JSON
+            # predicate must not label an answering Docker-healthy service
+            # unhealthy. Transport/HTTP failures still need a fresh probe.
+            if (
+                reason
+                and result.returncode == 0
+                and lane is not None
+                and lane in VERIFY_RECREATE_LANES
+            ):
+                container = self._compose_service_container(lane, service)
+                if (
+                    container
+                    and _runtime_health_helper("runtime_health_state", container)
+                    == "healthy"
+                ):
+                    reason = ""
+                    docker_healthy = True
             self._last_answering_degraded[port] = (
                 _answering_degraded(result) if reason else None
             )
@@ -6273,7 +6305,11 @@ class DeployExecutor:
                 endpoint=endpoint,
                 status="fail" if reason else "pass",
                 latency_ms=latency,
-                detail=reason,
+                detail=(
+                    "Docker reports healthy; host probe answered HTTP success"
+                    if docker_healthy
+                    else reason
+                ),
             ),
             timed_out,
         )
@@ -6287,7 +6323,7 @@ class DeployExecutor:
         failed: ModelHealthCheck,
         timed_out: subprocess.TimeoutExpired | None,
     ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
-        """Keep probing a runtime docker still reports ``starting``, within its budget.
+        """Retry a starting or Docker-healthy runtime within its declared budget.
 
         OMN-19374. MEASURED from this agent's journal on the dev lane,
         2026-09-23T22:39Z to 2026-09-24T09:01Z: ten consecutive full deploys
@@ -6300,17 +6336,11 @@ class DeployExecutor:
         from ready, restarted its clock, and swapped the container id under the
         compose-dev receipt's ``probe_generation_bound`` read.
 
-        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, the helpers
-        ``onex-runtime-deploy`` waits on (OMN-18349), so both deploy paths share
-        one budget and one state vocabulary. Waiting continues ONLY while docker
-        reports the container ``starting`` and the helper's own
-        ``runtime_health_keep_waiting`` agrees. Anything else -- unhealthy, not
-        running, restarted since the wait began, no healthcheck, an unreadable
-        container, a spent budget -- returns the failed check unchanged and the
-        caller's single recreate runs exactly as before. That is deliberately
-        narrower than the helper, which also waits on ``healthy``: a container
-        docker calls healthy while its host port stays dead is the OMN-18640
-        wedge, and that one must still reach the recreate without delay.
+        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, also used by
+        ``onex-runtime-deploy``. Both ``starting`` and ``healthy`` can outlive a
+        failed host probe: retry with backoff inside the declared budget. Any
+        other state or a spent budget returns the failed check. The caller
+        re-reads Docker before allowing a recreate, only for unhealthy/exited.
         """
         container = self._compose_service_container(lane, service)
         if not container:
@@ -6323,7 +6353,13 @@ class DeployExecutor:
             return failed, timed_out
         baseline = _runtime_health_helper("runtime_started_at", container)
 
-        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        # Four extra attempts cover the short exponential-backoff steps before
+        # reaching the poll interval. The deadline also bounds slow probes.
+        attempts = max(
+            1,
+            (budget + VERIFY_RECREATE_POLL_SECONDS - 1) // VERIFY_RECREATE_POLL_SECONDS
+            + 4,
+        )
         started = time.monotonic()
         check = failed
         state = ""
@@ -6335,12 +6371,17 @@ class DeployExecutor:
         for _attempt in range(attempts):
             state = _runtime_health_helper("runtime_health_state", container, baseline)
             elapsed = int(time.monotonic() - started)
-            if state != "starting" or not _runtime_health_helper_ok(
+            if state not in {"starting", "healthy"} or not _runtime_health_helper_ok(
                 "runtime_health_keep_waiting", str(elapsed), str(budget), state
             ):
                 break
-            _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            delay = min(
+                2 ** min(_attempt, 4), VERIFY_RECREATE_POLL_SECONDS, budget - elapsed
+            )
+            _verify_recreate_sleep(delay)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             if check.status == "pass":
                 break
             current = self._last_answering_degraded.get(port)
@@ -6367,11 +6408,12 @@ class DeployExecutor:
         if check.status == "pass":
             logger.info(
                 "%s passed after %ss inside %s's declared %ss start budget "
-                "(docker reported starting); not recreated",
+                "(docker reported %s); not recreated",
                 failed.endpoint,
                 waited,
                 service,
                 budget,
+                state,
             )
             return (
                 check.model_copy(
@@ -6379,7 +6421,7 @@ class DeployExecutor:
                         "detail": (
                             f"passed after waiting {waited}s inside the container's "
                             f"declared {budget}s start budget (docker reported "
-                            f"starting); not recreated (OMN-19374)"
+                            f"{state}); not recreated (OMN-19374)"
                         )
                     }
                 ),
@@ -6408,6 +6450,7 @@ class DeployExecutor:
                 [
                     "docker",
                     "ps",
+                    "--all",
                     "-q",
                     "--no-trunc",
                     "--filter",
@@ -6464,7 +6507,7 @@ class DeployExecutor:
           lane was measured binding :8085 at t+321s, so an immediate re-probe
           would report failure every time -- a vacuous control that would make
           the ``recovered`` outcome unreachable. The wait comes from the
-          compose model via ``runtime_compose_up_budget``, never a constant.
+          service's own compose healthcheck, including its failure tail.
 
         ``timed_out`` is the exception the failing probe raised, or ``None``
         for a probe that answered unhealthy. It is threaded in and handed back
@@ -6472,6 +6515,26 @@ class DeployExecutor:
         failed the job before this change cannot start passing because the
         recreate itself broke.
         """
+        # A host probe is not permission to destroy a running container. Read
+        # Docker again immediately before the destructive remedy: waiting may
+        # have changed its state, and an unreadable state is not evidence.
+        container = self._compose_service_container(lane, service)
+        state = (
+            _runtime_health_helper("runtime_health_state", container)
+            if container
+            else "absent"
+        )
+        exited = (
+            state == "not-running"
+            and _runtime_health_helper("runtime_container_status", container)
+            == "exited"
+        )
+        if state != "unhealthy" and not exited:
+            logger.warning(
+                "%s not recreated: Docker reports %s", service, state or "unreadable"
+            )
+            return failed, timed_out
+        budget = runtime_health_probe_budget(lane, service)
         config = lane_config_for(lane)
         argv = [
             "docker",
@@ -6532,27 +6595,32 @@ class DeployExecutor:
             )
             return failed, timed_out
 
-        budget = runtime_compose_up_budget(lane, [service]).timeout_seconds
         logger.info(
             "%s recreated; re-probing %s for up to %ss",
             service,
             failed.endpoint,
             budget,
         )
-        # The poll is bounded by a COUNT derived from the budget, not by a
-        # wall-clock deadline. The two say the same thing about a real boot,
-        # and the count is the one a test can drive to its end without waiting
-        # out the budget -- a deadline loop with the sleep removed spins for
-        # the whole ten minutes instead.
-        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        # The deadline includes probe time; the count also bounds tests whose
+        # sleep seam is removed. Include the probe at the budget's boundary.
+        attempts = max(
+            1,
+            (budget + VERIFY_RECREATE_POLL_SECONDS - 1) // VERIFY_RECREATE_POLL_SECONDS
+            + 1,
+        )
         started = time.monotonic()
         check = failed
         for attempt in range(attempts):
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             if check.status == "pass":
                 break
+            remaining = budget - (time.monotonic() - started)
+            if remaining <= 0:
+                break
             if attempt + 1 < attempts:
-                _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
+                _verify_recreate_sleep(min(VERIFY_RECREATE_POLL_SECONDS, remaining))
         waited = time.monotonic() - started
         recovered = check.status == "pass"
         self._record_verify_recreate(

@@ -350,7 +350,19 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-deploy-agent-health-convergence
+    statement: Post-deploy verification retries transient failures, permits recreation only for a Docker-unhealthy or exited container, and honours the selected service's own healthcheck budget.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: a transient 503 while Docker reports healthy is retried with backoff and never recreated; a persistent host failure or unreadable Docker state fails without recreation; Docker unhealthy or exited permits exactly one service recreation -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC143
+        statement: 'AC143: re-probing a recreated service waits at least its compose start_period plus interval times retries, even without health-gated dependents, and includes probe time in its deadline; a 900-second effects startup passes inside its 1800-second start period -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC144
+        statement: 'AC144: a successful host HTTP response with a differing JSON status passes when Docker reports the dev service healthy, while an HTTP 503 remains a failed probe requiring retry -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
     command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
@@ -512,6 +524,28 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-deploy-agent-health-convergence
+    description: Focused verification replays of the reported job sequences; Docker and the clock are controlled, and the readiness budget is read from compose. No live deploy is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+      - AC143
+      - AC144
+  - id: dod-omn-17427-deploy-agent-health-convergence-deploy
+    description: Hosted-runner deploy check using the real executor with a fake Docker runner and clock, including recovery after the old 600-second ceiling. No host, broker or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+      - AC143
+      - AC144
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual
