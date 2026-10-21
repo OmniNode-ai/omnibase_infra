@@ -387,6 +387,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-runner-image-python-source
+    statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: docker/runners/Dockerfile has no add-apt-repository, deadsnakes or launchpad instruction, installs uv before running `uv python install 3.12`, and links python3.12, python3, python, pip3 and pip to the managed interpreter with a 3.12 version assertion -- falsifier: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -553,6 +558,9 @@ evidence_requirements:
   - kind: tests
     description: The census planner grades a restart count past its bound against the container's last start and the census time; the collector reads both.
     command: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
+  - kind: tests
+    description: A text-level read of the runner Dockerfile pins the Python source to uv-managed CPython installed after uv; build-smoke proves the built image.
+    command: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1831,3 +1839,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac146-runner-image-python-source
+    description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
