@@ -52,7 +52,7 @@ _BROKER = "test-broker-container"
 # OMN-20934: the neutral fixture's required lane, read from its manifest.
 _LANE = NEUTRAL_LANE
 _LANE_OUTAGE_PS = (
-    "example-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
+    "example-dogfood-postgres\trunning\tUp 2 hours\tpostgres:16"
     f"\tcom.omninode.lane={_LANE}\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
