@@ -121,6 +121,14 @@ x-runtime-base: &runtime-base
     - omnibase-infra-network
   logging: *logging-defaults
   restart: unless-stopped
+  # OMN-19513: the container default is 1024 open files. The main runtime joins
+  # one consumer group per projection topic at boot (2-3 broker sockets each) and
+  # opens a Postgres pool per dispatched message, so it passes 1024 about four
+  # minutes after every start, fails every write with Errno 24, and exits.
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
   deploy:
     resources:
       limits:
