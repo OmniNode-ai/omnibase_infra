@@ -82,7 +82,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
-  - id: dod-omn-18595-release-pr-refresh-superseded-candidate
+  - id: dod-omn-18595-release-pr-refresh
     description: The release train rebuilds an open release PR whose candidate is superseded, leaves one for the same candidate alone, rebuilds an orphan branch with a lease push, and refuses a PR whose candidate cannot be read.
     source: manual
     checks:
