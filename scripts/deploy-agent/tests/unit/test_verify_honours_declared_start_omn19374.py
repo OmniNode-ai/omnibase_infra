@@ -17,9 +17,9 @@ the compose-dev receipt's generation binding.
 The fix makes verification consult docker's own reading of that container
 before the recreate, through the SAME helpers ``onex-runtime-deploy`` uses
 (``scripts/runtime_build/runtime_health_wait.sh``, OMN-18349): while docker
-reports it ``starting`` and the wait is inside the declared budget, keep
-probing. Anything else -- unhealthy, not running, restarted, absent, no
-healthcheck, budget spent -- reaches the recreate exactly as before.
+reports it ``starting`` or ``healthy`` and the wait is inside the declared
+budget, keep probing. OMN-17427 permits recreation only after a fresh Docker
+unhealthy or exited reading; unreadable state and a spent budget fail the job.
 
 The helpers run as REAL bash against a fake ``docker``; only the curl probe
 and the compose recreate are faked.
@@ -76,6 +76,7 @@ fmt="$3"
 if [[ -z "${FAKE_STATE:-}" ]]; then exit 1; fi
 case "${fmt}" in
     *'printf "%d %d %d %d" .Config.Healthcheck.StartPeriod'*) printf '%s\\n' "${FAKE_HEALTHCHECK}" ;;
+    '{{.State.Status}}') printf '%s\\n' "${FAKE_STATE%% *}" ;;
     *State.Status*) printf '%s %s\\n' "${FAKE_STATE}" "${FAKE_STARTED_AT:-t0}" ;;
     *State.StartedAt*) printf '%s\\n' "${FAKE_STARTED_AT:-t0}" ;;
     *) echo "unsupported format: ${fmt}" >&2; exit 2 ;;
@@ -199,7 +200,13 @@ def _real_helpers_no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert HELPERS.is_file(), HELPERS
     monkeypatch.setattr(executor_mod, "RUNTIME_HEALTH_WAIT_HELPERS", HELPERS)
-    monkeypatch.setattr(executor_mod, "_verify_recreate_sleep", lambda _seconds: None)
+    clock = [0.0]
+    monkeypatch.setattr(executor_mod.time, "monotonic", lambda: clock[0])
+
+    def advance(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(executor_mod, "_verify_recreate_sleep", advance)
 
 
 def _starting(**overrides: str) -> dict[str, str]:
@@ -254,31 +261,37 @@ def test_the_helpers_are_the_ones_deploy_runtime_sh_uses(fake_bin: Path) -> None
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("docker_env", "why"),
+    ("docker_env", "why", "recreate"),
     [
-        (_starting(FAKE_STATE="running unhealthy"), "docker says unhealthy"),
-        (_starting(FAKE_STATE="exited none"), "the container is not running"),
-        (_starting(FAKE_STATE="running none"), "no healthcheck declared"),
-        (_starting(FAKE_HEALTHCHECK="0 0 0 0"), "a zero declared budget"),
-        (_starting(FAKE_STATE=""), "docker cannot inspect it"),
+        (_starting(FAKE_STATE="running unhealthy"), "docker says unhealthy", True),
+        (_starting(FAKE_STATE="exited none"), "the container exited", True),
+        (_starting(FAKE_STATE="running none"), "no healthcheck declared", False),
+        (_starting(FAKE_HEALTHCHECK="0 0 0 0"), "a zero declared budget", False),
+        (_starting(FAKE_STATE=""), "docker cannot inspect it", False),
     ],
 )
-def test_positive_control_a_dead_runtime_is_still_recreated(
-    fake_bin: Path, docker_env: dict[str, str], why: str
+def test_only_a_docker_failure_allows_recreation(
+    fake_bin: Path, docker_env: dict[str, str], why: str, recreate: bool
 ) -> None:
-    """The recreate the OMN-18640 wedge needs is untouched by the wait."""
+    """Docker unhealthy or exited allows recreation; unknown health does not."""
     lane = _StartingLane(fake_bin=fake_bin, runtime_fails=1, docker_env=docker_env)
     executor = DeployExecutor()
 
     with patch("deploy_agent.executor._run", side_effect=lane):
-        executor.verify(on_phase_update=_noop_phase_update)
+        if recreate:
+            executor.verify(on_phase_update=_noop_phase_update)
+        else:
+            with pytest.raises(VerificationFailedError):
+                executor.verify(on_phase_update=_noop_phase_update)
 
-    assert _recreated_services(lane.cmds) == ["omninode-runtime"], why
-    assert len(executor.verify_recreate) == 1, why
+    assert _recreated_services(lane.cmds) == (
+        ["omninode-runtime"] if recreate else []
+    ), why
+    assert len(executor.verify_recreate) == int(recreate), why
 
 
 @pytest.mark.unit
-def test_positive_control_an_unresolvable_container_is_still_recreated(
+def test_an_unresolvable_container_fails_without_recreation(
     fake_bin: Path,
 ) -> None:
     lane = _StartingLane(
@@ -289,20 +302,17 @@ def test_positive_control_an_unresolvable_container_is_still_recreated(
     )
 
     with patch("deploy_agent.executor._run", side_effect=lane):
-        DeployExecutor().verify(on_phase_update=_noop_phase_update)
+        with pytest.raises(VerificationFailedError):
+            DeployExecutor().verify(on_phase_update=_noop_phase_update)
 
-    assert _recreated_services(lane.cmds) == ["omninode-runtime"]
+    assert _recreated_services(lane.cmds) == []
 
 
 @pytest.mark.unit
-def test_a_start_that_outlives_its_declared_budget_is_recreated(
+def test_a_start_that_outlives_its_declared_budget_fails_without_recreation(
     fake_bin: Path,
 ) -> None:
-    """Bounded: a runtime starting forever is recreated once the budget is spent.
-
-    A 50 s budget (30 s start period + 1 x (10 s + 10 s)) at the 10 s poll is
-    five probes; the sixth is the recreate's own re-probe.
-    """
+    """A spent budget fails the job; Docker starting is not permission to recreate."""
     lane = _StartingLane(
         fake_bin=fake_bin,
         runtime_fails=None,
@@ -314,15 +324,15 @@ def test_a_start_that_outlives_its_declared_budget_is_recreated(
         with pytest.raises(VerificationFailedError):
             executor.verify(on_phase_update=_noop_phase_update)
 
-    assert _recreated_services(lane.cmds) == ["omninode-runtime"]
+    assert _recreated_services(lane.cmds) == []
     probes_before_recreate = 0
     for cmd in lane.cmds:
         if _is_compose_recreate(cmd):
             break
         if f"http://localhost:{lane.runtime_port}/health" in cmd:
             probes_before_recreate += 1
-    # The first failing probe plus five inside the budget.
-    assert probes_before_recreate == 6
+    # One initial probe plus eight with backoff, ending at the 50 s deadline.
+    assert probes_before_recreate == 9
 
 
 @pytest.mark.unit

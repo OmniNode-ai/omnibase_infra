@@ -1,0 +1,63 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21288
+title: "Projection writers, event consumers and effect processes run as nodes inside the one runtime container"
+summary: >-
+  Lands the stack check for the ruling that no container runs a single projection and no separate container runs effects, with a shrink-only list of the fourteen dev-stack services that still run outside the runtime container. The check is delivered; moving those services into the runtime is not, and AC2's end state (a dev stack that holds only the runtime and its backing services) is left.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21288-ac1-stack-check
+    statement: "A stack check refuses a dev-stack service that runs a projection writer, consumer or effects process outside the runtime container."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: a stack check refuses a dev-stack service that runs a projection writer, consumer or effects process outside the runtime container -- falsifier: pytest of the check over a fixture compose file
+  - id: req-omn21288-ac2-dev-stack
+    statement: "The same check runs over the real dev compose files; the services still outside the runtime are a shrink-only list."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: the dev stack definition holds only the runtime and its backing services -- falsifier: the same pytest run over the real dev compose file
+evidence_requirements:
+  - kind: tests
+    description: "The stack check over the fixture compose files and over the real dev stack."
+    command: |-
+      uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21288-ac1-fixture-refusal
+    description: >-
+      Read the dev-stack-runtime-only hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/omn21288/stack_separate_workloads.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21288-ac2-real-dev-stack
+    description: >-
+      Run the registered hook's entry after requiring its files pattern to match the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the fourteen listed services still run outside the runtime container.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21288-hosted-stack-deploy-check
+    description: >-
+      Hosted-runner deployment-definition check: run the registered hook's entry after requiring its files pattern to match the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the fourteen remaining services into the runtime.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+context:
+  remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

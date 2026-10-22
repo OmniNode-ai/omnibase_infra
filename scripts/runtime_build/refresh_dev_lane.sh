@@ -69,7 +69,8 @@
 #      the lane label. The census's own drift code, passed through unchanged.
 #   4/5 the closing census could not run (inventory unobservable / host
 #      undeclared); the census's own codes, passed through unchanged.
-#   64 usage / precondition error
+#   64 usage / precondition error, including a --ref whose commit is not
+#      contained in origin/dev (OMN-21272; refused before the lane lock)
 
 set -euo pipefail
 
@@ -358,6 +359,42 @@ if [[ -n "${OMNIBASE_INFRA_COMPOSE_PROJECT:-}" && "${OMNIBASE_INFRA_COMPOSE_PROJ
     err "OMNIBASE_INFRA_COMPOSE_PROJECT='${OMNIBASE_INFRA_COMPOSE_PROJECT}' is set but this script"
     err "  ONLY drives '${COMPOSE_PROJECT}' (dev). Unset it before calling this script."
     exit 64
+fi
+
+# --- the ref must be on dev (OMN-21272) -------------------------------------
+# This script drives ONLY the dev compose project, so it deploys only what dev
+# carries. On 2026-10-21 a `--ref 30baa7158ea2` -- a feature-branch merge commit
+# not on dev -- held the dev lane lock from 10:51:31Z; the deploy agent's job for
+# the next dev merge ended lane_lock_contended, and the guard wrote a FAIL about
+# a deploy that never happened. A --ref whose commit is not contained in
+# origin/dev is refused HERE, in every mode and before the lane lock is taken,
+# so it never holds the lane window. The fetch is the same one the refresh makes
+# below; it only moves remote-tracking refs.
+if [[ "${CENSUS_ONLY}" != true && "${MODE}" != "print-rollback-cmd" ]]; then
+    REF_GUARD_CLONE="${OMNI_HOME}/omnibase_infra"
+    if [[ ! -d "${REF_GUARD_CLONE}/.git" ]]; then
+        err "Expected clone not found: ${REF_GUARD_CLONE} (needed to check --ref is on dev)."
+        exit 64
+    fi
+    ref_guard_git() { git -c "safe.directory=${REF_GUARD_CLONE}" -C "${REF_GUARD_CLONE}" "$@"; }
+    if ! ref_guard_git fetch origin --prune; then
+        err "could not fetch origin in ${REF_GUARD_CLONE}; cannot check --ref '${REF}' is on dev."
+        err "  Nothing was locked, read, built or recreated."
+        exit 64
+    fi
+    if ! REF_GUARD_SHA="$(ref_guard_git rev-parse --verify --quiet "${REF}^{commit}")"; then
+        err "REF_NOT_ON_DEV: --ref '${REF}' does not resolve to a commit in ${REF_GUARD_CLONE}."
+        err "  Nothing was locked, read, built or recreated."
+        exit 64
+    fi
+    if ! ref_guard_git merge-base --is-ancestor "${REF_GUARD_SHA}" origin/dev; then
+        err "REF_NOT_ON_DEV: --ref '${REF}' (${REF_GUARD_SHA}) is not contained in origin/dev."
+        err "  This script drives only the dev lane, which deploys only what dev carries;"
+        err "  refusing before the lane lock so this ref never holds the lane (OMN-21272)."
+        err "  Nothing was locked, read, built or recreated."
+        exit 64
+    fi
+    log "--ref '${REF}' (${REF_GUARD_SHA:0:12}) is contained in origin/dev"
 fi
 
 # --- the closing lane census (OMN-20876) -----------------------------------
