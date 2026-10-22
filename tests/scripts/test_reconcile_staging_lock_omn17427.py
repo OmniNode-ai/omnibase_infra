@@ -12,6 +12,8 @@ the first.
 
 from __future__ import annotations
 
+import os
+import signal
 import socket
 import subprocess
 import sys
@@ -49,7 +51,10 @@ def test_a_live_holder_makes_a_second_run_refuse_without_touching_staging(
     staging.mkdir()
     sentinel = staging / "half-copied-by-the-other-run"
     sentinel.write_text("x", encoding="utf-8")
-    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+    )
     try:
         lock = _lock_for(staging)
         record = _record(holder.pid, socket.gethostname())
@@ -64,14 +69,14 @@ def test_a_live_holder_makes_a_second_run_refuse_without_touching_staging(
             "the refused run released a lock it did not hold"
         )
     finally:
-        holder.kill()
+        os.killpg(holder.pid, signal.SIGKILL)
         holder.wait()
 
 
 def test_a_holder_on_another_host_is_never_reclaimed(workspace: _Workspace) -> None:
     staging = _drift_the_interpreter(workspace)
     lock = _lock_for(staging)
-    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
     gone.wait()
     record = _record(gone.pid, "some-other-host.invalid")
     lock.symlink_to(record)
@@ -86,7 +91,7 @@ def test_a_dead_holder_is_reclaimed_and_the_run_proceeds(
     workspace: _Workspace,
 ) -> None:
     staging = _drift_the_interpreter(workspace)
-    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
     gone.wait()
     _lock_for(staging).symlink_to(_record(gone.pid, socket.gethostname()))
 
