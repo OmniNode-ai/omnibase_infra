@@ -54,7 +54,7 @@ requirements:
     statement: Dispatch parity must pin both the declared OCC development corpus and the retired OCC corpus without changing any executable selection oracle.
     acceptance:
       - id: AC11
-        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 152-contract retired inventory, both sharing all 1090 probes, 126 dispatchers and 110 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
+        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 152-contract retired inventory, both sharing all 1093 probes, 127 dispatchers and 111 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
   - id: req-occ-residual-s6-infra
     statement: omnibase_infra's branch-protection audit workflow and deploy-scope pre-push hook must read no onex_change_control, and the two scripts that ran out of a change-control clone with no caller must be gone.
     acceptance:
@@ -256,9 +256,9 @@ dod_evidence:
               assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 131}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
-              assert len(retired['dispatchers']) == 126
-              assert len(retired['routes']) == 110
-              assert len(retired['probes']) == 1090
+              assert len(retired['dispatchers']) == 127
+              assert len(retired['routes']) == 111
+              assert len(retired['probes']) == 1093
           print('Tracked dispatch parity closure and inventories passed')
           PY
         cwd: ${OMNI_HOME}/omnibase_infra
