@@ -365,6 +365,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
+    # OMN-19988: local_environment was DELETED here by the pin advance to
+    # d25b2beef687, which carries omnimarket's node_projection_local_environment
+    # contract declaring the relation. The expiry module went red naming it.
+    #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access
@@ -388,33 +392,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-19988: the same infra-first window; this repo vendors
-    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation, which lands after this release (the
-    # node's wiring check refuses a contract whose table no release grants). The
-    # source declares access read_write, role local_environment in omnimarket's
-    # scripts/application-relation-ownership.yaml; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
-    # node_projection_local_environment contract merges and the pin advances
-    # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:local_environment",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_local_environment/"
-            "0000_create_local_environment.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="local_environment",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_local_environment/"
-                "0000_create_local_environment.sql"
-            ),
-            access="read_write",
-            role="local_environment",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
