@@ -412,6 +412,11 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-prepr-verify-signal-in-cleanup
+    statement: A pre-PR verify run that receives its first SIGTERM, SIGHUP or SIGINT during the teardown, snap-post, lease take or lease release finishes that step before it exits INTERRUPTED, and its summary names only the cleanup that ran (OMN-20085, the 2026-10-20T15:20Z slot 2 run whose teardown one SIGTERM cut short).
+    acceptance:
+      - id: AC148
+        statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
   - id: req-omn17427-developer-grants-complete-audit
     statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
     acceptance:
@@ -420,8 +425,18 @@ requirements:
   - id: req-omn17427-boot-timeout-explanation
     statement: A timed-out boot wait prints the conditions, pod state, exact-object events and current and previous log tails for each unready Deployment, with full logs in its uploaded diagnostics artifact. Tests use synthetic namespace and broker identifiers.
     acceptance:
-      - id: AC148
-        statement: 'AC148: fake-kubectl tests exercise crash-loop diagnostics, full artifact logs, ReplicaSet events without pods, unreadable kubectl output, selection of only unready Deployments and the uploaded artifact path -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q'
+      - id: AC160
+        statement: 'AC160: fake-kubectl tests exercise crash-loop diagnostics, full artifact logs, ReplicaSet events without pods, unreadable kubectl output, selection of only unready Deployments and the uploaded artifact path -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q'
+  - id: req-omn17427-broker-listener-alarm
+    statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
+    acceptance:
+      - id: AC158
+        statement: 'AC158: broker_listener is ALARM when every bootstrap address refuses, times out or accepts without a Kafka ApiVersions answer, OK when one address answers, and INDETERMINATE for an unresolvable name or a malformed bootstrap -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q'
+  - id: req-omn17427-seed-scan-virtualenv-scope
+    statement: Seed provenance scans repository publishers without descending into nested Python environments identified by pyvenv.cfg, while source publishers and incomplete scans still fail the gate.
+    acceptance:
+      - id: AC159
+        statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -600,6 +615,9 @@ evidence_requirements:
   - kind: tests
     description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
     command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+  - kind: tests
+    description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1971,6 +1989,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac146-verify-signal-in-cleanup
+    description: The verify_signal tests send a real SIGTERM to the test process from a fake transport while the teardown, snap-post, lease release or lease take command runs, and read the fake host's phases and lease and the result file. Five of the new tests fail against the previous module, where the signal raised inside the cleanup step and the summary always said torn down.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn-17427-ac146-verify-signal-deploy-check
+    description: Hosted-runner deploy check -- the verify signal tests over a fake transport; they do not claim a live verify run on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
   - id: dod-omn17427-ac146-complete-developer-grant-audit
     description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
     source: manual
@@ -1995,7 +2031,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC148
+      - AC160
   - id: dod-omn-17427-ac148-boot-timeout-deploy
     description: Hosted-runner deploy check of timeout diagnostics and the workflow artifact destination with fake kubectl responses. Fails if diagnostic fields, log preservation or artifact wiring regress; no live deployment is claimed.
     source: manual
@@ -2004,4 +2040,31 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC148
+      - AC160
+  - id: dod-omn-17427-ac158-broker-listener-alarm
+    description: scripts/lab_alarm.py evaluates a broker_listener condition every run against kafka_bootstrap_servers with a Kafka ApiVersions v0 probe; refused, timed out or unanswered on every address is ALARM, one answering address is OK, an unresolvable or malformed bootstrap is INDETERMINATE.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac158-broker-listener-deploy-check
+    description: Hosted-runner deploy check of the broker_listener condition against local sockets and fake probes; no broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "real_probe or refused"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac159-seed-scan-scope
+    description: Temporary source trees contain marked virtual environments and real source publishers, with positive and negative controls that keep provenance enforcement on repository scripts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC159

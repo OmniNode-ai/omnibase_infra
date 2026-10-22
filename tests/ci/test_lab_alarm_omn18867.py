@@ -921,6 +921,7 @@ def _run(
         canary_reader=lambda repo, workflow, branch, max_age_hours: canary,
         heartbeat_reader=heartbeat
         or _fresh_heartbeat(clock() if clock is not None else None),
+        listener_probe=lambda host, port, *, timeout: None,
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
         ledger_appender=appender if appender is not None else _recording_appender([]),
@@ -2946,6 +2947,7 @@ def _replay_tick(
         effects_reader=_effects_reader(),
         canary_reader=lambda repo, workflow, branch, max_age_hours: (0, CANARY_GREEN),
         heartbeat_reader=_fresh_heartbeat(tick),
+        listener_probe=lambda host, port, *, timeout: None,
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
         ledger_appender=appender,
