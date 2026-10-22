@@ -1,0 +1,1 @@
+Live-contact exception: this merge of dev carries the CI tooling dev already merged in omnibase_infra#5245 unchanged, and this PR's own change only adds one pytest --deselect to the nightly integration job, reaching no new external service, credential or contact surface.

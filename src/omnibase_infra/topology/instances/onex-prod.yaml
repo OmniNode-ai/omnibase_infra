@@ -195,6 +195,13 @@ databases:
             schema: omninode_internal
           - object_type: TABLE
             objects:
+              - lab_job_state
+              - pr_state
+              - work_ledger_rows
+            privileges: [SELECT]
+            schema: omninode_internal
+          - object_type: TABLE
+            objects:
               - generation_events
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
