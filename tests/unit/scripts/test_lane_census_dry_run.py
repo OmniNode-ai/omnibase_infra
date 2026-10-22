@@ -121,7 +121,7 @@ def _run(
 # anything is published), never about which lane it is.
 _LANE = NEUTRAL_LANE
 _LANE_OUTAGE_PS = (
-    "example-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
+    "example-dogfood-postgres\trunning\tUp 2 hours\tpostgres:16"
     f"\tcom.omninode.lane={_LANE}\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
