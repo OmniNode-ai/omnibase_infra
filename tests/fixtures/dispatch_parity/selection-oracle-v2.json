@@ -3272,6 +3272,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68": {
+      "category": "command",
+      "contract_name": "node_ticket_contract_compose_effect",
+      "event_model_module": "omnibase_infra.models.model_ticket_contract_compose_request",
+      "event_model_name": "ModelTicketContractComposeRequest",
+      "handler_id": "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68",
+      "handler_module": "omnibase_infra.handlers.handler_ticket_contract_compose",
+      "handler_name": "HandlerTicketContractCompose",
+      "message_types": [
+        "ModelTicketContractComposeRequest",
+        "onex.cmd.platform.ticket-contract-compose.v1",
+        "platform.ticket-contract-compose"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_topic_migration_executor_effect.HandlerTopicMigrationExecutor.execute_topic_migration_f32e7971": {
       "category": "command",
       "contract_name": "node_topic_migration_executor_effect",
@@ -3601,16 +3617,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 128,
+        "omnibase_infra": 129,
         "onex-change-control": 4
       },
-      "contracts_discovered": 153,
+      "contracts_discovered": 154,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 94,
-      "probe_count": 1090,
-      "registered_dispatchers": 126,
-      "registered_routes": 110,
-      "type_scoped_dispatchers": 73
+      "distinct_subscribe_topics": 95,
+      "probe_count": 1093,
+      "registered_dispatchers": 127,
+      "registered_routes": 111,
+      "type_scoped_dispatchers": 74
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -4283,6 +4299,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P1a::onex.cmd.platform.ticket-contract-compose.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.ticket-contract-compose",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "command",
+        "message_type": "platform.ticket-contract-compose",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.platform.ticket-contract-compose.v1"
     },
     "P1a::onex.cmd.platform.topic-catalog-query.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5717,6 +5748,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.platform.request-introspection.v1"
+    },
+    "P1b::onex.cmd.platform.ticket-contract-compose.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.platform.ticket-contract-compose.v1"
     },
     "P1b::onex.cmd.platform.topic-catalog-query.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -23904,6 +23950,26 @@
       },
       "topic": "onex.cmd.skill.scope-check.v1"
     },
+    "P4::dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68::onex.cmd.platform.ticket-contract-compose.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68",
+      "event_model": "omnibase_infra.models.model_ticket_contract_compose_request.ModelTicketContractComposeRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.ticket-contract-compose",
+        "payload": "ModelTicketContractComposeRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.ticket-contract-compose",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.ticket-contract-compose.v1"
+    },
     "P4::dispatcher.auto.node_topic_migration_projection.HandlerTopicMigrationProjection::onex.evt.omnibase-infra.topic-migration-lifecycle.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_topic_migration_projection.HandlerTopicMigrationProjection",
@@ -25510,6 +25576,16 @@
       "route_id": "route.auto.node_scope_workflow_orchestrator.HandlerScopeCheckInitiate.onex_cmd_skill_scope_check_v1",
       "topic": "onex.cmd.skill.scope-check.v1",
       "topic_pattern": "*.cmd.skill.scope-check.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_ticket_contract_compose_effect",
+      "dispatcher_id": "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68",
+      "handler_id": "dispatcher.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68",
+      "message_category": "command",
+      "route_id": "route.auto.node_ticket_contract_compose_effect.HandlerTicketContractCompose.ticket_contract_compose_27679e68.onex_cmd_platform_ticket_contract_compose_v1",
+      "topic": "onex.cmd.platform.ticket-contract-compose.v1",
+      "topic_pattern": "*.cmd.platform.ticket-contract-compose.*",
       "type_scoped": true
     },
     {
