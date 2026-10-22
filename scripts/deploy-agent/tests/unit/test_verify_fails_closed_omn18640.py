@@ -139,7 +139,18 @@ class _Lane:
         self, cmd: list[str], timeout: int, **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         self.cmds.append(list(cmd))
+        if cmd[0] == "bash":
+            return _completed(
+                cmd,
+                stdout={
+                    "runtime_health_budget_seconds": "2000",
+                    "runtime_started_at": "t0",
+                    "runtime_health_state": "unhealthy",
+                }.get(cmd[5], ""),
+            )
         if cmd[:2] == ["docker", "ps"]:
+            if any("label=com.docker.compose.service=" in arg for arg in cmd):
+                return _completed(cmd, stdout="unhealthy-container\n")
             if "health=unhealthy" in cmd:
                 return _completed(cmd, stdout=self.unhealthy_containers)
             return _completed(cmd)

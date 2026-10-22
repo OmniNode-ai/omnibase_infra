@@ -37,6 +37,7 @@ from deploy_agent.build_budget import (
 )
 from deploy_agent.compose_budget import (
     ModelPhaseBudget,
+    derive_runtime_health_budget,
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
@@ -74,7 +75,6 @@ from deploy_agent.gateway_budget import (
 )
 from deploy_agent.host_conditions import probe_host_conditions
 from deploy_agent.instance_lanes import (
-    LANE_MIRROR_CREDENTIAL_MAP_KEY,
     ModelInstanceLane,
     ModelLaneMirrorRequest,
     handle_lane_mirror,
@@ -161,15 +161,6 @@ COMPOSE_PROJECT = "omnibase-infra"
 # each bounded well under the phase it precedes.
 CONFIG_HASH_TIMEOUT_SECONDS = 60
 RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
-# OMN-18572. The operator-env keys THIS FLEET rewrites between agent restarts,
-# and therefore the only ones ``_compose_env`` re-reads from disk per job rather
-# than trusting the process snapshot systemd resolved at unit start. See
-# ``_repointed_pin_env`` for why the set is narrow and why widening it is a
-# deliberate act. ``ONEX_CLOUD_MIGRATE_IMAGE`` has the same shape and is one
-# entry away, but its delivery is OMN-18475's in-flight work and is not taken
-# here -- two lanes writing the same seam is how a fix lands twice and neither
-# half is attributable.
-OPERATOR_REPOINTED_PIN_KEYS: tuple[str, ...] = ("ONEX_API_IMAGE",)
 #: The governed repoint the agent shells out to, resolved against the deploy
 #: clone rather than written out a second time.
 REPOINT_ONEX_API_SCRIPT = (
@@ -366,7 +357,7 @@ VERIFY_RECREATE_LANES: frozenset[EnumRuntimeLane] = frozenset({EnumRuntimeLane.D
 VERIFY_RECREATE_TIMEOUT_SECONDS = 300
 
 # How often the readiness poll re-probes after the recreate. The wait it is
-# bounded by is DERIVED from the compose model (``runtime_compose_up_budget``),
+# bounded by is DERIVED from the target's own compose healthcheck,
 # never a constant -- a recreated runtime on this lane was measured binding
 # :8085 at t+321s, so a single immediate re-probe would be a vacuous control
 # that always reported the remedy had failed.
@@ -1304,59 +1295,274 @@ def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
     return _load_dotenv_file(env_path)
 
 
-def _operator_env_file() -> Path | None:
+# OMN-18475. Read the operator env store again whenever it changes, not only at
+# agent start.
+#
+# WHY
+# ---
+#
+# ``deploy/deploy-agent-launch.sh`` bash-``source``s the operator env store
+# (``DEPLOY_AGENT_ENV_FILE``) once, then execs the agent, so the process
+# environment is the store as it was when the unit started. ``_compose_env``
+# copied that environment into every compose command, and a value the operator or
+# a lane added to the store afterwards never reached a container until someone
+# restarted the agent by hand. Measured on the compose dev lane, 2026-10-21:
+# ``ESTIMATOR_FERNET_KEY`` was added at about 20:25Z, and the agent's ``onex-api``
+# recreates at 21:52Z and 23:33Z both brought the container up with the key empty
+# (the estimator answered 503 at 22:38Z). A change of ``ONEX_CLOUD_MIGRATE_IMAGE``
+# at 22:48Z needed the same restart, and the graceful stop took 42 minutes to drain
+# because the agent is rarely idle. OMN-18572 had fixed one key of this shape,
+# ``ONEX_API_IMAGE``, by re-reading that key alone; every other key kept the defect.
+#
+# WHAT
+# ----
+#
+# :func:`operator_store_overlay` returns the values the store assigns, decoded by
+# the launcher's own decoder: ``bash`` sourcing the file under ``set -a``, exactly
+# as the launcher does. The earlier narrow re-read existed because a second parser
+# could decode a credential differently from the launcher (the OMN-18073 ANSI-C
+# case). Using bash itself removes that difference, so the whole store can be
+# re-read without changing how any value is decoded.
+#
+# The names in ``DEPLOY_AGENT_ENV_PROTECTED`` are left out of the overlay, as the
+# launcher restores them after its own source: the unit owns those names, and a
+# store that also sets one (the dev lane's store sets ``KAFKA_ENVIRONMENT=local``)
+# must not relabel the lane.
+#
+# The decode runs only when the store's identity (device, inode, size, mtime)
+# changes, so a compose command pays one ``stat`` and nothing else between edits.
+#
+# WHAT IS NOT CLAIMED
+# -------------------
+#
+# A name DELETED from the store keeps its start-time value until the agent
+# restarts. The overlay can say what the store assigns now; it cannot tell a name
+# the store dropped from a name the unit or the host set.
+#
+# FAILURE
+# -------
+#
+# Fails open, as the OMN-18572 re-read did: a store that is missing, unreadable or
+# fails to source yields the last overlay that did decode (or nothing), the
+# process values stand, and a warning names the file and the reason, never a
+# value. The agent's ability to deploy must not depend on the store parsing at
+# every instant, for example halfway through an operator's edit.
+
+#: The operator env store the launcher sourced. Declared on the unit and
+#: protected, so it names the same file for the life of the process.
+ENV_OPERATOR_ENV_STORE = "DEPLOY_AGENT_ENV_FILE"
+#: The names the unit owns, which the launcher restores after sourcing the store.
+ENV_OPERATOR_STORE_PROTECTED = "DEPLOY_AGENT_ENV_PROTECTED"
+
+#: Bound on one decode. A store is a few hundred lines of assignments.
+OPERATOR_STORE_DECODE_TIMEOUT_SECONDS = 30
+
+#: Marks the two environment dumps in the decoder's stdout, so anything the
+#: store itself prints cannot be mistaken for one.
+_OPERATOR_STORE_DUMP_MARKER = "__OMN18475_ENV__"
+_OPERATOR_STORE_DUMP_CODE = (
+    "import json, os, sys; "
+    f"sys.stdout.write({_OPERATOR_STORE_DUMP_MARKER!r} + json.dumps(dict(os.environ)) + chr(10))"
+)
+#: The launcher's decode, with a dump of the environment before and after the
+#: source. ``set -e`` and ``pipefail`` stay armed and ``-u`` stays off, as in the
+#: launcher, so a store the launcher would refuse is refused here too. The
+#: trailing ``:`` keeps the second dump from being the last command: bash execs
+#: a ``-c`` script's last command in place and changes ``SHLVL`` as it does, so
+#: the two dumps would differ by a name the store never set.
+_OPERATOR_STORE_DECODE_SCRIPT = (
+    'set -eo pipefail; "$2" -c "$3"; set -a; . "$1"; set +a; "$2" -c "$3"; :'
+)
+
+
+class OperatorEnvDecodeError(RuntimeError):
+    """The store could not be sourced. The message carries no value."""
+
+
+class ModelOperatorStoreIdentity(BaseModel):
+    """What changes when the store is edited or replaced."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+
+
+class _OperatorStoreCache:
+    """The last store identity decoded and what it assigned."""
+
+    path: Path | None = None
+    identity: ModelOperatorStoreIdentity | None = None
+    assigned: dict[str, str] = {}
+
+
+def operator_env_file(environ: Mapping[str, str] | None = None) -> Path | None:
     """The operator env store this agent was launched against, or ``None``.
 
-    ``DEPLOY_AGENT_ENV_FILE`` is declared on the unit and is one of the
-    protected names the launcher refuses to let the store itself override, so
-    it names the same file for the life of the process. There is no default
-    (rule 8): a guessed path would silently read some other machine's file.
+    There is no default (rule 8): a guessed path would read some other
+    machine's file.
     """
-    declared = os.environ.get("DEPLOY_AGENT_ENV_FILE", "").strip()
+    source = os.environ if environ is None else environ
+    declared = source.get(ENV_OPERATOR_ENV_STORE, "").strip()
     return Path(declared) if declared else None
 
 
-def _repointed_pin_env() -> dict[str, str]:
-    """Re-read the pins that are REPOINTED on the host between agent restarts.
+def operator_store_protected_names(environ: Mapping[str, str]) -> frozenset[str]:
+    """The names the unit declared and the store may not override."""
+    return frozenset(environ.get(ENV_OPERATOR_STORE_PROTECTED, "").split())
 
-    OMN-18572. ``deploy-agent-dev.service`` resolves the operator env store once,
-    when systemd starts the process, so ``_compose_env``'s ``dict(os.environ)``
-    re-copies a snapshot frozen at that moment. Every other value in that file is
-    operator-held and changes on the operator's own cadence, which the restart
-    boundary is a perfectly good clock for. ``ONEX_API_IMAGE`` is different: it is
-    rewritten BY THIS FLEET, by ``scripts/runtime_build/repoint_dev_lane_onex_api.py``,
-    between jobs -- and a pin the writer advanced while the reader holds a stale
-    copy is the 11:26Z recreate of 2026-09-17, where the agent faithfully brought
-    up ``onex-api`` on the pin that had been replaced eight minutes earlier.
 
-    Deliberately NARROW. Overlaying the whole file would fix the same symptom and
-    change every other value the deploy runs with, including credentials the
-    launcher decoded differently from the way this parser would -- a far larger
-    blast radius than the defect. ``OPERATOR_REPOINTED_PIN_KEYS`` is the list of
-    keys this fleet itself writes, and adding one is a deliberate act.
+def _operator_store_identity(path: Path) -> ModelOperatorStoreIdentity:
+    """The store's identity; raises ``OSError`` when it cannot be read."""
+    st = path.stat()
+    return ModelOperatorStoreIdentity(
+        device=st.st_dev, inode=st.st_ino, size=st.st_size, mtime_ns=st.st_mtime_ns
+    )
 
-    Fails OPEN, by design and only here: an absent or unreadable store yields an
-    empty mapping and the process value stands. The agent's ability to deploy at
-    all must not depend on a file that exists on one host.
+
+def decode_operator_env_store(
+    path: Path, *, base_env: Mapping[str, str]
+) -> dict[str, str]:
+    """Every name the store assigns, with the value bash ``source`` gives it.
+
+    ``base_env`` is the environment the source runs in, as the launcher's ran in
+    the unit's, so a store line that refers to another variable resolves the
+    same way. A name counts as assigned when its value after the source differs
+    from its value before, which also leaves out what the shell sets itself.
     """
-    path = _operator_env_file()
+    env = dict(base_env)
+    # A non-interactive bash sources $BASH_ENV first; the store is the only file
+    # this decode may read.
+    env.pop("BASH_ENV", None)
+    try:
+        completed = subprocess.run(
+            [
+                "bash",
+                "--noprofile",
+                "--norc",
+                "-c",
+                _OPERATOR_STORE_DECODE_SCRIPT,
+                "operator-env-decode",
+                str(path),
+                sys.executable,
+                _OPERATOR_STORE_DUMP_CODE,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=OPERATOR_STORE_DECODE_TIMEOUT_SECONDS,
+            env=env,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OperatorEnvDecodeError(
+            f"sourcing {path} did not finish: {type(exc).__name__}"
+        ) from exc
+    if completed.returncode != 0:
+        raise OperatorEnvDecodeError(f"sourcing {path} exited {completed.returncode}")
+    dumps = [
+        line[len(_OPERATOR_STORE_DUMP_MARKER) :]
+        for line in completed.stdout.splitlines()
+        if line.startswith(_OPERATOR_STORE_DUMP_MARKER)
+    ]
+    if len(dumps) != 2:
+        raise OperatorEnvDecodeError(
+            f"sourcing {path} produced {len(dumps)} environment dump(s), not 2"
+        )
+    try:
+        before, after = (json.loads(dump) for dump in dumps)
+    except ValueError as exc:
+        raise OperatorEnvDecodeError(
+            f"sourcing {path} produced an unreadable environment dump"
+        ) from exc
+    return {
+        str(name): str(value)
+        for name, value in after.items()
+        if before.get(name) != value
+    }
+
+
+def operator_store_overlay(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The store's current values for every name the unit does not own.
+
+    ``_compose_env`` applies this over the process environment for every compose
+    command, so a value changed in the store reaches the next command the agent
+    runs, with no restart. Only a process the launcher started reads it: both
+    ``DEPLOY_AGENT_ENV_FILE`` and ``DEPLOY_AGENT_ENV_PROTECTED`` must be set. A
+    process with a store but no protected list would let the store relabel names
+    the unit owns, so it reads nothing and says so.
+    """
+    source = os.environ if environ is None else environ
+    path = operator_env_file(source)
     if path is None:
         return {}
-    try:
-        stored = _load_dotenv_file(path)
-    except OSError as exc:
+    protected = operator_store_protected_names(source)
+    if not protected:
         logger.warning(
-            "operator env store %s could not be read for the repointed pins "
-            "(%s); the process environment's values stand",
+            "operator env store %s is declared without %s, so it is not read "
+            "again; the process environment's values stand (OMN-18475)",
             path,
-            exc,
+            ENV_OPERATOR_STORE_PROTECTED,
         )
         return {}
-    return {
-        key: value
-        for key, value in stored.items()
-        if key in OPERATOR_REPOINTED_PIN_KEYS and value
-    }
+    assigned = _operator_store_assigned(path, source)
+    return {name: value for name, value in assigned.items() if name not in protected}
+
+
+def _operator_store_assigned(path: Path, environ: Mapping[str, str]) -> dict[str, str]:
+    """The cached decode when the store is unchanged, else a fresh one."""
+    try:
+        identity = _operator_store_identity(path)
+    except OSError as exc:
+        logger.warning(
+            "operator env store %s could not be read (%s); the process "
+            "environment's values stand (OMN-18475)",
+            path,
+            type(exc).__name__,
+        )
+        return _operator_store_last_good(path)
+    if _OperatorStoreCache.path == path and _OperatorStoreCache.identity == identity:
+        return _OperatorStoreCache.assigned
+    try:
+        assigned = decode_operator_env_store(path, base_env=environ)
+    except OperatorEnvDecodeError as exc:
+        logger.warning(
+            "operator env store re-read refused: %s; keeping the last values "
+            "that decoded (OMN-18475)",
+            exc,
+        )
+        return _operator_store_last_good(path)
+    protected = operator_store_protected_names(environ)
+    changed = sorted(
+        name
+        for name, value in assigned.items()
+        if name not in protected and environ.get(name) != value
+    )
+    logger.info(
+        "operator env store %s read again (OMN-18475): it sets %d name(s) "
+        "differently from this process, %d of them not owned by the unit and "
+        "applied to compose commands%s",
+        path,
+        len(assigned),
+        len(changed),
+        f": {', '.join(changed)}" if changed else "",
+    )
+    _OperatorStoreCache.path = path
+    _OperatorStoreCache.identity = identity
+    _OperatorStoreCache.assigned = assigned
+    return assigned
+
+
+def _operator_store_last_good(path: Path) -> dict[str, str]:
+    return _OperatorStoreCache.assigned if _OperatorStoreCache.path == path else {}
+
+
+def reset_operator_store_cache() -> None:
+    """Forget the cached decode. For tests, which write many stores per process."""
+    _OperatorStoreCache.path = None
+    _OperatorStoreCache.identity = None
+    _OperatorStoreCache.assigned = {}
 
 
 class _LaneOverlayClone:
@@ -1529,8 +1735,9 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
         "the operator env store: write the value as a real multi-line "
         'double-quoted entry (VAR="<line>\\n<line>\\n") -- the one shape both '
         "bash `source` and systemd's EnvironmentFile decode identically -- "
-        "then restart this unit so it re-reads the file. No value is printed "
-        "by this guard."
+        "and the agent reads the store again at its next compose command "
+        "(OMN-18475); a value that reached the process at unit start needs a "
+        "restart of this unit. No value is printed by this guard."
     )
 
 
@@ -1581,6 +1788,13 @@ def resolve_lane_overlay_dir(
 
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
+    # OMN-18475: `update`, not `setdefault`. The process environment is the
+    # operator store as the launcher sourced it at unit start; the overlay is the
+    # store as it is now, decoded by the same bash source and without the names
+    # the unit owns, so a value added or changed since start reaches this
+    # command with no restart. Applied first, as the launcher applies the store
+    # before anything below reads the environment.
+    env.update(operator_store_overlay())
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
     # OMN-20932: resolve the private lane-overlay directory every lane compose
@@ -1590,10 +1804,6 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
         env.pop(LANE_OVERLAY_DIR_ENV, None)
     else:
         env[LANE_OVERLAY_DIR_ENV] = lane_overlay_dir
-    # OMN-18572: `update`, not `setdefault`. The process environment ALREADY
-    # carries a value for these keys -- a stale one, resolved at unit start --
-    # so a setdefault would read as wired and change nothing.
-    env.update(_repointed_pin_env())
     # OMN-20867: `update`, not `setdefault`. The lane's own fragment in the
     # private deployment overlay is the source for the keys it sets, over any
     # value the operator store holds for them; a key it leaves out keeps
@@ -2002,6 +2212,159 @@ def finish_recreate_renames(lane: EnumRuntimeLane) -> list[str]:
     return renamed
 
 
+#: OMN-18475: dockerd's refusal to remove a container another removal already
+#: holds. Measured on the lab dev lane 2026-10-22T01:00:04Z, job 77dcfaf4: the
+#: forward-migration recreate timed out at 300 s under load1 48 on 32 cores,
+#: the cleanup's ``docker rm -f`` of the Created leftover timed out at 60 s while
+#: dockerd kept removing it, and the retry, issued at once, asked compose to
+#: recreate from that same container: ``removal of container 5da809605ebd... is
+#: already in progress``. The job failed and left a Dead and a Created
+#: forward-migration container behind.
+REMOVAL_IN_PROGRESS = "is already in progress"
+#: How long a settle waits for dockerd to finish the removals it has started.
+#: Above the 60 s cleanup bound that measured removal outlived.
+CONTAINER_REMOVAL_WAIT_SECONDS = 300
+CONTAINER_REMOVAL_POLL_SECONDS = 5
+
+
+def _removal_wait_sleep(seconds: float) -> None:
+    """Sleep between removal polls. A seam, so a test drives the real loop."""
+    time.sleep(seconds)
+
+
+class ModelServiceSettle(BaseModel):
+    """What one settle of a lane's services removed and what it left removing."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    removed: list[str]
+    still_removing: list[str]
+
+
+def settle_service_containers(
+    lane: EnumRuntimeLane,
+    services: Sequence[str],
+    *,
+    wait_seconds: float = CONTAINER_REMOVAL_WAIT_SECONDS,
+) -> ModelServiceSettle:
+    """Wait out this lane's in-flight removals of ``services``; remove what is dead.
+
+    OMN-18475. Scoped by the lane's compose project label and the compose
+    service label. Three container shapes are handled and nothing else is
+    touched:
+
+    * ``removing``: dockerd is still removing it; wait, up to ``wait_seconds``.
+      A recreate that starts now asks compose to remove it again and fails.
+    * ``dead``: a removal that failed. It can never run again, so removing it
+      loses nothing.
+    * ``created`` under the recreate's temporary name: never ran (OMN-20864).
+
+    Every lane mutation that reaches here runs under the lane lock, so no other
+    compose command owns these containers. A listing that cannot be read is a
+    warning and an empty result: the recreate that follows reports what it finds.
+    """
+    project = lane_config_for(lane).compose_project
+    wanted = set(services)
+    deadline = time.monotonic() + wait_seconds
+    removed: list[str] = []
+    while True:
+        try:
+            listed = _run(
+                [
+                    "docker",
+                    "ps",
+                    "-a",
+                    "--filter",
+                    f"label=com.docker.compose.project={project}",
+                    "--format",
+                    "{{.ID}}\t{{.Names}}\t{{.State}}\t"
+                    '{{.Label "com.docker.compose.service"}}',
+                ],
+                timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("settle of %s on %s unread: %s", wanted, project, exc)
+            return ModelServiceSettle(removed=removed, still_removing=[])
+        if listed.returncode != 0:
+            logger.warning(
+                "settle of %s on %s unread: docker ps exited %s: %s",
+                ", ".join(sorted(wanted)),
+                project,
+                listed.returncode,
+                (listed.stderr or listed.stdout).strip()[:200],
+            )
+            return ModelServiceSettle(removed=removed, still_removing=[])
+        removing: list[str] = []
+        for line in listed.stdout.splitlines():
+            fields = line.split("\t")
+            if len(fields) != 4:
+                continue
+            container_id, name, state, service = (field.strip() for field in fields)
+            if service not in wanted:
+                continue
+            state = state.lower()
+            if state == "removing":
+                removing.append(name)
+                continue
+            if state != "dead" and not (
+                state == "created" and RECREATE_TMP_NAME.match(name)
+            ):
+                continue
+            try:
+                result = _run(
+                    ["docker", "rm", "-f", container_id],
+                    timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                # dockerd keeps removing after the client gives up, which is
+                # how the measured race began; the next poll sees it removing.
+                logger.warning("removal of %s (%s) unfinished: %s", name, state, exc)
+                removing.append(name)
+                continue
+            if result.returncode == 0:
+                removed.append(name)
+                logger.warning(
+                    "removed %s container %s (service %s) on %s (OMN-18475)",
+                    state,
+                    name,
+                    service,
+                    project,
+                )
+            elif REMOVAL_IN_PROGRESS in (result.stderr or result.stdout):
+                removing.append(name)
+            else:
+                logger.warning(
+                    "could not remove %s container %s: %s",
+                    state,
+                    name,
+                    (result.stderr or result.stdout).strip()[:200],
+                )
+        if not removing:
+            return ModelServiceSettle(removed=removed, still_removing=[])
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "settle of %s on %s: %s still removing after %ss (OMN-18475)",
+                ", ".join(sorted(wanted)),
+                project,
+                ", ".join(removing),
+                wait_seconds,
+            )
+            return ModelServiceSettle(removed=removed, still_removing=removing)
+        logger.info(
+            "settle of %s on %s: waiting for dockerd to finish removing %s",
+            ", ".join(sorted(wanted)),
+            project,
+            ", ".join(removing),
+        )
+        _removal_wait_sleep(CONTAINER_REMOVAL_POLL_SECONDS)
+
+
+def _hit_removal_race(result: subprocess.CompletedProcess[str]) -> bool:
+    return result.returncode != 0 and REMOVAL_IN_PROGRESS in (
+        f"{result.stderr or ''}{result.stdout or ''}"
+    )
+
+
 def run_compose_recreate(
     argv: list[str],
     *,
@@ -2011,7 +2374,7 @@ def run_compose_recreate(
     env: dict[str, str] | None = None,
     removed: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one compose recreate; on a timeout clean up and retry it ONCE.
+    """Run one compose recreate; on a timeout or a removal race, settle and retry ONCE.
 
     OMN-20864. A recreate killed at its ceiling leaves the new container
     ``Created`` under its temporary name (``RECREATE_TMP_NAME``), and nothing
@@ -2019,15 +2382,28 @@ def run_compose_recreate(
     5h50m. On a timeout the leftover is removed and the command retried once;
     a second timeout is cleaned up the same way and then raised, so the caller
     reports the timeout exactly as before but never leaves the shape behind.
-    The name of every leftover removed is appended to ``removed``, which the
+
+    OMN-18475. The retry waits until dockerd has finished every removal it has
+    started for these services, and removes their Dead containers, before it
+    runs: a retry issued while a removal is still in flight fails with
+    ``REMOVAL_IN_PROGRESS``. An attempt that fails with that error is settled and
+    retried the same way, and the last failing attempt is settled on the way
+    out, so a failure leaves no Dead or Created container for the next job.
+
+    The name of every container removed is appended to ``removed``, which the
     caller passes when it records them; it is filled before a raise as well.
     """
     if removed is None:
         removed = []
+
+    def settle() -> None:
+        removed.extend(settle_service_containers(lane, services).removed)
+
     try:
-        return _run(argv, timeout=timeout, env=env)
+        first = _run(argv, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         removed.extend(remove_recreate_leftovers(lane, services))
+        settle()
         logger.warning(
             "compose recreate of %s timed out at %ss; leftovers removed: %s; "
             "retrying once (OMN-20864)",
@@ -2035,10 +2411,23 @@ def run_compose_recreate(
             timeout,
             removed or "none",
         )
+    else:
+        if first.returncode == 0:
+            return first
+        settle()
+        if not _hit_removal_race(first):
+            return first
+        logger.warning(
+            "compose recreate of %s met a removal still in progress; settled "
+            "(removed: %s) and retrying once (OMN-18475)",
+            ", ".join(services),
+            removed or "none",
+        )
     try:
-        return _run(argv, timeout=timeout, env=env)
+        second = _run(argv, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         removed.extend(remove_recreate_leftovers(lane, services))
+        settle()
         logger.exception(
             "compose recreate of %s timed out twice at %ss; leftovers removed: %s",
             ", ".join(services),
@@ -2046,6 +2435,9 @@ def run_compose_recreate(
             removed or "none",
         )
         raise
+    if second.returncode != 0:
+        settle()
+    return second
 
 
 def _compose_service_states(
@@ -2280,6 +2672,15 @@ def runtime_compose_up_budget(
         lane_config_for(lane).compose_files,
         expected_services,
         margin_seconds=RUNTIME_COMPOSE_UP_MARGIN_SECONDS,
+        floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+    )
+
+
+def runtime_health_probe_budget(lane: EnumRuntimeLane, service: str) -> int:
+    """Read the probed service's own healthcheck, irrespective of dependents."""
+    return derive_runtime_health_budget(
+        lane_config_for(lane).compose_files,
+        service,
         floor_seconds=RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
     )
 
@@ -2787,9 +3188,9 @@ class DeployExecutor:
         the fence excludes it; otherwise the receipt, which never changes the
         job's verdict and is logged at ERROR when it is a failure.
 
-        The credential map path is operator-held. It is re-read from the
-        operator env store on every call, like the repointed pins, so adding
-        it there reaches the next deploy without an agent restart.
+        The credential map path is operator-held. ``_compose_env`` carries the
+        operator env store as it is now (OMN-18475), so adding it there reaches
+        the next deploy without an agent restart.
         """
         clone = _LaneOverlayClone.path
         raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
@@ -2801,11 +3202,6 @@ class DeployExecutor:
         ):
             return None
         env = _compose_env()
-        store = _operator_env_file()
-        if store is not None and store.is_file():
-            declared = _load_dotenv_file(store).get(LANE_MIRROR_CREDENTIAL_MAP_KEY)
-            if declared:
-                env[LANE_MIRROR_CREDENTIAL_MAP_KEY] = declared
         receipt = handle_lane_mirror(
             ModelLaneMirrorRequest(
                 clone=clone,
@@ -2874,7 +3270,7 @@ class DeployExecutor:
         # unit names the lane's own store, and ~/.omnibase/.env there is a
         # workstation file the lane never reads, whose drift must not refuse
         # the lane's deploy.
-        operator_store = _operator_env_file() or Path.home() / ".omnibase" / ".env"
+        operator_store = operator_env_file() or Path.home() / ".omnibase" / ".env"
         fallback_candidates = [
             operator_store,
             Path(REPO_DIR) / ".env",
@@ -3486,7 +3882,7 @@ class DeployExecutor:
                 "recreated": False,
             }
 
-        env_file = _operator_env_file()
+        env_file = operator_env_file()
         if env_file is None:
             return {
                 "result": "SKIPPED",
@@ -6130,7 +6526,9 @@ class DeployExecutor:
             tuple[str, int, ModelHealthCheck, subprocess.TimeoutExpired | None]
         ] = []
         for service, port in lane_config_for(lane).runtime_health_targets:
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             probes.append((service, port, check, timed_out))
 
         settled: list[ModelHealthCheck] = []
@@ -6157,7 +6555,7 @@ class DeployExecutor:
                         check.endpoint,
                     )
                     check, timed_out = self._probe_runtime_health(
-                        service=service, port=port
+                        service=service, port=port, lane=lane
                     )
                     if check.status == "pass":
                         check = check.model_copy(
@@ -6230,7 +6628,7 @@ class DeployExecutor:
         return checks
 
     def _probe_runtime_health(
-        self, *, service: str, port: int
+        self, *, service: str, port: int, lane: EnumRuntimeLane | None = None
     ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
         """Probe one runtime health endpoint, returning the check and any timeout.
 
@@ -6241,12 +6639,14 @@ class DeployExecutor:
         """
         endpoint = f"http://localhost:{port}/health"  # url-authority-ok: see loopback rationale above
         start = time.monotonic()
+        docker_healthy = False
         timed_out: subprocess.TimeoutExpired | None = None
         reason = ""
         try:
             result = _run(
                 [
                     "curl",
+                    "--fail",
                     "-sS",
                     "--max-time",
                     str(RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS),
@@ -6263,6 +6663,24 @@ class DeployExecutor:
             self._last_answering_degraded[port] = None
         else:
             reason = _runtime_health_reason(result)
+            # Docker executes the compose-declared healthcheck, including its
+            # policy and consecutive-failure threshold. A separate JSON
+            # predicate must not label an answering Docker-healthy service
+            # unhealthy. Transport/HTTP failures still need a fresh probe.
+            if (
+                reason
+                and result.returncode == 0
+                and lane is not None
+                and lane in VERIFY_RECREATE_LANES
+            ):
+                container = self._compose_service_container(lane, service)
+                if (
+                    container
+                    and _runtime_health_helper("runtime_health_state", container)
+                    == "healthy"
+                ):
+                    reason = ""
+                    docker_healthy = True
             self._last_answering_degraded[port] = (
                 _answering_degraded(result) if reason else None
             )
@@ -6273,7 +6691,11 @@ class DeployExecutor:
                 endpoint=endpoint,
                 status="fail" if reason else "pass",
                 latency_ms=latency,
-                detail=reason,
+                detail=(
+                    "Docker reports healthy; host probe answered HTTP success"
+                    if docker_healthy
+                    else reason
+                ),
             ),
             timed_out,
         )
@@ -6287,7 +6709,7 @@ class DeployExecutor:
         failed: ModelHealthCheck,
         timed_out: subprocess.TimeoutExpired | None,
     ) -> tuple[ModelHealthCheck, subprocess.TimeoutExpired | None]:
-        """Keep probing a runtime docker still reports ``starting``, within its budget.
+        """Retry a starting or Docker-healthy runtime within its declared budget.
 
         OMN-19374. MEASURED from this agent's journal on the dev lane,
         2026-09-23T22:39Z to 2026-09-24T09:01Z: ten consecutive full deploys
@@ -6300,17 +6722,11 @@ class DeployExecutor:
         from ready, restarted its clock, and swapped the container id under the
         compose-dev receipt's ``probe_generation_bound`` read.
 
-        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, the helpers
-        ``onex-runtime-deploy`` waits on (OMN-18349), so both deploy paths share
-        one budget and one state vocabulary. Waiting continues ONLY while docker
-        reports the container ``starting`` and the helper's own
-        ``runtime_health_keep_waiting`` agrees. Anything else -- unhealthy, not
-        running, restarted since the wait began, no healthcheck, an unreadable
-        container, a spent budget -- returns the failed check unchanged and the
-        caller's single recreate runs exactly as before. That is deliberately
-        narrower than the helper, which also waits on ``healthy``: a container
-        docker calls healthy while its host port stays dead is the OMN-18640
-        wedge, and that one must still reach the recreate without delay.
+        The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, also used by
+        ``onex-runtime-deploy``. Both ``starting`` and ``healthy`` can outlive a
+        failed host probe: retry with backoff inside the declared budget. Any
+        other state or a spent budget returns the failed check. The caller
+        re-reads Docker before allowing a recreate, only for unhealthy/exited.
         """
         container = self._compose_service_container(lane, service)
         if not container:
@@ -6323,7 +6739,13 @@ class DeployExecutor:
             return failed, timed_out
         baseline = _runtime_health_helper("runtime_started_at", container)
 
-        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        # Four extra attempts cover the short exponential-backoff steps before
+        # reaching the poll interval. The deadline also bounds slow probes.
+        attempts = max(
+            1,
+            (budget + VERIFY_RECREATE_POLL_SECONDS - 1) // VERIFY_RECREATE_POLL_SECONDS
+            + 4,
+        )
         started = time.monotonic()
         check = failed
         state = ""
@@ -6335,12 +6757,17 @@ class DeployExecutor:
         for _attempt in range(attempts):
             state = _runtime_health_helper("runtime_health_state", container, baseline)
             elapsed = int(time.monotonic() - started)
-            if state != "starting" or not _runtime_health_helper_ok(
+            if state not in {"starting", "healthy"} or not _runtime_health_helper_ok(
                 "runtime_health_keep_waiting", str(elapsed), str(budget), state
             ):
                 break
-            _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            delay = min(
+                2 ** min(_attempt, 4), VERIFY_RECREATE_POLL_SECONDS, budget - elapsed
+            )
+            _verify_recreate_sleep(delay)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             if check.status == "pass":
                 break
             current = self._last_answering_degraded.get(port)
@@ -6367,11 +6794,12 @@ class DeployExecutor:
         if check.status == "pass":
             logger.info(
                 "%s passed after %ss inside %s's declared %ss start budget "
-                "(docker reported starting); not recreated",
+                "(docker reported %s); not recreated",
                 failed.endpoint,
                 waited,
                 service,
                 budget,
+                state,
             )
             return (
                 check.model_copy(
@@ -6379,7 +6807,7 @@ class DeployExecutor:
                         "detail": (
                             f"passed after waiting {waited}s inside the container's "
                             f"declared {budget}s start budget (docker reported "
-                            f"starting); not recreated (OMN-19374)"
+                            f"{state}); not recreated (OMN-19374)"
                         )
                     }
                 ),
@@ -6408,6 +6836,7 @@ class DeployExecutor:
                 [
                     "docker",
                     "ps",
+                    "--all",
                     "-q",
                     "--no-trunc",
                     "--filter",
@@ -6464,7 +6893,7 @@ class DeployExecutor:
           lane was measured binding :8085 at t+321s, so an immediate re-probe
           would report failure every time -- a vacuous control that would make
           the ``recovered`` outcome unreachable. The wait comes from the
-          compose model via ``runtime_compose_up_budget``, never a constant.
+          service's own compose healthcheck, including its failure tail.
 
         ``timed_out`` is the exception the failing probe raised, or ``None``
         for a probe that answered unhealthy. It is threaded in and handed back
@@ -6472,6 +6901,26 @@ class DeployExecutor:
         failed the job before this change cannot start passing because the
         recreate itself broke.
         """
+        # A host probe is not permission to destroy a running container. Read
+        # Docker again immediately before the destructive remedy: waiting may
+        # have changed its state, and an unreadable state is not evidence.
+        container = self._compose_service_container(lane, service)
+        state = (
+            _runtime_health_helper("runtime_health_state", container)
+            if container
+            else "absent"
+        )
+        exited = (
+            state == "not-running"
+            and _runtime_health_helper("runtime_container_status", container)
+            == "exited"
+        )
+        if state != "unhealthy" and not exited:
+            logger.warning(
+                "%s not recreated: Docker reports %s", service, state or "unreadable"
+            )
+            return failed, timed_out
+        budget = runtime_health_probe_budget(lane, service)
         config = lane_config_for(lane)
         argv = [
             "docker",
@@ -6532,27 +6981,32 @@ class DeployExecutor:
             )
             return failed, timed_out
 
-        budget = runtime_compose_up_budget(lane, [service]).timeout_seconds
         logger.info(
             "%s recreated; re-probing %s for up to %ss",
             service,
             failed.endpoint,
             budget,
         )
-        # The poll is bounded by a COUNT derived from the budget, not by a
-        # wall-clock deadline. The two say the same thing about a real boot,
-        # and the count is the one a test can drive to its end without waiting
-        # out the budget -- a deadline loop with the sleep removed spins for
-        # the whole ten minutes instead.
-        attempts = max(1, budget // VERIFY_RECREATE_POLL_SECONDS)
+        # The deadline includes probe time; the count also bounds tests whose
+        # sleep seam is removed. Include the probe at the budget's boundary.
+        attempts = max(
+            1,
+            (budget + VERIFY_RECREATE_POLL_SECONDS - 1) // VERIFY_RECREATE_POLL_SECONDS
+            + 1,
+        )
         started = time.monotonic()
         check = failed
         for attempt in range(attempts):
-            check, timed_out = self._probe_runtime_health(service=service, port=port)
+            check, timed_out = self._probe_runtime_health(
+                service=service, port=port, lane=lane
+            )
             if check.status == "pass":
                 break
+            remaining = budget - (time.monotonic() - started)
+            if remaining <= 0:
+                break
             if attempt + 1 < attempts:
-                _verify_recreate_sleep(VERIFY_RECREATE_POLL_SECONDS)
+                _verify_recreate_sleep(min(VERIFY_RECREATE_POLL_SECONDS, remaining))
         waited = time.monotonic() - started
         recovered = check.status == "pass"
         self._record_verify_recreate(
