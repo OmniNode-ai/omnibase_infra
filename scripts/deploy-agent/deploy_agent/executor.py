@@ -5449,7 +5449,12 @@ class DeployExecutor:
         )
 
     def _rendered_config_hashes(
-        self, lane: EnumRuntimeLane, services: Sequence[str]
+        self,
+        lane: EnumRuntimeLane,
+        services: Sequence[str],
+        *,
+        profile: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
         """Ask compose for the config hash of each service, as it would render it.
 
@@ -5457,8 +5462,8 @@ class DeployExecutor:
         list and prints `<service> <hash>` per line. This is the same value
         compose writes to the `com.docker.compose.config-hash` label when it
         creates a container, so the two are directly comparable rather than
-        approximately so -- verified equal on all three core services of the
-        .201 dev lane on 2026-09-19.
+        approximately so. ``["*"]`` with a ``profile`` asks for every service
+        that profile would start.
         """
         config = lane_config_for(lane)
         cmd = [
@@ -5467,11 +5472,13 @@ class DeployExecutor:
             *_compose_file_args(lane),
             "-p",
             config.compose_project,
-            "config",
-            "--hash",
-            ",".join(services),
         ]
-        result = _run(cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env())
+        if profile:
+            cmd += ["--profile", profile]
+        cmd += ["config", "--hash", ",".join(services)]
+        result = _run(
+            cmd, timeout=CONFIG_HASH_TIMEOUT_SECONDS, env=_compose_env(extra_env)
+        )
         if result.returncode != 0:
             raise RuntimeError(
                 f"`compose config --hash` exited {result.returncode}: "
@@ -6069,18 +6076,75 @@ class DeployExecutor:
                     detail = f"Docker compose up failed: {compose_up_error}; {detail}"
                 raise RuntimeError(detail)
             logger.info("Recovery succeeded — all containers now running")
-        elif compose_up_error:
-            # The command was killed or exited non-zero, yet every expected
-            # service is running. Stated rather than swallowed: the phase
-            # passes on live state, and VERIFICATION still has to prove health.
+        if compose_up_error:
+            # OMN-17427: "running" is not "converged". A container compose was
+            # about to recreate is still running at its old config, and a
+            # service compose failed to create is not in `expected` at all.
+            # After a killed or non-zero up, the phase passes only when every
+            # service in scope carries the config hash compose renders now.
+            self._require_compose_up_converged(
+                lane=lane,
+                profile=profile,
+                requested_services=requested_services,
+                extra_env=extra_env,
+                compose_up_error=compose_up_error,
+            )
+            # Stated rather than swallowed: VERIFICATION still has to prove health.
             logger.warning(
-                "compose up did not exit cleanly (%s) but every expected "
-                "service is running; phase %s passes on live state",
+                "compose up did not exit cleanly (%s) but every service in "
+                "scope is at its declared configuration; phase %s passes",
                 compose_up_error,
                 phase.value,
             )
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
+
+    def _require_compose_up_converged(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        profile: str,
+        requested_services: list[str],
+        extra_env: Mapping[str, str] | None,
+        compose_up_error: str,
+    ) -> None:
+        """Raise unless every service in the up's scope is at its declared config (OMN-17427).
+
+        Read the way compose itself decides whether to recreate: the
+        ``com.docker.compose.config-hash`` label on the project's container for
+        the service against the hash ``compose config --hash`` renders now,
+        under the same files, project, profile and environment as the up. The
+        scope is the services the up named, or else every service the profile
+        would start. A render or label read that fails fails the phase too: an
+        unknown state is not a converged one.
+        """
+        prefix = f"Docker compose up failed: {compose_up_error[:2000]}"
+        named = _without_disabled_services(list(requested_services), lane)
+        try:
+            rendered = self._rendered_config_hashes(
+                lane,
+                named or ["*"],
+                profile=profile,
+                extra_env=extra_env,
+            )
+            in_scope = named or _without_disabled_services(sorted(rendered), lane)
+            unconverged: list[str] = []
+            for service in in_scope:
+                declared = rendered.get(service, "")
+                running = self._running_config_hash(lane, service)
+                if not declared or running != declared:
+                    unconverged.append(
+                        f"{service} running={running[:12] or 'none'} "
+                        f"declared={declared[:12] or 'none'}"
+                    )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"{prefix}; convergence could not be read: {exc}"
+            ) from exc
+        if unconverged:
+            raise RuntimeError(
+                f"{prefix}; not at declared configuration: {'; '.join(unconverged)}"
+            )
 
     def _running_config_hash(self, lane: EnumRuntimeLane, service: str) -> str:
         """The config hash on ``service``'s container, or ``""`` when it has none.
