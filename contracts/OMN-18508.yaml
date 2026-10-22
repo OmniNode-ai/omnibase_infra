@@ -5,6 +5,13 @@ summary: The compose dev lane applied the omninode_cloud corpus as role_omninode
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18508-ac6-accepted-20261018t2045z:
+      - label: AC6
+        criterion_hash: b8f1ed0b655b545cd280b96405e3346334fad1332f86e70400c09ab9ea2c0580
+        proposed_by: lane=dod-closeout-bind-2026-10-22T1845Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-10-22T1845Z-c3
 requirements:
   - id: req-omn-18508-criteria
     statement: The ticket's labelled acceptance criteria.
