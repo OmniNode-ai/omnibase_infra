@@ -31,6 +31,8 @@
 #       declares none or cannot be inspected.
 #   runtime_started_at <container>
 #       Print the container's State.StartedAt, or nothing if it cannot be read.
+#   runtime_container_status <container>
+#       Print State.Status; a failed inspect returns nonzero.
 #   runtime_health_state <container> [<started_at_baseline>]
 #       Print one of: starting | healthy | unhealthy | no-healthcheck |
 #       not-running | restarted | absent. `restarted` means State.StartedAt no
@@ -65,6 +67,10 @@ runtime_health_budget_seconds() {
 
 runtime_started_at() {
     docker inspect --format '{{.State.StartedAt}}' "$1" 2>/dev/null || true
+}
+
+runtime_container_status() {
+    docker inspect --format '{{.State.Status}}' "$1"
 }
 
 runtime_health_state() {

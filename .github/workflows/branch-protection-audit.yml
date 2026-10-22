@@ -84,6 +84,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # The runs-on fallback is ubuntu-latest (omnibase_infra#5066), which ships no uv.
+      # Without setup, the parity report fails "uv: command not found" (exit 127).
+      # Install uv explicitly for this hosted runner (OMN-17427).
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+
       # The one check the shared audit does not carry. Read-only, no --fix. A
       # non-zero exit fails the job; tests/ci/test_branch_protection_single_auditor.py
       # pins that no audit step is softened into a report.
@@ -99,9 +105,10 @@ jobs:
       # `report` exits 0 with findings (report-then-enforce rollout; the enforcing
       # per-PR gate lands separately), so only a run that cannot complete fails it.
       # NEVER mutates branch protection.
+      # --no-project --with pyyaml installs only the CLI dependency, avoiding project sync.
       - name: Required-context parity report (REPORT-ONLY)
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          uv run python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai
+          uv run --no-project --with pyyaml==6.0.3 python scripts/audit_required_context_parity_cli.py report --owner OmniNode-ai

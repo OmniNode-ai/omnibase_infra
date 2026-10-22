@@ -11,7 +11,7 @@ workspace reset, checkout, and dependency-install writes before finally dying
 with ENOSPC -- so every rejected attempt still burns real disk. The gate this
 file tests makes the hook fail INSTANTLY, before any of those writes, the
 moment free space is below the admission floor -- capping each rejected
-attempt's I/O cost at a single `df` call instead of however many megabytes a
+attempt's I/O cost at a few `df` calls instead of however many megabytes a
 partial checkout/cache-write burns before the kernel actually returns ENOSPC.
 
 These are real-subprocess tests (the same style as
@@ -72,6 +72,7 @@ def _run_hook(
     pause_dir: Path | None = None,
     extra_path: Path | None = None,
     min_free_gb: int = 5,
+    mount_readings: dict[Path, tuple[str, int | str]] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["RUNNER_HOME"] = str(runner_home)
@@ -79,7 +80,12 @@ def _run_hook(
     env["RUNNER_NAME"] = runner_name
     env["RUNNER_DISK_ADMISSION_BACKOFF_N"] = str(backoff_n)
     env["RUNNER_DISK_ADMISSION_MIN_FREE_GB"] = str(min_free_gb)
-    if avail_kb is not None:
+    if mount_readings is not None:
+        env["DISK_ADMISSION_DF_OVERRIDE_KB"] = "\n".join(
+            f"{mount}\t{filesystem}\t{available}"
+            for mount, (filesystem, available) in mount_readings.items()
+        )
+    elif avail_kb is not None:
         env["DISK_ADMISSION_DF_OVERRIDE_KB"] = str(avail_kb)
     else:
         env.pop("DISK_ADMISSION_DF_OVERRIDE_KB", None)
@@ -113,6 +119,167 @@ def test_healthy_disk_proceeds_normally(tmp_path: Path) -> None:
     assert "RUNNER-DISK-ADMISSION" not in result.stdout + result.stderr
     assert workspace.is_dir()
     assert not (workspace / "stale.txt").exists()
+
+
+@pytest.mark.parametrize("short_path", [".", "_work", "_work/_temp"])
+def test_separate_filesystem_below_floor_refuses_job(
+    tmp_path: Path, short_path: str
+) -> None:
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    temp = runner_home / "_work" / "_temp"
+    temp.mkdir()
+    marker = workspace / "stale.txt"
+    marker.write_text("untouched")
+    short_mount = runner_home / short_path
+    readings = {
+        runner_home: ("overlay", FIVE_GB_KB * 10),
+        runner_home / "_work": ("scratch", FIVE_GB_KB * 10),
+        temp: ("temp", FIVE_GB_KB * 10),
+    }
+    readings[short_mount] = ("short", 1024 * 1024)
+
+    result = _run_hook(runner_home, workspace, avail_kb=None, mount_readings=readings)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "::error title=RUNNER-DISK-ADMISSION:" in result.stdout
+    assert f"free on {short_mount} (below" in result.stdout
+    assert marker.read_text() == "untouched"
+
+
+@pytest.mark.parametrize("unreadable_path", [".", "_work", "_work/_temp"])
+def test_one_unreadable_mount_fails_open_and_names_mount(
+    tmp_path: Path, unreadable_path: str
+) -> None:
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    temp = runner_home / "_work" / "_temp"
+    temp.mkdir()
+    marker = workspace / "stale.txt"
+    marker.write_text("reset me")
+    unreadable_mount = runner_home / unreadable_path
+    readings = {
+        runner_home: ("overlay", FIVE_GB_KB * 10),
+        runner_home / "_work": ("scratch", FIVE_GB_KB * 10),
+        temp: ("temp", FIVE_GB_KB * 10),
+    }
+    readings[unreadable_mount] = ("unreadable", "unreadable")
+
+    result = _run_hook(runner_home, workspace, avail_kb=None, mount_readings=readings)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"could not read free space on {unreadable_mount};" in result.stdout
+    assert "gate fails open, job proceeds" in result.stdout
+    assert not marker.exists()
+
+
+def test_unreadable_home_does_not_hide_short_work_filesystem(tmp_path: Path) -> None:
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    work = runner_home / "_work"
+
+    result = _run_hook(
+        runner_home,
+        workspace,
+        avail_kb=None,
+        mount_readings={
+            runner_home: ("overlay", "unreadable"),
+            work: ("scratch", 1024 * 1024),
+        },
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"free on {work} (below" in result.stdout
+    assert f"could not read free space on {runner_home};" in result.stdout
+    assert "job proceeds" not in result.stdout
+
+
+def test_shared_filesystem_uses_lowest_reading_and_counts_one_refusal(
+    tmp_path: Path,
+) -> None:
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    temp = runner_home / "_work" / "_temp"
+    temp.mkdir()
+    result = _run_hook(
+        runner_home,
+        workspace,
+        avail_kb=None,
+        mount_readings={
+            runner_home: ("overlay", FIVE_GB_KB * 10),
+            runner_home / "_work": ("scratch", 1024 * 1024),
+            temp: ("scratch", 2 * 1024 * 1024),
+        },
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"free on {runner_home / '_work'} (below" in result.stdout
+    assert result.stdout.count("::error title=RUNNER-DISK-ADMISSION:") == 1
+    assert (
+        runner_home / ".onex-disk-admission/consecutive_failures"
+    ).read_text() == "1\n"
+
+
+@pytest.mark.parametrize("short_mount", ["_work", "extra"])
+def test_explicit_mount_is_additional_to_required_mounts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, short_mount: str
+) -> None:
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    extra = runner_home / "extra"
+    extra.mkdir()
+    monkeypatch.setenv("RUNNER_DISK_ADMISSION_MOUNT", str(extra))
+    readings = {
+        runner_home: ("overlay", FIVE_GB_KB * 10),
+        runner_home / "_work": ("scratch", FIVE_GB_KB * 10),
+        extra: ("extra", FIVE_GB_KB * 10),
+    }
+    readings[runner_home / short_mount] = ("short", 1024 * 1024)
+
+    result = _run_hook(runner_home, workspace, avail_kb=None, mount_readings=readings)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"free on {runner_home / short_mount} (below" in result.stdout
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_df_reads_actual_write_paths(tmp_path: Path, unreadable: bool) -> None:
+    runner_home = tmp_path / "runner home"
+    workspace = runner_home / "_work" / "repo" / "repo"
+    workspace.mkdir(parents=True)
+    temp = runner_home / "_work" / "_temp"
+    temp.mkdir()
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    calls = tmp_path / "df-calls"
+    (stub_bin / "df").write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$2" >> "{calls}"\n'
+        'printf "Filesystem 1024-blocks Used Available Capacity Mounted on\\n"\n'
+        'case "$2" in\n'
+        f"  */_work) {'exit 1' if unreadable else 'echo /dev/sda1 20000000 19000000 1048576 95% /scratch'} ;;\n"
+        "  *) echo overlay 20000000 1000000 19000000 5% / ;;\n"
+        "esac\n"
+    )
+    (stub_bin / "df").chmod(0o755)
+
+    result = _run_hook(runner_home, workspace, avail_kb=None, extra_path=stub_bin)
+
+    assert result.returncode == (0 if unreadable else 1), result.stdout + result.stderr
+    assert calls.read_text().splitlines() == [
+        str(runner_home),
+        str(runner_home / "_work"),
+        str(temp),
+    ]
+    if unreadable:
+        assert f"could not read free space on {runner_home / '_work'};" in result.stdout
+    else:
+        assert f"free on {runner_home / '_work'} (below" in result.stdout
 
 
 def test_below_floor_fails_instantly_before_any_write(tmp_path: Path) -> None:

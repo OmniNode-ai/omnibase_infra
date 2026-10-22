@@ -9,7 +9,7 @@ deletes by a loose pattern can delete the dev lane's own topics, groups or
 Valkey keys, so every selector here is asserted against listings that carry the
 dev lane's names beside the slot's, and the dev names must survive.
 
-The reaper and the heartbeat lease (the other half of Task 7) are not here.
+The reaper and heartbeat lease are exercised in test_prepr_slot_reaper_omn18896.py.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -556,6 +557,60 @@ def test_plan_only_deletes_nothing(tmp_path: Path) -> None:
     ]
     assert mutating == []
     assert (tmp_path / "slot-1").exists()
+
+
+@pytest.mark.parametrize("settles", [True, False])
+def test_consumer_groups_are_retried_for_one_bounded_session_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, settles: bool
+) -> None:
+    class DrainingHost(FakeHost):
+        attempts = 0
+
+        def __call__(
+            self, argv: list[str], env: dict[str, str] | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            if "rpk" in argv and "group" in argv and "delete" in argv:
+                self.attempts += 1
+                if self.attempts < 3 or not settles:
+                    self.calls.append(argv)
+                    return subprocess.CompletedProcess(
+                        argv, 1, "", "group is still active"
+                    )
+            return super().__call__(argv, env)
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    )
+    host = DrainingHost()
+    code, report = _run(host, tmp_path)
+    assert host.attempts >= 3
+    assert clock[0] <= teardown.GROUP_DRAIN_TIMEOUT_S
+    assert code == (policy.EXIT_OK if settles else policy.EXIT_TEARDOWN_INCOMPLETE)
+    assert report["residue"]["groups"] == (0 if settles else 1)
+    assert {"local.g", "prepr2.g"} <= host.groups
+
+
+def test_group_retry_does_not_treat_an_unreadable_listing_as_empty(
+    tmp_path: Path,
+) -> None:
+    class UnreadableHost(FakeHost):
+        def __call__(
+            self, argv: list[str], env: dict[str, str] | None = None
+        ) -> subprocess.CompletedProcess[str]:
+            if (
+                "rpk" in argv
+                and "group" in argv
+                and "list" in argv
+                and not self.containers[teardown.policy.SLOTS[1].compose_project]
+            ):
+                return subprocess.CompletedProcess(argv, 1, "", "broker unavailable")
+            return super().__call__(argv, env)
+
+    code, report = _run(UnreadableHost(), tmp_path)
+    assert code == policy.EXIT_TEARDOWN_INCOMPLETE
+    assert report["residue"]["groups"] == -1
 
 
 # ---------------------------------------------------------------------------
