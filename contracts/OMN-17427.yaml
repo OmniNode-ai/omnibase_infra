@@ -397,6 +397,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-shared-ticket-contract-composer
+    statement: Repository-side preparation composes independent branch fragments without shared root edits; hosted adoption remains blocked on the external gate owners.
+    acceptance:
+      - id: AC17427001
+        statement: 'Independent branch trees each add one bound criterion under contracts/OMN-17427.d, validate separately, and merge in either order with no textual conflict and no root change; malformed fragments are refused -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q'
   - id: req-omn17427-runner-image-python-source
     statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
     acceptance:
@@ -412,6 +417,16 @@ requirements:
     acceptance:
       - id: AC146
         statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
+  - id: req-omn17427-broker-listener-alarm
+    statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
+    acceptance:
+      - id: AC158
+        statement: 'AC158: broker_listener is ALARM when every bootstrap address refuses, times out or accepts without a Kafka ApiVersions answer, OK when one address answers, and INDETERMINATE for an unresolvable name or a malformed bootstrap -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q'
+  - id: req-omn17427-seed-scan-virtualenv-scope
+    statement: Seed provenance scans repository publishers without descending into nested Python environments identified by pyvenv.cfg, while source publishers and incomplete scans still fail the gate.
+    acceptance:
+      - id: AC159
+        statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -1925,6 +1940,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn17427-shared-ticket-contract-composer
+    description: Two branch trees are merged file by file with Git in both orders, then composed and structurally validated. Legacy root data is preserved and invalid additions fail closed. This is repository-side preparation, not a claim that external hosted gates accept fragments.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427001
+  - id: dod-omn17427-contract-compose-deploy
+    description: Hosted-runner source and routing smoke. Loads the head-side node contract through the explicit contract path, validates the request, dispatches the real filesystem composer over the repository contract and persists its typed terminal verdict. Fails when the node, handler, input model or routing is absent or broken; requires no broker, credentials or running lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=src uv run --frozen onex node node_ticket_contract_compose_effect --contract src/omnibase_infra/nodes/node_ticket_contract_compose_effect/contract.yaml --input tests/ci/fixtures/ticket_contract_compose_request_omn17427.json --backend event_bus=inmemory --state-root .onex_state/ticket-contract-compose-deploy
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427001
   - id: dod-omn-17427-ac146-runner-image-python-source
     description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
     source: manual
@@ -1959,3 +1992,30 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC146]
+  - id: dod-omn-17427-ac158-broker-listener-alarm
+    description: scripts/lab_alarm.py evaluates a broker_listener condition every run against kafka_bootstrap_servers with a Kafka ApiVersions v0 probe; refused, timed out or unanswered on every address is ALARM, one answering address is OK, an unresolvable or malformed bootstrap is INDETERMINATE.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac158-broker-listener-deploy-check
+    description: Hosted-runner deploy check of the broker_listener condition against local sockets and fake probes; no broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "real_probe or refused"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac159-seed-scan-scope
+    description: Temporary source trees contain marked virtual environments and real source publishers, with positive and negative controls that keep provenance enforcement on repository scripts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC159

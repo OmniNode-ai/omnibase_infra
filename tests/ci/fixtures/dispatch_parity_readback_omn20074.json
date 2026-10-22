@@ -1,8 +1,8 @@
 {
   "_provenance": {
-    "captured_utc": "2026-10-20T16:26:01.389825+00:00",
+    "captured_utc": "2026-10-21T19:39:27.996458+00:00",
     "legacy_product_sha": "6c82d7967161a1f4bf98ec3f694d06ed989c63eb",
-    "retired_product_sha": "a201b4321b37c51d74602cd31397bd8782753bec",
+    "retired_product_sha": "194cbfe6c19ef976a6a68f5750330d2375591236",
     "source": "Live MessageDispatchEngine.dispatch snapshots for the declared dependency corpora"
   },
   "legacy": {
@@ -24,13 +24,13 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-10-20T16:26:01.389825+00:00",
+    "captured_utc": "2026-10-21T19:39:27.996458+00:00",
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 131
+        "omnibase_infra": 132
       },
-      "contracts_discovered": 152,
+      "contracts_discovered": 153,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 95,
       "probe_count": 1093,
@@ -38,6 +38,6 @@
       "registered_routes": 111,
       "type_scoped_dispatchers": 74
     },
-    "snapshot_sha256": "e9ee086816e2f08ccbd6539d940afaaf25f2d5c216f41e6a86f8b48754ce5fc5"
+    "snapshot_sha256": "37ca6e80e3b4a7865457ec4504e8c04b7732af5d3dec240432c0471f6e5e26df"
   }
 }

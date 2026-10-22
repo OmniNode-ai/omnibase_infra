@@ -2,15 +2,15 @@
   "corpus": {
     "contracts_by_package": {
       "omnibase_core": 21,
-      "omnibase_infra": 131
+      "omnibase_infra": 132
     },
-    "contracts_discovered": 152,
+    "contracts_discovered": 153,
     "discovery_errors": 0,
-    "distinct_subscribe_topics": 95,
-    "probe_count": 1093,
-    "registered_dispatchers": 127,
-    "registered_routes": 111,
-    "type_scoped_dispatchers": 74
+    "distinct_subscribe_topics": 96,
+    "probe_count": 1096,
+    "registered_dispatchers": 128,
+    "registered_routes": 112,
+    "type_scoped_dispatchers": 75
   },
   "exclusions": [
     {
