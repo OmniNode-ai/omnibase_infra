@@ -1,0 +1,53 @@
+# OMN-21271 contract file for omnibase_infra: the delegation dispatch port resolves its routes once, off the event loop.
+schema_version: "1.0.0"
+ticket_id: "OMN-21271"
+title: "the delegation dispatch port resolves its routes once, off the event loop, and re-reads contracts only when the installed set changes"
+summary: "RuntimeDelegationDispatchPort._resolved_routes called discover_runtime_local_ingress_routes on every delegate-skill dispatch, synchronously on the runtime's event loop; on the dev effects container one call read 1014 contract.yaml files in 4.2 to 7.7 s and stalled the loop for up to 7.7 s. Resolution now runs in a worker thread and keeps the routes keyed by the package names and a stat-only fingerprint of the installed contract set (local_ingress_contract_fingerprint), so a resolved port reads no contract until one is added, edited or removed."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21271-ac1-resolve-once-off-loop
+    statement: "A port that has resolved its routes reads no contract on the next dispatch, and the first resolution runs in a worker thread."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a delegate-skill dispatch on a runtime that has already resolved its routes reads no contract file, and the first resolution runs off the event loop -- falsifier: a focused pytest that patches Path.read_text and counts calls across two dispatches finds a read on the second, or finds the first resolution on the loop thread"
+  - id: req-omn21271-ac2-reresolve-on-change
+    statement: "A change to the installed contract set is resolved on the next dispatch."
+    acceptance:
+      - id: AC2
+        statement: "AC2: when the installed contract set changes (a contract added, edited or removed), the next dispatch resolves the new set -- falsifier: a focused pytest that edits a temporary package's contract between two dispatches finds the old routes on the second"
+evidence_requirements:
+  - kind: tests
+    description: "Read counts, resolution thread, loop heartbeat, concurrency, and re-resolution after an edit, an addition and a removal, against a fake package under tmp_path."
+    command: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/integration/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21271-ac1-resolve-once-off-loop"
+    description: "Two resolutions and two dispatches read the contract once; the first resolution runs on a thread other than the loop's; a 0.4 s discovery leaves the loop's largest heartbeat gap under 0.2 s; ten concurrent resolutions read each contract once. All 11 tests of the new file fail against origin/dev 39e52ccb2."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]
+  - id: "dod-omn21271-ac2-reresolve-on-change"
+    description: "After one resolution, an edited, an added and a removed contract each appear in the next resolution; the fingerprint changes on each and never opens a contract."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_dispatch_port_route_cache_omn21271.py tests/unit/runtime/test_runtime_local_ingress.py tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_omn18933_handler_wiring_route_scope.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC2]
+  - id: "dod-omn21271-deploy"
+    description: "Post-merge deploy smoke -- the deployed effects runtime carries the cached async route resolution. It fails on the image built before this change, where _resolved_routes is synchronous and local_ingress_contract_fingerprint does not exist. Hosted CI has no runtime container, so only the local Done gate runs it; this supplemental deployment check binds no acceptance criterion, and the hosted tests prove AC1 and AC2."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime-effects} python -c \"import asyncio; from omnibase_infra.runtime.service_delegation_dispatch_port import RuntimeDelegationDispatchPort as P; from omnibase_infra.runtime.runtime_local_ingress import local_ingress_contract_fingerprint; assert asyncio.iscoroutinefunction(P._resolved_routes); print('deploy smoke ok')\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: []

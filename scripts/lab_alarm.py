@@ -129,6 +129,7 @@ import json
 import os
 import re
 import shlex
+import socket
 import stat
 import subprocess
 import sys
@@ -232,6 +233,13 @@ class EnumAlarmCondition(StrEnum):
     tag past the agent's own bound is an alarm: until this condition the
     heartbeat was published and served and nothing read it.
 
+    BROKER_LISTENER (OMN-17427) dials the dev broker's external listener, the
+    address every dev-lane client outside the compose network uses. On
+    2026-10-20 the broker crash-looped from 15:19:18Z and that listener stopped
+    answering. The restart bound saw it only because the container restarted;
+    a broker that stays up with its external listener unbound restarts
+    nothing, and the lag condition reads a refusing broker as INDETERMINATE.
+
     WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger
     file's newest canonical row against ``max(row_ts)`` in the work-ledger
     projection table. The projection sat frozen for about 36 hours while its
@@ -241,6 +249,7 @@ class EnumAlarmCondition(StrEnum):
 
     LAB_PASS_RECEIPT = "lab_pass_receipt"
     CONTAINER_RESTARTS = "container_restarts"
+    BROKER_LISTENER = "broker_listener"
     CONSUMER_GROUP_LAG = "consumer_group_lag"
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
     WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
@@ -676,6 +685,118 @@ def evaluate_container_restarts(
         condition=condition,
         outcome=EnumConditionOutcome.OK,
         evidence=f"{evidence}; every container is inside its declared bound",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Condition — the dev broker's external listener answers a TCP connect
+# ---------------------------------------------------------------------------
+
+
+class ListenerProbe(Protocol):
+    def __call__(self, host: str, port: int, *, timeout: float) -> None:
+        """Return when ``host:port`` accepts a TCP connection; raise ``OSError`` otherwise."""
+
+
+_API_VERSIONS_CORRELATION_ID = 17427
+
+
+def probe_tcp_listener(host: str, port: int, *, timeout: float) -> None:
+    """Send one Kafka ApiVersions v0 request and require its response header.
+
+    A TCP accept alone is not enough: a host-side port proxy can accept for a
+    container that is not serving. ApiVersions is answered before SASL
+    authentication, so no credential is needed or sent.
+    """
+    client_id = b"lab-alarm"
+    body = (
+        (18).to_bytes(2, "big")  # api_key ApiVersions
+        + (0).to_bytes(2, "big")  # api_version 0
+        + _API_VERSIONS_CORRELATION_ID.to_bytes(4, "big")
+        + len(client_id).to_bytes(2, "big")
+        + client_id
+    )
+    with socket.create_connection((host, port), timeout=timeout) as conn:
+        conn.settimeout(timeout)
+        conn.sendall(len(body).to_bytes(4, "big") + body)
+        header = b""
+        while len(header) < 8:
+            chunk = conn.recv(8 - len(header))
+            if not chunk:
+                raise ConnectionResetError(
+                    f"{host}:{port} closed the connection before answering ApiVersions"
+                )
+            header += chunk
+    if int.from_bytes(header[4:8], "big") != _API_VERSIONS_CORRELATION_ID:
+        raise ConnectionError(
+            f"{host}:{port} answered ApiVersions with a foreign correlation id"
+        )
+
+
+def evaluate_broker_listener(
+    bootstrap_servers: str,
+    *,
+    probe: ListenerProbe,
+    timeout_seconds: float = 10.0,
+) -> ModelConditionReport:
+    """The dev broker's external listener accepts a connection (OMN-17427).
+
+    One answering bootstrap address is enough, as it is for a client. A name
+    the alarm host cannot resolve is INDETERMINATE: that is the alarm host's
+    fault, not evidence about the broker. Refused and timed out on every
+    address is an ALARM.
+    """
+    condition = EnumAlarmCondition.BROKER_LISTENER
+    subject = f"broker-listener:{bootstrap_servers}"
+    addresses: list[tuple[str, int]] = []
+    for entry in (part.strip() for part in bootstrap_servers.split(",")):
+        name, _, port_text = entry.rpartition(":")
+        if not name or not port_text.isdigit():
+            return ModelConditionReport(
+                condition=condition,
+                outcome=EnumConditionOutcome.INDETERMINATE,
+                evidence=f"bootstrap {bootstrap_servers!r} is not host:port[,host:port]",
+            )
+        addresses.append((name, int(port_text)))
+
+    refused: list[str] = []
+    unresolved: list[str] = []
+    for host, port in addresses:
+        try:
+            probe(host, port, timeout=timeout_seconds)
+        except socket.gaierror as exc:
+            unresolved.append(f"{host}:{port} ({exc})")
+            continue
+        except OSError as exc:
+            refused.append(f"{host}:{port} ({type(exc).__name__}: {exc})")
+            continue
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.OK,
+            evidence=(
+                f"external listener {host}:{port} answered a Kafka ApiVersions "
+                f"request (bootstrap {bootstrap_servers}); unauthenticated, not a "
+                "topic read"
+            ),
+        )
+    if unresolved:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=(
+                f"could not resolve {'; '.join(unresolved)}"
+                + (f"; refused: {'; '.join(refused)}" if refused else "")
+            ),
+        )
+    detail = (
+        f"the dev broker's external listener {bootstrap_servers} did not answer "
+        f"a Kafka ApiVersions request within {timeout_seconds:g}s: {'; '.join(refused)}"
+    )
+    return ModelConditionReport(
+        condition=condition,
+        outcome=EnumConditionOutcome.ALARM,
+        evidence=detail,
+        alarms=(ModelAlarm(condition=condition, subject=subject, detail=detail),),
     )
 
 
@@ -2819,6 +2940,7 @@ def run_once(
     effects_reader: EffectsHeldReader,
     canary_reader: CanaryVerdictReader,
     heartbeat_reader: HeartbeatReader,
+    listener_probe: ListenerProbe,
     posting_channel: str,
     env_file: Path,
     ledger_appender: LedgerAppender,
@@ -2842,6 +2964,9 @@ def run_once(
     )
     restart_report = evaluate_container_restarts(
         config.container_restart_bounds, runner=runner
+    )
+    listener_report = evaluate_broker_listener(
+        config.kafka_bootstrap_servers, probe=listener_probe
     )
     lag_report, lag_sample = evaluate_consumer_group_lag(
         lag_reader, config.consumer_groups, previous=state.lag_sample
@@ -2879,6 +3004,7 @@ def run_once(
     watched_reports = (
         receipt_report,
         restart_report,
+        listener_report,
         lag_report,
         effects_report,
         work_ledger_report,
@@ -3162,6 +3288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         canary_reader=read_chain_canary_verdict,
         heartbeat_reader=lambda: read_dev_tag_heartbeat(config.agent_url),
+        listener_probe=probe_tcp_listener,
         posting_channel=args.posting_channel,
         env_file=args.env_file,
         ledger_appender=make_ledger_appender(config.ledger_append_command, args.ledger),

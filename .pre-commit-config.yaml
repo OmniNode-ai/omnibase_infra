@@ -1612,6 +1612,13 @@ repos:
         files: ^(scripts/ci/check_no_credential_in_log\.py|scripts/ci/tests/fixtures/credential_in_log_fixture\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: provider-key-redaction
+        name: BYOK provider shapes are redacted (OMN-17427)
+        entry: uv run --frozen pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(utils/util_(dlq_credential_redaction|log_credential_redaction|error_sanitization)|cli/cli_delegate|gate/executor)\.py|tests/unit/utils/test_provider_key_redaction_omn17427\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
         entry: uv run --frozen python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
