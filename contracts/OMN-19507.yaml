@@ -10,13 +10,13 @@ requirements:
   - id: runner-disk-admission-correction
     statement: Correct the storage admission cause of the missing receipt.
     acceptance:
-      - id: AC-a
+      - id: AC1
         statement: >-
           The admission gate refuses a job when any filesystem of runner home, _work, or existing _work/_temp is below the floor, using the minimum across distinct filesystems and naming the short path.
-      - id: AC-b
+      - id: AC2
         statement: >-
           Unreadable df on a checked mount preserves fail-open behavior and logs the unreadable mount; a known short disk still refuses the job.
-      - id: AC-c
+      - id: AC3
         statement: The existing disk-admission and restore tests still pass.
 evidence_requirements:
   - kind: tests
@@ -31,7 +31,7 @@ dod_evidence:
     description: >-
       Inject a separate low-space workspace or temp filesystem while runner home is healthy; require refusal before workspace reset and the short path in the message. Shared-filesystem and explicit-mount cases also run.
     source: manual
-    binds_ac: [AC-a]
+    binds_ac: [AC1]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py -k 'separate_filesystem or shared_filesystem or explicit_mount' -q
@@ -40,7 +40,7 @@ dod_evidence:
     description: >-
       Inject unreadable df separately on each checked mount and require the job to proceed with the path logged. An unreadable home cannot hide a short workspace filesystem.
     source: manual
-    binds_ac: [AC-b]
+    binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py -k unreadable -q
@@ -48,7 +48,7 @@ dod_evidence:
   - id: dod-admission-restore-regressions
     description: Run the complete focused admission and restore suites.
     source: manual
-    binds_ac: [AC-c]
+    binds_ac: [AC3]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py tests/scripts/test_runner_disk_admission_restore.py -q
@@ -57,7 +57,7 @@ dod_evidence:
     description: >-
       Hosted-runner deploy probe runs this checkout's hook bind-mounted into a disposable Linux container with separate home and workspace df readings. Require exit 1 and RUNNER-DISK-ADMISSION naming _work before checkout. Fails on the original hook; requires no private host, credentials or disk exhaustion. Live refusal and receipt observations remain separate post-merge evidence.
     source: manual
-    binds_ac: [AC-a]
+    binds_ac: [AC1]
     checks:
       - check_type: command
         check_value: |-
