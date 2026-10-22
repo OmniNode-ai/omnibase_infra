@@ -127,8 +127,8 @@ x-runtime-base: &runtime-base
   # minutes after every start, fails every write with Errno 24, and exits.
   ulimits:
     nofile:
-      soft: 65535
-      hard: 65535
+      soft: 65536
+      hard: 65536
   deploy:
     resources:
       limits:

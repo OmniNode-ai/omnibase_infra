@@ -208,20 +208,6 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY omni-curl /usr/local/bin/omni-curl
 RUN chmod +x /usr/local/bin/omni-curl
 
-# Install Python 3.12 via deadsnakes PPA
-RUN add-apt-repository ppa:deadsnakes/ppa -y \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.12 \
-        python3.12-venv \
-        python3.12-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3.12 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
-    && python3.12 -m ensurepip --upgrade \
-    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3 \
-    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip
-
 # Install uv
 RUN tmp_dir="$(mktemp -d)" \
     && uv_triple_var="UV_ARCH_${TARGETARCH}" && uv_triple="${!uv_triple_var}" \
@@ -231,6 +217,28 @@ RUN tmp_dir="$(mktemp -d)" \
     && tar -xzf "${tmp_dir}/uv.tar.gz" -C /usr/local/bin --strip-components=1 "uv-${uv_triple}/uv" \
     && rm -rf "${tmp_dir}" \
     && chmod +x /usr/local/bin/uv
+
+# Install Python 3.12 as a uv-managed CPython (python-build-standalone, from
+# GitHub releases like the uv binary above) (OMN-17427). It replaces the
+# deadsnakes Launchpad PPA, which answered 503 to every runner-image-build-smoke
+# and runner-image-multiarch-smoke from 19:46Z to 20:27Z on 2026-10-21. That
+# reds every PR that re-binds the image, the virtualenv CVE fix among them.
+# GitHub is already a hard dependency of this build; Launchpad no longer is.
+# The interpreter lives under /opt/uv-python (root-owned, world-readable), and
+# /usr/local/bin/python3.12 is what `uv sync` in the bake below discovers.
+RUN export UV_PYTHON_INSTALL_DIR=/opt/uv-python \
+    && uv python install 3.12 \
+    && py="$(uv python find --managed-python 3.12)" \
+    && py_bin="$(dirname "${py}")" \
+    && { "${py}" -m pip --version >/dev/null 2>&1 || "${py}" -m ensurepip; } \
+    && ln -sf "${py}" /usr/local/bin/python3.12 \
+    && ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3 \
+    && ln -sf /usr/local/bin/python3.12 /usr/local/bin/python \
+    && ln -sf "${py_bin}/pip3.12" /usr/local/bin/pip3.12 \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3 \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip \
+    && python3.12 -c 'import sys, ssl, sqlite3, venv; assert sys.version_info[:2] == (3, 12), sys.version' \
+    && pip3 --version
 
 # Install Docker CLI + Compose v2 + Buildx plugins (no daemon — socket mounted at runtime)
 # OMN-14966: docker-compose-plugin provides `docker compose` v2 (installed at
