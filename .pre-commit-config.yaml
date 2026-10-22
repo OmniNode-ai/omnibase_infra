@@ -69,6 +69,13 @@ repos:
         files: ^(\.github/workflows/|tests/ci/test_anthropic_key_prefix_workflows_omn20967\.py$|\.pre-commit-config\.yaml$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: body-reading-workflows-trigger-on-edit
+        name: A workflow that reads the PR body fires on edited (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q -n 0 --no-cov
+        language: system
+        files: ^(\.github/workflows/|tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427\.py$|\.pre-commit-config\.yaml$)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: mirror-source-consume-only
         name: Mirror source consume-only regression (OMN-20867)
         entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
@@ -565,10 +572,10 @@ repos:
       - id: release-train-nightly-tests
         require_serial: true
         name: Release train decision surface (OMN-20715)
-        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
         language: system
         pass_filenames: false
-        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py)$
+        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py|tests/scripts/test_release_pr_open_omn18595\.py)$
         stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
@@ -577,6 +584,14 @@ repos:
         language: system
         pass_filenames: false
         files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
+        stages: [pre-commit]
+      - id: deploy-agent-health-convergence
+        require_serial: true
+        name: Deploy-agent health convergence (OMN-17427)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        language: system
+        pass_filenames: false
+        files: ^scripts/(deploy-agent/(deploy_agent/(executor|compose_budget)\.py|tests/unit/(test_verify_convergence_omn17427|conftest)\.py)|runtime_build/runtime_health_wait\.sh)$
         stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
@@ -1612,6 +1627,13 @@ repos:
         files: ^(scripts/ci/check_no_credential_in_log\.py|scripts/ci/tests/fixtures/credential_in_log_fixture\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: provider-key-redaction
+        name: BYOK provider shapes are redacted (OMN-17427)
+        entry: uv run --frozen pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(utils/util_(dlq_credential_redaction|log_credential_redaction|error_sanitization)|cli/cli_delegate|gate/executor)\.py|tests/unit/utils/test_provider_key_redaction_omn17427\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
       - id: onex-validate-naming
         name: ONEX Naming Convention Validation
         entry: uv run --frozen python scripts/validation/validate_naming.py src/omnibase_infra --errors-only
@@ -2051,6 +2073,16 @@ repos:
         entry: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
         language: system
         files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-21288: projection writers, consumers and effects run inside the one
+      # runtime container. Refuses a dev-stack service that runs one outside it;
+      # the services that still do are a shrink-only list in the test.
+      - id: dev-stack-runtime-only
+        name: Check the dev stack runs no workload outside the runtime container
+        entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
+        language: system
+        files: ^(docker/(docker-compose\.(infra|dev-lane)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-4857: Block Consul references in source (decommissioned service)
