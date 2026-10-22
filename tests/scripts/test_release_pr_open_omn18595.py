@@ -8,7 +8,7 @@ branch, without reading which candidate that PR was cut from. omnibase_infra#525
 (0.38.76, cut from candidate 39e52ccb2078677a6755450c7f3c44d32c862a8f) was
 therefore never replaced after dev moved on, although it could not go green at
 its own candidate. The decision now compares the PR body's recorded candidate
-with the run's candidate (OMN-18595, AC4-AC7).
+with the run's candidate (OMN-18595, AC5-AC8).
 
 Everything here runs on fakes: no network, no gh. The pure decision is tested
 directly, and the shipped workflow step is executed in two halves under a fake
@@ -85,7 +85,7 @@ def _pr(number: int, candidate: str) -> Any:
 
 
 class TestReleasePrRefreshSupersededCandidate:
-    """AC4: a superseded candidate rebuilds the release branch and the PR body."""
+    """AC5: a superseded candidate rebuilds the release branch and the PR body."""
 
     def test_release_pr_refresh_superseded_candidate(self) -> None:
         plan = rt.decide_release_pr(
@@ -155,7 +155,7 @@ class TestReleasePrRefreshSupersededCandidate:
 
 
 class TestReleasePrSameCandidateNoop:
-    """AC5: the same candidate pushes nothing and edits nothing."""
+    """AC6: the same candidate pushes nothing and edits nothing."""
 
     def test_release_pr_same_candidate_noop(self) -> None:
         plan = rt.decide_release_pr(
@@ -194,7 +194,7 @@ class TestReleasePrSameCandidateNoop:
 
 
 class TestReleasePrOrphanBranchRebuilt:
-    """AC6: a branch on the remote with no open PR is rebuilt with a lease push."""
+    """AC7: a branch on the remote with no open PR is rebuilt with a lease push."""
 
     def test_release_pr_orphan_branch_rebuilt(self) -> None:
         plan = rt.decide_release_pr(
@@ -252,7 +252,7 @@ class TestReleasePrOrphanBranchRebuilt:
 
 
 class TestReleasePrUnreadableCandidateRefuses:
-    """AC7: a body with no readable candidate is refused and never force-pushed."""
+    """AC8: a body with no readable candidate is refused and never force-pushed."""
 
     @pytest.mark.parametrize(
         "candidate_line",
