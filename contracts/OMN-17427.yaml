@@ -1972,7 +1972,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC158]
-  - id: dod-omn17427-ac158-issuer-overlay-coverage-deploy-check
+  - id: dod-omn17427-ac158-overlay-coverage-deploy
     description: Hosted-runner deploy check runs the issuer's check command over synthetic overlay and ledger files, and the compose file the issuer is recreated from still parses. No Docker daemon, broker, overlay checkout or credential is required.
     source: manual
     checks:
