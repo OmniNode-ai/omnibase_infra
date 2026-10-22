@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21298"
+title: "Committed ticket contracts repeat acceptance ids, so a lab-pass receipt bound to their ticket is refused"
+summary: "lab_pass_receipt.py emit --bind-from-commit copies the cited ticket contract's acceptance ids into the receipt's criterion_labels, and the receipt refuses labels that repeat. contracts/OMN-17427.yaml declared AC49, AC50, AC51, AC53, AC97, AC100, AC141 and AC142 more than once, contracts/OMN-19998.yaml AC21 and AC22, and contracts/OMN-20867.yaml AC3 and AC5, so the candidate-boot receipt of a dev commit titled with one of those tickets was refused with \"criterion_labels must be distinct ticket criterion labels\". The repeated criteria are renumbered to unused ids with their binds_ac moved with them, and a test builds a bound receipt from every committed contract."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21298-criterion-labels-distinct"
+    statement: |-
+      Every committed ticket contract declares each acceptance id once, so a lab-pass receipt bound to its ticket can be emitted.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: a bound receipt built from the acceptance ids of every contracts/*.yaml with an OMN ticket id is accepted, and a contract that repeats a label is refused with the receipt's own message -- falsifier: uv run pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q
+      - id: "AC2"
+        statement: |-
+          AC2: contracts/OMN-17427.yaml, contracts/OMN-19998.yaml and contracts/OMN-20867.yaml each declare every acceptance id once, and every binds_ac label of theirs names an acceptance id the same contract declares -- falsifier: the AC2 check reads the three contracts and exits nonzero on a repeated or unbound label
+evidence_requirements:
+  - kind: "tests"
+    description: "The test builds a bound lab_pass_receipt.py receipt from every committed ticket contract's acceptance ids, with a negative control asserting a repeated label is refused."
+    command: "uv run pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21298-ac1-criterion-labels-distinct"
+    description: "The test builds a bound lab_pass_receipt.py receipt from every committed ticket contract's acceptance ids. It fails at the merge base, where the file is absent and OMN-17427.yaml, OMN-19998.yaml and OMN-20867.yaml repeat labels; with the repeated criteria renumbered it passes. A negative control asserts a repeated label is refused."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21298-ac2-renumbered-labels-check"
+    description: "Hosted-runner deploy check -- reads the three renumbered contracts from the checked-out tree and exits nonzero when one repeats an acceptance id or binds a label it does not declare; it fails at the merge base, where all three repeat labels. No deployment surface is involved; it reads repository files only."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python3 -c \"import sys,yaml; bad=[]; [bad.append(n) for n in ('OMN-17427','OMN-19998','OMN-20867') for c in [yaml.safe_load(open('contracts/'+n+'.yaml'))] for ids in [[a['id'] for r in c['requirements'] for a in r.get('acceptance',[])]] if len(ids)!=len(set(ids)) or any(b not in ids for e in c.get('dod_evidence',[]) for b in e.get('binds_ac',[]))]; sys.exit(1 if bad else 0)\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
