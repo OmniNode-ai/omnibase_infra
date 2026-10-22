@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-19975"
 title: "A developer principal's live ACLs can be audited against the rows deploy/lab/developer-principal-grants.yaml derives for it"
-summary: "The lab principal issuer only ever adds ACL rows, and nothing compared a developer principal's live rows with the grant file, so a row the file does not derive (or a derived row the broker lost) was invisible. This change adds an audit-grants command to scripts/lab_principal_issuer.py: read-only, it lists each issued principal's ACLs with rpk, derives the expected rows from the file, and exits 1 naming every MISSING and EXTRA row. It creates and deletes nothing. The ticket's own AC1 readback on the dev lane broker, and the developer.principal overlay key, are not part of this change."
+summary: "The lab principal issuer only ever adds ACL rows, and nothing compared a developer principal's live rows with the grant file, so a row the file does not derive (or a derived row the broker lost) was invisible. This change adds an audit-grants command to scripts/lab_principal_issuer.py: read-only, it lists each issued principal's ACLs with rpk, derives the expected rows from the file, and exits 1 naming every MISSING and EXTRA row. It creates and deletes nothing. The issuer selects declared principals from the developer.principal overlay and reads the node-derived grants. A read-only h201 proof now matches all three declared principals. Apply and audit refuse an empty selection, and the audit refuses rpk rows carrying errors."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -65,3 +65,11 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/deploy/lab/developer-principal-derived-grants.json?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF '\"pattern\": \"PREFIXED\"'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
+  - id: "dod-omn19975-ac1-complete-readback"
+    description: "The exact-grant proof refuses empty principal selections and broker row errors. The h201 readback at 2026-10-21T19:14Z loaded config/lab/developer-principal-overlay.yaml from the host internal checkout and found expected=135 live=135 missing=0 extra=0 for all three declared principals. This is a read-only broker proof; the running issuer still has no overlay mount."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

@@ -1,0 +1,1 @@
+Live-contact exception: this merge of origin/dev only carries workflow edits already merged on dev under their own gates; this PR's own boot_gate explainer change is covered by the Live-contact exception in its PR body, with a fake-kubectl replay because the sandbox has no cluster.
