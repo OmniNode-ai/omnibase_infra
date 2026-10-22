@@ -73,6 +73,26 @@ gates:
     cross_repo_ref: "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa"
     skip_semantics: never
     rationale: "OMN-20074: repo-owned evidence verdict required through CI Summary's EXPECTED_EXTERNAL_CONTEXTS on pull_request runs only; absent/red/skipped blocks dev's sole required context. Operator ruling 2026-10-08T22:41:24Z admits the pull_request_target caller using the base-branch definition, with no job-level if: or path filter. Merged dev heads #4767, #4765 and #4758 report success. No merge_group assertion is made; every OCC context stays enforced until S6 part 2."
+  - name: "Hostile Review Thread Gate"
+    mode: REQUIRED
+    producer_kind: local
+    workflow: hostile-reviewer.yml
+    job_path: ["hostile-review-thread-gate"]
+    # neutral_ok, not never, for the deploy-gate reason above: a skip here
+    # does not weaken enforcement. This context is NOT a branch-protection
+    # context; it is enforced only through CI Summary's
+    # EXPECTED_EXTERNAL_CONTEXTS on PRs into dev (DEV_BASE_ONLY_CONTEXTS),
+    # where absent or still running is PENDING (FAILURE at the poller's
+    # deadline) and `skipped` is a FAILURE
+    # (EXTERNAL_GOOD_CONCLUSIONS is {"success"}). The job-level
+    # `if: !cancelled() && github.event_name == 'pull_request'` is the
+    # OMN-18799 fix (a cancelled run must not post a green that evaluated
+    # nothing) and the event guard is always true for this workflow's only
+    # trigger; `needs: [hostile-review]` makes the gate read the threads the
+    # reviewer just posted, and `!cancelled()` runs it whatever the reviewer's
+    # result, so a skipped, degraded or failed reviewer never holds a merge.
+    skip_semantics: neutral_ok
+    rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or rejected: <reason>. Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
   - name: "call-reject-skip-token / scan / reject-skip-gate-token"
     mode: REQUIRED
     producer_kind: cross_repo
