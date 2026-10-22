@@ -2606,7 +2606,7 @@ jobs:
       # job's result feeds the required "CI Summary" through "CI Tests Gate".
       - name: Verify release train decision surface (OMN-20715)
         if: matrix.split == 1
-        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
 
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
