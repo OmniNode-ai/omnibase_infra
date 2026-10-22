@@ -43,11 +43,11 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC2]
   - id: "dod-omn21271-deploy"
-    description: "Post-merge deploy smoke -- the deployed effects runtime carries the cached async route resolution. It fails on the image built before this change, where _resolved_routes is synchronous and local_ingress_contract_fingerprint does not exist."
+    description: "Post-merge deploy smoke -- the deployed effects runtime carries the cached async route resolution. It fails on the image built before this change, where _resolved_routes is synchronous and local_ingress_contract_fingerprint does not exist. Hosted CI has no runtime container, so only the local Done gate runs it; this supplemental deployment check binds no acceptance criterion, and the hosted tests prove AC1 and AC2."
     source: "manual"
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
         check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime-effects} python -c \"import asyncio; from omnibase_infra.runtime.service_delegation_dispatch_port import RuntimeDelegationDispatchPort as P; from omnibase_infra.runtime.runtime_local_ingress import local_ingress_contract_fingerprint; assert asyncio.iscoroutinefunction(P._resolved_routes); print('deploy smoke ok')\""
         cwd: "${OMNI_HOME}/omnibase_infra"
-    binds_ac: [AC1]
+    binds_ac: []
