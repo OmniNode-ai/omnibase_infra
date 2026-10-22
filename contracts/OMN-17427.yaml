@@ -402,6 +402,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-branch-protection-audit-setup-uv
+    statement: 'The Audit Branch Protection job installs uv with a sha-pinned setup-uv step before any uv run, and runs the required-context parity report with uv run --no-project --with the PyYAML version uv.lock pins, so the job on its ubuntu-latest runs-on fallback no longer fails "uv: command not found" (exit 127).'
+    acceptance:
+      - id: AC171
+        statement: 'AC171: the audit job has an astral-sh/setup-uv step pinned to a full sha ahead of every uv run, every uv run in the job is uv run --no-project, the parity step installs pyyaml at the uv.lock version, and the parity CLI and its lib import nothing third-party but yaml; the same tests fail 4 of 6 on the workflow before this change -- falsifier: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py -q'
   - id: req-omn17427-omn19937-ac4-dev202-writer
     statement: The main runtime takes the board-probe projection from the lane class selection its private env fragment supplies through the base passthrough, alongside the landing nodes, so the installed writer can consume lab probe results.
     acceptance:
@@ -1992,6 +1997,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac171-audit-setup-uv
+    description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py tests/ci/test_branch_protection_single_auditor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171
+  - id: dod-omn-17427-ac171-branch-protection-audit-hosted
+    description: Hosted-runner deploy check -- the same workflow-shape tests over the audit workflow, uv.lock and the parity CLI sources; no project sync of the audit job, token or GitHub API call is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171
   - id: dod-omn17427-shared-ticket-contract-composer
     description: Two branch trees are merged file by file with Git in both orders, then composed and structurally validated. Legacy root data is preserved and invalid additions fail closed. This is repository-side preparation, not a claim that external hosted gates accept fragments.
     source: manual
