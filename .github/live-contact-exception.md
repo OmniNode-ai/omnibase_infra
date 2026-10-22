@@ -1,0 +1,1 @@
+Live-contact exception: built in a cloud session with no GitHub access under RULING 2026-10-21T21:14:58Z, so fakes stand in for gh and git, and the live proof is the first scheduled train run after merge rebuilding omnibase_infra#5256.

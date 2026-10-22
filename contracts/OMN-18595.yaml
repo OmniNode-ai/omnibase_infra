@@ -21,6 +21,17 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3: the cascade resolves core at least 0.47.48, the installed version matches uv.lock and passes runtime version admission, and the runner image lock identity_digest and shared_env_digest equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/unit/runtime/test_core_release_cascade_omn18595.py fails at the merge base, which resolves 0.47.46; tests/ci/test_runner_image_identity.py fails when the runner lock digests do not match the dependency manifests"
+  - id: req-omn18595-release-pr-refresh-superseded-candidate
+    statement: The release train judges an open release PR by the candidate it was cut from, so a PR whose candidate is superseded is rebuilt rather than left open forever.
+    acceptance:
+      - id: AC4
+        statement: "AC4: a run whose decision candidate differs from the candidate recorded in the open release PR's body rebuilds the release branch from the new candidate, force-pushes it with lease and rewrites the PR body to name the new candidate, and the unit test fails on the current workflow logic -- falsifier: uv run pytest tests/scripts -k release_pr_refresh_superseded_candidate"
+      - id: AC5
+        statement: "AC5: a run whose decision candidate equals the open release PR's recorded candidate pushes nothing and edits nothing -- falsifier: uv run pytest tests/scripts -k release_pr_same_candidate_noop"
+      - id: AC6
+        statement: "AC6: a run that finds the release branch on the remote with no open PR rebuilds it with a lease push and opens the PR, instead of failing a plain push -- falsifier: uv run pytest tests/scripts -k release_pr_orphan_branch_rebuilt"
+      - id: AC7
+        statement: "AC7: an open release PR whose body carries no readable candidate line is refused with a named reason and is never force-pushed -- falsifier: uv run pytest tests/scripts -k release_pr_unreadable_candidate_refuses"
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -71,3 +82,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-18595-release-pr-refresh-superseded-candidate
+    description: The release train rebuilds an open release PR whose candidate is superseded, leaves one for the same candidate alone, rebuilds an orphan branch with a lease push, and refuses a PR whose candidate cannot be read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts -k "release_pr_refresh_superseded_candidate or release_pr_same_candidate_noop or release_pr_orphan_branch_rebuilt or release_pr_unreadable_candidate_refuses" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+      - AC5
+      - AC6
+      - AC7
