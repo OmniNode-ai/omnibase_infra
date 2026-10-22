@@ -37,6 +37,11 @@ requirements:
         statement: "AC7: a run that finds the release branch on the remote with no open PR rebuilds it with a lease push and opens the PR, instead of failing a plain push -- falsifier: uv run pytest tests/scripts -k release_pr_orphan_branch_rebuilt"
       - id: AC8
         statement: "AC8: an open release PR whose body carries no readable candidate line is refused with a named reason and is never force-pushed -- falsifier: uv run pytest tests/scripts -k release_pr_unreadable_candidate_refuses"
+  - id: req-omn18595-cascade-core-0-47-52-runner-lock
+    statement: The core 0.47.52 cascade regenerates the runner image identity from its updated dependency manifests.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: the cascade resolves and installs core 0.47.52, passes runtime version admission, and records runner identity and shared-env digests matching the dependency manifests -- falsifier: the exact-version check fails at the merge base, and runner identity verification fails at the uncorrected cascade head'
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -122,3 +127,24 @@ dod_evidence:
       - AC6
       - AC7
       - AC8
+  - id: dod-omn-18595-core-0-47-52-runner-lock
+    description: The core 0.47.52 cascade installs the triggering release, passes runtime admission and keeps the runner image lock bound to its manifests.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import importlib.metadata,tomllib; from omnibase_infra.runtime.version_compatibility import check_version_compatibility; p=tomllib.load(open('pyproject.toml','rb')); lock=tomllib.load(open('uv.lock','rb')); core=next(v['version'] for v in lock['package'] if v['name']=='omnibase-core'); assert core=='0.47.52', core; assert 'omnibase-core=='+core in p['tool']['uv']['override-dependencies']; assert importlib.metadata.version('omnibase-core')==core; assert check_version_compatibility()==[]; print('core',core,'runtime admission passed')"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/integration/runtime/test_core_consumer_profiles_boot_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
+  - id: dod-deploy-core-0-47-52-runner-lock
+    description: Deploy-scope readback of the runner image lock from this pull request revision on GitHub; its recorded digests must match the core 0.47.52 manifests, without fleet access or sibling clones.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/runners/runner-image.lock.json?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c "import json,sys; lock=json.load(sys.stdin); assert lock['identity_digest']=='647f894d5ed87301a48f8567cc9171bf'; assert lock['shared_env_digest']=='49e70b78af573573b4aecbc6'; print('core 0.47.52 runner image lock readback passed')"
+        cwd: ${OMNI_HOME}/omnibase_infra
