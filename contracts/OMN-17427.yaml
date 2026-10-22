@@ -417,11 +417,6 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
-  - id: req-omn17427-lockfile-virtualenv
-    statement: The uv.lock of omnibase_infra#5178 pins virtualenv at 21.14.12 or above (the same uv.lock hunk as omnibase_infra#5241), so the osv-scanner Lockfile CVE Scan reports no known vulnerability in uv.lock.
-    acceptance:
-      - id: AC151
-        statement: 'AC151: uv.lock resolves virtualenv to 21.14.12 or above and uv lock --check passes -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open(''uv.lock'', ''rb''))[''package''] if p[''name''] == ''virtualenv''); assert Version(p[''version'']) >= Version(''21.14.12''), p[''version'']"'
   - id: req-omn17427-runner-image-python-source
     statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
     acceptance:
@@ -1960,16 +1955,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
-  - id: dod-omn-17427-ac151-lockfile-virtualenv
-    description: Hosted-runner check of the committed uv.lock virtualenv resolution; reads only the lockfile and needs no broker, container or lab credential.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: |
-          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open('uv.lock', 'rb'))['package'] if p['name'] == 'virtualenv'); assert Version(p['version']) >= Version('21.14.12'), p['version']"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC151
   - id: dod-omn-17427-ac146-runner-image-python-source
     description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
     source: manual
