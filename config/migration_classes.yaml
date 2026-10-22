@@ -303,6 +303,7 @@ migrations:
   forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql: expand-only
   forward/nodes/node_projection_lab_job/0000_create_lab_job.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_job_state)
   forward/nodes/node_projection_lab_job/0001_grant_omninode_runtime_lab_job.sql: expand-only # additive
+  forward/nodes/node_projection_lab_job/0002_grant_role_omnidash_lab_job_state_select.sql: expand-only
   forward/nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql: expand-only
   forward/nodes/node_projection_lab_proof_receipts/0000_create_lab_proof_receipts.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_proof_receipts)
@@ -331,6 +332,7 @@ migrations:
   forward/nodes/node_projection_pr_landing/0001_grant_omninode_runtime_pr_landing.sql: expand-only # additive
   forward/nodes/node_projection_pr_state/0000_create_pr_state.sql: expand-only # additive
   forward/nodes/node_projection_pr_state/0001_grant_omninode_runtime_pr_state.sql: expand-only # additive
+  forward/nodes/node_projection_pr_state/0002_grant_role_omnidash_pr_state_select.sql: expand-only
   forward/nodes/node_projection_prod_promotion_gate/0000_create_prod_promotion_gate_decisions.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_prod_promotion_gate/0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql: expand-only
   forward/nodes/node_projection_provider_quota/0000_create_provider_quota_state.sql: forward-only # ALTER TABLE public.provider_quota_state ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP
@@ -406,6 +408,7 @@ migrations:
   forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql: forward-only # Replace aggregate population and append run count
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
+  forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
@@ -440,6 +443,7 @@ migrations:
   forward/nodes/node_projection_work_ledger/0002_work_ledger_typed_records.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.work_ledger_rows) over a new nullable column; ALTER TABLE ADD COLUMN IF NOT EXISTS
   forward/nodes/node_projection_work_ledger/0003_work_ledger_seq.sql: expand-only # additive nullable ledger_seq and non-unique partial index
   forward/nodes/node_projection_work_ledger/0004_grant_work_ledger_ro_work_ledger_state.sql: expand-only # additive guarded GRANT SELECT to a read-only role
+  forward/nodes/node_projection_work_ledger/0005_grant_role_omnidash_work_ledger_rows_select.sql: expand-only
   forward/nodes/node_projection_worktree_reconcile/0000_create_worktree_reconcile_hosts.sql: expand-only # additive
   forward/nodes/node_projection_worktree_reconcile/0001_grant_runtime_worktree_reconcile.sql: expand-only # additive
   forward/nodes/node_renderer_capability_projection/0001_create_renderer_capability_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RENDERER_CAPABILITY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_RENDERE

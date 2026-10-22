@@ -20,7 +20,9 @@ being subtly wrong that a shell one-liner would hide:
     Polls every runtime-family Deployment and the projection snapshot topic, and
     fails closed. A ``kubectl rollout status`` loop reports only the FIRST
     Deployment that fails and hides the rest, which is the opposite of what a
-    diagnostic gate should do.
+    diagnostic gate should do. On a timeout it also explains every Deployment
+    that is not ready -- pod status and last state, the events naming it, and
+    log tails -- in the step log itself (OMN-17427).
 
 ``redact``
     Strips Secret payloads out of the rendered manifest before it is uploaded as
@@ -402,6 +404,276 @@ def _topic_exists(namespace: str, broker_deployment: str, topic: str) -> bool:
     )
 
 
+#: Lines of each container log echoed into the step log per not-ready pod. The
+#: step log is where a reader looks first; the FULL logs still reach the
+#: artifact (OMN-17534 AC-2), here and in the Collect diagnostics step.
+DEFAULT_LOG_LINES = 120
+
+#: Run one kubectl command; returns (returncode, stdout, stderr).
+KubectlRunner = Callable[[list[str]], tuple[int, str, str]]
+
+
+def _run_kubectl(args: list[str]) -> tuple[int, str, str]:
+    try:
+        result = subprocess.run(
+            ["kubectl", *args], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        return 127, "", f"kubectl could not be run: {exc}"
+    return result.returncode, result.stdout, result.stderr
+
+
+def _kubectl_json_or_error(
+    run: KubectlRunner, args: list[str]
+) -> tuple[dict[str, Any] | None, str]:
+    code, out, err = run([*args, "-o", "json"])
+    if code != 0:
+        return None, f"`kubectl {' '.join(args)}` failed ({code}): {err.strip()}"
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError as exc:
+        return None, f"`kubectl {' '.join(args)}` returned unparseable JSON: {exc}"
+    if not isinstance(payload, dict):
+        return None, f"`kubectl {' '.join(args)}` returned no JSON object"
+    return payload, ""
+
+
+def _label_selector(deployment: dict[str, Any]) -> str:
+    labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels") or {}
+    return ",".join(f"{key}={value}" for key, value in sorted(labels.items()))
+
+
+def _state_text(state: dict[str, Any] | None) -> str:
+    """One line for a containerState: which of waiting/running/terminated, and why."""
+    if not state:
+        return "none"
+    if "waiting" in state:
+        waiting = state["waiting"] or {}
+        text = f"waiting ({waiting.get('reason', '')})"
+        if waiting.get("message"):
+            text += f": {waiting['message']}"
+        return text
+    if "terminated" in state:
+        term = state["terminated"] or {}
+        text = (
+            f"terminated ({term.get('reason', '')}, exit {term.get('exitCode', '?')}"
+            f", finished {term.get('finishedAt', '?')})"
+        )
+        if term.get("message"):
+            text += f": {term['message']}"
+        return text
+    if "running" in state:
+        return f"running since {(state['running'] or {}).get('startedAt', '?')}"
+    return "unknown"
+
+
+def _pod_status_lines(pod: dict[str, Any]) -> list[str]:
+    """The fields that say why a pod is not Ready, and nothing else."""
+    status = pod.get("status", {})
+    lines = [f"phase={status.get('phase', '?')}"]
+    if status.get("reason") or status.get("message"):
+        lines.append(f"pod: {status.get('reason', '')} {status.get('message', '')}")
+    for condition in status.get("conditions", []) or []:
+        if condition.get("status") != "True":
+            lines.append(
+                f"condition {condition.get('type')}={condition.get('status')} "
+                f"{condition.get('reason', '')}: {condition.get('message', '')}".rstrip(
+                    ": "
+                )
+            )
+    for kind, key in (
+        ("init", "initContainerStatuses"),
+        ("container", "containerStatuses"),
+    ):
+        for cs in status.get(key, []) or []:
+            lines.append(
+                f"{kind} {cs.get('name')}: ready={cs.get('ready')} "
+                f"restarts={cs.get('restartCount', 0)} "
+                f"state={_state_text(cs.get('state'))}"
+            )
+            if cs.get("lastState"):
+                lines.append(
+                    f"{kind} {cs.get('name')}: lastState="
+                    f"{_state_text(cs.get('lastState'))}"
+                )
+    return lines
+
+
+def _event_lines(events: dict[str, Any], names: set[str]) -> list[str]:
+    """Events whose involved object is the Deployment, one of its ReplicaSets or pods.
+
+    Matched by exact name, never by prefix: ``omninode-runtime`` is a prefix of
+    ``omninode-runtime-effects-...``, and a prefix match would report another
+    Deployment's events as this one's.
+    """
+    picked = [
+        event
+        for event in events.get("items", []) or []
+        if (event.get("involvedObject") or {}).get("name") in names
+    ]
+
+    def when(event: dict[str, Any]) -> str:
+        return str(
+            event.get("lastTimestamp")
+            or event.get("eventTime")
+            or event.get("firstTimestamp")
+            or ""
+        )
+
+    lines = []
+    for event in sorted(picked, key=when):
+        involved = event.get("involvedObject") or {}
+        lines.append(
+            f"{when(event)} {event.get('type', '')} {event.get('reason', '')} "
+            f"{involved.get('kind', '')}/{involved.get('name', '')} "
+            f"(x{event.get('count') or 1}): {event.get('message', '')}"
+        )
+    return lines
+
+
+def _tail(text: str, lines: int) -> str:
+    kept = text.splitlines()
+    if len(kept) <= lines:
+        return "\n".join(kept)
+    return "\n".join(
+        [f"... ({len(kept) - lines} earlier line(s) in the artifact)", *kept[-lines:]]
+    )
+
+
+def explain_not_ready(
+    *,
+    namespace: str,
+    names: list[str],
+    log_lines: int = DEFAULT_LOG_LINES,
+    diagnostics_dir: Path | None = None,
+    run: KubectlRunner = _run_kubectl,
+) -> str:
+    """Say why each named Deployment is not ready, from the cluster itself.
+
+    OMN-17427. The table above names the Deployments that never became ready
+    and stops there: run 39668407696 left omninode-runtime and two projection
+    writers 0/1 for 1800s and its step log said nothing about why, so the cause
+    sat in an artifact nobody opens first and every run was re-diagnosed by
+    hand. This prints, per Deployment: its conditions, each pod's phase,
+    conditions, container state and last state, the events naming it, its
+    ReplicaSets or its pods, and the tail of the current and previous container
+    logs. With ``diagnostics_dir`` the same goes to
+    ``not-ready-<deployment>.txt`` with the logs UNTRUNCATED, so the artifact
+    carries what the step log cut.
+
+    Never raises: an unreadable piece is reported as unreadable and the rest is
+    still printed, because this runs on the failure path.
+    """
+    events, events_error = _kubectl_json_or_error(
+        run, ["get", "events", "-n", namespace]
+    )
+    if diagnostics_dir is not None:
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+
+    report: list[str] = []
+    for name in names:
+        brief: list[str] = [f"===== why {name} is not ready ====="]
+        full: list[str] = []
+        deployment, error = _kubectl_json_or_error(
+            run, ["get", "deployment", name, "-n", namespace]
+        )
+        if deployment is None:
+            brief.append(f"deployment unreadable: {error}")
+            report.extend(brief)
+            continue
+        for condition in deployment.get("status", {}).get("conditions", []) or []:
+            brief.append(
+                f"deployment condition {condition.get('type')}="
+                f"{condition.get('status')} {condition.get('reason', '')}: "
+                f"{condition.get('message', '')}"
+            )
+        selector = _label_selector(deployment)
+        pods_payload, error = (
+            _kubectl_json_or_error(
+                run, ["get", "pods", "-n", namespace, "-l", selector]
+            )
+            if selector
+            else (None, "deployment declares no spec.selector.matchLabels")
+        )
+        pods = (pods_payload or {}).get("items", []) or []
+        if pods_payload is None:
+            brief.append(f"pods unreadable: {error}")
+        elif not pods:
+            brief.append(
+                f"no pod matches selector {selector}: nothing was scheduled, "
+                "so the events below are the whole story"
+            )
+
+        involved = {name}
+        for pod in pods:
+            pod_name = pod.get("metadata", {}).get("name", "?")
+            involved.add(pod_name)
+            for owner in pod.get("metadata", {}).get("ownerReferences", []) or []:
+                if owner.get("kind") == "ReplicaSet" and owner.get("name"):
+                    involved.add(owner["name"])
+            brief.append(f"--- pod {pod_name}")
+            brief.extend("  " + line for line in _pod_status_lines(pod))
+
+        brief.append("--- events")
+        if events is None:
+            brief.append(f"  events unreadable: {events_error}")
+        else:
+            # The ReplicaSet events are where FailedCreate (admission, quota)
+            # lives when no pod ever exists, so match their names too.
+            for rs_name in _replicaset_names(run, namespace, name, deployment):
+                involved.add(rs_name)
+            brief.extend("  " + line for line in _event_lines(events, involved))
+
+        full.extend(brief)
+        for pod in pods:
+            pod_name = pod.get("metadata", {}).get("name", "?")
+            for label, extra in (("current", []), ("previous", ["--previous"])):
+                code, out, err = run(
+                    [
+                        "logs",
+                        "-n",
+                        namespace,
+                        pod_name,
+                        "--all-containers",
+                        "--timestamps",
+                        *extra,
+                    ]
+                )
+                text = out if code == 0 else f"(unreadable: {err.strip()})"
+                if label == "previous" and code != 0 and "not found" in err:
+                    text = "(no previous container: it has not restarted)"
+                brief.append(f"--- {label} logs {pod_name} (last {log_lines} lines)")
+                brief.append(_tail(text, log_lines))
+                full.append(f"--- {label} logs {pod_name} (full)")
+                full.append(text)
+
+        report.extend(brief)
+        if diagnostics_dir is not None:
+            (diagnostics_dir / f"not-ready-{name}.txt").write_text(
+                "\n".join(full) + "\n", encoding="utf-8"
+            )
+    text = "\n".join(report)
+    print("\n" + text, file=sys.stderr)
+    return text
+
+
+def _replicaset_names(
+    run: KubectlRunner, namespace: str, name: str, deployment: dict[str, Any]
+) -> list[str]:
+    selector = _label_selector(deployment)
+    if not selector:
+        return []
+    payload, _error = _kubectl_json_or_error(
+        run, ["get", "replicasets", "-n", namespace, "-l", selector]
+    )
+    names: list[str] = []
+    for rs in (payload or {}).get("items", []) or []:
+        owners = rs.get("metadata", {}).get("ownerReferences", []) or []
+        if any(o.get("kind") == "Deployment" and o.get("name") == name for o in owners):
+            names.append(rs.get("metadata", {}).get("name", ""))
+    return [n for n in names if n]
+
+
 def wait_for_boot(
     *,
     namespace: str,
@@ -410,6 +682,8 @@ def wait_for_boot(
     lane_prefix: str,
     broker_deployment: str,
     require_topic: bool,
+    log_lines: int = DEFAULT_LOG_LINES,
+    diagnostics_dir: Path | None = None,
 ) -> int:
     """Poll until EVERY runtime-family Deployment is Ready and the topic exists.
 
@@ -497,12 +771,20 @@ def wait_for_boot(
             "cause and not only a symptom.",
             file=sys.stderr,
         )
+    not_ready = [name for name, ready, desired, _r in last_rows if ready != desired]
     for name, ready, desired, reason in last_rows:
         if ready != desired:
             print(
                 f"  - {name}: {ready}/{desired} Ready. {reason}".rstrip(),
                 file=sys.stderr,
             )
+    if not_ready:
+        explain_not_ready(
+            namespace=namespace,
+            names=not_ready,
+            log_lines=log_lines,
+            diagnostics_dir=diagnostics_dir,
+        )
     print(
         "\nFull pod logs, --previous logs, describes and the redacted render are "
         "in this job's uploaded artifact.",
@@ -670,6 +952,18 @@ def main() -> int:
             "half of what makes a green run mean anything."
         ),
     )
+    wait.add_argument(
+        "--log-lines",
+        type=int,
+        default=DEFAULT_LOG_LINES,
+        help="lines of each not-ready pod's logs echoed into the step log",
+    )
+    wait.add_argument(
+        "--diagnostics-dir",
+        type=Path,
+        default=None,
+        help="also write each not-ready explanation, with full logs, here",
+    )
 
     tp = sub.add_parser(
         "render-topic-provision-job",
@@ -703,6 +997,8 @@ def main() -> int:
         lane_prefix=args.lane_prefix,
         broker_deployment=args.broker_deployment,
         require_topic=not args.skip_topic_check,
+        log_lines=args.log_lines,
+        diagnostics_dir=args.diagnostics_dir,
     )
 
 

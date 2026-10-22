@@ -544,6 +544,11 @@ jobs:
           # runs them, by path. The delegation consumer kwarg-parity proof is
           # the same shape: it reads OmniMarket's consumer source, which only
           # delegation-consumer-kwarg-parity.yml checks out (OMN-18938).
+          # OMN-17427: the live LLM adapter documentation suite fails closed
+          # without LLM_DEEPSEEK_R1_URL (OMN-21147), which this workflow does
+          # not set. It runs by explicit path against a configured endpoint;
+          # selecting it here only made its fail-closed fixture error every
+          # night.
           uv run pytest tests/integration/ \
             -m "integration and not bastion" \
             --deselect tests/integration/event_bus/test_kafka_event_bus_integration.py \
@@ -558,6 +563,7 @@ jobs:
             --deselect tests/integration/registration/e2e/test_runtime_e2e.py \
             --deselect tests/integration/test_runtime_consumes_build_loop_terminal_event.py \
             --deselect tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py \
+            --deselect tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py \
             -v \
             --tb=short \
             --junitxml=nightly-integration-junit.xml \
