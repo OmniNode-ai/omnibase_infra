@@ -1382,3 +1382,119 @@ def test_lane_act_switches_pass_a_set_host_value_through(overlay: str | None) ->
             assert environment.get(key) == value, (
                 f"{name} renders {key}={environment.get(key)!r}, not the host's {value!r}"
             )
+
+
+_CLOUD_ONE_SHOTS = frozenset({"cloud-migration-files", "cloud-migration"})
+_CLOUD_GATED_SERVICE = "onex-api"
+
+
+def _services_reaching(
+    services: dict[str, Any], targets: frozenset[str]
+) -> dict[str, list[str]]:
+    def path_to_target(name: str, visited: set[str]) -> list[str] | None:
+        if name in targets:
+            return [name]
+        if name in visited:
+            return None
+        visited.add(name)
+        dependencies = (services.get(name) or {}).get("depends_on") or {}
+        for dependency in sorted(dependencies):
+            path = path_to_target(dependency, visited)
+            if path is not None:
+                return [name, *path]
+        return None
+
+    reaching: dict[str, list[str]] = {}
+    for name in sorted(services):
+        if name not in targets:
+            path = path_to_target(name, set())
+            if path is not None:
+                reaching[name] = path
+    return reaching
+
+
+def _render_dev_lane_runtime_services() -> dict[str, Any]:
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+@pytest.mark.integration
+def test_dev_lane_cloud_migration_gates_only_onex_api() -> None:
+    """OMN-18496: a failed ancillary cloud migration gates only onex-api."""
+    services = _render_dev_lane_runtime_services()
+    expected = _CLOUD_ONE_SHOTS | {
+        _CLOUD_GATED_SERVICE,
+        "omninode-runtime",
+        "runtime-effects",
+    }
+    assert expected <= services.keys(), (
+        f"missing services: {expected - services.keys()}"
+    )
+    assert (
+        services[_CLOUD_GATED_SERVICE]["depends_on"]["cloud-migration"]["condition"]
+        == "service_completed_successfully"
+    )
+    reaching = _services_reaching(services, _CLOUD_ONE_SHOTS)
+    assert set(reaching) == {_CLOUD_GATED_SERVICE}, (
+        f"cloud one-shots must gate only {_CLOUD_GATED_SERVICE}; paths: {reaching!r}"
+    )
+
+
+@pytest.mark.integration
+def test_runtime_family_never_waits_on_a_cloud_one_shot() -> None:
+    """OMN-18496: cloud migration failures cannot block the runtime family."""
+    services = _render_dev_lane_runtime_services()
+    reaching = _services_reaching(services, _CLOUD_ONE_SHOTS)
+    checked: set[str] = set()
+    for name in sorted(services):
+        if name in {"omninode-runtime", "runtime-effects", "runtime-worker"} or (
+            name.startswith("projection-")
+        ):
+            checked.add(name)
+            assert name not in reaching, (
+                f"{name} waits on a cloud one-shot via {reaching[name]!r}"
+            )
+    assert {"omninode-runtime", "runtime-effects"} <= checked, (
+        f"both runtime kernels must be checked; checked: {sorted(checked)!r}"
+    )
+
+
+@pytest.mark.integration
+def test_reachability_flags_a_runtime_wired_to_a_failing_cloud_migration() -> None:
+    """OMN-18496: detect direct and transitive failure gates without Docker."""
+    fixture: dict[str, Any] = {
+        "cloud-migration": {"restart": "no"},
+        "migration-gate": {
+            "depends_on": {
+                "forward-migration": {"condition": "service_completed_successfully"}
+            }
+        },
+        "omninode-runtime": {
+            "depends_on": {
+                "migration-gate": {"condition": "service_completed_successfully"},
+                "cloud-migration": {"condition": "service_completed_successfully"},
+            }
+        },
+        "runtime-effects": {
+            "depends_on": {"omninode-runtime": {"condition": "service_started"}}
+        },
+        "onex-api": {
+            "depends_on": {
+                "cloud-migration": {"condition": "service_completed_successfully"}
+            }
+        },
+        "a": {"depends_on": {"b": {"condition": "service_started"}}},
+        "b": {"depends_on": {"a": {"condition": "service_started"}}},
+    }
+    assert _services_reaching(fixture, _CLOUD_ONE_SHOTS) == {
+        "onex-api": ["onex-api", "cloud-migration"],
+        "omninode-runtime": ["omninode-runtime", "cloud-migration"],
+        "runtime-effects": ["runtime-effects", "omninode-runtime", "cloud-migration"],
+    }
+    assert _services_reaching(
+        {"list-runtime": {"depends_on": ["cloud-migration"]}}, _CLOUD_ONE_SHOTS
+    ) == {"list-runtime": ["list-runtime", "cloud-migration"]}

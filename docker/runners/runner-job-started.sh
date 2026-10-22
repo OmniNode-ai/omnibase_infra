@@ -820,8 +820,8 @@ wire_sibling_checkout_mirror_rewrite() {
 # THE FIX. Check free disk BEFORE any of the write-heavy steps in this hook's
 # main body (workspace rm -rf + mirror reseed, uv/checkout mirror-rewrite
 # discovery, wire_pypi_cache). Below the floor, fail the job here -- the SAME
-# "instant fail" outcome ENOSPC already produces, but capped at a single `df`
-# call's worth of I/O instead of however many megabytes a partial
+# "instant fail" outcome ENOSPC already produces, but capped at a few `df`
+# calls' worth of I/O instead of however many megabytes a partial
 # checkout/cache-write burns before the kernel actually returns ENOSPC. This
 # is fix direction #1 from OMN-16363: "a minimum-free-disk gate before
 # accepting a new job -- refuse/defer job acceptance below some threshold ...
@@ -862,42 +862,95 @@ _C3_DISK_ADMISSION_STATE_DIR="${RUNNER_DISK_ADMISSION_STATE_DIR:-${RUNNER_HOME:-
 # mount is absent -- e.g. before the fleet is recreated to pick up the new
 # compose volume; see the rollout note in knowledge-base:runbooks/runner-disk-admission-gate.md.
 _C3_DISK_ADMISSION_PAUSE_DIR="${RUNNER_DISK_ADMISSION_PAUSE_DIR:-/home/runner/.onex-disk-admission-pause}"
-# The runner's own workspace/tool-cache mount -- the same volume actions/checkout,
-# uv, and docker builds all write to inside this container.
-_C3_DISK_ADMISSION_MOUNT="${RUNNER_DISK_ADMISSION_MOUNT:-/home/runner/actions-runner}"
+# An explicit mount is an additional write target, never a replacement for
+# runner home and workspace storage (which can be separate bind mounts).
+_C3_DISK_ADMISSION_MOUNT="${RUNNER_DISK_ADMISSION_MOUNT:-}"
 
-# _c3_avail_kb -- test seam: DISK_ADMISSION_DF_OVERRIDE_KB lets tests inject an
-# exact avail-KB reading without needing a real near-full filesystem.
-_c3_avail_kb() {
-    if [[ -n "${DISK_ADMISSION_DF_OVERRIDE_KB:-}" ]]; then
-        echo "${DISK_ADMISSION_DF_OVERRIDE_KB}"
+# Existing df test seam: a scalar supplies the same avail-KB to every path.
+# Per-mount fixtures extend it with newline-separated, tab-delimited rows:
+# path<TAB>filesystem<TAB>avail-KB (a nonnumeric value simulates unreadable df).
+# Production and fixtures both return filesystem<TAB>avail-KB.
+_c3_disk_usage() {
+    local mount="$1" override="${DISK_ADMISSION_DF_OVERRIDE_KB:-}"
+    if [[ -n "${override}" ]]; then
+        if [[ "${override}" != *$'\t'* ]]; then
+            printf 'override\t%s\n' "${override}"
+        else
+            local path filesystem avail_kb
+            while IFS=$'\t' read -r path filesystem avail_kb; do
+                if [[ "${path}" == "${mount}" ]]; then
+                    printf '%s\t%s\n' "${filesystem}" "${avail_kb}"
+                    return 0
+                fi
+            done <<< "${override}"
+        fi
         return 0
     fi
-    df -Pk "${_C3_DISK_ADMISSION_MOUNT}" 2>/dev/null | awk 'NR==2 {print $4}'
+    df -Pk "${mount}" 2>/dev/null | awk 'NR==2 {print $1 "\t" $4}'
 }
 
-# disk_admission_gate -- returns 1 (job must fail) when free space on
-# _C3_DISK_ADMISSION_MOUNT is below the admission floor; returns 0 (job
-# proceeds) otherwise, INCLUDING when disk usage cannot be read at all (fail
-# OPEN -- a broken `df` must never itself become a fleet-wide outage; the
-# existing ENOSPC failure mode remains the backstop in that case).
+# Check each write path, reduce readings by filesystem, then admit only when
+# every readable filesystem meets the floor. Unreadable paths fail open, but
+# never hide a known short filesystem. No workspace/cache writes precede this.
 disk_admission_gate() {
     local avail_kb avail_gb_frac min_free_kb runner="${RUNNER_NAME:-unknown}"
-    avail_kb="$(_c3_avail_kb)"
-    if ! [[ "${avail_kb}" =~ ^[0-9]+$ ]]; then
-        echo "[disk-admission] could not read free space on ${_C3_DISK_ADMISSION_MOUNT}; gate fails open, job proceeds."
+    local runner_home="${RUNNER_HOME:-/home/runner/actions-runner}"
+    local work_root="${runner_home}/_work"
+    local mount filesystem usage shortest_mount="" minimum_kb=""
+    local -a mounts=("${runner_home}" "${work_root}") unreadable=()
+    local -A free_by_fs=() mount_by_fs=()
+    [[ ! -d "${work_root}/_temp" ]] || mounts+=("${work_root}/_temp")
+    # RUNNER_WORK_DIR is configurable in the workspace-reset path below.
+    if [[ "${RUNNER_WORK_DIR:-_work}" != "_work" ]]; then
+        local configured_work="${runner_home}/${RUNNER_WORK_DIR}"
+        mounts+=("${configured_work}")
+        [[ ! -d "${configured_work}/_temp" ]] || mounts+=("${configured_work}/_temp")
+    fi
+    [[ -z "${_C3_DISK_ADMISSION_MOUNT}" ]] || mounts+=("${_C3_DISK_ADMISSION_MOUNT}")
+
+    for mount in "${mounts[@]}"; do
+        usage="$(_c3_disk_usage "${mount}")" || usage=""
+        filesystem="" avail_kb=""
+        IFS=$'\t' read -r filesystem avail_kb <<< "${usage}" || true
+        if [[ -z "${filesystem}" || ! "${avail_kb}" =~ ^[0-9]+$ ]]; then
+            unreadable+=("${mount}")
+            continue
+        fi
+        # Multiple paths may share a filesystem. Keep its lowest observation
+        # (space can fall during this scan) and the path that reported it.
+        if [[ -z "${free_by_fs[${filesystem}]+present}" ]] ||
+            [[ "${avail_kb}" -lt "${free_by_fs[${filesystem}]}" ]]; then
+            free_by_fs["${filesystem}"]="${avail_kb}"
+            mount_by_fs["${filesystem}"]="${mount}"
+        fi
+    done
+    for filesystem in "${!free_by_fs[@]}"; do
+        avail_kb="${free_by_fs[${filesystem}]}"
+        if [[ -z "${minimum_kb}" || "${avail_kb}" -lt "${minimum_kb}" ]]; then
+            minimum_kb="${avail_kb}"
+            shortest_mount="${mount_by_fs[${filesystem}]}"
+        fi
+    done
+    min_free_kb=$(( _C3_DISK_ADMISSION_MIN_FREE_GB * 1024 * 1024 ))
+    for mount in "${unreadable[@]}"; do
+        if [[ -z "${minimum_kb}" || "${minimum_kb}" -ge "${min_free_kb}" ]]; then
+            echo "[disk-admission] could not read free space on ${mount}; gate fails open, job proceeds."
+        else
+            echo "[disk-admission] could not read free space on ${mount}; failing open for this mount only; another filesystem is below the floor."
+        fi
+    done
+    if [[ -z "${minimum_kb}" ]]; then
         return 0
     fi
-
-    min_free_kb=$(( _C3_DISK_ADMISSION_MIN_FREE_GB * 1024 * 1024 ))
-    if [[ "${avail_kb}" -ge "${min_free_kb}" ]]; then
+    if [[ "${minimum_kb}" -ge "${min_free_kb}" ]]; then
         # Healthy -- clear any prior consecutive-failure streak.
         rm -f "${_C3_DISK_ADMISSION_STATE_DIR}/consecutive_failures" 2>/dev/null || true
         return 0
     fi
+    avail_kb="${minimum_kb}"
 
     avail_gb_frac="$(awk "BEGIN {printf \"%.2f\", ${avail_kb}/1024/1024}")"
-    echo "::error title=RUNNER-DISK-ADMISSION:${avail_gb_frac}GB::Runner '${runner}' has only ${avail_gb_frac} GB free on ${_C3_DISK_ADMISSION_MOUNT} (below the ${_C3_DISK_ADMISSION_MIN_FREE_GB} GB admission floor). Refusing this job BEFORE workspace reset/checkout/dependency writes to avoid contributing to the OMN-16360 write-amplification loop. This is an infra failure, not a domain defect."
+    echo "::error title=RUNNER-DISK-ADMISSION:${avail_gb_frac}GB::Runner '${runner}' has only ${avail_gb_frac} GB free on ${shortest_mount} (below the ${_C3_DISK_ADMISSION_MIN_FREE_GB} GB admission floor). Refusing this job BEFORE workspace reset/checkout/dependency writes to avoid contributing to the OMN-16360 write-amplification loop. This is an infra failure, not a domain defect."
 
     mkdir -p "${_C3_DISK_ADMISSION_STATE_DIR}" 2>/dev/null || true
     local count_file="${_C3_DISK_ADMISSION_STATE_DIR}/consecutive_failures"
