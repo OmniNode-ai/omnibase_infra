@@ -151,7 +151,7 @@ def _clone_local(source_git_dir: Path, dest: Path) -> subprocess.CompletedProces
     )
 
 
-_ARRAY_REF = re.compile(r"\$\{(\w+)\[@\]\}")
+_ARRAY_REF = re.compile(r'\$\{(\w+)\[@\](?:\+"\$\{\1\[@\]\}")?\}')
 
 
 def _read_bash_array(
@@ -159,7 +159,8 @@ def _read_bash_array(
 ) -> list[str]:
     """Return the quoted or bare words of the bash array ``name=( ... )`` in ``path``.
 
-    A word that is itself an array expansion (``"${OTHER[@]}"``) is resolved
+    A word that is itself an array expansion (``"${OTHER[@]}"`` or the bash
+    3.2-safe ``${OTHER[@]+"${OTHER[@]}"}``) is resolved
     recursively rather than kept as a literal string: since OMN-19072,
     ``cut-lab-ref.sh``'s ``LAB_REF_REPOS`` is exactly
     ``("${SIBLING_LAB_TAG_REPOS[@]}")``, sourcing ``sibling_clone_manifest.sh``

@@ -28,8 +28,8 @@ log line, not into an exception message. Concretely:
   once — the same "value crosses exactly once" discipline
   ``omnimarket/projection/credential_publisher.py`` uses for customer BYOK.
 * Every message derived from an exception goes through
-  :func:`_safe_error`, which runs ``sanitize_error_message`` AND then
-  explicitly replaces any parsed value substring with ``***``. The
+  :func:`_safe_error`, which explicitly replaces any parsed value substring
+  with ``***`` AND then runs ``sanitize_error_string`` on the remainder. The
   sanitiser alone is not enough: it pattern-matches credential-shaped text,
   and an API key echoed back inside a third-party SDK error is not
   guaranteed to match a pattern. Redacting the values we are literally
@@ -81,7 +81,10 @@ from omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_reque
 from omnibase_infra.nodes.node_secret_seed_effect.models.model_secret_seed_result import (
     ModelSecretSeedResult,
 )
-from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
+from omnibase_infra.utils.util_error_sanitization import (
+    sanitize_error_message,
+    sanitize_error_string,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +213,7 @@ def _default_store_factory(request: ModelSecretSeedRequest) -> ProtocolSeedSecre
 def _redact(text: str, values: Iterable[SecretStr]) -> str:
     """Blank every held secret value out of ``text``.
 
-    This runs on top of ``sanitize_error_message``, not instead of it. The
+    This runs alongside ``sanitize_error_string``, not instead of it. The
     sanitiser recognises credential-SHAPED text; it cannot recognise an
     arbitrary API key that a third-party SDK helpfully echoed back inside
     its own error string. We are holding those values, so we can remove them
@@ -225,8 +228,14 @@ def _redact(text: str, values: Iterable[SecretStr]) -> str:
 
 
 def _safe_error(exc: Exception, values: Iterable[SecretStr]) -> str:
-    """Sanitise an exception, then redact held values out of the remainder."""
-    return _redact(sanitize_error_message(exc), values)
+    """Redact held values out of an exception message, then sanitise the rest.
+
+    Held values go first: the sanitiser blanks a whole message on a credential
+    shape, so a key we hold would otherwise cost the diagnostic remainder.
+    """
+    held = tuple(values)
+    remainder = sanitize_error_string(_redact(str(exc), held))
+    return _redact(f"{type(exc).__name__}: {remainder}", held)
 
 
 def parse_source(raw: str) -> dict[str, SecretStr]:

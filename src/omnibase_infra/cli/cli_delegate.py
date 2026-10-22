@@ -2936,6 +2936,11 @@ def _redact_refusal_text(text: str) -> str:
     is the flag and the rule it broke, so the credentials are taken out of it and
     the rest is kept.
     """
+    from omnibase_infra.utils.util_dlq_credential_redaction import (
+        redact_credential_value_patterns,
+    )
+
+    text = redact_credential_value_patterns(text, "[REDACTED]")
     text = _KEY_MATERIAL.sub("[REDACTED key material]", text)
     text = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", text)
     text = _SECRET_PAIR.sub(r"\g<key>[REDACTED]", text)
