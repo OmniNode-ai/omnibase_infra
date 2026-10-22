@@ -6,6 +6,13 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn17427-reconcile-staging-lock
+    statement: Dispatch venv staging excludes concurrent writers and releases its lock when the reconciler exits.
+    acceptance:
+      - id: AC17427526301
+        statement: A live local holder or a holder on another host refuses a second run without changing staging or releasing the holder's lock; a dead local holder is reclaimed and the acquired lock is released at exit.
+      - id: AC17427526302
+        statement: The lock record parser uses process substitution and the reconciler retains its regression against here-string pipe deadlocks.
   - id: req-omn17427-c28-seam-dlq
     statement: The C28 node and script collectors count the injected malformed marker on the seam DLQ and ignore unrelated messages on the generic DLQ.
     acceptance:
@@ -623,6 +630,34 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-pr5263-staging-lock
+    description: The real reconciler runs against temporary workspace shims with live, foreign and dead lock holders; the tests inspect staging contents, lock ownership and release.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_reconcile_staging_lock_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526301
+  - id: dod-omn17427-pr5263-no-here-string
+    description: The existing deadlock regression rejects here-string syntax and exercises a 200 KiB lane-hook status response within its timeout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_reconcile_hung_holder_omn19709.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526302
+  - id: dod-omn17427-pr5263-staging-hosted-deploy
+    description: Hosted-runner check of staging exclusion, lock reclamation and release, and the large-output regression using temporary workspaces and subprocesses. Requires no broker, container, credentials or deployed lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_reconcile_staging_lock_omn17427.py tests/scripts/test_reconcile_hung_holder_omn19709.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526301
+      - AC17427526302
   - id: dod-omn17427-omn19937-ac4-dev202-writer
     description: The regression failed before the deployment selection was added (empty owned manifest) and passes after it. This proves placement configuration, not a deployed consumer or successful live row readback; OMN-19937 AC4 remains open until deployment and re-probe.
     source: manual

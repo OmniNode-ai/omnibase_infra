@@ -829,7 +829,7 @@ staging_lock_field() {
   # $1 = holder record, $2 = key. Records are `pid=N;host=H;at=T`.
   local part
   local -a parts
-  IFS=';' read -r -a parts <<< "$1"
+  IFS=';' read -r -a parts < <(printf '%s\n' "$1")
   for part in "${parts[@]}"; do
     [[ "$part" == "$2="* ]] && { printf '%s' "${part#"$2="}"; return 0; }
   done
