@@ -2135,11 +2135,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC524903]
   - id: dod-omn17427-ac524904-compose-up
-    description: Clean exits preserve the path without extra hash or label reads.
+    description: Clean exits preserve the path without extra hash or label reads, paired with unconverged-error regressions that fail at the merge base to distinguish the two paths.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k clean_up
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k "clean_up or unconverged"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC524904]
   - id: dod-omn17427-compose-up-convergence-deploy-check
