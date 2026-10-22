@@ -155,8 +155,8 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # not a runtime lane: it has no runtime main/effects pair. It publishes no
     # port and serves a Unix socket reached only by the host's tailscale serve.
     "principal-issuer": _PORTS_NONE,
-    # OMN-17292 — the dashboard owner's collaborator lane on the .202 host,
-    # declared in the private lane census on 2026-10-22 (operator RULING
+    # OMN-17292 — the dashboard owner's collaborator lane on the second lab
+    # host, declared in the private lane census on 2026-10-22 (operator RULING
     # 2026-10-22T07:02:21Z, OMN-17427). No port block for it has been recorded
     # in this repository, so the honest value is UNDECLARED, as for dogfood.
     "dashboard-owner": _PORTS_UNDECLARED,
@@ -240,11 +240,11 @@ _LANE_BOUNDARY: dict[str, str] = {
         "network, unix socket only, no published port; NOT a runtime lane, "
         "never a proof lane, and never sourced for stability/prod grants"
     ),
-    # OMN-17292. Collaborator-class like `lakshman`: brought up on .202 for the
-    # dashboard owner (operator RULING 2026-10-22T07:02:21Z), so it carries the
-    # same boundary as that lane.
+    # OMN-17292. Collaborator-class, like the collaborator lane above: brought
+    # up on the second lab host for the dashboard owner (operator RULING
+    # 2026-10-22T07:02:21Z), so it carries the same boundary as that lane.
     "dashboard-owner": (
-        ".202 collaborator lane for the dashboard owner — mutable by its owner; "
+        "collaborator lane for the dashboard owner — mutable by its owner; "
         "NOT a proof lane; never sourced for stability/prod grants"
     ),
 }

@@ -40,7 +40,10 @@ from scripts.preflight_lane_deploy_attribution import (
     lane_from_compose_project,
     resolve_grant_block,
 )
-from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+from tests.helpers.lane_census_fixtures import (
+    COLLABORATOR_LANES_ON_SECOND_HOST,
+    LAB_MANIFEST,
+)
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
     LANE_OVERLAY_TARGET,
@@ -172,13 +175,11 @@ def test_manifest_declares_sim_202_on_lab_202_only() -> None:
     )
 
 
-#: OMN-19505: .202 also carries the second deployed dev lane. OMN-17292: since
-#: 2026-10-22 it also carries the collaborator lane brought up there for the
-#: dashboard owner (operator RULING 2026-10-22T07:02:21Z, OMN-17427), declared
-#: in the private census as ``lakshman`` and ``dashboard-owner``. No other lane
-#: is declared for it. The census test below drives sim-202's rows only, so it
-#: also holds those two lanes to reading clean while entirely down.
-LANES_ON_202 = ["dashboard-owner", "dev-202", "lakshman", LANE]
+#: OMN-19505: .202 also carries the second deployed dev lane. No .201 lane is
+#: declared for it.
+LANES_ON_202 = ["dev-202", LANE]
+#: OMN-17292: and the dashboard owner's collaborator lane, under both its names.
+LANES_ON_202 = sorted([*LANES_ON_202, *COLLABORATOR_LANES_ON_SECOND_HOST])
 
 
 @pytest.mark.lab_overlay
@@ -190,7 +191,7 @@ def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> 
         name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
     )
     assert lanes_on_host == LANES_ON_202, (
-        f"only the declared .202 lanes may be on .202; got {lanes_on_host}"
+        f"no .201 lane may be declared for .202; got {lanes_on_host}"
     )
 
 
