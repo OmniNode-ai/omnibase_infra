@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21268"
+title: "omnibase_infra still declares the judge lane that the lane census dropped, so every PR's lab-overlay parity check fails"
+summary: "The private lane census dropped judge after its compose project was retired. omnibase_infra still carried judge as a census lane (two lane block generator rows, the compose parity tuple, the runtime-worker accounting and the governed-lane split), so every pull request's Lab-overlay parity tests (OMN-20934) check failed. judge is retired on the terms prod was (OMN-18320): its generator rows and parity entries are dropped, GOVERNED_LANES stays wider so mutations still refuse, the neutral census fixture's stand-in lane is renamed from judge to dogfood, and a split-safe test asserts a retired lane has no generator row. docker/docker-compose.judge.yml stays in the tree."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21268-judge-retired"
+    statement: |-
+      omnibase_infra's census-side lane declarations match the census that no longer declares judge.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: the lane block generator's port and boundary maps carry no row for a retired lane (prod, judge) while still covering the live lanes -- falsifier: uv run pytest tests/unit/scripts/test_lane_block_retired_lanes.py -q
+      - id: "AC2"
+        statement: |-
+          AC2: the lab-overlay parity tests pass against the census that no longer declares judge -- falsifier: ONEX_WORKSPACE_CONFIG_ROOT=<overlay> uv run pytest -m lab_overlay tests/ -q
+evidence_requirements:
+  - kind: "tests"
+    description: "The retired-lane test reads the generator maps; the drift tests run the orphan and undeclared-lane checks over the neutral census fixture. The lab-overlay run itself needs the private overlay, which the hosted Lab-overlay parity tests job fetches; locally it gave 130 passed against the private lane census main branch at 990026fd8."
+    command: "uv run pytest tests/unit/scripts/test_lane_block_retired_lanes.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21268-ac1-retired-lane-rows"
+    description: "The generator's _LANE_PORT_MAP and _LANE_BOUNDARY have no prod or judge row and still cover dev, dogfood and principal-issuer. Fails at the merge base, whose generator keeps both judge rows."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_lane_block_retired_lanes.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21268-ac2-census-checks-agree"
+    description: "Split-safe half of AC2: the retired-lane test plus the drift tests that run orphan_map_entries and the undeclared-lane check over the neutral census fixture (its stand-in lane renamed to dogfood). The hosted evidence job has no lab overlay, so the lab_overlay run is not repeated here; the PR's own Lab-overlay parity tests (OMN-20934) check is that verdict. Fails at the merge base through the retired-lane test."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_lane_block_retired_lanes.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q -n 0 -m \"not lab_overlay\" -k \"retired or still_cover or manifest_declaring_every_mapped or agreeing_tree or drift_count\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
