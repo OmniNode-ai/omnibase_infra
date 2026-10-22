@@ -491,6 +491,17 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-compose-up-convergence
+    statement: A failed or interrupted compose up passes its phase only when every service in scope has its declared configuration hash.
+    acceptance:
+      - id: AC524901
+        statement: A nonzero or interrupted up with a mismatched hash or missing container raises and never reports phase success.
+      - id: AC524902
+        statement: A nonzero or interrupted up whose services have converged passes, using the same project and profile to render hashes.
+      - id: AC524903
+        statement: A failed configuration hash render after a compose error raises rather than accepting unknown convergence.
+      - id: AC524904
+        statement: A clean compose up makes no additional configuration hash or container label reads.
   - id: req-omn17427-role-omnidash-lab-job-check-select
     statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
     acceptance:
@@ -2297,6 +2308,46 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn17427-ac524901-compose-up
+    description: Mismatched or absent container hashes refuse phase success.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k unconverged
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524901]
+  - id: dod-omn17427-ac524902-compose-up
+    description: Converged containers permit recovery after a nonzero exit or timeout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k converged_passes
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524902]
+  - id: dod-omn17427-ac524903-compose-up
+    description: A failed hash render refuses an unknown convergence state.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k config_hash_failure
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524903]
+  - id: dod-omn17427-ac524904-compose-up
+    description: Clean exits preserve the path without extra hash or label reads, paired with unconverged-error regressions that fail at the merge base to distinguish the two paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k "clean_up or unconverged"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524904]
+  - id: dod-omn17427-compose-up-convergence-deploy-check
+    description: Hosted-runner deploy check runs the real compose phase and hash readers with mocked command responses, including mismatch, absence, timeout and render failure. No Docker daemon, credentials or live deployment is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524901, AC524902, AC524903, AC524904]
   - id: dod-omn-17427-ac160
     description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
     source: manual
