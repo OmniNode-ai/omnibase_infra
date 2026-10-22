@@ -13,6 +13,8 @@ Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ImageId = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 SourceSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 SourceRepo = Literal["omnibase_core", "omnibase_compat", "omnimarket"]
+# An in-image probe bound; unset means scaled to the host's load (OMN-17991).
+ProbeTimeoutSeconds = Annotated[int, Field(ge=30, le=1800)]
 
 
 class ModelEffectsDeployPlan(BaseModel):
@@ -43,6 +45,11 @@ class ModelEffectsDeployPlan(BaseModel):
     # Match the existing effects readiness allowance; a short fixed deadline
     # would roll back a normal subscription bootstrap before it could finish.
     health_timeout_seconds: Annotated[int, Field(ge=1, le=1800)] = 1800
+    probe_timeout_seconds: ProbeTimeoutSeconds | None = None
+    # OMN-17991: the fix for an unhealthy effects container must be deployable.
+    # Admitted only on the dev lane, for a running target whose health check
+    # fails or has not settled; health is recorded before and after.
+    admit_unhealthy_target: bool = False
 
     @field_validator("reason")
     @classmethod
