@@ -103,8 +103,13 @@ LAB_MANIFEST = _lab_census_path("lane-manifest.yaml")
 LAB_SNAPSHOT = _lab_census_path("census-snapshot.json")
 
 
-def _collaborator_runtime_profile() -> str:
-    """The runtime-policy profile that is neither dev, dogfood nor governed."""
+def _collaborator_runtime_profiles() -> frozenset[str]:
+    """The runtime-policy profiles that are neither dev, dogfood nor governed.
+
+    Returned as a set rather than unpacked to one name: this module is imported
+    by many test modules, and a change to the profile set must fail the tests
+    that compare lanes, not the collection of every importer.
+    """
     from typing import get_args
 
     from omnibase_infra.runtime.models.model_runtime_policy_contract import (
@@ -112,17 +117,20 @@ def _collaborator_runtime_profile() -> str:
     )
     from scripts.preflight_lane_deploy_attribution import GOVERNED_LANES
 
-    collaborator: set[str] = (
-        set(get_args(RuntimeProfileName)) - GOVERNED_LANES - {"dev", "dogfood"}
+    return (
+        frozenset(get_args(RuntimeProfileName))
+        - GOVERNED_LANES
+        - {
+            "dev",
+            "dogfood",
+        }
     )
-    (profile,) = collaborator
-    return profile
 
 
 #: OMN-17292: since 2026-10-22 the lab's second host also carries the
 #: collaborator lane brought up there for the dashboard owner (operator RULING
 #: 2026-10-22T07:02:21Z, OMN-17427). The private census declares it under two
 #: lane names: the runtime-policy collaborator profile and ``dashboard-owner``.
-COLLABORATOR_LANES_ON_SECOND_HOST = frozenset(
-    {"dashboard-owner", _collaborator_runtime_profile()}
+COLLABORATOR_LANES_ON_SECOND_HOST = (
+    frozenset({"dashboard-owner"}) | _collaborator_runtime_profiles()
 )
