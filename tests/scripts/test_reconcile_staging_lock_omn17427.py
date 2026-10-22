@@ -131,15 +131,16 @@ def test_the_holder_record_is_parsed_through_process_substitution() -> None:
         "on a full pipe (OMN-19709)"
     )
     record = _record(4242, "lab-host") + ";note=" + "x" * 200 * 1024
+    # The record goes in on stdin: Linux refuses any single argv string over
+    # 128 KiB (MAX_ARG_STRLEN) with E2BIG, so a 200 KiB argument never runs.
     fields = subprocess.run(
         [
             "bash",
             "-c",
-            function + 'for key in pid host at; do staging_lock_field "$1" "$key"; '
-            "printf '\\n'; done",
-            "bash",
-            record,
+            function + 'record="$(cat)"; for key in pid host at; do '
+            'staging_lock_field "$record" "$key"; printf \'\\n\'; done',
         ],
+        input=record,
         capture_output=True,
         text=True,
         timeout=30,
