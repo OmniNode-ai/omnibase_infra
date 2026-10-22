@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-19958
+title: Runner OOM kills alert in the pass that sees them, on every runner host
+summary: omnibase_infra#4264 makes runner-monitor.sh read each runner's cgroup memory.events oom_kill counter, report a positive delta in the pass that sees it, stay quiet on a flat counter, and report an unreadable counter as an error. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19958-ac2-accepted-20261022t0245z:
+      - label: AC2
+        criterion_hash: 5191b8f13219d1dc24edabbb1bf02288cefa77cd486eaa8162dce404e483e411
+        proposed_by: lane=dod-closeout-bind-2026-10-22T0245Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-22T0245Z-c1
+    dod-omn19958-ac3-accepted-20261022t0245z:
+      - label: AC3
+        criterion_hash: 171318d84d0d5f2109777525a0645d103d4f7e82e1783782ae998eb275d6f014
+        proposed_by: lane=dod-closeout-bind-2026-10-22T0245Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-22T0245Z-c1
+requirements:
+  - id: req-omn-19958-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC3
+        statement: 'AC3: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC2: the monitor pass after an oom_kill rise reports delta 0 and logs no OOM_KILL line for the same runner. Absent before omnibase_infra#4264.'
+    command: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py -q -k "test_the_pass_after_a_kill_reports_delta_zero"
+  - kind: tests
+    description: 'AC3: with the fixture runner''s memory.events removed, the monitor reports an error for that runner. Absent before omnibase_infra#4264.'
+    command: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py -q -k "test_a_missing_memory_events_file_is_reported_for_that_runner"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19958-ac2-accepted-20261022t0245z
+    description: 'AC2: the monitor pass after an oom_kill rise reports delta 0 and logs no OOM_KILL line for the same runner. Absent before omnibase_infra#4264.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py -q -k "test_the_pass_after_a_kill_reports_delta_zero"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19958-ac3-accepted-20261022t0245z
+    description: 'AC3: with the fixture runner''s memory.events removed, the monitor reports an error for that runner. Absent before omnibase_infra#4264.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_monitor_oom_kill_delta.py -q -k "test_a_missing_memory_events_file_is_reported_for_that_runner"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

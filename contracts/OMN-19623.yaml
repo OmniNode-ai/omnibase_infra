@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19623
+title: no-cloud-bus pre-commit hook hangs under Homebrew bash 5.3 here-string pipe pressure
+summary: Evidence-only contract for the merged fix omnibase_infra#4131 (e42d626b7), which replaced the here-string feed of the while-read loop in scripts/validation/check_no_cloud_bus.sh. It records the one acceptance-criterion binding a second lane accepted, AC1. AC2 is a no-regression property that also holds with the fix reverted, so the merge-base control refuses it as always-pass; AC3 has no runnable check (its falsifier is a text scan). Neither is bound here. Touches no runtime path.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19623-ac1-accepted-20261021t2335z:
+      - label: AC1
+        criterion_hash: a17721fb053f309c0c658a28cd26c3d0c544b868510d827af9fdcf7a5189d75d
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2335Z-c0
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2335Z-c0
+requirements:
+  - id: req-omn-19623-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: the static ratchet asserts no executable line of check_no_cloud_bus.sh feeds a while-read loop from a here-string or heredoc. Fails at the parent of omnibase_infra#4131.'
+    command: uv run pytest tests/unit/scripts/validation/test_check_no_cloud_bus.py::test_gate_does_not_feed_a_while_read_loop_via_here_string_or_heredoc -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19623-ac1-accepted-20261021t2335z
+    description: 'AC1: the static ratchet asserts no executable line of scripts/validation/check_no_cloud_bus.sh feeds a while-read loop from a here-string or heredoc. Re-run by the accepting lane at omnibase_infra dev 39e52ccb2: 1 passed. At the parent of omnibase_infra#4131 (4d97482be) it fails on the line done <<< "$matches".'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/validation/test_check_no_cloud_bus.py::test_gate_does_not_feed_a_while_read_loop_via_here_string_or_heredoc -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
