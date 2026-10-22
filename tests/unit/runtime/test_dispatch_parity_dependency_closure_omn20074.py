@@ -59,11 +59,11 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
         "omnibase-core",
         "omnibase-infra",
     ]
-    assert legacy["header"]["corpus"]["contracts_discovered"] == 153
-    assert retired["header"]["corpus"]["contracts_discovered"] == 152
+    assert legacy["header"]["corpus"]["contracts_discovered"] == 154
+    assert retired["header"]["corpus"]["contracts_discovered"] == 153
     assert retired["header"]["corpus"]["contracts_by_package"] == {
         "omnibase_core": 21,
-        "omnibase_infra": 131,
+        "omnibase_infra": 132,
     }
     assert (
         "onex-change-control"
@@ -71,7 +71,7 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
     )
     for section in ("dispatchers", "routes", "probes", "discovery_errors"):
         assert retired[section] == legacy[section], section
-    assert len(retired["probes"]) == 1090
+    assert len(retired["probes"]) == 1096
 
 
 @pytest.mark.parametrize("missing", ["omnibase-core", "omnibase-infra"])

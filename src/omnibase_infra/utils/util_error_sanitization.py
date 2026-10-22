@@ -38,6 +38,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+from omnibase_infra.utils.util_dlq_credential_redaction import CREDENTIAL_VALUE_PATTERNS
+
 # Patterns that may indicate sensitive data in error messages.
 # These patterns are checked case-insensitively against the error message.
 # When matched, the error message is redacted to prevent credential leakage.
@@ -162,6 +164,9 @@ def sanitize_error_string(error_str: str, max_length: int = 500) -> str:
     if not error_str:
         return ""
 
+    if any(pattern.search(error_str) for pattern in CREDENTIAL_VALUE_PATTERNS):
+        return "[REDACTED - potentially sensitive data]"
+
     # Check for sensitive patterns in the error message (case-insensitive)
     error_lower = error_str.lower()
     for pattern in SENSITIVE_PATTERNS:
@@ -223,6 +228,9 @@ def sanitize_error_message(exception: Exception, max_length: int = 500) -> str:
     """
     exception_type = type(exception).__name__
     exception_str = str(exception)
+
+    if any(pattern.search(exception_str) for pattern in CREDENTIAL_VALUE_PATTERNS):
+        return f"{exception_type}: [REDACTED - potentially sensitive data]"
 
     # Check for sensitive patterns in the exception message (case-insensitive)
     exception_lower = exception_str.lower()

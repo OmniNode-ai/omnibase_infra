@@ -12,8 +12,8 @@
 # block generator already declares, so a clean census of this file is clean
 # for every checker.
 #
-# Shape: host-a runs `judge` (required) and `dev` (optional, with declared
-# restart bounds, the lane the lab alarm reads); host-b runs `dogfood`
+# Shape: host-a runs `dogfood` (required) and `dev` (optional, with declared
+# restart bounds, the lane the lab alarm reads); host-b runs `principal-issuer`
 # (optional), which is therefore not applicable on host-a.
 schema_version: "1.0.0"
 default_image_tag_pattern: '.+'
@@ -25,30 +25,30 @@ hosts:
     aliases: [box-b]
 
 lanes:
-  judge:
+  dogfood:
     hosts: [host-a]
-    compose_file: docker/docker-compose.example-judge.yml
-    compose_project: example-judge
-    network: example-judge-network
+    compose_file: docker/docker-compose.example-dogfood.yml
+    compose_project: example-dogfood
+    network: example-dogfood-network
     image_tag_pattern: '.+'
     services:
-      - name: example-judge-postgres
+      - name: example-dogfood-postgres
         kind: service
         replicas: 1
-      - name: example-judge-redpanda
+      - name: example-dogfood-redpanda
         kind: service
         replicas: 1
-      - name: example-judge-forward-migration
+      - name: example-dogfood-forward-migration
         kind: oneshot
-      - name: example-judge-migration-gate
+      - name: example-dogfood-migration-gate
         kind: keepalive
-      - name: example-judge-runtime
+      - name: example-dogfood-runtime
         kind: service
         replicas: 1
-      - name: example-judge-runtime-effects
+      - name: example-dogfood-runtime-effects
         kind: service
         replicas: 1
-      - name: example-judge-agent-actions-consumer
+      - name: example-dogfood-agent-actions-consumer
         kind: profile_gated
   dev:
     optional: true
@@ -66,14 +66,14 @@ lanes:
         kind: service
         replicas: 1
         restart_bound: 3
-  dogfood:
+  principal-issuer:
     optional: true
     hosts: [host-b]
-    compose_file: docker/docker-compose.example-dogfood.yml
-    compose_project: example-dogfood
-    network: example-dogfood-network
+    compose_file: docker/docker-compose.example-principal-issuer.yml
+    compose_project: example-principal-issuer
+    network: example-principal-issuer-network
     image_tag_pattern: '.+'
     services:
-      - name: example-dogfood-runtime
+      - name: example-principal-issuer-runtime
         kind: service
         replicas: 1

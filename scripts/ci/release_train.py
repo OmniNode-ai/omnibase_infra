@@ -1830,6 +1830,193 @@ def bump_declared_version(clone: Path, version: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
+# The open-release-PR decision (OMN-18595).                                     #
+# --------------------------------------------------------------------------- #
+# The line the workflow writes into every release PR body it opens. The decision
+# below reads it back, so the writer and the reader share one shape.
+_RECORDED_CANDIDATE_LINE: Final[re.Pattern[str]] = re.compile(
+    r"^[ \t]*[-*][ \t]+Candidate commit:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE
+)
+_RECORDED_CANDIDATE_VALUE: Final[re.Pattern[str]] = re.compile(
+    r"^`(?P<sha>[0-9a-fA-F]{40})`$"
+)
+_FULL_SHA: Final[re.Pattern[str]] = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+class EnumReleasePrAction(StrEnum):
+    """What the cut job does about the release PR for this run's branch."""
+
+    # No open PR: build the branch from the candidate and open one.
+    OPEN = "open"
+    # An open PR was cut from an older candidate: rebuild the branch from the
+    # new one, force it with lease, and rewrite the PR body to name it.
+    REFRESH = "refresh"
+    # An open PR already names this run's candidate: nothing to push or edit.
+    NOOP = "noop"
+    # The open PR cannot be judged: fail the step, never force-push.
+    REFUSE = "refuse"
+
+
+@dataclass(frozen=True)
+class ModelOpenReleasePr:
+    """One open PR whose head is the release branch: its number and body."""
+
+    number: int
+    body: str
+
+
+@dataclass(frozen=True)
+class ModelReleasePrPlan:
+    """The cut job's decision about the release PR, with what the step needs."""
+
+    action: EnumReleasePrAction
+    reason: str
+    pr_number: int | None = None
+    previous_candidate: str = ""
+    # The remote branch sha observed before the rebuild, for the lease. Empty
+    # when the branch is absent, which is the plain-push case.
+    lease_sha: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action.value,
+            "reason": self.reason,
+            "pr_number": self.pr_number,
+            "previous_candidate": self.previous_candidate,
+            "lease_sha": self.lease_sha,
+        }
+
+
+def parse_recorded_candidate(body: str) -> str | None:
+    """The 40-hex candidate a release PR body names, lowercased, else ``None``.
+
+    ``None`` covers a body with no ``Candidate commit`` line, a line whose value
+    is not one backticked full sha, and a body naming two different candidates:
+    in each the PR's provenance cannot be read, and the caller refuses.
+    """
+    found: set[str] = set()
+    for match in _RECORDED_CANDIDATE_LINE.finditer(body):
+        value = _RECORDED_CANDIDATE_VALUE.match(match.group("value"))
+        if value is None:
+            return None
+        found.add(value.group("sha").lower())
+    if len(found) != 1:
+        return None
+    return next(iter(found))
+
+
+def decide_release_pr(
+    *,
+    candidate_sha: str,
+    open_prs: Sequence[ModelOpenReleasePr],
+    remote_branch_sha: str,
+) -> ModelReleasePrPlan:
+    """Decide what to do about the release PR for this run's branch. Pure.
+
+    ``remote_branch_sha`` is the release branch's sha on the remote as the step
+    observed it, ``""`` when the branch is absent. It is both the "branch exists"
+    fact and the lease's expected value.
+
+    A superseded candidate refreshes rather than skips: skipping on any open PR
+    left omnibase_infra#5256 cut from a candidate that could never go green
+    while dev moved on, and the train never replaced it.
+    """
+    if not _FULL_SHA.match(candidate_sha):
+        return ModelReleasePrPlan(
+            action=EnumReleasePrAction.REFUSE,
+            reason=(
+                "the decision's candidate_sha is not a 40-hex sha, so the "
+                "release PR cannot be compared against it"
+            ),
+        )
+    candidate = candidate_sha.lower()
+
+    if not open_prs:
+        return ModelReleasePrPlan(
+            action=EnumReleasePrAction.OPEN,
+            reason=(
+                "no open release PR for the branch; the branch is absent, "
+                "so a plain push opens it"
+                if not remote_branch_sha
+                else "no open release PR for the branch, but the branch exists "
+                "on the remote; rebuilding it with a lease push"
+            ),
+            lease_sha=remote_branch_sha,
+        )
+
+    if len(open_prs) > 1:
+        numbers = ", ".join(f"#{pr.number}" for pr in open_prs)
+        return ModelReleasePrPlan(
+            action=EnumReleasePrAction.REFUSE,
+            reason=(
+                f"{len(open_prs)} open PRs ({numbers}) share the release branch; "
+                "which one to refresh is not decidable"
+            ),
+        )
+
+    pr = open_prs[0]
+    recorded = parse_recorded_candidate(pr.body)
+    if recorded is None:
+        return ModelReleasePrPlan(
+            action=EnumReleasePrAction.REFUSE,
+            reason=(
+                f"open release PR #{pr.number} carries no readable "
+                "'Candidate commit' line naming one 40-hex sha; refusing to "
+                "force-push a branch whose provenance cannot be read"
+            ),
+            pr_number=pr.number,
+        )
+    if recorded == candidate:
+        return ModelReleasePrPlan(
+            action=EnumReleasePrAction.NOOP,
+            reason=(
+                f"release PR #{pr.number} is already open for candidate "
+                f"{candidate}; not opening a second"
+            ),
+            pr_number=pr.number,
+            previous_candidate=recorded,
+        )
+    return ModelReleasePrPlan(
+        action=EnumReleasePrAction.REFRESH,
+        reason=(
+            f"release PR #{pr.number} was cut from candidate {recorded}, "
+            f"superseded by {candidate}; rebuilding it"
+        ),
+        pr_number=pr.number,
+        previous_candidate=recorded,
+        lease_sha=remote_branch_sha,
+    )
+
+
+def load_open_prs(raw: str) -> list[ModelOpenReleasePr]:
+    """Parse ``gh pr list --json number,body`` output."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"the open-PR list is not JSON: {exc}"
+        raise ReleaseTrainConfigError(msg) from exc
+    if not isinstance(parsed, list):
+        msg = "the open-PR list is not a JSON array"
+        raise ReleaseTrainConfigError(msg)
+    prs: list[ModelOpenReleasePr] = []
+    for entry in parsed:
+        if (
+            not isinstance(entry, dict)
+            or isinstance(entry.get("number"), bool)
+            or not isinstance(entry.get("number"), int)
+        ):
+            msg = f"an open-PR entry has no integer number: {entry!r}"
+            raise ReleaseTrainConfigError(msg)
+        body = entry.get("body")
+        prs.append(
+            ModelOpenReleasePr(
+                number=entry["number"], body=body if isinstance(body, str) else ""
+            )
+        )
+    return prs
+
+
+# --------------------------------------------------------------------------- #
 # CLI.                                                                          #
 # --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
@@ -1892,6 +2079,23 @@ def build_parser() -> argparse.ArgumentParser:
     bump.add_argument("--clone", type=Path, required=True)
     bump.add_argument("--version", required=True)
 
+    release_pr = sub.add_parser(
+        "release-pr",
+        help="decide whether to open, refresh, skip or refuse the release PR",
+    )
+    release_pr.add_argument("--candidate-sha", required=True)
+    release_pr.add_argument(
+        "--open-prs-file",
+        type=Path,
+        required=True,
+        help="`gh pr list --head <branch> --state open --json number,body` output",
+    )
+    release_pr.add_argument(
+        "--remote-branch-sha",
+        default="",
+        help="the release branch's sha on the remote; empty when it is absent",
+    )
+
     return parser
 
 
@@ -1906,6 +2110,20 @@ def _selected(policies: dict[str, ModelRepoReleasePolicy], raw: str) -> list[str
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # Needs no policy: it compares one candidate against one PR body.
+    if args.command == "release-pr":
+        try:
+            plan = decide_release_pr(
+                candidate_sha=args.candidate_sha,
+                open_prs=load_open_prs(args.open_prs_file.read_text(encoding="utf-8")),
+                remote_branch_sha=args.remote_branch_sha,
+            )
+        except (ReleaseTrainConfigError, OSError) as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(plan.to_dict(), sort_keys=True))
+        return 0
 
     try:
         policies = load_policy(args.policy)

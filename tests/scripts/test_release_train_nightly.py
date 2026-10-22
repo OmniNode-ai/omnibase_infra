@@ -27,7 +27,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import stat
 import subprocess
 import sys
 from dataclasses import replace
@@ -951,116 +950,6 @@ class TestWorkflowShape:
         )
         assert decision.verdict is rt.EnumTrainVerdict.CUT
         assert decision.to_dict()["base_branch"] == "trunk"
-
-
-# --------------------------------------------------------------------------- #
-# The duplicate guard is executed before branch creation, not merely present. #
-# --------------------------------------------------------------------------- #
-class TestTheDuplicateGuardHolds:
-    """An open train release PR must stop a second cut of the same branch.
-
-    Run the shipped shell up to branch creation. A sentinel at that boundary
-    proves the empty result proceeds and the occupied result actually stops.
-    """
-
-    WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
-
-    @staticmethod
-    def _run_guard(
-        tmp_path: Path, open_count: int
-    ) -> tuple[subprocess.CompletedProcess[str], Path, str]:
-        import yaml as _yaml
-
-        parsed = _yaml.safe_load(
-            TestTheDuplicateGuardHolds.WORKFLOW.read_text(encoding="utf-8")
-        )
-        steps = [
-            step
-            for step in parsed["jobs"]["cut"]["steps"]
-            if step.get("name") == "Open the release pull request"
-        ]
-        assert len(steps) == 1, "the cut job must declare exactly one release PR step"
-        step = steps[0]
-        run: str = step["run"]
-        branch_creation = 'git checkout -b "${branch}"'
-        assert run.count(branch_creation) == 1, (
-            "the guard boundary must appear exactly once in the shipped step"
-        )
-        lines = run.splitlines()
-        boundary = [
-            i for i, line in enumerate(lines) if line.strip() == branch_creation
-        ]
-        assert len(boundary) == 1, "branch creation must be its own shell line"
-        script = "\n".join(lines[: boundary[0]]) + "\necho REACHED_BRANCH_CREATION\n"
-
-        (tmp_path / "_target").mkdir()
-        bin_path = tmp_path / "bin"
-        bin_path.mkdir()
-        gh = bin_path / "gh"
-        gh.write_text(
-            "#!/bin/sh\n"
-            'printf \'%s\\n\' "$*" >> "$FAKE_GH_LOG"\n'
-            'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then\n'
-            "  printf '%s\\n' \"$FAKE_GH_OPEN_COUNT\"\n"
-            "else\n"
-            "  exit 1\n"
-            "fi\n",
-            encoding="utf-8",
-        )
-        gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
-        log = tmp_path / "gh.log"
-        env = {
-            **os.environ,
-            **dict.fromkeys(step["env"], "unused"),
-            "TARGET_REPO": "omnimarket",
-            "VERSION": "0.4.303",
-            "FAKE_GH_LOG": str(log),
-            "FAKE_GH_OPEN_COUNT": str(open_count),
-            "PATH": f"{bin_path}{os.pathsep}{os.environ['PATH']}",
-        }
-        result = subprocess.run(
-            ["bash", "-c", script],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        return result, log, run
-
-    def test_an_open_release_pr_for_the_branch_stops_the_cut(
-        self, tmp_path: Path
-    ) -> None:
-        result, _, _ = self._run_guard(tmp_path, open_count=1)
-        assert result.returncode == 0, result.stderr
-        assert "not opening a second" in result.stdout
-        assert "REACHED_BRANCH_CREATION" not in result.stdout
-
-    def test_no_open_release_pr_lets_the_cut_proceed(self, tmp_path: Path) -> None:
-        """One input flipped. An unoccupied branch reaches the cut boundary."""
-        result, _, _ = self._run_guard(tmp_path, open_count=0)
-        assert result.returncode == 0, result.stderr
-        assert "REACHED_BRANCH_CREATION" in result.stdout
-        assert "not opening a second" not in result.stdout
-
-    def test_the_guard_asks_about_the_exact_branch_the_cut_would_create(
-        self, tmp_path: Path
-    ) -> None:
-        result, log, run = self._run_guard(tmp_path, open_count=1)
-        assert result.returncode == 0, result.stderr
-        calls = [
-            line.split()
-            for line in log.read_text(encoding="utf-8").splitlines()
-            if line.split()[:2] == ["pr", "list"]
-        ]
-        assert len(calls) == 1, "the guard must ask about open release PRs once"
-        argv = calls[0]
-        assert argv[argv.index("--head") + 1] == "automation/release-0.4.303-omn-18595"
-        assert argv[argv.index("--state") + 1] == "open"
-        assert argv[argv.index("--repo") + 1] == "OmniNode-ai/omnimarket"
-        assert 'git checkout -b "${branch}"' in run
-        assert 'branch="automation/release-${VERSION}-omn-18595"' in run
 
 
 # --------------------------------------------------------------------------- #

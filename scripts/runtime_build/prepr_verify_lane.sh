@@ -142,6 +142,7 @@ USAGE
 }
 
 SLOT=""
+ORIGINAL_ARGS=("$@")
 WORKTREE=""
 REASON="${ONEX_DEPLOY_REASON:-}"
 WITH_GATEWAY=1
@@ -334,6 +335,18 @@ PYPLAN
 fi
 
 # -----------------------------------------------------------------------------
+# Resource ownership covers the build AND the subsequent exercise. The pool
+# wraps every phase in the same helper. A standalone bring-up re-execs through
+# it and leaves an expiring lease when it exits; longer exercises must also run
+# through the helper with the same token. Plan-only never writes a lease.
+LEASE_PY="${SCRIPT_DIR}/prepr_teardown_slot.py"
+if [[ -z "${ONEX_PREPR_LEASE_TOKEN:-}" ]]; then
+    exec "${PY}" "${LEASE_PY}" run --slot "${SLOT}" \
+        --holder "standalone-${BASHPID}" --staging-root "${STAGING_ROOT}" \
+        -- bash "$0" "${ORIGINAL_ARGS[@]}"
+fi
+"${PY}" "${LEASE_PY}" check --slot "${SLOT}" || exit $?
+
 # 4. LOCKS. The slot lock covers the whole critical section; the pool-wide
 # build lock covers the BUILD only and is released the moment it finishes, so
 # two slots overlap freely in boot, probe and teardown -- which is where most

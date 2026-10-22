@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21266"
+title: "omnibase_infra dev's uv.lock pins virtualenv 21.7.13, which four HIGH advisories published 2026-10-21 make the Lockfile CVE Scan block on every PR"
+summary: "Four HIGH virtualenv advisories published 2026-10-21 (GHSA-5vjq-rrrf-7h2q, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q, GHSA-vxj4-q4g9-crj7) cover the virtualenv 21.7.13 that dev's uv.lock pinned, so the Lockfile CVE Scan failed on dev and held every pull request. uv.lock now pins virtualenv 21.14.12 (relocked with uv 0.6.14, which the CVE workflow pins), moving packaging 25.0 to 26.3 and distlib 0.4.0 to 0.4.4 with it, and the runner image lock is regenerated. A floor test refuses any virtualenv below 21.14.7, the first release fixing all four."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21266-virtualenv-floor"
+    statement: |-
+      The lock resolves virtualenv at or above the first release fixing the four 2026-10-21 advisories, so the lockfile CVE scan no longer blocks on it.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: uv.lock pins virtualenv at or above 21.14.7, the first release fixing all four advisories, and the floor check refuses the recorded 21.7.13 as its positive control -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor.py -q
+      - id: "AC2"
+        statement: |-
+          AC2: the lockfile CVE scan finds no blocking advisory in the PR head's uv.lock -- falsifier: the Lockfile CVE Scan (OMN-16228) job of ci.yml on the PR head concludes success
+evidence_requirements:
+  - kind: "tests"
+    description: "The floor test reads uv.lock and fails when virtualenv is below 21.14.7; it refuses 21.7.13 and 21.14.6 and accepts 21.14.7 and later. The CVE scan job's own verdict on the PR head is read from GitHub."
+    command: "uv run pytest tests/ci/test_lockfile_virtualenv_floor.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21266-ac1-virtualenv-floor"
+    description: "The test reads uv.lock and fails when virtualenv is below the first fixed release 21.14.7; it refuses the recorded 21.7.13 pin as its positive control. Fails at the merge base, whose lock pins 21.7.13."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_lockfile_virtualenv_floor.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21266-ac2-lock-has-no-floor-breach"
+    description: "The uv.lock at the checked-out commit pins virtualenv at or above 21.14.7, the version below which the Lockfile CVE Scan blocks on the four advisories; read straight from the lock with no network call, and fails at the merge base, which pins 21.7.13. The CVE scan job's own verdict on the PR head is the hosted check of the same name."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python3 -c \"import tomllib,sys; v=[p['version'] for p in tomllib.load(open('uv.lock','rb'))['package'] if p['name']=='virtualenv']; sys.exit(0 if v and all(tuple(map(int,x.split('.')))>=(21,14,7) for x in v) else 1)\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
