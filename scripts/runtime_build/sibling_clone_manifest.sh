@@ -97,10 +97,13 @@ SIBLING_EXTRA_TRACKED_REPOS=()
 # The lab tag set (cut-lab-ref.sh --cut-tag, cut_release_train_tag.sh): every
 # clone the pin preflight reads, plus the extras above. Derived, never spelled,
 # so a sibling added to the manifest is tagged without anyone remembering to.
+# The extras are expanded through `${A[@]+...}` because macOS /bin/bash 3.2
+# treats an empty "${A[@]}" as unbound under `set -u`, and onboarding sources
+# this file with it (OMN-21256).
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
 SIBLING_LAB_TAG_REPOS=(
     "${SIBLING_CLONE_MANIFEST[@]}"
-    "${SIBLING_EXTRA_TRACKED_REPOS[@]}"
+    ${SIBLING_EXTRA_TRACKED_REPOS[@]+"${SIBLING_EXTRA_TRACKED_REPOS[@]}"}
 )
 
 # Tag-set members the lane refresh scripts do NOT move. omnibase_spi is

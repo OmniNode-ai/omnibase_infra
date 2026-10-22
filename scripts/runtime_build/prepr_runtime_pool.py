@@ -67,7 +67,9 @@ from the ref's test merge into dev, runs the named tests or the repo's unit
 suite, and tears down. ``--result-out`` gets one ``onex.prepr.verify-result.v1``
 JSON file for every outcome, whose ``exit_code`` equals the process exit code.
 A SIGTERM, SIGHUP or SIGINT tears the slot down, releases the lease and exits
-128+signal with outcome INTERRUPTED; a hard kill is OMN-18896's reaper.
+128+signal with outcome INTERRUPTED; a signal during teardown, snap-post, lease
+take or lease release is held until that step finishes. A hard kill is
+OMN-18896's reaper.
 """
 
 from __future__ import annotations
@@ -2277,11 +2279,12 @@ def _run_stack(
         # teardown below must run whatever failed above
         log(f"run aborted before teardown: {exc}")
     finally:
-        for phase in ("teardown", "snap-post"):
-            if "lease-lost" in outputs:
-                break
-            phase_run(phase, 600)
-        transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
+        with defer_interrupts():
+            for phase in ("teardown", "snap-post"):
+                if "lease-lost" in outputs:
+                    break
+                phase_run(phase, 600)
+            transport.run(host, f"rm -rf {remote_dir} /tmp/{tag}-*", timeout=30)
     return outputs
 
 
@@ -2318,25 +2321,68 @@ class VerifyInterrupted(BaseException):
         self.signum = signum
 
 
+@dataclass
+class _InterruptState:
+    """The guard's state: whether it is armed, deferral depth, a held signal."""
+
+    active: bool = False
+    depth: int = 0
+    pending: int | None = None
+
+
+_interrupt_state = _InterruptState()
+
+
+@contextlib.contextmanager
+def defer_interrupts() -> Any:
+    """Hold a signal that arrives inside the block until the block ends.
+
+    Cleanup (teardown, snap-post, the lease take and release) runs inside one,
+    so a first signal reaching it no longer cuts it short (2026-10-20T15:20Z,
+    pre-PR slot 2). The outermost block raises the held signal on a clean exit;
+    an exception already leaving the block keeps it for an outer block.
+    """
+    if not _interrupt_state.active:
+        yield
+        return
+    _interrupt_state.depth += 1
+    try:
+        yield
+    finally:
+        _interrupt_state.depth -= 1
+    if _interrupt_state.depth == 0 and _interrupt_state.pending is not None:
+        signum, _interrupt_state.pending = _interrupt_state.pending, None
+        raise VerifyInterrupted(signum)
+
+
 @contextlib.contextmanager
 def interrupt_guard() -> Any:
     """Turn the first SIGTERM, SIGHUP or SIGINT into ``VerifyInterrupted``.
 
-    Later signals are ignored so the cleanup the first one starts runs to its
-    end. The previous handlers come back on exit.
+    Cleanup defers the first signal until it finishes. Later signals are
+    ignored, and the previous handlers come back on exit.
     """
 
     def handler(signum: int, frame: Any) -> None:
         for sig in VERIFY_SIGNALS:
             signal.signal(sig, signal.SIG_IGN)
+        if _interrupt_state.depth:
+            _interrupt_state.pending = signum
+            return
         raise VerifyInterrupted(signum)
 
+    _interrupt_state.active = True
+    _interrupt_state.depth = 0
+    _interrupt_state.pending = None
     previous = {sig: signal.signal(sig, handler) for sig in VERIFY_SIGNALS}
     try:
         yield
     finally:
         for sig, old in previous.items():
             signal.signal(sig, old)
+        _interrupt_state.active = False
+        _interrupt_state.depth = 0
+        _interrupt_state.pending = None
 
 
 def resolve_ref_in_clone(clone: Path, ref: str) -> str:
@@ -2404,6 +2450,9 @@ class _VerifyFacts:
     started: str = ""
     readback: Readback | None = None
     lease_note: str = ""
+    lease_released: bool = False
+    lease_release_note: str = "not attempted"
+    outputs: dict[str, str] = field(default_factory=dict)
     refused: list[str] = field(default_factory=list)
 
 
@@ -2497,11 +2546,24 @@ def run_verify(
         except VerifyInterrupted as exc:
             name = signal.Signals(exc.signum).name
             outcome, code = "INTERRUPTED", EXIT_SIGNAL_BASE + exc.signum
-            where = f" on {facts.host.name}" if facts.host else ""
-            text = (
-                f"VERIFY INTERRUPTED: {name} stopped {repo}@{ref}{where}; "
-                "the slot was torn down and the lease released before exit"
-            )
+            text = f"VERIFY INTERRUPTED: {name} stopped {repo}@{ref}"
+            if facts.host is None:
+                text += "; nothing was leased"
+            else:
+                ran = facts.outputs
+                text += f" on {facts.host.name}; "
+                if "lease-lost" in ran:
+                    text += "the slot was not torn down (the lease was lost to a peer)"
+                elif "teardown" in ran and "snap-post" in ran:
+                    text += "the slot was torn down"
+                elif not ran:
+                    text += "the slot was not torn down (no slot phase had run)"
+                else:
+                    text += "the slot was not torn down (cleanup did not finish)"
+                if facts.lease_released:
+                    text += "; the lease was released"
+                else:
+                    text += f"; the lease was NOT released: {facts.lease_release_note}"
             if facts.host is not None and facts.readback is not None:
                 text += f"\n  restored={'yes' if facts.readback.restored else 'no'} ({facts.readback.residue})"
                 text += (
@@ -2557,48 +2619,50 @@ def _verify_steps(
         )
     until = now + dt.timedelta(minutes=ttl_minutes)
     host: PoolHost | None = None
-    for candidate in free:
-        ok, why = acquire_lease(
-            cfg, transport, candidate.host, facts.holder, until, now
-        )
-        if ok:
-            host, facts.lease_note = candidate.host, why
-            break
-        facts.refused.append(f"{candidate.host.name}: {why}")
-        log(f"lease {candidate.host.name} refused ({why}); trying the next free slot")
-    if host is None:
-        return (
-            "NO_FREE_SLOT",
-            EXIT_NO_FREE_HOST,
-            "no free pre-PR slot: every free slot was taken before its lease: "
-            + "; ".join(facts.refused),
-        )
-    facts.host = host
-    log(f"lease {host.name}: {facts.lease_note}; until {_utc_text(until)}")
-    log(
-        f"ledger: write HOLD surface={host.surface} until={_utc_text(until)} through /omni:ledger-msg now"
-    )
     own_dir = workdir is None
-    work = workdir or Path(tempfile.mkdtemp(prefix="prepr-verify-"))
-    work.mkdir(parents=True, exist_ok=True)
-    params = {
-        VERIFY_REPOS[facts.repo]: facts.sha,
-        "VERIFY_REF": facts.ref,
-    }
-    if facts.tests:
-        params["TESTS"] = " ".join(facts.tests)
-    if facts.suite:
-        params["SUITE_REPO"] = facts.repo
-        params["SUITE_WORKERS"] = str(suite_workers)
-    params_path = work / "verify.env"
-    params_path.write_text(
-        "".join(f"{k}={v}\n" for k, v in params.items()), encoding="utf-8"
-    )
-    outputs: dict[str, str] = {}
-    ports = (host.main_port, host.effects_port)
-    released, rwhy = False, "not attempted"
+    work = workdir
+    outputs = facts.outputs
     try:
         try:
+            with defer_interrupts():
+                for candidate in free:
+                    ok, why = acquire_lease(
+                        cfg, transport, candidate.host, facts.holder, until, now
+                    )
+                    if ok:
+                        host = facts.host = candidate.host
+                        facts.lease_note = why
+                        break
+                    facts.refused.append(f"{candidate.host.name}: {why}")
+                    log(
+                        f"lease {candidate.host.name} refused ({why}); trying the next free slot"
+                    )
+            if host is None:
+                return (
+                    "NO_FREE_SLOT",
+                    EXIT_NO_FREE_HOST,
+                    "no free pre-PR slot: every free slot was taken before its lease: "
+                    + "; ".join(facts.refused),
+                )
+            log(f"lease {host.name}: {facts.lease_note}; until {_utc_text(until)}")
+            log(
+                f"ledger: write HOLD surface={host.surface} until={_utc_text(until)} through /omni:ledger-msg now"
+            )
+            work = workdir or Path(tempfile.mkdtemp(prefix="prepr-verify-"))
+            work.mkdir(parents=True, exist_ok=True)
+            params = {
+                VERIFY_REPOS[facts.repo]: facts.sha,
+                "VERIFY_REF": facts.ref,
+            }
+            if facts.tests:
+                params["TESTS"] = " ".join(facts.tests)
+            if facts.suite:
+                params["SUITE_REPO"] = facts.repo
+                params["SUITE_WORKERS"] = str(suite_workers)
+            params_path = work / "verify.env"
+            params_path.write_text(
+                "".join(f"{k}={v}\n" for k, v in params.items()), encoding="utf-8"
+            )
             _run_stack(
                 cfg,
                 transport,
@@ -2618,20 +2682,21 @@ def _verify_steps(
                     now_fn(),
                 ),
             )
-        except VerifyInterrupted:
-            # the stack's own finally has torn the slot down; keep its readback
-            facts.readback = judge(outputs, None, ports)
-            raise
         finally:
-            released, rwhy = release_lease(cfg, transport, host, facts.holder)
-            log(f"lease {host.name}: {rwhy}")
+            if host is not None:
+                with defer_interrupts():
+                    facts.lease_released, facts.lease_release_note = release_lease(
+                        cfg, transport, host, facts.holder
+                    )
+                    log(f"lease {host.name}: {facts.lease_release_note}")
+        ports = (host.main_port, host.effects_port)
         rb = judge(outputs, None, ports)
         if host.kind == "prepr-slot":
             judge_slot_isolation(rb, outputs)
         facts.readback = rb
         outcome = "INCONCLUSIVE" if "lease-lost" in outputs else rb.outcome
-        if not released:
-            rb.notes.append(f"lease not released: {rwhy}")
+        if not facts.lease_released:
+            rb.notes.append(f"lease not released: {facts.lease_release_note}")
         finished = _utc_text(now_fn())
         text = render_readback(rb, host, params, facts.started, finished)
         if "lease-lost" in outputs:
@@ -2647,8 +2712,12 @@ def _verify_steps(
         )
         code = {"PASS": EXIT_PASS, "FAIL": EXIT_FAIL}.get(outcome, EXIT_INCONCLUSIVE)
         return outcome, code, text
+    except VerifyInterrupted:
+        if host is not None and outputs:
+            facts.readback = judge(outputs, None, (host.main_port, host.effects_port))
+        raise
     finally:
-        if own_dir:
+        if own_dir and work is not None:
             shutil.rmtree(work, ignore_errors=True)
 
 
