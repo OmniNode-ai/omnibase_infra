@@ -13,7 +13,7 @@ environment. These tests hold the wiring that the judge's guarantees rest on:
   judgement, so a PR with no thread passes exactly as before;
 - the gate step runs whatever the judge did, and reads its status;
 - the model key reaches the judge step alone, the write permission is the
-  job's alone, and no new secret appears.
+  job's alone and is not persisted in the checkout, and no new secret appears.
 """
 
 from __future__ import annotations
@@ -170,6 +170,11 @@ def test_no_new_secret_is_read() -> None:
 def test_only_the_job_may_write_and_only_pull_requests() -> None:
     assert ON_REPLY["permissions"] == {"contents": "read", "pull-requests": "read"}
     assert JOB["permissions"] == {"contents": "read", "pull-requests": "write"}
+
+
+def test_the_write_token_is_not_persisted_in_the_checkout() -> None:
+    checkout = STEPS["Checkout (gate script and PR history)"]
+    assert checkout["with"]["persist-credentials"] is False
 
 
 def test_the_job_is_hosted_and_keeps_the_required_context_name() -> None:

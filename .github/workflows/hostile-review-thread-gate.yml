@@ -13,8 +13,9 @@
 # `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
 # `rejected: <reason>` the review bot accepted. Resolving a thread fires no
 # workflow event, so the reply is the trigger: this workflow runs the same
-# script on the reply, the script checks it and publishes a fresh check-run of
-# the same name on the PR head. A reply the workflow token posts (the
+# script on the reply in a job of the same name, and that job's own check-run
+# is the fresh result. The script calls no Checks API (it reads review threads
+# and posts thread replies), so the job needs no `checks: write`. A reply the workflow token posts (the
 # reviewer's threads, the judge's verdicts) fires nothing here (GitHub does not
 # start workflows from GITHUB_TOKEN events), so this never loops on its own
 # output.
@@ -78,6 +79,10 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+          # The write token stays out of .git/config: the install and judge
+          # steps below run third-party code beside this checkout. The scripts
+          # get the token through their step's env alone.
+          persist-credentials: false
 
       # Stdlib only, before any install: a run with nothing to judge installs
       # nothing and calls no model.
