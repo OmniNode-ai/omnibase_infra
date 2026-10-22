@@ -311,8 +311,8 @@ requirements:
   - id: req-omn17427-prepr-pool-local-transport
     statement: The pre-PR pool driver runs a pool host's commands in a local shell when that host is this machine and the target's user is the current user, so a lane on the slot host reaches its own slots without an ssh key to itself (OMN-20085 AC7 prerequisite; no credential is changed).
     acceptance:
-      - id: AC145
-        statement: 'AC145: is_this_host matches a bindable local address and the current user only, LocalTransport runs in the home directory with a minimal environment and kills the whole process group on a timeout, HostRoutingTransport routes each target once, and main() builds HostRoutingTransport when no transport is given -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q'
+      - id: AC151
+        statement: 'AC151: is_this_host matches a bindable local address and the current user only, LocalTransport runs in the home directory with a minimal environment and kills the whole process group on a timeout, HostRoutingTransport routes each target once, and main() builds HostRoutingTransport when no transport is given -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q'
   - id: req-omn17427-runtime-node-selection
     statement: A deployment that sets ONEX_RUNTIME_NODE_SELECTION attaches, subscribes and provisions only the contracts it names; unset, every discovered contract is attached and every contract topic is provisioned as before.
     acceptance:
@@ -368,13 +368,13 @@ requirements:
   - id: req-omn17427-one-runtime-fold
     statement: A lane folds the effects, worker, tenant-projection and projection-writer roles into its one main runtime by declaring folded_profiles in the runtime policy contract (rendered as ONEX_RUNTIME_FOLDED_PROFILES); the auto-wiring ownership filter then attaches every contract those roles own in that process, an unregistered folded name is refused, and a node whose handler raises does not stop delivery to the other nodes on the shared bus.
     acceptance:
-      - id: AC146
-        statement: 'AC146: a main runtime folding the roles loads every folded node and nothing else changes without a fold, the fold reaches every effects and worker contract of this repo on disk, the policy contract renders a declared fold and refuses an unregistered one, and one crashing subscriber leaves the other nodes receiving every record -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q'
+      - id: AC153
+        statement: 'AC153: a main runtime folding the roles loads every folded node and nothing else changes without a fold, the fold reaches every effects and worker contract of this repo on disk, the policy contract renders a declared fold and refuses an unregistered one, and one crashing subscriber leaves the other nodes receiving every record -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q'
   - id: req-omn17427-patched-runtime-trust
     statement: The runtime lock resolves certifi at or above the release fixing PYSEC-2026-4320 and GHSA-6q48-6c7w-9gw2, and its CA bundle loads into a verifying TLS context.
     acceptance:
-      - id: AC147
-        statement: 'AC147: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
+      - id: AC154
+        statement: 'AC154: the locked and installed certifi versions are at least 2026.10.19, and the CA bundle loads into a TLS context requiring peer verification.'
   - id: req-omn17427-criterion-labels-distinct
     statement: Every committed ticket contract declares each acceptance id once, so a lab-pass receipt bound to its ticket can be emitted; contracts/OMN-17427.yaml declared AC49, AC50, AC51, AC53 and AC97 twice, and the candidate-boot receipt of dev commit e302a800a was refused with "criterion_labels must be distinct ticket criterion labels".
     acceptance:
@@ -390,8 +390,18 @@ requirements:
   - id: req-omn17427-census-restart-window
     statement: The lane census grades a container's cumulative RestartCount past its bound as a restart loop only while the container is not running or was last started within the last 1800 s of the census; a container running since a start older than that is not a loop, and an unreadable start or census time stays a finding.
     acceptance:
-      - id: AC151
-        statement: 'AC151: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+      - id: AC145
+        statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-runner-image-python-source
+    statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: docker/runners/Dockerfile has no add-apt-repository, deadsnakes or launchpad instruction, installs uv before running `uv python install 3.12`, and links python3.12, python3, python, pip3 and pip to the managed interpreter with a 3.12 version assertion -- falsifier: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q'
+  - id: req-omn17427-lockfile-virtualenv-floor
+    statement: uv.lock pins virtualenv at or above 21.14.12, the release the Lockfile CVE Scan reads clean of GHSA-5vjq-rrrf-7h2q, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q and GHSA-vxj4-q4g9-crj7, so the dev merge groups are no longer ejected by that scan.
+    acceptance:
+      - id: AC147
+        statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -558,6 +568,12 @@ evidence_requirements:
   - kind: tests
     description: The census planner grades a restart count past its bound against the container's last start and the census time; the collector reads both.
     command: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
+  - kind: tests
+    description: A text-level read of the runner Dockerfile pins the Python source to uv-managed CPython installed after uv; build-smoke proves the built image.
+    command: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+  - kind: tests
+    description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
+    command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1561,7 +1577,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC145
+      - AC151
   - id: dod-omn-17427-ac100-local-transport-deploy
     description: Hosted-runner deploy check -- the local transport runs a real bash command on the runner itself, and routes a loopback target to the local shell; the ssh pool tests read the lab lane census, which the hosted runner lacks, so this check runs only the local transport tests. It does not claim a run on a lab pre-PR slot.
     source: manual
@@ -1570,7 +1586,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_pool_local_transport_omn20085.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC145
+      - AC151
   - id: dod-omn-17427-ac61-node-selection
     description: The ownership filter and the topic provisioner honour ONEX_RUNTIME_NODE_SELECTION and leave every contract in place when it is unset.
     source: manual
@@ -1768,7 +1784,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC146
+      - AC153
   - id: dod-omn-17427-ac141-one-runtime-fold-deploy-check
     description: Hosted-runner deploy check -- the same fold tests; no container, lab host or credential is used.
     source: manual
@@ -1777,7 +1793,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC146
+      - AC153
   - id: dod-omn-17427-ac141-one-runtime-fold-integration
     description: Render a declared effects/workers fold through the runtime policy model and renderer, discover this repository's real contracts, and compare folded ownership with separate-role ownership and raw-contract readers on every registered runtime lane scope. Includes an unfolded control; starts no lane services.
     source: manual
@@ -1786,7 +1802,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_runtime_profile_fold_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC146
+      - AC153
   - id: dod-omn-17427-ac141-fold-integration-deploy
     description: Hosted-runner check of rendered fold configuration against real repository contracts and every registered runtime lane scope, with no broker, container, credential or running lane required. Refuses missing folded nodes or disagreement between ownership readers.
     source: manual
@@ -1795,7 +1811,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_runtime_profile_fold_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC146
+      - AC153
   - id: dod-omn17427-ac142-patched-runtime-trust
     description: Hosted-runner check of the committed certifi resolution and its installed CA bundle; runs without a broker, container or lab credential.
     source: manual
@@ -1805,7 +1821,7 @@ dod_evidence:
           env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import certifi, ssl, tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open('uv.lock', 'rb'))['package'] if p['name'] == 'certifi'); assert Version(p['version']) >= Version('2026.10.19'); assert certifi.__version__ == p['version']; c = ssl.create_default_context(cafile=certifi.where()); assert c.verify_mode == ssl.CERT_REQUIRED and c.check_hostname and c.get_ca_certs()"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC147
+      - AC154
   - id: dod-omn-17427-ac110-criterion-labels-distinct
     description: The test builds a bound lab_pass_receipt.py receipt from every committed ticket contract's acceptance ids. At the merge base it fails naming OMN-17427.yaml (AC49, AC50, AC51, AC53, AC97), OMN-19998.yaml (AC21, AC22) and OMN-20867.yaml (AC3, AC5); with the repeated criteria renumbered it passes. A negative control asserts a repeated label is refused.
     source: manual
@@ -1832,7 +1848,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC151
+      - AC145
   - id: dod-omn-17427-ac145-census-restart-window-deploy
     description: Hosted-runner deploy check -- the same planner and collector tests over repository fixtures; it reads no docker daemon and no census snapshot.
     source: manual
@@ -1841,7 +1857,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC151
+      - AC145
   - id: dod-omn-17427-ac145-census-restart-integration
     description: The real Docker HTTP client reads an isolated Unix socket and feeds the collector envelope to the planner CLI. Historical restarts and the 1800-second boundary pass; a recent start, zero start time, exited container and missing census time retain drift. No live Docker daemon or lab credentials are required.
     source: manual
@@ -1853,4 +1869,22 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_lane_census_restart_window_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC151
+      - AC145
+  - id: dod-omn-17427-ac146-runner-image-python-source
+    description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
+  - id: dod-omn-17427-ac147-lockfile-virtualenv-floor
+    description: The test reads uv.lock and fails when virtualenv is below 21.14.12; it refuses the recorded 21.7.13 pin as its positive control. No scheduled run is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC147
