@@ -31,29 +31,32 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn21288-ac1-fixture-refusal
     description: >-
-      Run the registered dev-stack-runtime-only hook on a fixture path. It executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so pre-commit refuses the missing hook there.
+      Read the dev-stack-runtime-only hook registered in .pre-commit-config.yaml, require its files pattern to match a fixture path, and run its entry. The entry executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so the check exits 1 there. It reads the config directly rather than through pre-commit run, whose cold-cache clone of every remote hook repository exceeds the verifier's 30s per-check budget.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files tests/fixtures/omn21288/stack_separate_workloads.yml
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' tests/fixtures/omn21288/stack_separate_workloads.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21288-ac2-real-dev-stack
     description: >-
-      Run the registered hook on the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the fourteen listed services still run outside the runtime container.
+      Run the registered hook's entry after requiring its files pattern to match the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the fourteen listed services still run outside the runtime container.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn21288-hosted-stack-deploy-check
     description: >-
-      Hosted-runner deployment-definition check: invoke the installed hook against the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the fourteen remaining services into the runtime.
+      Hosted-runner deployment-definition check: run the registered hook's entry after requiring its files pattern to match the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the fourteen remaining services into the runtime.
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+        check_value: |-
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
 context:
