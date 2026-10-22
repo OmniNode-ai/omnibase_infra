@@ -283,6 +283,31 @@ requirements:
     acceptance:
       - id: AC98
         statement: 'AC98: formal/prepr_slot_lease passes OneHolder and Terminates, mut_two_step_break, mut_no_reread, mut_unguarded_release and mut_break_live violate OneHolder, mut_leak_guard violates Terminates, and a release while the guard is held leaves the lease and the guard in place -- falsifier: uv run pytest tests/unit/formal/test_prepr_slot_lease_model.py tests/unit/scripts/test_prepr_slot_lease_omn18893.py -q'
+  - id: req-omn17427-prepr-heartbeat
+    statement: 'Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it.'
+    acceptance:
+      - id: AC146
+        statement: 'AC146: Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "heartbeat or command or killed or live_child or claim or standalone or pool"'
+  - id: req-omn17427-prepr-reap
+    statement: 'Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership.'
+    acceptance:
+      - id: AC147
+        statement: 'AC147: Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "reaped or reap or teardown or unknown or lease_guard or lane_lock or reused_pid"'
+  - id: req-omn17427-prepr-group-drain
+    statement: 'Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable.'
+    acceptance:
+      - id: AC148
+        statement: 'AC148: Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov -k "retried or unreadable_listing"'
+  - id: req-omn17427-prepr-installer
+    statement: 'Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration.'
+    acceptance:
+      - id: AC149
+        statement: 'AC149: Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer'
+  - id: req-omn17427-prepr-teardown
+    statement: 'Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing.'
+    acceptance:
+      - id: AC150
+        statement: 'AC150: Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov'
   - id: req-omn17427-prepr-teardown-servers-by-label
     statement: The pre-PR slot teardown finds the dev lane's broker, Valkey and Postgres by compose project and service label, not by container name, so a dev server left under a hash-prefixed name by a timed-out compose recreate still has the slot's topics, groups, keys and databases removed, and a missing or doubled server is refused before anything is deleted.
     acceptance:
@@ -457,6 +482,11 @@ requirements:
     acceptance:
       - id: AC160
         statement: 'AC160: node_projection_lab_job/0002, node_projection_work_ledger/0005 and node_projection_pr_state/0002 each grant role_omnidash SELECT on their one relation and nothing else, assert it, are bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that SELECT-only grant -- falsifier: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0 fails at the merge base, where the three migration files do not exist'
+  - id: req-omn17427-nightly-integ-live-adapter-deselect
+    statement: The nightly integration job deselects the live LLM adapter documentation suite, which fails closed without LLM_DEEPSEEK_R1_URL (OMN-21147), so the job no longer errors on that suite's fixture when no endpoint is configured; the existing kwarg-parity and two-way registration deselects stay.
+    acceptance:
+      - id: AC170
+        statement: 'AC170: the integration-tests pytest command in nightly-integration.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the kwarg-parity and two-way registration deselects, the workflow''s own arguments with -m "integration and not bastion" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_integration_live_adapter_deselect_omn17427.py -q'
   - id: req-omn17427-deploy-gate-fires-on-edit
     statement: A workflow whose job reads the pull request body fires when the body is edited, so a body fixed after the first run clears the red it caused; deploy-gate.yml gains the edited type and a CI test holds every body-reading workflow to it.
     acceptance:
@@ -1614,6 +1644,60 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC98
+  - id: dod-omn17427-prepr-heartbeat
+    description: 'Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "heartbeat or command or killed or live_child or claim or standalone or pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
+  - id: dod-omn17427-prepr-reap
+    description: 'Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "reaped or reap or teardown or unknown or lease_guard or lane_lock or reused_pid"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC147
+  - id: dod-omn17427-prepr-group-drain
+    description: 'Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov -k "retried or unreadable_listing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn17427-prepr-installer
+    description: 'Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC149
+  - id: dod-omn17427-prepr-teardown
+    description: 'Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC150
+  - id: dod-omn17427-prepr-deploy-check
+    description: 'Hosted-runner deploy check: install the immutable snapshot and user timer into temporary paths, run the installed helper, and prove systemd activation errors are returned. No Docker, user bus, credential, private configuration or live lab service is required; activation and shared-service cleanup still require lab proof.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC149
   - id: dod-omn-17427-ac144-teardown-servers-by-label
     description: The teardown tests run against a fake host that answers docker exec only for running server names. A renamed broker, or a renamed Postgres and Valkey, read CLEAN; no broker and two brokers end INCOMPLETE with no delete; each server is resolved once. The five new tests fail against the previous module, which execs omnibase-infra-redpanda by name.
     source: manual
@@ -2165,6 +2249,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC160
+  - id: dod-omn-17427-ac170-nightly-integ-deselect
+    description: Reads the integration-tests step of nightly-integration.yml and runs pytest --collect-only with that step's own arguments over tests/integration/adapters/llm; the same test fails before the deselect, where the selection collects the suite's tests. It does not run the nightly workflow or any live LLM endpoint.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_nightly_integration_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC170
+  - id: dod-omn-17427-ac170-nightly-integ-deploy-check
+    description: Hosted-runner deploy check -- the same workflow-argument collection test over repository files with LLM_DEEPSEEK_R1_URL removed from the environment; no credentials, lab host or live endpoint is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_nightly_integration_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC170
   - id: dod-omn-17427-ac172-edit-trigger
     description: The test parses every committed workflow, finds the ones that read the pull request body, and requires edited in their pull_request types; synthetic workflows are the positive and negative controls. Does not claim a live rerun on a pull request.
     source: manual
