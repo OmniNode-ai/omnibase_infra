@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-21288 fixture: a stack that runs an effects process, a worker, a second
+# kernel profile, an event consumer and a projection writer as their own
+# containers, beside a runtime-image API that is none of those.
+services:
+  postgres:
+    image: postgres:16-alpine
+  omninode-runtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    environment:
+      RUNTIME_PROFILE: main
+  effects-process:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    environment:
+      RUNTIME_PROFILE: effects
+  worker-process:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    environment:
+      RUNTIME_PROFILE: workers
+  event-consumer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    command: [python, -m, example_pkg.services.widget.consumer]
+  widget-projection-writer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    command:
+      - python
+      - -m
+      - example_pkg.nodes.node_projection_widget.handlers.handler_widget
+  plain-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    command: [uvicorn, example_pkg.api:app, --port, "8053"]
