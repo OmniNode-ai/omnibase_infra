@@ -63,7 +63,8 @@ HOW A PRINCIPAL IS HELD TO THE FILE (OMN-19975)
     the rows this file derives for that principal (:func:`expected_acl_rows`). A derived
     row the broker lacks is MISSING; an ALLOW row the file does not derive is EXTRA.
     Either one exits 1. It never creates or deletes an ACL: revoking an extra is a
-    separate, consented act.
+    separate, consented act. An empty principal selection and a listing row
+    carrying a broker error are refused: neither is a completed grant audit.
 
 WHO HOLDS A PRINCIPAL (OMN-19975)
     With ``--overlay FILE`` (the lab's ``developer.principal`` document, see
@@ -208,6 +209,7 @@ def load_declaration(path: Path) -> Declaration:
             f"{path}: allowed_login_domains must be a list of domains"
         )
     digest = hashlib.sha256(raw)
+    grants_raw: object
     if "grants_from" in doc:
         if "grants" in doc:
             raise DeclarationError(
@@ -526,6 +528,11 @@ def parse_acl_listing(text: str, principal: str) -> frozenset[AclRow]:
         if len(columns) < 7:
             raise IssuerError(
                 HTTPStatus.BAD_GATEWAY, f"unreadable rpk ACL row: {line!r}"
+            )
+        if columns[7:]:
+            raise IssuerError(
+                HTTPStatus.BAD_GATEWAY,
+                "rpk ACL row carries an error; the listing cannot prove the grants",
             )
         who, host, resource, name, pattern, operation, permission = columns[:7]
         if who == f"User:{principal}" and permission == "ALLOW":
@@ -993,9 +1000,16 @@ def _selected_principals(
 ) -> list[str]:
     """The overlay's principals when one is given, else those the ledger recorded."""
     if overlay is None:
-        return sorted(
+        principals = sorted(
             set(args.principal or ledger.principals_in_lane(declaration.lane))
         )
+        if not principals:
+            raise IssuerError(
+                HTTPStatus.BAD_REQUEST,
+                "no developer principals selected; name --overlay, --principal, "
+                "or a ledger recording principals in this lane",
+            )
+        return principals
     undeclared = sorted(set(args.principal or ()) - overlay.principals)
     if undeclared:
         raise IssuerError(

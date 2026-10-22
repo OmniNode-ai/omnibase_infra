@@ -61,6 +61,15 @@ _EXPECTED_GRANTS = [
         "privileges": ["DELETE", "SELECT"],
         "schema": "omninode_internal",
     },
+    # OMN-17427: node_projection_lab_job/0002, node_projection_pr_state/0002 and
+    # node_projection_work_ledger/0005 grant the omnimarket lab job check store,
+    # which reads through the same OMNIDASH_ANALYTICS_DB_URL.
+    {
+        "object_type": "TABLE",
+        "objects": ["lab_job_state", "pr_state", "work_ledger_rows"],
+        "privileges": ["SELECT"],
+        "schema": "omninode_internal",
+    },
     # The grants the corpus already delivers to role_omnidash by name. Declaring
     # the principal makes the OMN-18768 reverse arm of
     # scripts/validation/check_topology_grant_delivery.py hold it to account for
@@ -113,12 +122,20 @@ def test_role_omnidash_has_no_binding(instance: str) -> None:
 @pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
 def test_the_live_acl_gate_resolves_the_declaration(profile: str) -> None:
     declared = declared_acl(load_topology_profile(profile))
-    expected = {
-        (ROLE, "projection_watermarks", privilege)
-        for privilege in ("INSERT", "SELECT", "UPDATE")
-    } | {
-        (ROLE, "consumer_flow_windows", privilege) for privilege in ("DELETE", "SELECT")
-    }
+    expected = (
+        {
+            (ROLE, "projection_watermarks", privilege)
+            for privilege in ("INSERT", "SELECT", "UPDATE")
+        }
+        | {
+            (ROLE, "consumer_flow_windows", privilege)
+            for privilege in ("DELETE", "SELECT")
+        }
+        | {
+            (ROLE, table, "SELECT")
+            for table in ("lab_job_state", "pr_state", "work_ledger_rows")
+        }
+    )
     assert expected <= declared.table_grants
     assert (ROLE, "USAGE") in declared.schema_grants
     assert not {g for g in declared.table_grants if g[0] == ROLE} - expected

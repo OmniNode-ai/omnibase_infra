@@ -276,7 +276,7 @@ override-dependencies = [
     # OMN-17427: 0.47.44 -> 0.47.46, the floor omnimarket dev declares; its
     # claude_code_binding models import omnibase_core.enums.enum_binding_kind,
     # first released in 0.47.46 (core#2019).
-    "omnibase-core==0.47.48",
+    "omnibase-core==0.47.50",
     "omnibase-spi==0.23.7",
     "omnibase-compat==0.5.7",
 ]
@@ -759,6 +759,7 @@ node_setup_preflight_effect = "omnibase_infra.nodes.node_setup_preflight_effect"
 node_setup_validate_effect = "omnibase_infra.nodes.node_setup_validate_effect"
 node_slack_alerter_effect = "omnibase_infra.nodes.node_slack_alerter_effect"
 node_sync_revert_watchdog_effect = "omnibase_infra.nodes.node_sync_revert_watchdog_effect"
+node_ticket_contract_compose_effect = "omnibase_infra.nodes.node_ticket_contract_compose_effect"
 node_topic_migration_executor_effect = "omnibase_infra.nodes.node_topic_migration_executor_effect"
 node_topic_migration_projection = "omnibase_infra.nodes.node_topic_migration_projection"
 node_update_plan_reducer = "omnibase_infra.nodes.node_update_plan_reducer"
