@@ -16,7 +16,14 @@ on:
     # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
     # ci:ready or a draft->ready flip retriggers this workflow's evaluation
     # of the deploy-gate job's if:.
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    #
+    # OMN-17427: `edited` is here because the deploy-gate action reads the pull
+    # request body live (`gh pr view --json body`) to find the cited ticket. A
+    # body fixed after the first run otherwise never re-runs the job, and the
+    # red stays on the head (omnibase_infra#5217). Unlike ci.yml (OMN-16171)
+    # this workflow is one job, not a ~48-job matrix. Pinned by
+    # tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
   merge_group:
 
 concurrency:
