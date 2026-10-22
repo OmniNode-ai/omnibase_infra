@@ -419,7 +419,7 @@ def test_check_fails_when_the_target_block_names_a_stale_lane(tmp_path: Path) ->
     manifest = yaml.safe_load(manifest_path.read_text())
     snapshot = json.loads(snapshot_path.read_text())
     block = generate_block(manifest, snapshot)
-    stale = block.replace("| judge |", "| judge-renamed |")
+    stale = block.replace("| dogfood |", "| dogfood-renamed |")
     target = tmp_path / "CLAUDE.md"
     target.write_text(stale)
     rc = main_generator(
