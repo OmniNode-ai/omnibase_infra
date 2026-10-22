@@ -32,3 +32,6 @@ topics:
   # OMN-17427: cli_node publishes the reconcile command before waiting for its
   # terminal event, exactly as for the CI live-contact node above.
   - onex.cmd.platform.hotpatch-ledger-reconcile.v1
+  # OMN-17427: the generic node CLI publishes the composition request on its
+  # local runtime bus; the packaged-contract regression reads its terminal result.
+  - onex.cmd.platform.ticket-contract-compose.v1

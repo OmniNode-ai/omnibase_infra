@@ -24,6 +24,7 @@ class EnumPlatformTopic(str, Enum):
     CMD_LEDGER_QUERY_V1 = "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = "onex.cmd.platform.node-registration-acked.v1"  # onex.cmd.platform.node-registration-acked.v1
     CMD_REQUEST_INTROSPECTION_V1 = "onex.cmd.platform.request-introspection.v1"  # onex.cmd.platform.request-introspection.v1
+    CMD_TICKET_CONTRACT_COMPOSE_V1 = "onex.cmd.platform.ticket-contract-compose.v1"  # onex.cmd.platform.ticket-contract-compose.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = "onex.cmd.platform.topic-catalog-query.v1"  # onex.cmd.platform.topic-catalog-query.v1
     EVT_CI_LIVE_CONTACT_CHECKED_V1 = "onex.evt.platform.ci-live-contact-checked.v1"  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = "onex.evt.platform.contract-deregistered.v1"  # onex.evt.platform.contract-deregistered.v1
@@ -46,6 +47,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_NODE_REGISTRATION_RESULT_V1 = "onex.evt.platform.node-registration-result.v1"  # onex.evt.platform.node-registration-result.v1
     EVT_REGISTRATION_SNAPSHOTS_V1 = "onex.evt.platform.registration-snapshots.v1"  # onex.evt.platform.registration-snapshots.v1
     EVT_REGISTRY_REQUEST_INTROSPECTION_V1 = "onex.evt.platform.registry-request-introspection.v1"  # onex.evt.platform.registry-request-introspection.v1
+    EVT_TICKET_CONTRACT_COMPOSED_V1 = "onex.evt.platform.ticket-contract-composed.v1"  # onex.evt.platform.ticket-contract-composed.v1
     EVT_TOPIC_CATALOG_CHANGED_V1 = "onex.evt.platform.topic-catalog-changed.v1"  # onex.evt.platform.topic-catalog-changed.v1
     EVT_TOPIC_CATALOG_RESPONSE_V1 = "onex.evt.platform.topic-catalog-response.v1"  # onex.evt.platform.topic-catalog-response.v1
     EVT_VALIDATION_ADJUDICATION_COMPLETED_V1 = "onex.evt.platform.validation-adjudication-completed.v1"  # onex.evt.platform.validation-adjudication-completed.v1
