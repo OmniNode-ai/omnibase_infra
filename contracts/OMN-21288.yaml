@@ -31,21 +31,30 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn21288-ac1-fixture-refusal
     description: >-
-      The check refuses each separate effects process, worker, event consumer and projection writer in a fixture compose file, and passes a fixture that holds only the runtime and its backing services. At the base the check does not exist, so the test fails with a NameError.
+      Run the registered dev-stack-runtime-only hook on a fixture path. It executes the stack tests, including refusal of separate effects processes, workers, event consumers and projection writers. The merge-base control copies the tests and fixtures, but not the hook registration, so pre-commit refuses the missing hook there.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov -k fixture
+        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files tests/fixtures/omn21288/stack_separate_workloads.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21288-ac2-real-dev-stack
     description: >-
-      The check runs over the real dev stack (the infra compose file with the dev-lane overlay merged on it) and refuses any service outside the shrink-only list of fourteen, and any listed service it no longer flags. This is the gate half of AC2: the fourteen listed services still run outside the runtime container, so the end state AC2 names is not reached by this change.
+      Run the registered hook on the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the fourteen listed services still run outside the runtime container.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov -k real_dev_stack
+        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn21288-hosted-stack-deploy-check
+    description: >-
+      Hosted-runner deployment-definition check: invoke the installed hook against the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the fourteen remaining services into the runtime.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pre-commit run dev-stack-runtime-only --files docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
