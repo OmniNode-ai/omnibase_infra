@@ -158,6 +158,7 @@ converged, ``3`` convergence indeterminate.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import re
@@ -757,6 +758,12 @@ class ModelAgentAcceptance:
     accepted_at: datetime
     source: str
     build_outcome: EnumLaneBuildOutcome | None = None
+    #: OMN-21272. The job's wire ``status`` and why it never ran its first
+    #: phase (``deploy_agent.events.EnumJobNotStarted``'s value), read from the
+    #: SAME response. Empty when the agent served neither, which is also what
+    #: an older agent that does not serve ``not_started`` reads as.
+    status: str = ""
+    not_started: str = ""
 
     def __post_init__(self) -> None:
         if self.accepted_at.tzinfo is None:
@@ -962,11 +969,15 @@ def read_agent_acceptance(
         raise AcceptanceUnresolvedError(msg) from exc
     raw_errors = payload.get("errors")
     errors = [str(item) for item in raw_errors] if isinstance(raw_errors, list) else []
+    raw_status = payload.get("status")
+    raw_not_started = payload.get("not_started")
     return ModelAgentAcceptance(
         correlation_id=correlation_id.strip(),
         accepted_at=accepted_at,
         source=url,
         build_outcome=EnumLaneBuildOutcome.classify(errors),
+        status=str(raw_status) if isinstance(raw_status, str) else "",
+        not_started=str(raw_not_started) if isinstance(raw_not_started, str) else "",
     )
 
 
@@ -1359,6 +1370,29 @@ class ModelConvergenceResult:
     initial_revision: str = ""
 
 
+def not_started_reason(acceptance: ModelAgentAcceptance | None) -> str:
+    """Why a job that never ran is not a statement about the lane (OMN-21272).
+
+    Empty unless the agent's own record says the job ENDED with a not_started
+    reason. On 2026-10-21 job f19ec60c ended ``failed`` with
+    ``not_started=lane_lock_contended`` 15 minutes after acceptance: an
+    out-of-band refresh held the lane lock, so the lane was never asked to
+    build this sha. Counting the lane's budget from that acceptance wrote a
+    ``deployed_revision`` FAIL about a deploy that never happened, and a FAIL
+    on that check is never re-emittable. INDETERMINATE says what is true --
+    nothing was measured -- and leaves the receipt binding-only.
+    """
+    if acceptance is None or not acceptance.not_started:
+        return ""
+    return (
+        f"the deploy agent's job {acceptance.correlation_id} ended "
+        f"{acceptance.status or 'terminal'} with not_started="
+        f"{acceptance.not_started}: it never ran its first phase, so the lane "
+        "was never asked to build this sha and its budget from acceptance "
+        "measures nothing about the lane"
+    )
+
+
 def run_convergence_wait(
     *,
     expected_revision: str,
@@ -1381,7 +1415,10 @@ def run_convergence_wait(
     * acceptance is known and its budget is spent -- ``FAIL``, a statement
       about the lane;
     * this job's own wall clock expires first, or acceptance was never
-      established -- ``INDETERMINATE``, a statement about the run.
+      established -- ``INDETERMINATE``, a statement about the run;
+    * the agent's job ended with a not_started reason (OMN-21272) --
+      ``INDETERMINATE`` naming that reason, at any point in the wait and
+      whatever the budget, because the lane was never asked to build the sha.
 
     The wall clock is a BOUND, never the budget. It exists because the job must
     survive to write the receipt; it is not widened to absorb a queue, and when
@@ -1464,6 +1501,8 @@ def run_convergence_wait(
 
     while not _converged(lane, ancestry):
         now = clock()
+        if not_started_reason(budget.acceptance):
+            break
         if budget.established and budget.exhausted(now):
             break
         if now >= wall_deadline:
@@ -1487,6 +1526,8 @@ def run_convergence_wait(
                 acceptance=probe.acceptance,
                 unresolved_reason=probe.reason,
             )
+        else:
+            budget = _refresh_job_record(budget, resolve_acceptance)
         lane = read_lane()
         ancestry = resolve_ancestry(lane.revision)
 
@@ -1509,6 +1550,23 @@ def run_convergence_wait(
             initial_revision=initial_revision,
             outcome=EnumConvergenceOutcome.INDETERMINATE,
             reason=budget.unresolved_reason,
+            lane=lane,
+            ancestry=ancestry,
+            budget=budget,
+            waited=waited,
+            finished_at=now,
+            queue=queue,
+        )
+    # OMN-21272. The last look at the job before a FAIL is written: a job
+    # that ended not_started after the final poll is still not the lane's
+    # failure.
+    budget = _refresh_job_record(budget, resolve_acceptance)
+    not_started = not_started_reason(budget.acceptance)
+    if not_started:
+        return ModelConvergenceResult(
+            initial_revision=initial_revision,
+            outcome=EnumConvergenceOutcome.INDETERMINATE,
+            reason=not_started,
             lane=lane,
             ancestry=ancestry,
             budget=budget,
@@ -1539,6 +1597,32 @@ def run_convergence_wait(
         finished_at=now,
         queue=queue,
     )
+
+
+def _refresh_job_record(
+    budget: ModelConvergenceBudget,
+    resolve_acceptance: Callable[[], ModelAcceptanceProbe],
+) -> ModelConvergenceBudget:
+    """Re-read an ESTABLISHED acceptance for the job's terminal facts (OMN-21272).
+
+    Only ``status`` and ``not_started`` move: the budget keeps its original
+    ``accepted_at`` and ``build_outcome``, so every other verdict's evidence
+    is byte-unchanged, and an unreadable re-read keeps what was already known, so a transient
+    agent error can neither restart nor un-establish the lane's budget.
+    """
+    if budget.acceptance is None or budget.acceptance.not_started:
+        return budget
+    probe = resolve_acceptance()
+    if probe.acceptance is None:
+        return budget
+    refreshed = dataclasses.replace(
+        budget.acceptance,
+        status=probe.acceptance.status,
+        not_started=probe.acceptance.not_started,
+    )
+    if refreshed == budget.acceptance:
+        return budget
+    return dataclasses.replace(budget, acceptance=refreshed)
 
 
 def convergence_evidence(
@@ -2441,12 +2525,21 @@ class ModelDurableBackfill:
     examined: int
     reason: str
     unclassified: tuple[str, ...] = ()
+    #: OMN-21272. The subset of ``backfill`` that already HAS a receipt, one
+    #: whose only failures are binding-class, answered for so it is measured
+    #: again rather than frozen as FAIL.
+    remeasured: tuple[str, ...] = ()
 
     def evidence_clause(self) -> str:
         head = f"durable floor {self.floor[:12]}" if self.floor else "no durable floor"
         parts = [f"{head} over {self.examined} first-parent commit(s)"]
         if self.backfill:
             parts.append("backfilling " + ", ".join(sha[:12] for sha in self.backfill))
+        if self.remeasured:
+            parts.append(
+                "re-measuring binding-only receipt(s) "
+                + ", ".join(sha[:12] for sha in self.remeasured)
+            )
         if self.reason:
             parts.append(self.reason)
         if self.unclassified:
@@ -2466,6 +2559,7 @@ def durable_backfill(
     runtime_affecting: Callable[[str], bool],
     include_converged: bool = False,
     lookback: int = REEMISSION_LOOKBACK_COMMITS,
+    receipt_binding_only: Callable[[str], bool] | None = None,
 ) -> ModelDurableBackfill:
     """The merges no run ever answered for, bounded by a DURABLE floor.
 
@@ -2505,6 +2599,18 @@ def durable_backfill(
     * no receipt of any verdict inside the lookback -- no durable floor, so
       nothing below the lane's revision is on record and nothing is widened;
     * a commit whose runtime classification cannot be read (named, and left).
+
+    A RECEIPT THAT IS ONLY A BINDING FAILURE IS ANSWERED FOR TOO (OMN-21272),
+    when ``receipt_binding_only`` is given. Such a receipt
+    (``lab_pass_receipt.is_binding_only_failure``) says the run could not bind
+    its observation, never that the lane was unwell -- a ``deployed_revision``
+    INDETERMINATE from a deploy job that never started, for one. Skipping it
+    because it is PRESENT froze it: on 2026-10-21 the lane reached 54ca4ac5f
+    and nothing could measure it again. Such a commit still anchors orphans
+    above it (it is a receipt on record), is answered for only when it is
+    runtime-affecting, and is answered for nothing when its receipt cannot be
+    read -- the reader, which never raises, returns False. A PASS or a
+    health-check FAIL is never answered for.
 
     ``include_converged`` answers for the lane's own revision too. A convergence
     run excludes it because its own receipt is being written in the same job;
@@ -2568,7 +2674,8 @@ def durable_backfill(
         if pending
         else ""
     )
-    if not anchored:
+    rebinding = _binding_only_receipts(walk, presence, answered, receipt_binding_only)
+    if not anchored and not rebinding:
         if pending:
             return ModelDurableBackfill(
                 (),
@@ -2584,7 +2691,7 @@ def durable_backfill(
 
     backfill: list[str] = []
     unclassified: list[str] = []
-    for sha in orphans_above_a_floor:
+    for sha in [*orphans_above_a_floor, *rebinding]:
         try:
             affecting = runtime_affecting(sha)
         except Exception as exc:  # noqa: BLE001 - unclassified answers nothing
@@ -2593,6 +2700,16 @@ def durable_backfill(
             continue
         if affecting:
             backfill.append(sha)
+    remeasured = [sha for sha in rebinding if sha in backfill]
+    if remeasured:
+        # Back into walk order (newest first) before the oldest-first flip. With
+        # no orphan floor, a re-measured receipt is the oldest point on record
+        # at or below itself.
+        order = {sha: index for index, sha in enumerate(walk)}
+        backfill.sort(key=order.__getitem__)
+        unclassified.sort(key=order.__getitem__)
+        if not floor:
+            floor = remeasured[-1]
     backfill.reverse()
     unclassified.reverse()
     reasons = [unanchored] if unanchored else []
@@ -2604,7 +2721,30 @@ def durable_backfill(
         len(below),
         "; ".join(reasons),
         tuple(unclassified),
+        tuple(reversed(remeasured)),
     )
+
+
+def _binding_only_receipts(
+    walk: Sequence[str],
+    presence: dict[str, EnumReceiptPresence],
+    answered: set[str],
+    receipt_binding_only: Callable[[str], bool] | None,
+) -> list[str]:
+    """The commits whose receipt is a binding-only FAIL, newest first (OMN-21272).
+
+    ``receipt_binding_only`` never raises (:func:`read_receipt_binding_only`):
+    a receipt it cannot read is ``False``, so it answers for nothing.
+    """
+    if receipt_binding_only is None:
+        return []
+    return [
+        sha
+        for sha in walk
+        if presence[sha] is EnumReceiptPresence.PRESENT
+        and sha not in answered
+        and receipt_binding_only(sha)
+    ]
 
 
 def read_first_parent_below(clone: Path, revision: str, limit: int) -> tuple[str, ...]:
@@ -2643,6 +2783,29 @@ def read_receipt_presence(repo: str, lane: str, sha: str) -> EnumReceiptPresence
         print(f"::warning::receipt listing for {sha[:12]} unreadable: {exc}")
         return EnumReceiptPresence.UNREADABLE
     return EnumReceiptPresence.PRESENT if artifacts else EnumReceiptPresence.ABSENT
+
+
+def read_receipt_binding_only(repo: str, lane: str, sha: str) -> bool:
+    """Is ``sha``'s newest receipt on ``lane`` a binding-only FAIL? Never raises.
+
+    OMN-21272. Read through the same artifact reader the delivery gate uses
+    (``lab_pass_receipt.read_lane``, over the listing
+    :func:`read_receipt_presence` already makes). Anything but a readable
+    receipt that ``is_binding_only_failure`` accepts is ``False``, so an
+    unreadable or mismatched receipt answers for nothing.
+    """
+    from scripts.ci.lab_pass_receipt import (
+        EnumLabLane,
+        is_binding_only_failure,
+        read_lane,
+    )
+
+    read = read_lane(repo, EnumLabLane(lane), sha)
+    if read.receipt is None:
+        if read.kind != "absent":
+            print(f"::warning::receipt for {sha[:12]} unreadable: {read.problem}")
+        return False
+    return is_binding_only_failure(read.receipt)
 
 
 def load_runtime_affecting_predicate(
@@ -2704,6 +2867,9 @@ def plan_durable_backfill(
         runtime_affecting=predicate,
         include_converged=include_converged,
         lookback=getattr(args, "reemission_lookback", REEMISSION_LOOKBACK_COMMITS),
+        receipt_binding_only=lambda sha: read_receipt_binding_only(
+            args.repo, lane, sha
+        ),
     )
 
 

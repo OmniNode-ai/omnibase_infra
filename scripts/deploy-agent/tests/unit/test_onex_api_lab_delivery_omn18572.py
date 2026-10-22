@@ -68,6 +68,8 @@ SHA = "a" * 40
 OVERLAY_SHA = "b" * 40
 STALE_PIN = "onex-lab/omnicloud-core:f37261c2-20260917T050425Z"
 FRESH_PIN = "onex-lab/omnicloud-core:99fdbd37-20260917T110254Z"
+#: The unit-owned names the launcher restores after sourcing the store.
+_PROTECTED = "DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_ENV_PROTECTED KAFKA_ENVIRONMENT"
 
 
 def _lock_is_free(path: Path) -> bool:
@@ -343,32 +345,36 @@ def test_compose_env_reads_the_onex_api_pin_from_the_operator_env_file(
     env_file = tmp_path / "operator.env"
     env_file.write_text(f"ONEX_API_IMAGE={FRESH_PIN}\n", encoding="utf-8")
     monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(env_file))
+    monkeypatch.setenv("DEPLOY_AGENT_ENV_PROTECTED", _PROTECTED)
     # The stale snapshot the running process is carrying.
     monkeypatch.setenv("ONEX_API_IMAGE", STALE_PIN)
 
     assert _compose_env()["ONEX_API_IMAGE"] == FRESH_PIN
 
 
-def test_compose_env_leaves_other_keys_to_the_process_environment(
+def test_compose_env_leaves_unit_owned_names_to_the_process_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Negative control: the re-read is scoped to the repointed pin keys.
+    """Negative control: the store never overrides a name the unit owns.
 
-    Without this, a fix that simply overlaid the whole operator file would pass
-    the test above while silently changing every other value the deploy runs
-    with -- a far larger blast radius than the defect.
+    OMN-18475 widened the re-read from the pin keys to the whole store, decoded
+    by the launcher's own bash source. What stays fenced is what the launcher
+    fences: the names in DEPLOY_AGENT_ENV_PROTECTED, which it restores after the
+    source. The store on the lab host sets KAFKA_ENVIRONMENT=local while the dev
+    unit declares dev.
     """
     env_file = tmp_path / "operator.env"
     env_file.write_text(
-        f"ONEX_API_IMAGE={FRESH_PIN}\nPOSTGRES_HOST=from-the-file\n",
+        f"ONEX_API_IMAGE={FRESH_PIN}\nKAFKA_ENVIRONMENT=local\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(env_file))
-    monkeypatch.setenv("POSTGRES_HOST", "from-the-process")
+    monkeypatch.setenv("DEPLOY_AGENT_ENV_PROTECTED", _PROTECTED)
+    monkeypatch.setenv("KAFKA_ENVIRONMENT", "dev")
 
     env = _compose_env()
     assert env["ONEX_API_IMAGE"] == FRESH_PIN
-    assert env["POSTGRES_HOST"] == "from-the-process"
+    assert env["KAFKA_ENVIRONMENT"] == "dev"
 
 
 def test_compose_env_survives_an_absent_operator_env_file(
@@ -381,6 +387,7 @@ def test_compose_env_survives_an_absent_operator_env_file(
     into an outage on every other machine.
     """
     monkeypatch.setenv("DEPLOY_AGENT_ENV_FILE", str(tmp_path / "absent.env"))
+    monkeypatch.setenv("DEPLOY_AGENT_ENV_PROTECTED", _PROTECTED)
     monkeypatch.setenv("ONEX_API_IMAGE", STALE_PIN)
 
     assert _compose_env()["ONEX_API_IMAGE"] == STALE_PIN
