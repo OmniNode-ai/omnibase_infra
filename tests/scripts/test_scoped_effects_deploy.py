@@ -41,6 +41,8 @@ class DockerBoundary:
     def __init__(self, compose_file: Path) -> None:
         self.compose_file = compose_file
         self.calls: list[list[str]] = []
+        self.stdins: list[str | None] = []
+        self.timeouts: list[int] = []
         self.clock = 0.0
         self.mode = "ok"
         self.last_target: dict[str, Any] | None = None
@@ -149,6 +151,8 @@ class DockerBoundary:
 
     def __call__(self, args: list[str], stdin: str | None, timeout: int) -> str:
         self.calls.append(args)
+        self.stdins.append(stdin)
+        self.timeouts.append(timeout)
         assert timeout > 0
         if args[0] == "git":
             ref = args[-1].removesuffix("^{commit}")
@@ -203,11 +207,19 @@ class DockerBoundary:
             assert "--read-only" in args
             assert stdin
             image = next(arg for arg in args if arg in (OLD_IMAGE, NEW_IMAGE))
+            if self.mode == "probe_timeout":
+                raise RuntimeError(
+                    "docker run interrupted or timed out; its process group was terminated"
+                )
             if self.mode == "race_after_probe" and image == NEW_IMAGE:
                 self.containers[CURRENT_ID]["Image"] = "sha256:" + "9" * 64
             return self._probe(image)
         if args[:2] == ["docker", "exec"]:
-            if "rpk" in args:
+            if any("rpk" in arg for arg in args):
+                if "rpk" in args and self.mode == "sasl_required":
+                    raise RuntimeError("docker exec failed with exit 1")
+                if "rpk" not in args:
+                    assert stdin == "effects-user\nsasl-secret-value\n"
                 return (
                     "NAME PARTITIONS REPLICAS\n"
                     + ("" if self.mode == "missing_topic" else f"{TOPIC} 1 1\n")
@@ -284,8 +296,11 @@ class DockerBoundary:
                 ",".join(map(str, files))
             )
             target["State"]["Health"]["Status"] = "healthy"
+            if self.mode == "admitted_rollback" and image == OLD_IMAGE:
+                target["State"]["Health"]["Status"] = "unhealthy"
             if (
-                self.mode in ("candidate_unhealthy", "rollback_unhealthy")
+                self.mode
+                in ("candidate_unhealthy", "rollback_unhealthy", "admitted_rollback")
                 and image == NEW_IMAGE
             ):
                 target["State"]["Health"]["Status"] = "unhealthy"
@@ -321,6 +336,17 @@ class DockerBoundary:
 
     def sleep(self, seconds: float) -> None:
         self.clock += seconds
+
+    def add_target_env(self, **values: str) -> None:
+        """Bind env on the active target and in rendered Compose, as the lane does."""
+        self.rendered["services"]["runtime-effects"]["environment"].update(values)
+        target = self.containers[CURRENT_ID]
+        target["Config"]["Env"].extend(
+            f"{key}={value}" for key, value in values.items()
+        )
+        target["Config"]["Labels"]["com.docker.compose.config-hash"] = (
+            self._config_hash(self.rendered)
+        )
 
 
 @pytest.fixture
@@ -361,7 +387,7 @@ def scenario(executor: Any, tmp_path: Path) -> tuple[Any, DockerBoundary, Path]:
 
 
 def _execute(
-    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path], **options: Any
 ) -> dict[str, Any]:
     plan, docker, state = scenario
     return executor.run_deploy(
@@ -371,6 +397,7 @@ def _execute(
         runner=docker,
         sleep=docker.sleep,
         monotonic=lambda: docker.clock,
+        **options,
     )
 
 
@@ -769,9 +796,11 @@ def test_offline_image_probe_needs_no_writable_filesystem(executor: Any) -> None
     # before the probe script runs: every real image was unprobeable (live
     # proof on .105, OMN-17991). The venv interpreter needs no cache directory.
     seen: list[list[str]] = []
+    timeouts: list[int] = []
 
     def runner(args: list[str], stdin: str | None, timeout: int) -> str:
         seen.append(args)
+        timeouts.append(timeout)
         return json.dumps(
             {
                 "source_pins": {},
@@ -784,9 +813,10 @@ def test_offline_image_probe_needs_no_writable_filesystem(executor: Any) -> None
             }
         )
 
-    executor._probe(runner, "print(1)", image=OLD_IMAGE)
-    executor._probe(runner, "print(1)", container=CURRENT_ID)
+    executor._probe(runner, "print(1)", timeout=720, image=OLD_IMAGE)
+    executor._probe(runner, "print(1)", timeout=720, container=CURRENT_ID)
     image_args, exec_args = seen
+    assert timeouts == [720, 720]
     assert "--read-only" in image_args
     entrypoint = image_args[image_args.index("--entrypoint") + 1]
     assert entrypoint == "/app/.venv/bin/python"
@@ -880,3 +910,228 @@ def test_compose_environment_order_is_not_a_settings_change(executor: Any) -> No
     before = executor._runtime_settings(container(["A=1", "B=2"]))
     assert before == executor._runtime_settings(container(["B=2", "A=1"]))
     assert before != executor._runtime_settings(container(["B=3", "A=1"]))
+
+
+def test_probe_timeout_is_declared_or_scaled_to_host_load(executor: Any) -> None:
+    # A fixed 120 s bound refused two rollouts on a loaded 32-core lab host whose
+    # probe took 497.9 s at load1 48 to 63 (OMN-17991).
+    assert executor.probe_timeout(900, loadavg=lambda: (99.0, 0, 0)) == {
+        "seconds": 900,
+        "source": "declared",
+    }
+    assert executor.probe_timeout(
+        None, loadavg=lambda: (48.0, 0.0, 0.0), cpu_count=lambda: 32
+    ) == {"seconds": 720, "source": "host-load", "load1": 48.0, "cpus": 32}
+    idle = executor.probe_timeout(
+        None, loadavg=lambda: (0.0, 0, 0), cpu_count=lambda: 8
+    )
+    assert idle["seconds"] == 120
+    busy = executor.probe_timeout(
+        None, loadavg=lambda: (10_000.0, 0, 0), cpu_count=lambda: 2
+    )
+    assert busy["seconds"] == 1800
+
+    def unreadable() -> tuple[float, float, float]:
+        raise OSError("load average unavailable")
+
+    with pytest.raises(RuntimeError, match="probe_timeout_seconds"):
+        executor.probe_timeout(None, loadavg=unreadable, cpu_count=lambda: 8)
+    with pytest.raises(RuntimeError, match="probe_timeout_seconds"):
+        executor.probe_timeout(None, loadavg=lambda: (1.0, 0, 0), cpu_count=lambda: 0)
+
+
+def _probe_timeouts(docker: DockerBoundary) -> list[int]:
+    return [
+        timeout
+        for call, timeout in zip(docker.calls, docker.timeouts, strict=True)
+        if call[:2] == ["docker", "run"]
+        or (call[:2] == ["docker", "exec"] and "/app/.venv/bin/python" in call)
+    ]
+
+
+def test_loaded_host_scales_every_probe_bound_and_records_it(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    result = _execute(
+        executor, scenario, loadavg=lambda: (48.0, 0.0, 0.0), cpu_count=lambda: 32
+    )
+    assert result["status"] == "PASSED", result.get("error")
+    timeouts = _probe_timeouts(docker)
+    assert len(timeouts) == 4 and set(timeouts) == {720}
+    receipt = json.loads(
+        Path(result["record_dir"]).joinpath("receipt.json").read_text()
+    )
+    assert receipt["probe_timeout"]["seconds"] == 720
+    assert receipt["probe_timeout"]["source"] == "host-load"
+
+
+def test_preview_reports_probe_bound_and_admission(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    plan, docker, state = scenario
+    result = executor.run_deploy(
+        plan,
+        state_root=state,
+        runner=docker,
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert result["probe_timeout"]["seconds"] == 720
+    assert result["admission"] == "healthy"
+    assert result["target_health_before"]["health"] == "healthy"
+
+
+def test_probe_timeout_refuses_naming_its_bound(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    docker.mode = "probe_timeout"
+    result = _execute(
+        executor, scenario, loadavg=lambda: (48.0, 0.0, 0.0), cpu_count=lambda: 32
+    )
+    assert result["status"] == "REFUSED"
+    assert "image probe bound 720 s" in result["error"]
+    assert not any("up" in call for call in docker.calls)
+
+
+_SASL_ENV = {
+    "KAFKA_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
+    "KAFKA_SASL_MECHANISM": "SCRAM-SHA-256",
+    "KAFKA_SASL_USERNAME": "effects-user",
+    "KAFKA_SASL_PASSWORD": "sasl-secret-value",
+}
+
+
+def test_topic_check_authenticates_as_the_runtime_does(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    # The dev broker enables SASL; an unauthenticated rpk read refused every
+    # rollout on the lab dev host (OMN-17991).
+    _, docker, _ = scenario
+    docker.mode = "sasl_required"
+    docker.add_target_env(**_SASL_ENV)
+    result = _execute(executor, scenario)
+    assert result["status"] == "PASSED", result.get("error")
+    assert not any("sasl-secret-value" in arg for call in docker.calls for arg in call)
+    assert not any("effects-user" in arg for call in docker.calls for arg in call)
+    receipt_text = Path(result["record_dir"]).joinpath("receipt.json").read_text()
+    assert "sasl-secret-value" not in receipt_text
+    assert "effects-user" not in receipt_text
+    receipt = json.loads(receipt_text)
+    assert receipt["topic_check"] == {
+        "auth": "sasl:SCRAM-SHA-256",
+        "required_beyond_target": 0,
+    }
+    rpk = [call for call in docker.calls if any("rpk" in arg for arg in call)]
+    assert len(rpk) == 1 and rpk[0][-1] == "SCRAM-SHA-256"
+
+
+def test_unauthenticated_topic_check_is_recorded(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    result = _execute(executor, scenario)
+    receipt = json.loads(
+        Path(result["record_dir"]).joinpath("receipt.json").read_text()
+    )
+    assert receipt["topic_check"] == {"auth": "none", "required_beyond_target": 0}
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"KAFKA_SASL_PASSWORD": ""},
+        {"KAFKA_SECURITY_PROTOCOL": "SASL_SSL"},
+        {"KAFKA_SASL_MECHANISM": "OAUTHBEARER"},
+    ],
+)
+def test_sasl_topic_check_fails_closed(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path], override: dict[str, str]
+) -> None:
+    _, docker, _ = scenario
+    docker.add_target_env(**{**_SASL_ENV, **override})
+    result = _execute(executor, scenario)
+    assert result["status"] == "REFUSED"
+    assert "sasl-secret-value" not in result["error"]
+    assert not any("up" in call for call in docker.calls)
+    assert not any(any("rpk" in arg for arg in call) for call in docker.calls)
+
+
+def _make_unhealthy(docker: DockerBoundary, **state: Any) -> None:
+    docker.containers[CURRENT_ID]["State"].update(state)
+    docker.containers[CURRENT_ID]["State"]["Health"] = {
+        "Status": "unhealthy",
+        "FailingStreak": 3,
+        "Log": [
+            {
+                "Start": "t0",
+                "End": "t1",
+                "ExitCode": 1,
+                "Output": "secret-bearing health output",
+            }
+        ],
+    }
+
+
+def _admitting(scenario: tuple[Any, DockerBoundary, Path]) -> tuple[Any, ...]:
+    plan, docker, state = scenario
+    return plan.model_copy(update={"admit_unhealthy_target": True}), docker, state
+
+
+def test_dev_lane_plan_replaces_an_unhealthy_effects_container(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    _make_unhealthy(docker)
+    result = _execute(executor, _admitting(scenario))
+    assert result["status"] == "PASSED", result.get("error")
+    receipt_text = Path(result["record_dir"]).joinpath("receipt.json").read_text()
+    receipt = json.loads(receipt_text)
+    assert receipt["admission"] == "unhealthy-admitted"
+    assert receipt["target_health_before"]["health"] == "unhealthy"
+    assert receipt["target_health_before"]["failing_streak"] == 3
+    assert receipt["target_health_before"]["last_check_exit_code"] == 1
+    assert receipt["target_health_after"]["health"] == "healthy"
+    assert receipt["target_health_after"]["container_id"] == CANDIDATE_ID
+    assert '"Output"' not in receipt_text
+    assert "secret-bearing health output" not in receipt_text
+
+
+@pytest.mark.parametrize("case", ["no_flag", "restarting", "stopped"])
+def test_unhealthy_target_refuses_outside_its_admission(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path], case: str
+) -> None:
+    _, docker, _ = scenario
+    if case == "restarting":
+        _make_unhealthy(docker, Restarting=True)
+    elif case == "stopped":
+        _make_unhealthy(docker, Running=False, Status="exited")
+    else:
+        _make_unhealthy(docker)
+    with pytest.raises(RuntimeError, match="admit_unhealthy_target"):
+        _execute(executor, scenario if case == "no_flag" else _admitting(scenario))
+    assert not any("up" in call for call in docker.calls)
+
+
+def test_admitted_unhealthy_rollback_restores_the_prior_settled_state(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    _make_unhealthy(docker)
+    docker.mode = "admitted_rollback"
+    result = _execute(executor, _admitting(scenario))
+    assert result["status"] == "FAILED_ROLLED_BACK", result.get("rollback_error")
+    assert result["rollback_verified"] is True
+    assert result["rollback_health"]["health"] == "unhealthy"
+    assert result["rollback_health"]["image"] == OLD_IMAGE
+    assert sum("up" in call for call in docker.calls) == 2
+
+
+def test_healthy_rollback_records_its_health(
+    executor: Any, scenario: tuple[Any, DockerBoundary, Path]
+) -> None:
+    _, docker, _ = scenario
+    docker.mode = "candidate_unhealthy"
+    result = _execute(executor, scenario)
+    assert result["status"] == "FAILED_ROLLED_BACK"
+    assert result["rollback_health"]["health"] == "healthy"

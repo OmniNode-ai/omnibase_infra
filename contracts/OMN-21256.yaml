@@ -1,0 +1,49 @@
+# OMN-21256 contract file for omnibase_infra: the sibling clone manifest sources under macOS bash 3.2.
+schema_version: "1.0.0"
+ticket_id: "OMN-21256"
+title: "sibling_clone_manifest.sh expands an empty array that macOS bash 3.2 rejects under set -u, so onboarding fails at 'build the dispatch venv' on a stock Mac"
+summary: "SIBLING_EXTRA_TRACKED_REPOS=() (emptied by OMN-17427) was expanded bare inside SIBLING_LAB_TAG_REPOS; macOS /bin/bash 3.2 reports \"unbound variable\" under set -u, so sourcing the manifest from reconcile-workspace-venvs.sh aborted onboarding on every stock Mac. The expansion now uses ${A[@]+\"${A[@]}\"}. A new test sweeps every script reconcile-workspace-venvs.sh sources (reconcile_privilege_lib.sh, sibling_clone_manifest.sh) for unguarded expansions of arrays that are ever assigned empty."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21256-bash32-empty-array
+    statement: "The sibling clone manifest sources under macOS bash 3.2 with set -u, and no sourced script expands a possibly-empty array unguarded."
+    acceptance:
+      - id: AC1
+        statement: "AC1: sourcing the file under `/bin/bash -u` (3.2) succeeds with the extras array empty -- falsifier: a test that runs `/bin/bash -euc 'source scripts/runtime_build/sibling_clone_manifest.sh'` exits non-zero"
+      - id: AC2
+        statement: "AC2: no other script sourced by [reconcile-workspace-venvs.sh](<http://reconcile-workspace-venvs.sh>) expands a possibly-empty array unguarded (grep sweep recorded in the PR)"
+evidence_requirements:
+  - kind: tests
+    description: "The manifest sources under macOS bash 3.2 with set -u and the sourced-script sweep finds no unguarded empty-array expansion."
+    command: "uv run pytest tests/scripts/test_reconcile_sourced_scripts_bash32_omn21256.py -q -p no:cacheprovider"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21256-manifest-sources-bash32"
+    description: "The manifest sources under /bin/bash with set -u on every platform (including bash 3.2 on stock Macs), and the static bash 3.2 guard finds no unguarded empty-array expansion."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_reconcile_sourced_scripts_bash32_omn21256.py -q -p no:cacheprovider -k bash32"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]
+  - id: "dod-omn21256-sourced-scripts-sweep"
+    description: "The sweep covers exactly the scripts reconcile-workspace-venvs.sh sources and finds no unguarded expansion of an array ever assigned empty; RUN_AS in reconcile_privilege_lib.sh is recorded as guarded by its length check; at origin/dev 6a184d8323 the sweep fails on sibling_clone_manifest.sh line 103."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_reconcile_sourced_scripts_bash32_omn21256.py -q -p no:cacheprovider -k \"sourced_set or no_unguarded\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC2]
+  - id: "dod-omn21256-proof-root-guarded-array"
+    description: "Proof-root staging resolves guarded empty and populated array expansions as bash does, and the dogfood dry-run accepts a pinned root using the updated manifest. These checks use temporary local repositories and require no deployed lane."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_stage_pinned_proof_root_omn19086.py tests/scripts/test_cut_lab_ref.py -q -p no:cacheprovider -k 'bash32_guarded or dogfood_lane_is_isolated'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1]

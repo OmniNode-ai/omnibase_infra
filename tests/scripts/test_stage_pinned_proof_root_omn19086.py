@@ -477,3 +477,31 @@ def test_a_referenced_empty_array_resolves_and_a_top_level_empty_one_refuses(
     assert MOD._read_bash_array(manifest, "TAGS") == ["omnibase_core"]
     with pytest.raises(MOD.UsageError, match=r"EXTRA .* is empty"):
         MOD._read_bash_array(manifest, "EXTRA")
+
+
+@pytest.mark.parametrize("extras", [[], ["omnimemory", "omnigemini"]])
+def test_bash32_guarded_array_reference_resolves(
+    tmp_path: Path, extras: list[str]
+) -> None:
+    """The nounset-safe expansion contributes the same repositories as bash."""
+    manifest = tmp_path / "manifest.sh"
+    manifest.write_text(
+        f"EXTRA=({' '.join(extras)})\n"
+        'BASE=("omnibase_core")\n'
+        'TAGS=("${BASE[@]}" ${EXTRA[@]+"${EXTRA[@]}"})\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-euc",
+            'source "$1"; printf "%s\\n" "${TAGS[@]}"',
+            "_",
+            str(manifest),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert MOD._read_bash_array(manifest, "TAGS") == result.stdout.splitlines()
+    assert MOD._read_bash_array(manifest, "TAGS") == ["omnibase_core", *extras]
