@@ -41,3 +41,13 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py tests/unit/docker/test_delegation_import_smoke_guard.py tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-deployed-dockerfile-names-no-omnimarket
+    description: >-
+      AC2, deploy-scope probe. Reads docker/Dockerfile.runtime through the GitHub API at the commit that carries this contract and exits nonzero unless no instruction line outside a comment names omnimarket and the routing ladder is COPYed from the build context. At the merge base the file installs omnimarket and copies the ladder out of the wheel, so the probe prints false there; the runtime-boot-smoke job on the pull request head is the boot half of AC2 and runs on a hosted runner.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | split("\n") as $l | (($l | map(select(test("^\\s*#") | not) | select(test("omnimarket"; "i"))) | length) == 0) and ($l | map(contains("COPY --chown=omniinfra:omniinfra workspace/routing_tiers.yaml /app/config/delegation/routing_tiers.yaml")) | any)' | grep -qx true
+    binds_ac:
+      - "AC2"
