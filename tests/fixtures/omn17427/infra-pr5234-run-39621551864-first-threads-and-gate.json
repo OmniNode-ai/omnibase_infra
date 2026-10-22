@@ -1,0 +1,27 @@
+{
+ "_provenance": {
+  "source": "onex scm job-log over the dev bus (node_github_repo_gateway_effect) for run 39621551864 on omnibase_infra#5234 head 968f3ee91b8bf01a19fb41fd03343c605190d299, the first reviewer run with the fixed poster: job 119296792200 'Hostile Reviewer (adversarial gate)' and job 119301772367 'Hostile Review Thread Gate'. Lines are verbatim from the job logs.",
+  "captured_utc": "2026-10-21T15:16:00Z",
+  "source_sha256": "73442e3b199e48ae01758c0726d502817b196b5d4a47ada03a9d715901bfbe08",
+  "bus_correlation_ids": [
+   "41c8f56e-60b8-4fff-b072-79c49098fb8d",
+   "28ede409-645d-42c0-804a-890e9e7ce594"
+  ],
+  "ticket": "OMN-17427",
+  "command": "onex scm job-log OmniNode-ai/omnibase_infra --job-id <id> --tail-bytes <n> --bus-lane dev --source bus"
+ },
+ "response": {
+  "pr": 5234,
+  "run_id": 39621551864,
+  "reviewer_log_lines": [
+   "2026-10-21T15:09:53.0299382Z thread-poster stats: {\"posted_threads\": 2, \"body_findings\": 0, \"deduped\": 0, \"truncated\": 0, \"suppressed_hints\": 2, \"below_quorum\": 98}",
+   "2026-10-21T15:09:53.0300075Z Posted hostile review (COMMENT) with 2 finding thread(s); 0 demoted to a review body."
+  ],
+  "thread_gate_log_lines": [
+   "2026-10-21T15:10:10.4728989Z hostile-review-disposition: {\"blocking\": true, \"disposition\": \"none\", \"disposition_author\": \"\", \"disposition_url\": \"\", \"fingerprint\": \"0b75b492dc2a\", \"fix_verified\": null, \"fixed_in\": \"\", \"head_sha\": \"968f3ee91b8bf01a19fb41fd03343c605190d299\", \"line_end\": null, \"line_start\": null, \"model\": \"correctness\", \"original_commit\": \"968f3ee91b8bf01a19fb41fd03343c605190d299\", \"outdated\": false, \"path\": \".github/workflows/hostile-review-thread-gate.yml\", \"pr\": 5234, \"reason\": \"unresolved, no disposition reply\", \"rejected_reason\": \"\", \"repo\": \"OmniNode-ai/omnibase_infra\", \"resolved\": false, \"resolved_by\": \"\", \"severity\": \"MINOR\", \"thread_id\": \"PRRT_kwDOPuAjtM6u01K4\", \"url\": \"https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489373\"}",
+   "2026-10-21T15:10:10.4731525Z hostile-review-disposition: {\"blocking\": true, \"disposition\": \"none\", \"disposition_author\": \"\", \"disposition_url\": \"\", \"fingerprint\": \"ca3902ada6b3\", \"fix_verified\": null, \"fixed_in\": \"\", \"head_sha\": \"968f3ee91b8bf01a19fb41fd03343c605190d299\", \"line_end\": null, \"line_start\": null, \"model\": \"sonnet\", \"original_commit\": \"968f3ee91b8bf01a19fb41fd03343c605190d299\", \"outdated\": false, \"path\": \".github/workflows/hostile-review-thread-gate.yml\", \"pr\": 5234, \"reason\": \"unresolved, no disposition reply\", \"rejected_reason\": \"\", \"repo\": \"OmniNode-ai/omnibase_infra\", \"resolved\": false, \"resolved_by\": \"\", \"severity\": \"MINOR\", \"thread_id\": \"PRRT_kwDOPuAjtM6u01Mr\", \"url\": \"https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489546\"}",
+   "2026-10-21T15:10:10.4750120Z   BLOCKING: .github/workflows/hostile-review-thread-gate.yml (correctness) \u2014 unresolved, no disposition reply \u2014 https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489373",
+   "2026-10-21T15:10:10.4750880Z   BLOCKING: .github/workflows/hostile-review-thread-gate.yml (sonnet) \u2014 unresolved, no disposition reply \u2014 https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489546"
+  ]
+ }
+}
