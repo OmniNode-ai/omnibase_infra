@@ -26,7 +26,7 @@ from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
 from compute_workspace_provenance import (
-    _content_parity_diff,
+    _diff_file_maps,
     _digest_files,
     _force_included_files,
     _tracked_files,
@@ -199,8 +199,11 @@ def _snapshot_market(source: Path, destination: Path) -> None:
         shutil.copy2(path, target)
 
 
-def validate_wheel(wheel: Path, source_package: Path, extracted: Path) -> str:
-    """Reject foreign payloads, then prove wheel package bytes equal pinned source."""
+def validate_wheel(wheel: Path, source_repo: Path, extracted: Path) -> str:
+    """Reject foreign payloads, then prove wheel package bytes equal pinned source.
+
+    `source_repo` is the Market snapshot root; its `src/omnimarket` is the package.
+    """
     metadata_roots: set[str] = set()
     names: set[str] = set()
     with zipfile.ZipFile(wheel) as archive:
@@ -234,7 +237,18 @@ def validate_wheel(wheel: Path, source_package: Path, extracted: Path) -> str:
     metadata = (extracted / metadata_root / "METADATA").read_text(encoding="utf-8")
     if "\nName: omnimarket\n" not in "\n" + metadata:
         raise ValueError("wheel distribution identity is not omnimarket")
-    differing = _content_parity_diff(source_package, extracted / "omnimarket")
+    # OMN-17991: the Market wheel force-includes repository-root files into
+    # `omnimarket/`, so comparing against `src/omnimarket` alone refused a real
+    # candidate build on a lab host ("wheel payload differs from pinned Market
+    # source"). Resolve the declarations exactly as the provenance gate does: a
+    # declared file is compared byte-for-byte, an undeclared wheel file is still
+    # drift, and a declared source missing from the snapshot refuses.
+    expected = _tracked_files(source_repo / "src" / "omnimarket")
+    errors: list[str] = []
+    expected.update(_force_included_files(source_repo, "omnimarket", errors))
+    if errors:
+        raise ValueError(f"unresolvable Market force-include: {errors[0]}")
+    differing = _diff_file_maps(expected, _tracked_files(extracted / "omnimarket"))
     if differing:
         raise ValueError(
             f"wheel payload differs from pinned Market source: {differing[:10]}"
@@ -441,9 +455,7 @@ def build_candidate(
         if len(wheels) != 1:
             raise RuntimeError("offline build must produce exactly one Market wheel")
         wheel = wheels[0]
-        metadata_root = validate_wheel(
-            wheel, source / "src/omnimarket", output / "wheel-proof"
-        )
+        metadata_root = validate_wheel(wheel, source, output / "wheel-proof")
         if validate_sources(plan) != digests:
             raise RuntimeError("source inputs changed during wheel construction")
         manifest = _manifest(plan, digests)

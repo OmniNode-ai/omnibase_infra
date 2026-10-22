@@ -25,6 +25,12 @@ requirements:
       - id: AC3
         statement: |-
           AC3: a plan with admit_unhealthy_target replaces a running effects container whose health is unhealthy or starting, records target_health_before and target_health_after, refuses without the flag or when the target is restarting or stopped, and a rollback of an admitted unhealthy target restores the prior settled state with rollback_health recorded -- falsifier: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'unhealthy_effects_container or unhealthy_target_refuses or admitted_unhealthy_rollback or healthy_rollback_records' fails at origin/dev.
+  - id: req-omn17991-wheel-force-include
+    statement: "The candidate builder compares the Market wheel against its pinned source with the wheel's declared force-includes resolved, as the provenance gate does."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a Market source whose pyproject.toml force-includes a root config/x.yaml into omnimarket/config/x.yaml, built into a wheel carrying that file with the same bytes, passes validate_wheel; the same wheel with different bytes for that file, a wheel with an extra undeclared file under omnimarket/, and a declaration whose source is absent from the snapshot each refuse; the BuildBoundary end-to-end build passes with the force-include declared in the fixture Market source -- falsifier: uv run --frozen pytest tests/scripts/test_build_effects_candidate.py -q -k 'wheel_force_included_file_matches or wheel_force_include_drift' fails at de9c84ea8, where validate_wheel raises "wheel payload differs from pinned Market source".
 evidence_requirements:
   - kind: tests
     description: "Focused scoped effects deploy, candidate build and entrypoint tests."
@@ -58,3 +64,11 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'unhealthy_effects_container or unhealthy_target_refuses or admitted_unhealthy_rollback or healthy_rollback_records'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn17991-wheel-force-include
+    description: The wheel force-include parity tests pass; at the prior head a declared force-included file refuses as drift.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_build_effects_candidate.py -q -k 'wheel_force_included_file_matches or wheel_force_include_drift'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
