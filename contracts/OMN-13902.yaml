@@ -82,5 +82,8 @@ dod_evidence:
       - check_type: command
         check_value: python3 scripts/ci/runner_image_identity.py --mode verify
         cwd: .
+      - check_type: command
+        check_value: python3 -c "import json, tomllib; assert tomllib.load(open('uv.lock','rb'))['revision'] >= 5; assert json.load(open('docker/runners/runner-image.lock.json'))['identity_digest'] != '39d55202b69616899b676b4dd06de851'"
+        cwd: .
     binds_ac:
       - AC5
