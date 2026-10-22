@@ -412,6 +412,11 @@ requirements:
     acceptance:
       - id: AC146
         statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
+  - id: req-omn17427-issuer-overlay-coverage
+    statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
+    acceptance:
+      - id: AC158
+        statement: 'AC158: lab_principal_issuer.py check --overlay FILE --ledger FILE exits 1 and names each principal issued in the lane that the overlay does not declare for its login, exits 0 when every issued principal is declared or the ledger is absent, ignores other lanes and grants-applied rows, never prints a login, and exits 2 for --ledger without --overlay -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -1959,3 +1964,19 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC146]
+  - id: dod-omn17427-ac158-issuer-overlay-coverage
+    description: Regression tests fail at the merge base, where check has no --ledger, and pass at the head; they cover a fully declared ledger, an undeclared issued machine, a login that differs from the overlay row, another lane, an absent ledger and --ledger without --overlay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC158]
+  - id: dod-omn17427-ac158-issuer-overlay-coverage-deploy-check
+    description: Hosted-runner deploy check runs the issuer's check command over synthetic overlay and ledger files, and the compose file the issuer is recreated from still parses. No Docker daemon, broker, overlay checkout or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC158]
