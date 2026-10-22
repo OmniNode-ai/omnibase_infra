@@ -69,6 +69,13 @@ repos:
         files: ^(\.github/workflows/|tests/ci/test_anthropic_key_prefix_workflows_omn20967\.py$|\.pre-commit-config\.yaml$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: body-reading-workflows-trigger-on-edit
+        name: A workflow that reads the PR body fires on edited (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q -n 0 --no-cov
+        language: system
+        files: ^(\.github/workflows/|tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427\.py$|\.pre-commit-config\.yaml$)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: mirror-source-consume-only
         name: Mirror source consume-only regression (OMN-20867)
         entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
