@@ -44,6 +44,21 @@ def _git(root: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+_MARKET_FORCE_INCLUDE = (
+    "[tool.hatch.build.targets.wheel.force-include]\n"
+    '"config/ci_bus_lanes.yaml" = "omnimarket/config/ci_bus_lanes.yaml"\n'
+)
+
+
+def _write_force_included(archive: zipfile.ZipFile, repo: Path) -> None:
+    """Honour the wheel force-include table the way hatch does."""
+    config = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
+    wheel_target = config.get("tool", {}).get("hatch", {}).get("build", {})
+    table = wheel_target.get("targets", {}).get("wheel", {}).get("force-include", {})
+    for source_rel, destination in table.items():
+        archive.writestr(destination, (repo / source_rel).read_bytes())
+
+
 @pytest.fixture(scope="module")
 def source_data(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     root = tmp_path_factory.mktemp("candidate-sources")
@@ -53,9 +68,13 @@ def source_data(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         package = clone / "src" / name
         package.mkdir(parents=True)
         (package / "__init__.py").write_text(f"PACKAGE = {name!r}\n")
-        (clone / "pyproject.toml").write_text(
-            f"[project]\nname = '{name.replace('_', '-')}'\nversion = '1.0.0'\n"
-        )
+        pyproject = f"[project]\nname = '{name.replace('_', '-')}'\nversion = '1.0.0'\n"
+        if name == "omnimarket":
+            # The real Market wheel force-includes root files into its package.
+            (clone / "config").mkdir()
+            (clone / "config/ci_bus_lanes.yaml").write_text("lanes: []\n")
+            pyproject += _MARKET_FORCE_INCLUDE
+        (clone / "pyproject.toml").write_text(pyproject)
         _git(clone, "init", "-q", "-b", "dev")
         _git(clone, "config", "user.name", "Candidate fixture")
         _git(clone, "config", "user.email", "candidate@example.test")
@@ -105,6 +124,7 @@ class BuildBoundary:
 
     def __init__(self, builder: Any, plan: Any, mode: str = "ok") -> None:
         self.calls: list[list[str]] = []
+        self.probe_timeouts: list[int] = []
         self.mode = mode
         self.plan = plan
         self.digests = builder.validate_sources(plan)
@@ -118,7 +138,7 @@ class BuildBoundary:
 
     def __call__(self, command: list[str], stdin: str | None, timeout: int) -> str:
         self.calls.append(command)
-        assert timeout <= 900
+        assert timeout <= 1800
         if command[:3] == ["docker", "image", "inspect"]:
             reference = command[-1]
             found = self.aliases[reference]
@@ -150,6 +170,7 @@ class BuildBoundary:
                 and command[command.index("--network") + 1] == "none"
             )
             assert stdin and "package_digests" in stdin
+            self.probe_timeouts.append(timeout)
             is_candidate = CANDIDATE in command
             result = {
                 "package_digests": dict(self.digests),
@@ -193,6 +214,7 @@ class BuildBoundary:
                             "omnimarket/" + str(path.relative_to(source)),
                             path.read_bytes(),
                         )
+                _write_force_included(archive, Path(command[-1]))
                 archive.writestr(
                     "omnimarket-1.0.0.dist-info/METADATA",
                     "Name: omnimarket\nVersion: 1.0.0\n",
@@ -357,13 +379,81 @@ def test_wheel_content_parity_is_not_a_source_label(
     builder: Any, tmp_path: Path
 ) -> None:
     source = tmp_path / "source"
-    source.mkdir()
-    (source / "__init__.py").write_text("EXPECTED=True\n")
+    (source / "src/omnimarket").mkdir(parents=True)
+    (source / "src/omnimarket/__init__.py").write_text("EXPECTED=True\n")
     wheel = tmp_path / "stale.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("omnimarket/__init__.py", "STALE=True\n")
         archive.writestr("omnimarket-1.0.dist-info/METADATA", "Name: omnimarket\n")
     with pytest.raises(ValueError, match="differs from pinned"):
+        builder.validate_wheel(wheel, source, tmp_path / "proof")
+
+
+def _force_include_market(root: Path, *, declare_source: bool = True) -> Path:
+    (root / "src/omnimarket").mkdir(parents=True)
+    (root / "src/omnimarket/__init__.py").write_text("EXPECTED=True\n")
+    if declare_source:
+        (root / "config").mkdir()
+        (root / "config/x.yaml").write_text("pinned: true\n")
+    (root / "pyproject.toml").write_text(
+        "[project]\nname = 'omnimarket'\nversion = '1.0.0'\n"
+        "[tool.hatch.build.targets.wheel.force-include]\n"
+        '"config/x.yaml" = "omnimarket/config/x.yaml"\n'
+    )
+    return root
+
+
+def _market_wheel(path: Path, files: dict[str, str]) -> Path:
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("omnimarket/__init__.py", "EXPECTED=True\n")
+        for name, content in files.items():
+            archive.writestr(name, content)
+        archive.writestr("omnimarket-1.0.dist-info/METADATA", "Name: omnimarket\n")
+    return path
+
+
+@pytest.mark.unit
+def test_wheel_force_included_file_matches_pinned_source(
+    builder: Any, tmp_path: Path
+) -> None:
+    """OMN-17991: a declared force-include with the same bytes is not drift."""
+    source = _force_include_market(tmp_path / "source")
+    wheel = _market_wheel(
+        tmp_path / "market.whl", {"omnimarket/config/x.yaml": "pinned: true\n"}
+    )
+    assert (
+        builder.validate_wheel(wheel, source, tmp_path / "proof")
+        == "omnimarket-1.0.dist-info"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("files", "declare_source", "match"),
+    [
+        ({"omnimarket/config/x.yaml": "pinned: false\n"}, True, "differs from"),
+        (
+            {
+                "omnimarket/config/x.yaml": "pinned: true\n",
+                "omnimarket/undeclared.yaml": "extra\n",
+            },
+            True,
+            "differs from",
+        ),
+        ({"omnimarket/config/x.yaml": "pinned: true\n"}, False, "force-include"),
+    ],
+    ids=["changed-bytes", "undeclared-extra", "declared-source-missing"],
+)
+def test_wheel_force_include_drift_still_refuses(
+    builder: Any,
+    tmp_path: Path,
+    files: dict[str, str],
+    declare_source: bool,
+    match: str,
+) -> None:
+    source = _force_include_market(tmp_path / "source", declare_source=declare_source)
+    wheel = _market_wheel(tmp_path / "market.whl", files)
+    with pytest.raises(ValueError, match=match):
         builder.validate_wheel(wheel, source, tmp_path / "proof")
 
 
@@ -381,10 +471,11 @@ def test_offline_image_probe_needs_no_writable_filesystem(builder: Any) -> None:
 
     def runner(args: list[str], stdin: str | None, timeout: int) -> str:
         seen.append(args)
+        assert timeout == 720
         assert stdin and "namespace['installed_package_root']" in stdin
         return json.dumps({"package_digests": {}})
 
-    builder._probe(runner, "sha256:" + "1" * 64)
+    builder._probe(runner, "sha256:" + "1" * 64, timeout=720)
     (args,) = seen
     assert "--read-only" in args
     assert args[args.index("--entrypoint") + 1] == "/app/.venv/bin/python"
@@ -455,3 +546,49 @@ def test_in_image_proof_resolves_the_editable_project_tree(builder: Any) -> None
     assert "installed_package_root(proof['repo'])" in builder._INSTALLER
     assert "locate_file(proof['repo'])" not in builder._INSTALLER
     assert "scoped_image_probe.py" in builder.PROOF_TOOLS
+
+
+@pytest.mark.unit
+def test_loaded_host_scales_both_probe_bounds(
+    builder: Any, plan: Any, tmp_path: Path
+) -> None:
+    # A fixed 120 s probe bound timed out on a loaded 32-core lab host at load1 48 to 63
+    # (497.9 s measured, OMN-17991).
+    boundary = BuildBoundary(builder, plan)
+    output = tmp_path / "candidate"
+    result = builder.build_candidate(
+        plan,
+        output,
+        execute=True,
+        runner=boundary,
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert result["status"] == "BUILT"
+    assert boundary.probe_timeouts == [720, 720]
+    receipt = json.loads((output / "candidate-receipt.json").read_text())
+    assert receipt["probe_timeout"]["seconds"] == 720
+    assert receipt["probe_timeout"]["source"] == "host-load"
+    preview = builder.build_candidate(
+        plan,
+        tmp_path / "preview",
+        runner=BuildBoundary(builder, plan),
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert preview["probe_timeout"]["seconds"] == 720
+
+
+@pytest.mark.unit
+def test_declared_probe_bound_wins(builder: Any, plan: Any, tmp_path: Path) -> None:
+    declared = plan.model_copy(update={"probe_timeout_seconds": 900})
+    boundary = BuildBoundary(builder, declared)
+    builder.build_candidate(
+        declared,
+        tmp_path / "candidate",
+        execute=True,
+        runner=boundary,
+        loadavg=lambda: (48.0, 0.0, 0.0),
+        cpu_count=lambda: 32,
+    )
+    assert boundary.probe_timeouts == [900, 900]

@@ -1,0 +1,74 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17991
+title: "Scoped effects deploy works on a loaded, SASL-enabled dev host"
+summary: >-
+  Follow-up to the effects-only deployment path. The in-image probe bound scales with host load or takes the plan's declared value, the broker topic check authenticates the way the runtime does, and a dev plan may replace a running effects container whose health check is unhealthy or starting, with a recorded rollback to the prior settled state.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17991-probe-bound
+    statement: "Every in-image probe runs under a bound declared by the plan or scaled to host load, and the receipt records it."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: an in-image probe's bound is the plan's declared probe_timeout_seconds or min(1800, ceil(120 * max(1, 4 * load1 / cpus))), every probe call receives it, the receipt records it, and a probe timeout refuses naming its bound -- falsifier: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'probe_timeout or probe_bound' fails at origin/dev, where the runner receives a fixed 120.
+  - id: req-omn17991-sasl-topic-check
+    statement: "The topic check authenticates with the effects target's declared SASL login without exposing it."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: with the effects target's environment declaring SASL_PLAINTEXT and a supported mechanism, the topic check authenticates with that login passed on stdin (never argv or the receipt) and refuses unsupported or empty credentials without an unauthenticated read -- falsifier: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'topic_check' fails at origin/dev.
+  - id: req-omn17991-unhealthy-admission
+    statement: "A dev plan may replace a running unhealthy or starting effects target only on its explicit flag, with recorded health and rollback."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a plan with admit_unhealthy_target replaces a running effects container whose health is unhealthy or starting, records target_health_before and target_health_after, refuses without the flag or when the target is restarting or stopped, and a rollback of an admitted unhealthy target restores the prior settled state with rollback_health recorded -- falsifier: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'unhealthy_effects_container or unhealthy_target_refuses or admitted_unhealthy_rollback or healthy_rollback_records' fails at origin/dev.
+  - id: req-omn17991-wheel-force-include
+    statement: "The candidate builder compares the Market wheel against its pinned source with the wheel's declared force-includes resolved, as the provenance gate does."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a Market source whose pyproject.toml force-includes a root config/x.yaml into omnimarket/config/x.yaml, built into a wheel carrying that file with the same bytes, passes validate_wheel; the same wheel with different bytes for that file, a wheel with an extra undeclared file under omnimarket/, and a declaration whose source is absent from the snapshot each refuse; the BuildBoundary end-to-end build passes with the force-include declared in the fixture Market source -- falsifier: uv run --frozen pytest tests/scripts/test_build_effects_candidate.py -q -k 'wheel_force_included_file_matches or wheel_force_include_drift' fails at de9c84ea8, where validate_wheel raises "wheel payload differs from pinned Market source".
+evidence_requirements:
+  - kind: tests
+    description: "Focused scoped effects deploy, candidate build and entrypoint tests."
+    command: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py tests/scripts/test_effects_deploy_entrypoint.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn17991-probe-bound
+    description: The probe bound tests pass; at the base they do not exist and the runner receives a fixed 120.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'probe_timeout or probe_bound'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn17991-sasl-topic-check
+    description: The SASL topic check tests pass; at the base the topic check reads unauthenticated.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'topic_check'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn17991-unhealthy-admission
+    description: The unhealthy admission and rollback health tests pass; at the base an unhealthy target always refuses.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_scoped_effects_deploy.py tests/scripts/test_build_effects_candidate.py -q -k 'unhealthy_effects_container or unhealthy_target_refuses or admitted_unhealthy_rollback or healthy_rollback_records'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn17991-wheel-force-include
+    description: The wheel force-include parity tests pass; at the prior head a declared force-included file refuses as drift.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_build_effects_candidate.py -q -k 'wheel_force_included_file_matches or wheel_force_include_drift'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

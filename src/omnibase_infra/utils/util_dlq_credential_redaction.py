@@ -19,10 +19,10 @@ constructs the model -- it copies the bytes that failed to become one. This
 module is the second layer, and it is deliberately NAME-based rather than
 type-based so a field added later as a plain ``str`` still cannot leak.
 
-WHAT IT DOES NOT DO. It redacts by field NAME. A credential placed in a field
-named ``note``, or concatenated into a free-text string, is not reachable by
-any name-based rule and is not covered here. That is the honest limit of
-defense in depth; AC1's typing is what covers the fields we know about.
+String values also use the shared credential-shape list, including free text
+in fields such as ``note``. Opaque values without a recognisable shape still
+require a credential field name or a Bearer label. This is defense in depth;
+typing and avoiding credential logging remain necessary.
 
 REDACTION IS RECORDED, NOT SILENT. Every call reports the dotted paths of the
 fields it replaced so the envelope can carry ``redacted_fields`` -- names
@@ -41,12 +41,14 @@ from typing import Final
 
 __all__ = [
     "CREDENTIAL_FIELD_NAME_FRAGMENTS",
+    "CREDENTIAL_VALUE_PATTERNS",
     "DLQ_REDACTION_MARKER",
     "NON_CREDENTIAL_FIELD_NAMES",
     "NON_CREDENTIAL_FIELD_SUFFIXES",
     "is_credential_field_name",
     "redact_credential_fields",
     "redact_credential_fields_in_text",
+    "redact_credential_value_patterns",
 ]
 
 # The value written in place of a credential. Distinct from
@@ -55,6 +57,33 @@ __all__ = [
 # read, this one says the body was read and one field was deliberately
 # removed. Conflating them would make a redacted record look corrupt.
 DLQ_REDACTION_MARKER: Final[str] = "<redacted:credential>"
+
+# One value-shape authority for logs, errors, DLQ bodies and receipts. The BYOK
+# catalogue (omnimarket/configs/byok_provider_backends.v1.yaml) offers openai,
+# anthropic, openrouter, gemini and glm. The sk- family includes sk-proj-,
+# sk-ant- (API and OAuth) and sk-or-; do not match only a fixed key length.
+# GLM also uses id.secret keys, with a 32-hex id. Opaque provider values have
+# no reliable bare-text discriminator: protect their credential-named fields
+# and Bearer form rather than redacting every ordinary identifier.
+CREDENTIAL_VALUE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"onxk_[A-Za-z0-9_-]{20,}"),
+    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AIza[A-Za-z0-9_-]{35,}"),
+    re.compile(
+        r"(?<![A-Za-z0-9_.-])[A-Fa-f0-9]{32}\.[A-Za-z0-9_-]{16,}"
+        r"(?![A-Za-z0-9_.-])"
+    ),
+    re.compile(r"(?i:\bbearer)\s+[A-Za-z0-9._~+/-]{16,}=*"),
+)
+
+
+def redact_credential_value_patterns(text: str, marker: str) -> str:
+    """Replace credential shapes using the caller's existing redaction marker."""
+    for pattern in CREDENTIAL_VALUE_PATTERNS:
+        text = pattern.sub(marker, text)
+    return text
+
 
 # Normalised name fragments that mark a field as credential-bearing. Matched
 # as a SUBSTRING of the normalised key (lowercased, ``-``/``_``/``.``/spaces
@@ -242,6 +271,11 @@ def _redact(
             )
             for index, item in enumerate(value)
         ]
+    if isinstance(value, str):
+        scrubbed = redact_credential_value_patterns(value, DLQ_REDACTION_MARKER)
+        if scrubbed != value:
+            redacted.append(path or "<root>")
+        return scrubbed
     return value
 
 
@@ -249,8 +283,8 @@ def redact_credential_fields(value: object) -> tuple[object, tuple[str, ...]]:
     """Recursively replace credential-named fields in a decoded structure.
 
     Returns the redacted structure and the dotted paths that were replaced.
-    Scalars and unrecognised types pass through untouched -- this function
-    only ever acts on a value that is REACHED THROUGH a credential-named key.
+    String scalars are checked for credential shapes even under ordinary field
+    names; other scalars and unrecognised types pass through untouched.
     """
     redacted: list[str] = []
     result = _redact(value, path="", depth=0, redacted=redacted)
@@ -268,7 +302,11 @@ def _redact_text_pairs(text: str) -> tuple[str, tuple[str, ...]]:
         quote = match.group("quote")
         return f"{key}{match.group('sep')}{quote}{DLQ_REDACTION_MARKER}{quote}"
 
-    return _TEXT_PAIR_RE.sub(_sub, text), tuple(redacted)
+    scrubbed = _TEXT_PAIR_RE.sub(_sub, text)
+    shaped = redact_credential_value_patterns(scrubbed, DLQ_REDACTION_MARKER)
+    if shaped != scrubbed:
+        redacted.append("<root>")
+    return shaped, tuple(redacted)
 
 
 def redact_credential_fields_in_text(text: str) -> tuple[str, tuple[str, ...]]:
@@ -283,8 +321,8 @@ def redact_credential_fields_in_text(text: str) -> tuple[str, tuple[str, ...]]:
     A body that is not JSON -- or that is JSON but decodes to a bare scalar,
     where there are no field names to match -- falls back to a
     ``key=value``/``key: value`` text scrub. That fallback is best effort: it
-    catches form-encoded and log-shaped bodies and misses anything else,
-    which is why AC1's typing exists rather than this being the only layer.
+    catches form-encoded and log-shaped bodies. Both paths also scrub the
+    shared credential value shapes, recording ``<root>`` for unstructured text.
 
     Returns the redacted text and the names/paths redacted. The text is
     returned unchanged (with an empty tuple) when nothing matched, so a
@@ -298,8 +336,6 @@ def redact_credential_fields_in_text(text: str) -> tuple[str, tuple[str, ...]]:
     except (ValueError, TypeError):
         return _redact_text_pairs(text)
     if not isinstance(decoded, (dict, list)):
-        # A JSON scalar carries no field names; the text fallback is the
-        # only thing that could match, and on a bare scalar it will not.
         return _redact_text_pairs(text)
     redacted_value, paths = redact_credential_fields(decoded)
     if not paths:
