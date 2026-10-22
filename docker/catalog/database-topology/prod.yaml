@@ -438,5 +438,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: a5ea07c47d8d331a41ed7b190f9d50f9dc39b64a5177a120056aabe603f9cdca
+  sha256: 01033034d38effe514b9511dc32318476e5f7bbd8e3f8470834e8ef41311c7fc
 topology_instance: local

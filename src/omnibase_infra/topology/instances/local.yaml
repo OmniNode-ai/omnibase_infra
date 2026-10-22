@@ -193,9 +193,6 @@ databases:
               - consumer_flow_windows
             privileges: [DELETE, SELECT]
             schema: omninode_internal
-          # OMN-17427: node_projection_lab_job/0002, node_projection_pr_state/0002
-          # and node_projection_work_ledger/0005 grant the omnimarket lab job
-          # check store, which reads through OMNIDASH_ANALYTICS_DB_URL.
           - object_type: TABLE
             objects:
               - lab_job_state

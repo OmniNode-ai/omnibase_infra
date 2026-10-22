@@ -50,4 +50,7 @@ def test_both_lab_job_migrations_are_vendored() -> None:
     assert sorted(path.name for path in _VENDORED.glob("*.sql")) == [
         "0000_create_lab_job.sql",
         "0001_grant_omninode_runtime_lab_job.sql",
+        # Infra-owned, not vendored: the read grant for the lab job check store
+        # (OMN-17427), like node_projection_registration/0008.
+        "0002_grant_role_omnidash_lab_job_state_select.sql",
     ]
