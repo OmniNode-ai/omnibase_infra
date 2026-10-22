@@ -26,7 +26,7 @@ from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
 from compute_workspace_provenance import (
-    _content_parity_diff,
+    _diff_file_maps,
     _digest_files,
     _force_included_files,
     _tracked_files,
@@ -39,8 +39,13 @@ from deploy_source_ref import (
     validate_immutable_selections,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from scoped_effects_deploy import _IMAGE_CONFIG_FIELDS, _run_command
-from scoped_effects_plan import ImageId, SourceRepo, SourceSha
+from scoped_effects_deploy import (
+    _IMAGE_CONFIG_FIELDS,
+    CommandProcessUnfencedError,
+    _run_command,
+    probe_timeout,
+)
+from scoped_effects_plan import ImageId, ProbeTimeoutSeconds, SourceRepo, SourceSha
 
 CommandRunner = Callable[[list[str], str | None, int], str]
 SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
@@ -59,6 +64,7 @@ class ModelEffectsCandidatePlan(BaseModel):
     source_pins: dict[SourceRepo, SourceSha]
     infra_source_root: Path
     infra_source_sha: SourceSha
+    probe_timeout_seconds: ProbeTimeoutSeconds | None = None
 
     @model_validator(mode="after")
     def check_boundary(self) -> Self:
@@ -77,7 +83,7 @@ def validate_sources(plan: ModelEffectsCandidatePlan) -> dict[str, str]:
     selections = (
         *validate_immutable_selections(
             {name: str(plan.source_root / name) for name in SIBLINGS},
-            dict(plan.source_pins),
+            {str(repo): sha for repo, sha in plan.source_pins.items()},
         ),
         RepoRefSelection(
             "omnibase_infra", plan.infra_source_root.resolve(), plan.infra_source_sha
@@ -128,7 +134,7 @@ def _image(runner: CommandRunner, reference: str, expected_id: str) -> dict[str,
     return value
 
 
-def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
+def _probe(runner: CommandRunner, image: str, *, timeout: int) -> dict[str, Any]:
     probe = (
         Path(__file__).with_name("scoped_image_probe.py").read_text(encoding="utf-8")
     )
@@ -141,8 +147,8 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
         "for name in ('omnibase_core', 'omnibase_compat', 'omnimarket', 'omnibase_infra')}\n"
         "print(json.dumps(evidence, sort_keys=True))\n"
     )
-    result = json.loads(
-        runner(
+    try:
+        output = runner(
             [
                 "docker",
                 "run",
@@ -158,9 +164,13 @@ def _probe(runner: CommandRunner, image: str) -> dict[str, Any]:
                 "-",
             ],
             script,
-            120,
+            timeout,
         )
-    )
+    except CommandProcessUnfencedError:
+        raise  # Callers dispatch on this type; never rewrap it.
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}; image probe bound {timeout} s") from exc
+    result = json.loads(output)
     if not isinstance(result, dict) or not isinstance(
         result.get("package_digests"), dict
     ):
@@ -189,8 +199,11 @@ def _snapshot_market(source: Path, destination: Path) -> None:
         shutil.copy2(path, target)
 
 
-def validate_wheel(wheel: Path, source_package: Path, extracted: Path) -> str:
-    """Reject foreign payloads, then prove wheel package bytes equal pinned source."""
+def validate_wheel(wheel: Path, source_repo: Path, extracted: Path) -> str:
+    """Reject foreign payloads, then prove wheel package bytes equal pinned source.
+
+    `source_repo` is the Market snapshot root; its `src/omnimarket` is the package.
+    """
     metadata_roots: set[str] = set()
     names: set[str] = set()
     with zipfile.ZipFile(wheel) as archive:
@@ -224,7 +237,18 @@ def validate_wheel(wheel: Path, source_package: Path, extracted: Path) -> str:
     metadata = (extracted / metadata_root / "METADATA").read_text(encoding="utf-8")
     if "\nName: omnimarket\n" not in "\n" + metadata:
         raise ValueError("wheel distribution identity is not omnimarket")
-    differing = _content_parity_diff(source_package, extracted / "omnimarket")
+    # OMN-17991: the Market wheel force-includes repository-root files into
+    # `omnimarket/`, so comparing against `src/omnimarket` alone refused a real
+    # candidate build on a lab host ("wheel payload differs from pinned Market
+    # source"). Resolve the declarations exactly as the provenance gate does: a
+    # declared file is compared byte-for-byte, an undeclared wheel file is still
+    # drift, and a declared source missing from the snapshot refuses.
+    expected = _tracked_files(source_repo / "src" / "omnimarket")
+    errors: list[str] = []
+    expected.update(_force_included_files(source_repo, "omnimarket", errors))
+    if errors:
+        raise ValueError(f"unresolvable Market force-include: {errors[0]}")
+    differing = _diff_file_maps(expected, _tracked_files(extracted / "omnimarket"))
     if differing:
         raise ValueError(
             f"wheel payload differs from pinned Market source: {differing[:10]}"
@@ -337,7 +361,13 @@ def build_candidate(
     *,
     execute: bool = False,
     runner: CommandRunner = _run_command,
+    loadavg: Callable[[], tuple[float, float, float]] = os.getloadavg,
+    cpu_count: Callable[[], int | None] = os.cpu_count,
 ) -> dict[str, Any]:
+    bound = probe_timeout(
+        plan.probe_timeout_seconds, loadavg=loadavg, cpu_count=cpu_count
+    )
+    timeout = bound["seconds"]
     digests = validate_sources(plan)
     base = _image(runner, plan.base_image_id, plan.base_image_id)
     if not execute:
@@ -345,6 +375,7 @@ def build_candidate(
             "status": "PREVIEW",
             "base_image_id": plan.base_image_id,
             "source_digests": digests,
+            "probe_timeout": bound,
         }
     # No hidden networked backend install. uv build uses this already-provisioned
     # environment with isolation disabled, with its backend version recorded.
@@ -366,7 +397,7 @@ def build_candidate(
         for root in (plan.source_root.resolve(), plan.infra_source_root.resolve())
     ):
         raise ValueError("candidate output must not be inside a source clone root")
-    baseline = _probe(runner, plan.base_image_id)
+    baseline = _probe(runner, plan.base_image_id, timeout=timeout)
     infra_ref = baseline.get("infra_source_ref")
     if (
         not isinstance(infra_ref, str)
@@ -393,6 +424,7 @@ def build_candidate(
         "started_at": datetime.now(UTC).isoformat(),
         "artifact_actions": [],
         "build_toolchain": {"python": sys.version, "hatchling": backend},
+        "probe_timeout": bound,
     }
     _write(output / "plan.json", plan.model_dump(mode="json"))
     try:
@@ -423,9 +455,7 @@ def build_candidate(
         if len(wheels) != 1:
             raise RuntimeError("offline build must produce exactly one Market wheel")
         wheel = wheels[0]
-        metadata_root = validate_wheel(
-            wheel, source / "src/omnimarket", output / "wheel-proof"
-        )
+        metadata_root = validate_wheel(wheel, source, output / "wheel-proof")
         if validate_sources(plan) != digests:
             raise RuntimeError("source inputs changed during wheel construction")
         manifest = _manifest(plan, digests)
@@ -530,7 +560,7 @@ def build_candidate(
             for key in _IMAGE_CONFIG_FIELDS
         ):
             raise RuntimeError("candidate changed baseline runtime image configuration")
-        after = _probe(runner, candidate_id)
+        after = _probe(runner, candidate_id, timeout=timeout)
         if (
             after["package_digests"] != digests
             or after.get("source_pins") != plan.source_pins

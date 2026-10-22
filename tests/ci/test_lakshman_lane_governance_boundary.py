@@ -60,6 +60,8 @@ from tests.helpers.lane_census_fixtures import LAB_MANIFEST
 
 pytestmark = pytest.mark.ci
 
+RETIRED = frozenset({"prod", "judge"})
+
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
 MANIFEST_PATH = LAB_MANIFEST  # OMN-20934: private config
@@ -245,20 +247,22 @@ def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     assert lane_spec["compose_file"] == "docker/docker-compose.lakshman.yml"
     # The governed lanes must NOT have become optional along the way.
     #
-    # OMN-18320 retired exactly one lab compose lane: `prod`. The governance
-    # constant stays wider than the manifest on purpose so unattributed prod
-    # mutations still refuse. This pins the split exactly, so a future partial
-    # erosion of stability-test or judge cannot hide behind a non-empty
-    # intersection.
+    # OMN-18320 retired the lab compose lane `prod`, and on 2026-10-21 the
+    # `judge` compose project was retired and removed from the private lane
+    # census too. The governance constant stays wider than the
+    # manifest on purpose so unattributed mutations of either still refuse.
+    # This pins the split exactly, so a future partial erosion of the
+    # remaining governed lane cannot hide behind a non-empty intersection.
     declared_governed = GOVERNED_LANES & manifest["lanes"].keys()
     retired_from_manifest = GOVERNED_LANES - manifest["lanes"].keys()
-    assert declared_governed == frozenset({"stability-test", "judge"}), (
-        "only the retired lab compose prod lane may be absent from the census "
-        f"manifest; declared governed lanes are {sorted(declared_governed)}"
+    assert len(declared_governed) == 1
+    assert declared_governed == GOVERNED_LANES - RETIRED, (
+        "only the retired lab compose prod and judge lanes may be absent from "
+        f"the census manifest; declared governed lanes are {sorted(declared_governed)}"
     )
-    assert retired_from_manifest == frozenset({"prod"}), (
-        "the only governed lane missing from the census manifest must be the "
-        f"retired lab compose prod lane; got {sorted(retired_from_manifest)}"
+    assert retired_from_manifest == RETIRED, (
+        "the only governed lanes missing from the census manifest must be the "
+        f"retired lab compose prod and judge lanes; got {sorted(retired_from_manifest)}"
     )
     for governed in declared_governed:
         assert not manifest["lanes"][governed].get("optional", False), (

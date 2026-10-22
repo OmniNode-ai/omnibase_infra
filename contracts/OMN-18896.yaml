@@ -1,0 +1,126 @@
+schema_version: 1.0.0
+ticket_id: OMN-18896
+title: 'Task 7: Teardown and a reaper for abandoned slots'
+summary: The supplied OCC contract autobinds the already-landed teardown (#4087) and has no original acceptance text for the reaper. AC1-AC4 are explicitly derived from the task title and the ledger friction; AC5 retains the existing teardown proof. No claim of armed scheduling or live shared-service cleanup is made by the hosted tests.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18896-prepr-heartbeat
+    statement: 'Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it.'
+    acceptance:
+      - id: AC1
+        statement: 'AC1: Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "heartbeat or command or killed or live_child or claim or standalone or pool"'
+  - id: req-omn18896-prepr-reap
+    statement: 'Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership.'
+    acceptance:
+      - id: AC2
+        statement: 'AC2: Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "reaped or reap or teardown or unknown or lease_guard or lane_lock or reused_pid"'
+  - id: req-omn18896-prepr-group-drain
+    statement: 'Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable.'
+    acceptance:
+      - id: AC3
+        statement: 'AC3: Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov -k "retried or unreadable_listing"'
+  - id: req-omn18896-prepr-installer
+    statement: 'Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration.'
+    acceptance:
+      - id: AC4
+        statement: 'AC4: Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer'
+  - id: req-omn18896-prepr-teardown
+    statement: 'Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing.'
+    acceptance:
+      - id: AC5
+        statement: 'AC5: Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing. -- falsifier: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: Slot ownership, reaping, installation and the existing teardown behavior.
+    command: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov
+  - kind: ci
+    description: 'PR #4087 CI checks green'
+    command: gh pr checks ${PR_NUMBER} --repo ${REPO}
+  - kind: tests
+    description: |-
+      Behavior proof for PR #4087 on OmniNode-ai/omnibase_infra, derived from the PR's own diff: the test target(s) it adds or changes. Bound as dod_evidence item `dod-occ-diff-derived-behavior-proof`, executed at cwd `${OMNI_HOME}/omnibase_infra`.
+    command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18896-prepr-heartbeat
+    description: 'Derived from OMN-18896 title: standalone bring-up and every mutating numbered-pool phase maintain a resource lease distinct from the pool admission lease; a killed owner leaves evidence, live owners and live children remain protected, and a foreign run cannot overwrite it. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "heartbeat or command or killed or live_child or claim or standalone or pool"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn18896-prepr-reap
+    description: 'Derived from OMN-18896 title: only an expired lease with no live owner or child is eligible for the existing teardown; the resource guard and bring-up lock serialize cleanup, unknown evidence refuses cleanup, and only CLEAN releases ownership. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k "reaped or reap or teardown or unknown or lease_guard or lane_lock or reused_pid"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn18896-prepr-group-drain
+    description: 'Derived from OMN-18896 teardown title and the recorded 2026-09-27 friction: teardown retries exactly slot-prefixed consumer groups through a bounded session drain, succeeds when they settle and remains INCOMPLETE when they persist or the listing is unreadable. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov -k "retried or unreadable_listing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn18896-prepr-installer
+    description: 'Derived from OMN-18896 reaper title: prepr_teardown_slot.py install-reaper snapshots its reap subcommand and teardown dependencies independently of a transient worktree, ships a sixty-second systemd user timer, propagates activation failure, and the installed plan probe runs without private lab configuration. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn18896-prepr-teardown
+    description: 'Existing teardown acceptance retained from the OMN-18896 contract: all slot residue axes read zero beside positive controls, neighbouring lanes survive, and plan-only removes nothing. Tests exercise file/process ownership and a fake shared-service host; this does not assert a live shared-service deployment.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn18896-prepr-deploy-check
+    description: 'Hosted-runner deploy check: install the immutable snapshot and user timer into temporary paths, run the installed helper, and prove systemd activation errors are returned. No Docker, user bus, credential, private configuration or live lab service is required; activation and shared-service cleanup still require lab proof.'
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_slot_reaper_omn18896.py -q --no-cov -k installer
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-OmniNode-ai-omnibase_infra-pr-4087
+    description: 'PR #4087 on OmniNode-ai/omnibase_infra — Evidence-Source autobind.'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/prepr_teardown_slot.py?ref=2551baaa98d76054cad12fad0ee1f68d1f95608e --jq '.content' | base64 -d | grep -c 'def _load_policy'
+      - check_type: command
+        check_value: |-
+          gh api repos/OmniNode-ai/omnibase_infra/pulls/4087/files --paginate --jq '.[].filename' | grep -cFx 'scripts/runtime_build/prepr_slot_policy.py'
+  - id: dod-occ-diff-derived-behavior-proof
+    description: 'PR #4087 on OmniNode-ai/omnibase_infra — diff-derived behavior proof (OMN-16434).'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: occ-self-bind-pr-11153
+    description: 'Binds OMN-18896 to OCC companion PR #11153 (self-bind).'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: gh pr view 11153 --repo OmniNode-ai/onex_change_control --json number,state

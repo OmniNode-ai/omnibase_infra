@@ -1,0 +1,78 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19507
+title: Runner disk admission measures all workspace filesystems
+summary: >-
+  Check runner home, _work, existing _work/_temp, configured work storage and an optional additional mount. Refuse on the minimum free space across distinct readable filesystems, naming the short path. Unreadable df remains fail-open for that path and cannot override a known short filesystem. The floor and self-pause behavior remain unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: runner-disk-admission-correction
+    statement: Correct the storage admission cause of the missing receipt.
+    acceptance:
+      - id: AC1
+        statement: >-
+          The admission gate refuses a job when any filesystem of runner home, _work, or existing _work/_temp is below the floor, using the minimum across distinct filesystems and naming the short path.
+      - id: AC2
+        statement: >-
+          Unreadable df on a checked mount preserves fail-open behavior and logs the unreadable mount; a known short disk still refuses the job.
+      - id: AC3
+        statement: The existing disk-admission and restore tests still pass.
+evidence_requirements:
+  - kind: tests
+    description: End-to-end shell-hook admission and host restore regression tests.
+    command: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py tests/scripts/test_runner_disk_admission_restore.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-admission-all-filesystems
+    description: >-
+      Inject a separate low-space workspace or temp filesystem while runner home is healthy; require refusal before workspace reset and the short path in the message. Shared-filesystem and explicit-mount cases also run.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py -k 'separate_filesystem or shared_filesystem or explicit_mount' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-admission-unreadable-mount
+    description: >-
+      Inject unreadable df separately on each checked mount and require the job to proceed with the path logged. An unreadable home cannot hide a short workspace filesystem.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py -k unreadable -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-admission-restore-regressions
+    description: >-
+      Run the complete focused admission and restore suites on a passing head. Stop at the first regression on the merge-base control so its known failures produce a verdict within the per-check budget.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py tests/scripts/test_runner_disk_admission_restore.py -q -x
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-admission-deploy-check
+    description: >-
+      Hosted-runner deploy probe runs this checkout's hook bind-mounted into a disposable Linux container with separate home and workspace df readings. Require exit 1 and RUNNER-DISK-ADMISSION naming _work before checkout. Fails on the original hook; requires no private host, credentials or disk exhaustion. Live refusal and receipt observations remain separate post-merge evidence.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          docker run --rm --network none \
+            -v "$PWD/docker/runners/runner-job-started.sh:/hook.sh:ro" \
+            ubuntu:22.04 bash -c '
+              set -eu
+              root=$(mktemp -d)
+              mkdir -p "$root/_work/repo/repo" "$root/_work/_temp"
+              readings=$(printf "%s\toverlay\t52428800\n%s\tscratch\t1048576\n%s\tscratch\t1048576\n" "$root" "$root/_work" "$root/_work/_temp")
+              status=0
+              output=$(RUNNER_HOME="$root" GITHUB_WORKSPACE="$root/_work/repo/repo" RUNNER_NAME=admission-probe DISK_ADMISSION_DF_OVERRIDE_KB="$readings" bash /hook.sh 2>&1) || status=$?
+              test "$status" -eq 1
+              printf "%s\n" "$output" | grep -F "::error title=RUNNER-DISK-ADMISSION:"
+              printf "%s\n" "$output" | grep -F "free on $root/_work (below the 5 GB admission floor)"
+            '
+        cwd: ${OMNI_HOME}/omnibase_infra

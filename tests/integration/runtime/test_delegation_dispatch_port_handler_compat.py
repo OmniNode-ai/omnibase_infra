@@ -513,7 +513,7 @@ def _completed_reply(
 async def test_terminal_measure_kwargs_cross_the_real_broker_without_wire_extras(
     trace_id: UUID | None, queue_wait_ms: int | None
 ) -> None:
-    """OMN-17427: caller-local evidence must not invalidate the strict bus wire."""
+    """OMN-17427: trace_id rides the strict bus wire; queue_wait_ms never does."""
     result, published_bytes, decoded = await _dispatch_through_real_broker(
         response_contract=None,
         reply=_completed_reply,
@@ -525,9 +525,13 @@ async def test_terminal_measure_kwargs_cross_the_real_broker_without_wire_extras
     assert len(published_bytes) == len(decoded) == 1
     assert decoded[0].prompt == "Classify the changelog entry."
     envelope = json.loads(published_bytes[0])
-    for name in ("trace_id", "queue_wait_ms"):
-        assert name not in envelope["payload"]
-        assert name not in decoded[0].model_dump()
+    assert "queue_wait_ms" not in envelope["payload"]
+    assert "queue_wait_ms" not in decoded[0].model_dump()
+    if trace_id is None:
+        assert "trace_id" not in envelope["payload"]
+    else:
+        assert envelope["payload"]["trace_id"] == str(trace_id)
+    assert decoded[0].trace_id == trace_id
 
 
 @pytest.mark.asyncio
