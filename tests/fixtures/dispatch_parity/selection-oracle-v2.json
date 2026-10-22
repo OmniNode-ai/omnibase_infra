@@ -82,6 +82,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170": {
+      "category": "command",
+      "contract_name": "node_backend_secret_discipline_compute",
+      "event_model_module": "omnibase_core.models.validation.model_shared_token_policy_request",
+      "event_model_name": "ModelSharedTokenPolicyRequest",
+      "handler_id": "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170",
+      "handler_module": "omnibase_core.nodes.node_backend_secret_discipline_compute.handler_shared_token_policy",
+      "handler_name": "HandlerSharedTokenPolicyCompute",
+      "message_types": [
+        "ModelSharedTokenPolicyRequest",
+        "omnibase-core.shared-token-policy-requested",
+        "onex.cmd.omnibase-core.shared-token-policy-requested.v1"
+      ],
+      "package": "omnibase_core",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_baseline_capture.HandlerBaselineCapture.baselines_capture_b144bba2": {
       "category": "event",
       "contract_name": "node_baseline_capture",
@@ -3622,11 +3638,11 @@
       },
       "contracts_discovered": 154,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 95,
-      "probe_count": 1093,
-      "registered_dispatchers": 127,
-      "registered_routes": 111,
-      "type_scoped_dispatchers": 74
+      "distinct_subscribe_topics": 96,
+      "probe_count": 1096,
+      "registered_dispatchers": 128,
+      "registered_routes": 112,
+      "type_scoped_dispatchers": 75
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3751,6 +3767,21 @@
         "status": "success"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
+    },
+    "P1a::onex.cmd.omnibase-core.shared-token-policy-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-core.shared-token-policy-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-core.v1",
+        "message_category": "command",
+        "message_type": "omnibase-core.shared-token-policy-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-core.shared-token-policy-requested.v1"
     },
     "P1a::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5238,6 +5269,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
+    },
+    "P1b::onex.cmd.omnibase-core.shared-token-policy-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-core.shared-token-policy-requested.v1"
     },
     "P1b::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -6735,6 +6781,26 @@
         "status": "success"
       },
       "topic": "onex.evt.artifact.update-plan-created.v1"
+    },
+    "P4::dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170::onex.cmd.omnibase-core.shared-token-policy-requested.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170",
+      "event_model": "omnibase_core.models.validation.model_shared_token_policy_request.ModelSharedTokenPolicyRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-core.shared-token-policy-requested",
+        "payload": "ModelSharedTokenPolicyRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-core.shared-token-policy-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-core.shared-token-policy-requested.v1"
     },
     "P4::dispatcher.auto.node_chain_orchestrator.HandlerChainLearnInitiate::onex.cmd.omnibase-infra.chain-learn.v1": {
       "construct_only": true,
@@ -24696,6 +24762,16 @@
       "route_id": "route.auto.node_artifact_reconciliation_orchestrator.HandlerPlanToYaml.onex_evt_artifact_update_plan_created_v1",
       "topic": "onex.evt.artifact.update-plan-created.v1",
       "topic_pattern": "*.evt.artifact.update-plan-created.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_backend_secret_discipline_compute",
+      "dispatcher_id": "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170",
+      "handler_id": "dispatcher.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170",
+      "message_category": "command",
+      "route_id": "route.auto.node_backend_secret_discipline_compute.HandlerSharedTokenPolicyCompute.shared_token_policy_a5aea170.onex_cmd_omnibase_core_shared_token_policy_requested_v1",
+      "topic": "onex.cmd.omnibase-core.shared-token-policy-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-core.shared-token-policy-requested.*",
       "type_scoped": true
     },
     {

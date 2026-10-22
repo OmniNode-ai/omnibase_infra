@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3: the cascade resolves core at least 0.47.48, the installed version matches uv.lock and passes runtime version admission, and the runner image lock identity_digest and shared_env_digest equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/unit/runtime/test_core_release_cascade_omn18595.py fails at the merge base, which resolves 0.47.46; tests/ci/test_runner_image_identity.py fails when the runner lock digests do not match the dependency manifests"
+  - id: req-omn18595-cascade-core-0-47-50-followers
+    statement: The core 0.47.50 cascade (omnibase_infra#5194) moves the infra runtime profile mirror, the dispatch parity oracle and the runner image lock with the new core, which registers the projection-writer-run-trace profile and a shared-token-policy dispatcher.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the cascade resolves core at least 0.47.50, infra's runtime profiles equal core's registry including projection-writer-run-trace and every one boots, the live dispatch snapshot equals the committed oracle and recorded readback, and the runner image lock digests equal the values recomputed from pyproject.toml and uv.lock -- falsifier: tests/unit/runtime/test_core_release_cascade_omn18595.py fails at the merge base, which resolves 0.47.48; the profile and dispatch parity tests fail when core 0.47.50 is installed without these changes"
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -71,3 +76,26 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-18595-core-0-47-50-followers
+    description: The core 0.47.50 cascade (omnibase_infra#5194) adds projection-writer-run-trace to the infra runtime profiles, recaptures the dispatch parity oracle and readback, and regenerates docker/runners/runner-image.lock.json.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_runtime_profile.py tests/unit/runtime/test_runtime_profile_fail_closed.py tests/integration/runtime/test_core_consumer_profiles_boot_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_dispatch_selection_parity.py tests/ci/test_dispatch_parity_live_contact_omn20074.py tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py tests/ci/test_runner_image_identity.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-deploy
+    description: Deploy-scope readback, bound to no criterion; the runtime profile module at the evaluated checkout revision registers projection-writer-run-trace, and the merge base lacks it.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_profile.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F '"projection-writer-run-trace": ModelRuntimeProfile('
+        cwd: ${OMNI_HOME}/omnibase_infra
