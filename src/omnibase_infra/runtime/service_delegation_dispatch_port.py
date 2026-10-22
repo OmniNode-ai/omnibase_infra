@@ -308,17 +308,14 @@ class RuntimeDelegationDispatchPort:
         Dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket
         fault-pin refusal on a routing pin.
 
-        ``attribution`` (OMN-20606) is accepted and unused: this port publishes
-        to a deployed lane whose own handler stamps the caller onto its
-        terminal. Only omnimarket's in-process port writes an evidence terminal
-        of its own and needs it.
-
-        ``trace_id`` and ``queue_wait_ms`` (OMN-17427) are accepted and unused
-        on the same terms: omnimarket#4252 writes them onto the in-process
-        port's own evidence terminal, and this port's request wire does not
-        carry them.
+        ``attribution`` (OMN-20606) and ``queue_wait_ms`` (OMN-19448) are accepted
+        and unused: this port publishes to a deployed lane whose own handler
+        stamps the caller onto its terminal and measures its own queue wait.
+        Only omnimarket's in-process port writes an evidence terminal of its
+        own and needs these caller values. The Core wire request has no
+        queue-wait field and forbids extras, so publishing it would be refused.
         """
-        del attribution, trace_id, queue_wait_ms
+        del attribution, queue_wait_ms
 
         # Refuse a spec the lane cannot run before any route is resolved or
         # anything is published.
@@ -418,6 +415,7 @@ class RuntimeDelegationDispatchPort:
             "source_session_id": source_session_id,
             "source_file_path": source_file_path,
             "correlation_id": str(correlation_id),
+            "trace_id": None if trace_id is None else str(trace_id),
             "max_tokens": max_tokens,
             "emitted_at": datetime.now(UTC).isoformat(),
             "output_schema_key": output_schema_key,
