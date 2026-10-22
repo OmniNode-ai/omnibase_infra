@@ -506,6 +506,31 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-branch-install-record
+    statement: "A fix installed into a dev-lane container from its branch is declared in a record the deploy agent keeps (repository, PR, branch head, services, each file's container path and sha256, an expiry at most seven days out), and the registrar refuses any lane but dev, a compose project that names prod or stability, a path outside /app, an expiry in the past or too far out, and a source whose hash is not the one the registrar was shown."
+    acceptance:
+      - id: AC184
+        statement: "AC184: registering with lane prod or stability, a prod or stability compose project, a path outside /app or with a traversal segment, an expiry in the past or beyond seven days, or a mismatched sha256 is refused and writes nothing; a second registration of one id needs replace and leaves the first in the history; a corrupt record file is refused and never read as no installs -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'registration or governed or second_registration or corrupt_record'"
+  - id: req-omn17427-branch-install-reapply
+    statement: "The handler puts every declared branch install back into the running dev-lane container after a recreate dropped it, restarts a changed container once, and reads every file back at its recorded sha256, so a refresh no longer drops a fix installed from its branch."
+    acceptance:
+      - id: AC185
+        statement: "AC185: the replay of the 11:18Z refresh (the runtime container recreated from its image, the writer file back to dev's copy) is detected, re-applied, restarted once and read back at the recorded sha256, again after every later recreate until the install is released; two installs in one container restart it once; a drifted file is replaced keeping owner and mode; a file that does not read back, a corrupt stored copy and a service with no running container are FAILED and copy nothing wrong; a project other than the dev lane's is refused and untouched -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'replay or second_recreate or whole_lane or two_installs or drifted or does_not_read_back or corrupt_stored or no_restart or no_running or other_containers'"
+  - id: req-omn17427-branch-install-release
+    statement: "A branch install is dropped when its PR is merged and the lane's running image already carries the merge, or when it expires, with a line in the release history and no later re-apply; an unread clone or running ref keeps it."
+    acceptance:
+      - id: AC186
+        statement: "AC186: an expired install is released and not applied, a merged one is released once the running image carries the squash commit (subject ending (#PR)) or the branch head, a merge the running image does not yet carry and an unread running ref keep it, and the history keeps the whole record -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'expired or merged or unmerged or release_history'"
+  - id: req-omn17427-branch-install-detector
+    statement: "Every recorded install missing from its running container is one BRANCH-INSTALL-MISSING line with the file, expected and observed sha256, and the declared installs and the last readback are one payload with no file content."
+    acceptance:
+      - id: AC187
+        statement: "AC187: after a recreate the check names the install, repository, PR, file and both hashes with friction_type=branch_install_missing in one ERROR line and changes nothing; an unreadable Docker is missing and never ok; the status payload lists the declared installs and the missing ones and carries no file content; the command line exits 4 on a lane that is not whole and 3 on a governed project -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'detected or unreadable_docker or status_payload or command_line'"
+  - id: req-omn17427-branch-install-agent
+    statement: "The dev deploy agent runs the handler after a dev job that verified the lane and on an idle tick for a recreate it did not see, only on the dev lane, relays the detector line into its log, never lets a failed re-apply change a job's verdict, and serves the record at /branch-installs."
+    acceptance:
+      - id: AC188
+        statement: "AC188: the real _run_deploy replays the refresh and applies after the recreate and the verify; an idle tick applies a loss under the dev lane lock, leaves a whole lane alone, is throttled, skips while a deploy holds the lane and runs nothing on an agent fenced from dev; a handler that cannot run or times out leaves the job a success; /branch-installs serves the declared installs, an empty list, an unreadable record as unreadable, and says indeterminate without a getter -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q"
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2342,3 +2367,93 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC172
+  - id: dod-omn-17427-ac184-branch-install-record
+    description: "The branch install record refuses what is not a dev-lane /app file with a bounded expiry and the shown hash. Fails at the merge base, which has no branch install handler."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'registration or governed or second_registration or corrupt_record'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC184
+  - id: dod-omn-17427-ac184-branch-install-record-deploy
+    description: Hosted-runner deploy check, the same test over the committed handler and agent files; it reads no live container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'registration or governed or second_registration or corrupt_record'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC184
+  - id: dod-omn-17427-ac185-branch-install-reapply
+    description: "A recreate that would have dropped the fix is detected, re-applied, restarted once and read back at the recorded sha256. Fails at the merge base, which has no re-apply."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'replay or second_recreate or whole_lane or two_installs or drifted or does_not_read_back or corrupt_stored or no_restart or no_running or other_containers'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC185
+  - id: dod-omn-17427-ac185-branch-install-reapply-deploy
+    description: Hosted-runner deploy check, the same test over the committed handler and agent files; it reads no live container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'replay or second_recreate or whole_lane or two_installs or drifted or does_not_read_back or corrupt_stored or no_restart or no_running or other_containers'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC185
+  - id: dod-omn-17427-ac186-branch-install-release
+    description: "An install is released on merge (once the running image carries it) or on expiry, with history, and kept when the merge or the running ref is unread. Fails at the merge base."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'expired or merged or unmerged or release_history'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC186
+  - id: dod-omn-17427-ac186-branch-install-release-deploy
+    description: Hosted-runner deploy check, the same test over the committed handler and agent files; it reads no live container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'expired or merged or unmerged or release_history'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC186
+  - id: dod-omn-17427-ac187-branch-install-detector
+    description: "The detector line names a recorded install missing from its container, and the status payload serves the readback. Fails at the merge base."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'detected or unreadable_docker or status_payload or command_line'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC187
+  - id: dod-omn-17427-ac187-branch-install-detector-deploy
+    description: Hosted-runner deploy check, the same test over the committed handler and agent files; it reads no live container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q -k 'detected or unreadable_docker or status_payload or command_line'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC187
+  - id: dod-omn-17427-ac188-branch-install-agent
+    description: "The dev deploy agent's job path and idle tick re-apply the record, relay the detector line and serve /branch-installs. Fails at the merge base, which has no such step."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC188
+  - id: dod-omn-17427-ac188-branch-install-agent-deploy
+    description: Hosted-runner deploy check, the same test over the committed handler and agent files; it reads no live container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC188
