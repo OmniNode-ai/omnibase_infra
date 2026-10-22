@@ -1,0 +1,38 @@
+schema_version: 1.0.0
+ticket_id: OMN-19957
+title: context-audit-consumer and contract-resolver get a 512 MiB limit on every lane
+summary: omnibase_infra#4268 raised the base compose memory limit of context-audit-consumer and omninode-contract-resolver from 256M to 512M. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19957-ac1-accepted-20261022t0245z:
+      - label: AC1
+        criterion_hash: 9faf85fbf9f0a5816b48182b185f8702e57db6cfb8057ad29cf238d322b8e513
+        proposed_by: lane=dod-closeout-bind-2026-10-22T0245Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-22T0245Z-c1
+requirements:
+  - id: req-omn-19957-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: the base compose declares a 536870912-byte memory limit for context-audit-consumer and omninode-contract-resolver. Fails against the 256M limit at the parent of omnibase_infra#4268.'
+    command: uv run pytest tests/ci/test_compose_service_memory_limits.py -q -k "test_base_compose_declares_512_mib_limit"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19957-ac1-accepted-20261022t0245z
+    description: 'AC1: the base compose declares a 536870912-byte memory limit for context-audit-consumer and omninode-contract-resolver. Fails against the 256M limit at the parent of omnibase_infra#4268.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_compose_service_memory_limits.py -q -k "test_base_compose_declares_512_mib_limit"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

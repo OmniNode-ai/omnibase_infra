@@ -189,7 +189,9 @@ def test_stale_reading_a_healthy_effects_is_not_recreated_after_the_runtime_wait
 
 
 @pytest.mark.unit
-def test_stale_reading_still_failing_effects_is_recreated_once(fake_bin: Path) -> None:
+def test_stale_reading_docker_healthy_effects_is_retried_without_recreation(
+    fake_bin: Path,
+) -> None:
     fake = _StartingLane(
         fake_bin=fake_bin, runtime_fails=3, effects_health=["fail", "fail", "healthy"]
     )
@@ -198,20 +200,9 @@ def test_stale_reading_still_failing_effects_is_recreated_once(fake_bin: Path) -
     with patch("deploy_agent.executor._run", side_effect=fake):
         checks = executor.verify(on_phase_update=_noop_phase_update)
 
-    assert _recreated_services(fake.cmds) == ["runtime-effects"]
-    assert [r.service for r in executor.verify_recreate] == ["runtime-effects"]
+    assert _recreated_services(fake.cmds) == []
+    assert executor.verify_recreate == []
     assert all(c.status == "pass" for c in checks)
-    recreate_index = next(
-        i for i, cmd in enumerate(fake.cmds) if _is_compose_recreate(cmd)
-    )
-    # A still-failing FRESH reading must precede the remedy, not follow it.
-    assert (
-        sum(
-            f"http://localhost:{fake.effects_port}/health" in cmd
-            for cmd in fake.cmds[:recreate_index]
-        )
-        == 2
-    )
     assert fake.runtime_probes == 4
     assert fake.effects_probes == 3
 
@@ -226,8 +217,8 @@ def test_stale_reading_no_retake_when_no_earlier_target_failed(fake_bin: Path) -
     with patch("deploy_agent.executor._run", side_effect=fake):
         checks = executor.verify(on_phase_update=_noop_phase_update)
 
-    assert _recreated_services(fake.cmds) == ["runtime-effects"]
-    assert [r.service for r in executor.verify_recreate] == ["runtime-effects"]
+    assert _recreated_services(fake.cmds) == []
+    assert executor.verify_recreate == []
     assert all(c.status == "pass" for c in checks)
     assert fake.runtime_probes == 1
     assert fake.effects_probes == 2

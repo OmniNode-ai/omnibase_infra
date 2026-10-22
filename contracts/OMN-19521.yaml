@@ -1,0 +1,57 @@
+schema_version: 1.0.0
+ticket_id: OMN-19521
+title: The deploy agent crash-loops when a poll batch holds two copies of one rebuild command, because the coalescer records a command as superseded by itself
+summary: A poll batch holding two copies of one correlation id made plan_coalesce record a command as superseded by itself, so ModelSupersession raised before the offset commit and the lab dev deploy agent crash-looped. omnibase_infra#4096 (d9f6674c28e72104c9246f603fd7bc4436c5a3dd) ends the group at a redelivered copy. This contract records the acceptance-criterion bindings a second lane accepted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn19521-ac1-accepted-20261021t2245z:
+      - label: AC1
+        criterion_hash: 93f6e8edabf5da21ac573e6599946dcf8cfb844a42cf58ae660caf5139c3c7ff
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2245Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2245Z-c1
+    dod-omn19521-ac2-accepted-20261021t2245z:
+      - label: AC2
+        criterion_hash: c33e61d7accf227bd0e661de7916d141625b451edcc5bf012d010b7a8f87d7c3
+        proposed_by: lane=dod-closeout-bind-2026-10-21T2245Z-c1
+        accepted_by: lane=dod-closeout-accept-2026-10-21T2245Z-c1
+requirements:
+  - id: req-omn-19521-criteria
+    statement: The ticket's labelled acceptance criteria.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+      - id: AC2
+        statement: 'AC2: the labelled criterion of the same name on the ticket; its recorded criterion_hash and lane acceptance are retained in context.ac_binding_provenance.'
+evidence_requirements:
+  - kind: tests
+    description: 'AC1: a duplicate copy directly behind the head, behind a folded member, and a copy of the head behind a folded member each end the group with DUPLICATE_COMMAND and raise nothing, before any ancestry question. All 4 fail with coalesce.py at the parent of omnibase_infra#4096.'
+    command: env -u PYTHONPATH uv run pytest 'scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py::TestADuplicateCopyInTheBatch' -q -p no:cacheprovider
+  - kind: tests
+    description: 'AC2: poll_and_accept on [head@290, head@291] accepts the head once with reason None, writes no superseded record and commits [291] only. Fails with coalesce.py at the parent of omnibase_infra#4096.'
+    command: env -u PYTHONPATH uv run pytest 'scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py::TestARedeliveredCopyAtTheConsumer::test_a_redelivered_copy_of_the_head_runs_the_head_once' -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19521-ac1-accepted-20261021t2245z
+    description: 'AC1: a duplicate copy directly behind the head, behind a folded member, and a copy of the head behind a folded member each end the group with DUPLICATE_COMMAND and raise nothing, before any ancestry question. All 4 fail with coalesce.py at the parent of omnibase_infra#4096.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run pytest 'scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py::TestADuplicateCopyInTheBatch' -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19521-ac2-accepted-20261021t2245z
+    description: 'AC2: poll_and_accept on [head@290, head@291] accepts the head once with reason None, writes no superseded record and commits [291] only. Fails with coalesce.py at the parent of omnibase_infra#4096.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run pytest 'scripts/deploy-agent/tests/unit/test_deploy_agent_coalesce_omn18143.py::TestARedeliveredCopyAtTheConsumer::test_a_redelivered_copy_of_the_head_runs_the_head_once' -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

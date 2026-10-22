@@ -193,6 +193,12 @@ _PROFILES: dict[str, ModelRuntimeProfile] = {
         name="projection-writer-registration",
         prefetch_policy="disabled",
     ),
+    # OMN-19972: core 0.47.50 registers the run-trace writer as a standalone
+    # consumer-attached profile, so it must resolve here as well.
+    "projection-writer-run-trace": ModelRuntimeProfile(
+        name="projection-writer-run-trace",
+        prefetch_policy="disabled",
+    ),
     "projection-writer-savings": ModelRuntimeProfile(
         name="projection-writer-savings",
         prefetch_policy="disabled",
