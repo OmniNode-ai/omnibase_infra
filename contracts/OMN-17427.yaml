@@ -397,6 +397,11 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-boot-timeout-explanation
+    statement: A timed-out boot wait prints the conditions, pod state, exact-object events and current and previous log tails for each unready Deployment, with full logs in its uploaded diagnostics artifact. Tests use synthetic namespace and broker identifiers.
+    acceptance:
+      - id: AC148
+        statement: 'AC148: fake-kubectl tests exercise crash-loop diagnostics, full artifact logs, ReplicaSet events without pods, unreadable kubectl output, selection of only unready Deployments and the uploaded artifact path -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -1865,3 +1870,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac148-boot-timeout-explanation
+    description: Fake-kubectl tests exercise the timeout explanation and artifact path using synthetic namespace and broker identifiers. No running cluster, credentials or containers are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn-17427-ac148-boot-timeout-deploy
+    description: Hosted-runner deploy check of timeout diagnostics and the workflow artifact destination with fake kubectl responses. Fails if diagnostic fields, log preservation or artifact wiring regress; no live deployment is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148

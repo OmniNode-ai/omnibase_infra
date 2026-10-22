@@ -25,7 +25,7 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DELIVER = REPO_ROOT / ".github" / "workflows" / "deliver-dev-candidate-to-staging.yml"
-NS = "onex-dev"
+NS = "lane-a"
 
 RUNTIME_DEPLOYMENT = {
     "metadata": {"name": "omninode-runtime"},
@@ -286,7 +286,7 @@ def test_wait_explains_exactly_the_not_ready_deployments_on_timeout(
         ("omnimarket-projection-savings-writer", 0, 1, ""),
         ("omninode-runtime", 0, 1, "MinimumReplicasUnavailable: x"),
         ("omninode-runtime-effects", 1, 1, ""),
-        ("onex-lab-redpanda", 1, 1, ""),
+        ("lane-a-redpanda", 1, 1, ""),
     ]
     seen: dict[str, Any] = {}
 
@@ -302,8 +302,8 @@ def test_wait_explains_exactly_the_not_ready_deployments_on_timeout(
         namespace=NS,
         timeout_seconds=0,
         poll_seconds=1,
-        lane_prefix="onex-lab-",
-        broker_deployment="onex-lab-redpanda",
+        lane_prefix="lane-a-",
+        broker_deployment="lane-a-redpanda",
         require_topic=True,
         log_lines=7,
         diagnostics_dir=tmp_path,
