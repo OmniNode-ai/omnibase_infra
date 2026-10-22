@@ -258,6 +258,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q'
+  - id: req-omn17427-cloud-migration-runtime-graph
+    statement: In the dev lane's rendered compose graph (docker-compose.infra.yml layered with docker-compose.dev-lane.yml, profile runtime) only onex-api reaches the cloud-migration-files or cloud-migration one-shot through depends_on, so a failing cloud migration cannot keep omninode-runtime, runtime-effects, runtime-worker or a projection writer from starting.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: the render shows onex-api waiting on cloud-migration with service_completed_successfully and no other service reaching either cloud one-shot directly or transitively, and a fixture that wires omninode-runtime to a failing cloud-migration is flagged with its dependency path -- falsifier: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"'
   - id: req-omn17427-prepr-teardown-stop-on-failure
     statement: The pre-PR slot teardown stops after a failed container removal and keeps the staging root whenever an earlier step failed, and a staging root it cannot remove is reported in the teardown report instead of raised.
     acceptance:
@@ -422,6 +427,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-branch-protection-audit-setup-uv
+    statement: 'The Audit Branch Protection job installs uv with a sha-pinned setup-uv step before any uv run, and runs the required-context parity report with uv run --no-project --with the PyYAML version uv.lock pins, so the job on its ubuntu-latest runs-on fallback no longer fails "uv: command not found" (exit 127).'
+    acceptance:
+      - id: AC171
+        statement: 'AC171: the audit job has an astral-sh/setup-uv step pinned to a full sha ahead of every uv run, every uv run in the job is uv run --no-project, the parity step installs pyyaml at the uv.lock version, and the parity CLI and its lib import nothing third-party but yaml; the same tests fail 4 of 6 on the workflow before this change -- falsifier: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py -q'
   - id: req-omn17427-omn19937-ac4-dev202-writer
     statement: The main runtime takes the board-probe projection from the lane class selection its private env fragment supplies through the base passthrough, alongside the landing nodes, so the installed writer can consume lab probe results.
     acceptance:
@@ -452,6 +462,11 @@ requirements:
     acceptance:
       - id: AC146
         statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
+  - id: req-omn17427-boot-timeout-explanation
+    statement: A timed-out boot wait prints the conditions, pod state, exact-object events and current and previous log tails for each unready Deployment, with full logs in its uploaded diagnostics artifact. Tests use synthetic namespace and broker identifiers.
+    acceptance:
+      - id: AC160
+        statement: 'AC160: fake-kubectl tests exercise crash-loop diagnostics, full artifact logs, ReplicaSet events without pods, unreadable kubectl output, selection of only unready Deployments and the uploaded artifact path -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q'
   - id: req-omn17427-broker-listener-alarm
     statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
     acceptance:
@@ -462,6 +477,11 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-role-omnidash-lab-job-check-select
+    statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
+    acceptance:
+      - id: AC160
+        statement: 'AC160: node_projection_lab_job/0002, node_projection_work_ledger/0005 and node_projection_pr_state/0002 each grant role_omnidash SELECT on their one relation and nothing else, assert it, are bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that SELECT-only grant -- falsifier: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0 fails at the merge base, where the three migration files do not exist'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -590,6 +610,9 @@ evidence_requirements:
     description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
     command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
   - kind: tests
+    description: In the rendered dev-lane compose graph only onex-api reaches a cloud migration one-shot through depends_on; a fixture wiring the runtime to a failing cloud-migration is flagged.
+    command: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
+  - kind: tests
     description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root is reported; they do not claim a live slot teardown.
     command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
   - kind: tests
@@ -643,6 +666,9 @@ evidence_requirements:
   - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+  - kind: tests
+    description: The lab job check store's SELECT grants to role_omnidash are issued, asserted, ledger-bound and declared.
+    command: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -2050,6 +2076,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac171-audit-setup-uv
+    description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py tests/ci/test_branch_protection_single_auditor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171
+  - id: dod-omn-17427-ac171-branch-protection-audit-hosted
+    description: Hosted-runner deploy check -- the same workflow-shape tests over the audit workflow, uv.lock and the parity CLI sources; no project sync of the audit job, token or GitHub API call is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_branch_protection_audit_uv_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC171
   - id: dod-omn17427-shared-ticket-contract-composer
     description: Two branch trees are merged file by file with Git in both orders, then composed and structurally validated. Legacy root data is preserved and invalid additions fail closed. This is repository-side preparation, not a claim that external hosted gates accept fragments.
     source: manual
@@ -2086,6 +2130,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac146-cloud-migration-runtime-graph
+    description: Renders the dev lane's compose files with docker compose config (non-mutating) and walks every service's depends_on closure; only onex-api reaches cloud-migration or cloud-migration-files, and a fixture that wires omninode-runtime to a failing cloud-migration is flagged with its path. Reads repository files only; does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
+  - id: dod-omn-17427-ac146-runtime-graph-deploy-check
+    description: Hosted-runner deploy check -- the same render-and-walk over the committed compose files, which are what the deploy agent renders on the dev lane; no container is started.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
   - id: dod-omn-17427-ac146-verify-signal-in-cleanup
     description: The verify_signal tests send a real SIGTERM to the test process from a fake transport while the teardown, snap-post, lease release or lease take command runs, and read the fake host's phases and lease and the result file. Five of the new tests fail against the previous module, where the signal raised inside the cleanup step and the summary always said torn down.
     source: manual
@@ -2120,6 +2182,24 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC146]
+  - id: dod-omn-17427-ac148-boot-timeout-explanation
+    description: Fake-kubectl tests exercise the timeout explanation and artifact path using synthetic namespace and broker identifiers. No running cluster, credentials or containers are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
+  - id: dod-omn-17427-ac148-boot-timeout-deploy
+    description: Hosted-runner deploy check of timeout diagnostics and the workflow artifact destination with fake kubectl responses. Fails if diagnostic fields, log preservation or artifact wiring regress; no live deployment is claimed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
   - id: dod-omn-17427-ac158-broker-listener-alarm
     description: scripts/lab_alarm.py evaluates a broker_listener condition every run against kafka_bootstrap_servers with a Kafka ApiVersions v0 probe; refused, timed out or unanswered on every address is ALARM, one answering address is OK, an unresolvable or malformed bootstrap is INDETERMINATE.
     source: manual
@@ -2147,3 +2227,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac160
+    description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160

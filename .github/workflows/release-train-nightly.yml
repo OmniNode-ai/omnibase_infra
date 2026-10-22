@@ -321,12 +321,38 @@ jobs:
           cd _target
           branch="automation/release-${VERSION}-omn-18595"
 
-          existing=$(gh pr list --repo "OmniNode-ai/${TARGET_REPO}" \
-            --head "${branch}" --state open --json number --jq 'length')
-          if [ "${existing}" -gt 0 ]; then
-            echo "a release PR for ${branch} is already open — not opening a second"
-            exit 0
-          fi
+          # An open release PR is judged by the candidate it was cut from, not by
+          # its existence: a PR cut from a superseded candidate is rebuilt, one
+          # cut from this run's candidate is left alone, and one whose candidate
+          # cannot be read is refused rather than force-pushed.
+          gh pr list --repo "OmniNode-ai/${TARGET_REPO}" \
+            --head "${branch}" --state open --json number,body \
+            >"${RUNNER_TEMP}/open-release-prs.json"
+          remote_sha=$(git ls-remote --heads origin "refs/heads/${branch}" | cut -f1)
+          plan=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" release-pr \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --open-prs-file "${RUNNER_TEMP}/open-release-prs.json" \
+            --remote-branch-sha "${remote_sha}")
+          action=$(jq -r .action <<<"${plan}")
+          reason=$(jq -r .reason <<<"${plan}")
+          pr_number=$(jq -r '.pr_number // empty' <<<"${plan}")
+          case "${action}" in
+            noop)
+              echo "${reason}"
+              exit 0
+              ;;
+            refuse)
+              echo "::error::${reason}"
+              exit 1
+              ;;
+            open | refresh)
+              echo "${action}: ${reason}"
+              ;;
+            *)
+              echo "::error::unknown release PR action '${action}'"
+              exit 1
+              ;;
+          esac
 
           git checkout -b "${branch}"
 
@@ -366,7 +392,15 @@ jobs:
           git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          git push origin "${branch}"
+          # publish the rebuilt branch
+          # The lease names the remote sha observed before the rebuild, so a push
+          # from anyone else in between is refused rather than overwritten. An
+          # absent branch is a plain push: there is nothing to lease against.
+          if [ -n "${remote_sha}" ]; then
+            git push --force-with-lease="${branch}:${remote_sha}" origin "${branch}"
+          else
+            git push origin "${branch}"
+          fi
 
           body=$(cat <<PREOF
           Opened by the scheduled release train (${TICKET}).
@@ -390,9 +424,15 @@ jobs:
           Evidence-Ticket: ${TICKET}
           PREOF
           )
-          gh pr create \
-            --repo "OmniNode-ai/${TARGET_REPO}" \
-            --title "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
-            --body "${body}" \
-            --head "${branch}" \
-            --base "${BASE_BRANCH}"
+          if [ "${action}" = "refresh" ]; then
+            gh pr edit "${pr_number}" \
+              --repo "OmniNode-ai/${TARGET_REPO}" \
+              --body "${body}"
+          else
+            gh pr create \
+              --repo "OmniNode-ai/${TARGET_REPO}" \
+              --title "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
+              --body "${body}" \
+              --head "${branch}" \
+              --base "${BASE_BRANCH}"
+          fi

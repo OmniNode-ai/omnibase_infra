@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-21288 fixture: a stack that holds only the runtime and its backing services.
+services:
+  postgres:
+    image: postgres:16-alpine
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+  valkey:
+    image: valkey/valkey:8.0-alpine
+  omninode-runtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    environment:
+      RUNTIME_PROFILE: main
