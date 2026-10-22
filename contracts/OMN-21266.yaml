@@ -1,4 +1,3 @@
----
 schema_version: "1.0.0"
 ticket_id: "OMN-21266"
 title: "omnibase_infra dev's uv.lock pins virtualenv 21.7.13, which four HIGH advisories published 2026-10-21 make the Lockfile CVE Scan block on every PR"
