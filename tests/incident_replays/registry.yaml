@@ -1456,3 +1456,20 @@ cases:
     test: tests/ci/test_incident_replay_omn20173.py::test_the_real_guard_refuses_the_compose_default_that_addressed_the_coding_plan
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A COMPOSE DEFAULT THAT SENT SYSTEM TRAFFIC TO THE GLM CODING PLAN ENDPOINT while the only test that named the path pinned every committed z.ai URL to it. On 2026-09-30 the terms report found that the Coding Plan bars directly invoking the model API from our own systems, and the judge, dogfood and lakshman compose files each defaulted LLM_GLM_URL to the Coding Plan path. THE ARTIFACT IS docker-compose.judge.yml at dev 3a12fa83d read from the git object and committed unmodified, 31664 bytes, re-fetchable at the recorded locator; line 145 carries the default and the real guard refuses it by file and line. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every compose file would replay this perfectly, so the same guard is run over the tracked tree on the fixing branch and must accept it.
+  - id: omn17427-a-rejection-alone-cleared-a-finding
+    guard: scripts/ci/check_hostile_review_threads.py
+    incident: OMN-17427
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn17427_review_judge.py::test_the_same_findings_clear_once_the_judge_accepts
+    artifact:
+      fixture: tests/fixtures/omn17427/infra-pr5234-job-119316797666-thread-gate-log-lines.captured
+      sha256: f51427b0f6236f1315f77934694bdd27c4f9d03ee72fce43e9ff3fba16133f4e
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/actions/jobs/119316797666/logs
+      captured_at: '2026-10-21T15:47:59Z'
+      captured_by: lane review-bot-judge-1640 (OMN-17427)
+    test: tests/ci/test_incident_replay_omn17427_review_judge.py::test_the_real_gate_keeps_both_rejected_findings_blocked
+    why: >-
+      The thread gate's second replay case: OMN-17427 changed what clears a finding, so the case it now refuses is replayed on real bytes. The false_green is A REJECTION THAT CLEARED A FINDING BY ITSELF. Job 119316797666 of run 39626556756, the Hostile Review Thread Gate on omnibase_infra#5234 head 8f4e58c5, read a `rejected:` reply on each of the PR's two finding threads (discussion_r4338489373 from the correctness voter, discussion_r4338489546 from the sonnet voter) and accepted both as dispositions, "rejected with a reason"; it went on to try to resolve them, which is the only reason the line is in the log at all. Any account can write such a reply and every agent replies through the operator's own account, so the gate cleared two findings no one had shown to be wrong (on the same PR's later review an agent rejected 13 of 14). THE ARTIFACT is those two BLOCKING lines verbatim from that job's log, the same lines tests/fixtures/omn17427/infra-pr5234-job-119316797666-resolve-thread-forbidden.json carries, committed as bytes; re-fetch the job's log at the locator and grep `BLOCKING:`. Disclosed limitation, stated rather than hidden: the log carries the thread ids, voter models and the disposition kind but not the rejection's own words, so the replay rebuilds each thread from those facts with a placeholder rejection; the verdict under test (does a rejection alone clear?) depends only on what the log carries. The replay drives the real gate's pending scan (what it hands the review bot) and its verdict over the two threads and requires both findings to stay blocked as awaiting the review bot. THE DISCRIMINATOR IS LOAD-BEARING: a gate that blocked everything would replay this perfectly, so the same threads with the review bot's accepted verdict under the workflow identity must clear, and with the verdict under any other account must not.
