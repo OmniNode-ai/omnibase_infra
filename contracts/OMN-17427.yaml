@@ -422,6 +422,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-omn19937-ac4-dev202-writer
+    statement: The main runtime takes the board-probe projection from the lane class selection its private env fragment supplies through the base passthrough, alongside the landing nodes, so the installed writer can consume lab probe results.
+    acceptance:
+      - id: AC144
+        statement: 'OMN-19937 AC4 prerequisite: the instance overlay leaves ONEX_RUNTIME_LANE_CLASS and ONEX_RUNTIME_LANE_CLASS_CONTRACTS to the base passthrough, and with the fragment selection supplied the real ownership filter admits projection_board_probe_results and the landing nodes while retaining instance identity and excluding unselected class contracts; the absent-selection control reproduces the missing consumer -- falsifier: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py -q'
   - id: req-omn17427-shared-ticket-contract-composer
     statement: Repository-side preparation composes independent branch fragments without shared root edits; hosted adoption remains blocked on the external gate owners.
     acceptance:
@@ -643,6 +648,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-omn19937-ac4-dev202-writer
+    description: The regression failed before the deployment selection was added (empty owned manifest) and passes after it. This proves placement configuration, not a deployed consumer or successful live row readback; OMN-19937 AC4 remains open until deployment and re-probe.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC144
+  - id: dod-omn17427-omn19937-ac4-hosted-deploy-check
+    description: Hosted-runner check of the deployment environment against the real ownership filter, including a missing-selection control and exclusion of an unselected class node; no Docker daemon, live lane, broker or credentials required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py tests/unit/runtime/auto_wiring/test_runtime_lane_class_omn20867.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC144
   - id: dod-omn-17427-ac142-teardown-small-batches
     description: Fake-host teardown of 120 slot topics checks multiple bounded delete batches and an immediately following broker health read for each batch. The head tests fail on the merge-base product, which has no broker health pacing.
     source: manual
