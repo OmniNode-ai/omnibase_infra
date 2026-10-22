@@ -441,6 +441,28 @@ class SerialBatchWithhold:
                 )
 
 
+# OMN-17427: one log line per failed consume-loop iteration, written by the
+# arm that caught the failure.
+_CONSUME_ITERATION_FAILED = (
+    "consume_loop_iteration_failed topic=%s group=%s error_type=%s error=%s "
+    "consecutive_failures=%d -- replacing the consumer and polling on; the "
+    "loop does not end (OMN-17427)"
+)
+
+
+def _consume_failure_extra(
+    topic: str, group_id: str, correlation_id: UUID, error: BaseException
+) -> dict[str, str]:
+    """Structured fields of a ``consume_loop_iteration_failed`` line."""
+    return {
+        "topic": topic,
+        "group_id": group_id,
+        "correlation_id": str(correlation_id),
+        "error": str(error),
+        "error_type": type(error).__name__,
+    }
+
+
 class EventBusKafka(
     MixinKafkaBroadcast,
     MixinKafkaDlq,
@@ -4189,11 +4211,36 @@ class EventBusKafka(
                     # Not this task being cancelled: a CancelledError leaked
                     # out of something the iteration awaited. It is that
                     # thing failing, never the loop ending (OMN-17427).
+                    consecutive_failures += 1
+                    logger.exception(
+                        _CONSUME_ITERATION_FAILED,
+                        topic,
+                        group_id,
+                        type(cancelled).__name__,
+                        cancelled,
+                        consecutive_failures,
+                        extra=_consume_failure_extra(
+                            topic, group_id, correlation_id, cancelled
+                        ),
+                    )
                     failure: BaseException = cancelled
-                except Exception as error:  # noqa: BLE001 — boundary: any failed iteration is answered by replacing the consumer, never by ending the loop
+                except Exception as error:
+                    # Any failed iteration is answered by replacing the
+                    # consumer after a backoff, never by ending the loop.
+                    consecutive_failures += 1
+                    logger.exception(
+                        _CONSUME_ITERATION_FAILED,
+                        topic,
+                        group_id,
+                        type(error).__name__,
+                        error,
+                        consecutive_failures,
+                        extra=_consume_failure_extra(
+                            topic, group_id, correlation_id, error
+                        ),
+                    )
                     failure = error
 
-                consecutive_failures += 1
                 if max_in_flight > 1:
                     # The driver may have rejoined onto a newer handle; the
                     # live one is the one published for shutdown.
@@ -4248,7 +4295,8 @@ class EventBusKafka(
     ) -> None:
         """Report one failed consume-loop iteration and wait out its backoff.
 
-        The caller replaces the consumer on its next iteration. Before that
+        The caller has already logged the failure (in its ``except`` arm, where
+        the exception is in hand). The caller replaces the consumer on its next iteration. Before that
         replacement stops this consumer, every partition of a failed serial
         batch is pinned back at the batch's first record: under auto-commit
         ``stop()`` commits the fetch position, which after ``getmany`` is past
@@ -4256,24 +4304,6 @@ class EventBusKafka(
         be committed past without having run. Records it did run are
         redelivered -- at-least-once, the delivery contract of this path.
         """
-        logger.error(
-            "consume_loop_iteration_failed topic=%s group=%s error_type=%s "
-            "error=%s consecutive_failures=%d -- replacing the consumer and "
-            "polling on; the loop does not end (OMN-17427)",
-            topic,
-            group_id,
-            type(error).__name__,
-            error,
-            consecutive_failures,
-            exc_info=error,
-            extra={
-                "topic": topic,
-                "group_id": group_id,
-                "correlation_id": str(correlation_id),
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
         await self._emit_consume_loop_error_health_event(
             topic, group_id, correlation_id, error
         )
@@ -4308,13 +4338,12 @@ class EventBusKafka(
         if consumer is not None:
             try:
                 await asyncio.wait_for(consumer.stop(), timeout=self._timeout_seconds)
-            except Exception as stop_error:  # noqa: BLE001 — boundary: a failed client may also fail to close
-                logger.warning(
+            except Exception as stop_error:
+                logger.exception(
                     "consume_consumer_stop_failed topic=%s group=%s error=%s",
                     topic,
                     group_id,
                     stop_error,
-                    exc_info=True,
                 )
         return await self._rebuild_consumer_for_rejoin(topic, group_id)
 

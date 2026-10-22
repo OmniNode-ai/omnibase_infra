@@ -29,9 +29,9 @@ No broker: fake consumers, an injectable clock and sub-second intervals.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -49,6 +49,13 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
 )
+
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaConsumer
+
+    from omnibase_infra.event_bus.models import ModelEventMessage
+
+    _Callback = Callable[[ModelEventMessage], Awaitable[None]]
 
 pytestmark = pytest.mark.unit
 
@@ -207,7 +214,7 @@ class _Harness:
         bus = EventBusKafka(config=self.config)
         self.bus = bus
         await bus.start()
-        bus._group_consumers[(TOPIC, GROUP)] = self.first  # type: ignore[assignment]
+        bus._group_consumers[(TOPIC, GROUP)] = cast("AIOKafkaConsumer", self.first)
         self._wire_drain(self.first)
 
         async def _callback(message: Any) -> None:
@@ -215,7 +222,7 @@ class _Harness:
                 await self._handler(message.raw_offset)
             self.handled.append(message.raw_offset)
 
-        bus._subscribers[TOPIC] = [(GROUP, "sub-1", _callback)]  # type: ignore[assignment]
+        bus._subscribers[TOPIC] = [(GROUP, "sub-1", cast("_Callback", _callback))]
 
         def _to_model(msg: Any, _topic: str) -> MagicMock:
             message = MagicMock()
@@ -232,7 +239,9 @@ class _Harness:
             replacement = self.replacements.pop(0)
             self._wire_drain(replacement)
             self.rebuilt.append(replacement)
-            bus._group_consumers[(topic, group_id)] = replacement  # type: ignore[assignment]
+            bus._group_consumers[(topic, group_id)] = cast(
+                "AIOKafkaConsumer", replacement
+            )
             return replacement
 
         for active in (
@@ -380,7 +389,7 @@ async def test_cancelling_the_loop_task_ends_it_promptly_and_close_stops_the_con
             await asyncio.wait_for(task, timeout=1.0)
 
         blocked = _PartitionLog([], block=True)
-        bus._group_consumers[(TOPIC, GROUP)] = blocked  # type: ignore[assignment]
+        bus._group_consumers[(TOPIC, GROUP)] = cast("AIOKafkaConsumer", blocked)
         task = asyncio.create_task(bus._consume_loop(TOPIC, GROUP, uuid4()))
         bus._group_consumer_tasks[(TOPIC, GROUP)] = task
         await asyncio.sleep(0.02)
@@ -583,7 +592,9 @@ async def test_readiness_reports_a_topic_dead_when_any_of_its_groups_is_dead() -
     async with _Harness(_config(), _PartitionLog([]), []) as harness:
         bus = harness.bus
         assert bus is not None
-        bus._group_consumers[(TOPIC, SIBLING_GROUP)] = _PartitionLog([])  # type: ignore[assignment]
+        bus._group_consumers[(TOPIC, SIBLING_GROUP)] = cast(
+            "AIOKafkaConsumer", _PartitionLog([])
+        )
         alive = asyncio.create_task(asyncio.Event().wait())
         bus._group_consumer_tasks[(TOPIC, SIBLING_GROUP)] = alive
         bus._group_consumer_tasks[(TOPIC, GROUP)] = await _finished_task()
