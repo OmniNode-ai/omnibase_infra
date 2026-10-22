@@ -92,6 +92,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.enums.enum_dev_lane_branch_install_file_state import (
     EnumDevLaneBranchInstallFileState,
 )
@@ -668,6 +669,14 @@ class HandlerDevLaneBranchInstall:
         self._merged_probe = merged_probe
         self._reader = DevLaneContainerReader(compose_project, runner)
         self._writer = DevLaneContainerWriter(store.blobs, runner, sleep or time.sleep)
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     def check(self) -> ModelDevLaneBranchInstallReceipt:
         """Read only: which declared installs are not in the running containers."""
