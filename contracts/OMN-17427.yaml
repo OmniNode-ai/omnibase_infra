@@ -427,6 +427,15 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-deploy-agent-health-convergence
+    statement: Post-deploy verification retries transient failures, permits recreation only for a Docker-unhealthy or exited container, and honours the selected service's own healthcheck budget.
+    acceptance:
+      - id: AC181
+        statement: 'AC181: a transient 503 while Docker reports healthy is retried with backoff and never recreated; a persistent host failure or unreadable Docker state fails without recreation; Docker unhealthy or exited permits exactly one service recreation -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC182
+        statement: 'AC182: re-probing a recreated service waits at least its compose start_period plus interval times retries, even without health-gated dependents, and includes probe time in its deadline; a 900-second effects startup passes inside its 1800-second start period -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC183
+        statement: 'AC183: a successful host HTTP response with a differing JSON status passes when Docker reports the dev service healthy, while an HTTP 503 remains a failed probe requiring retry -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
   - id: req-omn17427-branch-protection-audit-setup-uv
     statement: 'The Audit Branch Protection job installs uv with a sha-pinned setup-uv step before any uv run, and runs the required-context parity report with uv run --no-project --with the PyYAML version uv.lock pins, so the job on its ubuntu-latest runs-on fallback no longer fails "uv: command not found" (exit 127).'
     acceptance:
@@ -498,6 +507,9 @@ requirements:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
 evidence_requirements:
+  - kind: tests
+    description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
     command: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
@@ -692,6 +704,28 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-deploy-agent-health-convergence
+    description: Focused verification replays of the reported job sequences; Docker and the clock are controlled, and the readiness budget is read from compose. No live deploy is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
+      - AC182
+      - AC183
+  - id: dod-omn-17427-deploy-agent-convergence-deploy
+    description: Hosted-runner deploy check using the real executor with a fake Docker runner and clock, including recovery after the old 600-second ceiling. No host, broker or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
+      - AC182
+      - AC183
   - id: dod-omn17427-omn19937-ac4-dev202-writer
     description: The regression failed before the deployment selection was added (empty owned manifest) and passes after it. This proves placement configuration, not a deployed consumer or successful live row readback; OMN-19937 AC4 remains open until deployment and re-probe.
     source: manual
