@@ -110,14 +110,11 @@ def _collaborator_runtime_profile() -> str:
     from omnibase_infra.runtime.models.model_runtime_policy_contract import (
         RuntimeProfileName,
     )
+    from scripts.preflight_lane_deploy_attribution import GOVERNED_LANES
 
-    collaborator: set[str] = set(get_args(RuntimeProfileName)) - {
-        "dev",
-        "dogfood",
-        "stability-test",
-        "judge",
-        "prod",
-    }
+    collaborator: set[str] = (
+        set(get_args(RuntimeProfileName)) - GOVERNED_LANES - {"dev", "dogfood"}
+    )
     (profile,) = collaborator
     return profile
 
