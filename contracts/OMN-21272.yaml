@@ -53,7 +53,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
-  - id: dod-omn21272-ac3-backfill-remeasures-binding-failure
+  - id: dod-omn21272-ac3-backfill-remeasures-binding
     description: durable_backfill answers for a runtime-affecting merge whose receipt is a binding-only failure, and never for a PASS, a health FAIL or an unreadable receipt.
     source: manual
     checks:
