@@ -1,0 +1,83 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21272
+title: A lock-contended deploy reads INDETERMINATE and is re-measured, and refresh_dev_lane.sh refuses a ref not on dev
+summary: The deploy agent's GET /job/{correlation_id} serves not_started; the post-merge convergence guard reads a job that ended with a not_started reason as INDETERMINATE naming it, never FAIL; durable_backfill answers for a runtime-affecting merge whose dev-lane receipt is a binding-only failure; refresh_dev_lane.sh refuses, with exit 64 and before the lane lock, a --ref not contained in origin/dev.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21272-lock-contended-is-remeasured
+    statement: A deploy that never started is never written as a terminal dev-lane FAIL, a binding-only receipt is measured again, and the dev lane refresh never takes the lane for a ref not on dev.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the deploy agent's GET /job/{correlation_id} serves the job's not_started reason (null when the job started) -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_job_endpoint_not_started_omn21272.py -k job_endpoint_serves_not_started"
+      - id: AC2
+        statement: "AC2: check_dev_lane_staleness.py convergence reads a job that ended with a not_started reason as INDETERMINATE naming that reason, never FAIL, even after the declared budget from acceptance has passed -- falsifier: uv run pytest tests/ci/test_convergence_not_started_omn21272.py -k not_started_is_indeterminate"
+      - id: AC3
+        statement: "AC3: durable_backfill answers for a runtime-affecting merge whose only dev-lane receipt is a binding-only failure (is_binding_only_failure true), while a merge with a PASS or a health-check FAIL receipt is still not answered for -- falsifier: uv run pytest tests/ci/test_durable_backfill_binding_only_omn21272.py -k backfill_remeasures_binding_failure"
+      - id: AC4
+        statement: "AC4: refresh_dev_lane.sh refuses, with exit 64 and before it takes the compose lane lock, a --ref whose commit is not contained in origin/dev, and still accepts origin/dev and a sha on dev -- falsifier: uv run pytest tests/unit/scripts/test_refresh_dev_lane_ref_on_dev_omn21272.py -k refresh_dev_lane_refuses_ref_not_on_dev"
+evidence_requirements:
+  - kind: tests
+    description: The job route serves not_started as the enum value for a lock-contended job and null for a started or in-flight one.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_job_endpoint_not_started_omn21272.py -k job_endpoint_serves_not_started
+  - kind: tests
+    description: The incident's recorded values (accepted 10:57:06Z, ended 11:12:06Z lane_lock_contended, 1500 s budget) read INDETERMINATE naming the reason and correlation id, also once the budget has passed; the receipt is binding-only; the same job with no reason still FAILs.
+    command: uv run pytest tests/ci/test_convergence_not_started_omn21272.py -k not_started_is_indeterminate
+  - kind: tests
+    description: A binding-only FAIL receipt is answered for; a PASS, a health FAIL and an unreadable receipt are not; the reader goes through lab_pass_receipt.read_lane.
+    command: uv run pytest tests/ci/test_durable_backfill_binding_only_omn21272.py -k backfill_remeasures_binding_failure
+  - kind: tests
+    description: A temp git repository stands in for the ambient clone; a feature sha, a short sha learnt by fetch, a feature branch and an unresolvable ref exit 64 with the lane lock held and unreached; origin/dev and shas on dev pass the guard.
+    command: uv run pytest tests/unit/scripts/test_refresh_dev_lane_ref_on_dev_omn21272.py -k refresh_dev_lane_refuses_ref_not_on_dev
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21272-ac1-job-route-serves-not-started
+    description: GET /job/{correlation_id} serves not_started (lane_lock_contended for a contended job, null for a started one).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_job_endpoint_not_started_omn21272.py -k job_endpoint_serves_not_started
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21272-ac2-not-started-is-indeterminate
+    description: A job that ended with a not_started reason is INDETERMINATE naming that reason, never FAIL, at any point in the wait.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_convergence_not_started_omn21272.py -k not_started_is_indeterminate
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21272-ac3-backfill-remeasures-binding
+    description: durable_backfill answers for a runtime-affecting merge whose receipt is a binding-only failure, and never for a PASS, a health FAIL or an unreadable receipt.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_durable_backfill_binding_only_omn21272.py -k backfill_remeasures_binding_failure
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21272-ac4-refresh-refuses-ref-not-on-dev
+    description: refresh_dev_lane.sh exits 64 before the lane lock for a --ref not contained in origin/dev and accepts origin/dev and a sha on dev.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_ref_on_dev_omn21272.py -k refresh_dev_lane_refuses_ref_not_on_dev
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21272-deploy-job-route-not-started-shipped
+    description: The deploy agent source at the pushed head serves not_started on its job route, which is what the lab deploy agent runs once rebuilt; the merge base serves no such field.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          git show HEAD:scripts/deploy-agent/deploy_agent/health.py | grep -cF '"not_started": job.not_started.value if job.not_started else None'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
