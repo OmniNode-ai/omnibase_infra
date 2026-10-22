@@ -732,11 +732,11 @@ dod_evidence:
     binds_ac:
       - AC17427526301
   - id: dod-omn17427-pr5263-no-here-string
-    description: The existing deadlock regression rejects here-string syntax and exercises a 200 KiB lane-hook status response within its timeout.
+    description: The holder-record parser is read from the reconciler and run in bash; it must use process substitution, never a here-string, and parse a 200 KiB record. The existing deadlock regression still rejects here-strings and exercises a 200 KiB lane-hook status response.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_reconcile_hung_holder_omn19709.py -q
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_reconcile_staging_lock_omn17427.py::test_the_holder_record_is_parsed_through_process_substitution tests/scripts/test_reconcile_hung_holder_omn19709.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427526302

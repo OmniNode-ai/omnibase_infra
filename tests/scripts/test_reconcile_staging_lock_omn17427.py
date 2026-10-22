@@ -13,6 +13,7 @@ the first.
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -29,6 +30,10 @@ from tests.scripts.test_reconcile_workspace_venvs import (
 )
 
 pytestmark = pytest.mark.unit
+
+_VENV_SCRIPT = (
+    Path(__file__).resolve().parents[2] / "scripts" / "reconcile-workspace-venvs.sh"
+)
 
 
 @pytest.fixture
@@ -109,3 +114,35 @@ def test_the_lock_is_released_when_the_run_ends(workspace: _Workspace) -> None:
     assert not _lock_for(staging).is_symlink(), (
         "the staging lock survived the run, so every later tick would be refused"
     )
+
+
+def _staging_lock_field_source() -> str:
+    source = _VENV_SCRIPT.read_text(encoding="utf-8")
+    match = re.search(r"^staging_lock_field\(\) \{\n.*?^\}\n", source, re.M | re.S)
+    assert match, "reconcile-workspace-venvs.sh defines no staging_lock_field()"
+    return match.group(0)
+
+
+def test_the_holder_record_is_parsed_through_process_substitution() -> None:
+    function = _staging_lock_field_source()
+    assert "< <(" in function, function
+    assert "<<<" not in function, (
+        "staging_lock_field feeds read through a here-string, which can deadlock "
+        "on a full pipe (OMN-19709)"
+    )
+    record = _record(4242, "lab-host") + ";note=" + "x" * 200 * 1024
+    fields = subprocess.run(
+        [
+            "bash",
+            "-c",
+            function + 'for key in pid host at; do staging_lock_field "$1" "$key"; '
+            "printf '\\n'; done",
+            "bash",
+            record,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    ).stdout.splitlines()
+    assert fields == ["4242", "lab-host", "2026-10-22T02:48:05Z"]
