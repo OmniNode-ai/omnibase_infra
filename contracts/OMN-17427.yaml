@@ -502,6 +502,11 @@ requirements:
         statement: A failed configuration hash render after a compose error raises rather than accepting unknown convergence.
       - id: AC524904
         statement: A clean compose up makes no additional configuration hash or container label reads.
+  - id: req-omn17427-collaborator-writer-overlay
+    statement: Every service of the collaborator lane whose environment names BIFROST_LANE_OVERLAY_PATH mounts a file at that path, so the delegation writer's entrypoint can render the Bifrost contract.
+    acceptance:
+      - id: AC527201
+        statement: The rendered collaborator lane compose config has no service that names BIFROST_LANE_OVERLAY_PATH without a mount at that path, the delegation writer included.
   - id: req-omn17427-role-omnidash-lab-job-check-select
     statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
     acceptance:
@@ -2348,6 +2353,22 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC524901, AC524902, AC524903, AC524904]
+  - id: dod-omn17427-ac527201-writer-overlay-mount
+    description: The collaborator lane render test refuses any service that names BIFROST_LANE_OVERLAY_PATH without mounting it; the delegation writer had no mount at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/infra/test_lakshman_compose_render.py -q -k every_service_naming_the_lane_overlay_mounts_it
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC527201]
+  - id: dod-omn17427-writer-overlay-deploy-check
+    description: Hosted-runner deploy check renders the collaborator lane compose file with docker compose config, without starting a container, and checks every service that names the lane overlay path mounts it. No credentials or live deployment are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/infra/test_lakshman_compose_render.py -q -k every_service_naming_the_lane_overlay_mounts_it
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC527201]
   - id: dod-omn-17427-ac160
     description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
     source: manual
