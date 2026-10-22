@@ -432,6 +432,11 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-role-omnidash-lab-job-check-select
+    statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
+    acceptance:
+      - id: AC160
+        statement: 'AC160: node_projection_lab_job/0002, node_projection_work_ledger/0005 and node_projection_pr_state/0002 each grant role_omnidash SELECT on their one relation and nothing else, assert it, are bound by the migration ledger checksum and classed expand-only, and the three topology instances and rendered catalogs declare exactly that SELECT-only grant -- falsifier: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0 fails at the merge base, where the three migration files do not exist'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -613,6 +618,9 @@ evidence_requirements:
   - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+  - kind: tests
+    description: The lab job check store's SELECT grants to role_omnidash are issued, asserted, ledger-bound and declared.
+    command: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -2045,3 +2053,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac160
+    description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
