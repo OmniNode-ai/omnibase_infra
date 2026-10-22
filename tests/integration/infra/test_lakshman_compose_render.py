@@ -677,3 +677,28 @@ def test_read_binding_consumer_group_is_unique_among_the_lane_bindings() -> None
     assert groups["lakshman.omnimarket-projections.runtime-read.consume.v1"] == (
         "runtime-effects"
     )
+
+
+@pytest.mark.integration
+def test_every_service_naming_the_lane_overlay_mounts_it() -> None:
+    """A service whose environment names BIFROST_LANE_OVERLAY_PATH must mount a file there.
+
+    The runtime entrypoint renders the Bifrost contract from that path before the
+    service starts, so a service that names it without mounting it exits
+    ONEX_CORE_041 "Bifrost lane overlay not found" on every boot. The delegation
+    writer did exactly that on a fresh bring-up of this lane (OMN-17427): it merges
+    the lane's runtime env and had no mount, while the two runtimes beside it did.
+    """
+    services = _compose_config_json()["services"]
+    unmounted = sorted(
+        name
+        for name, config in services.items()
+        if (
+            target := (config.get("environment") or {}).get("BIFROST_LANE_OVERLAY_PATH")
+        )
+        and not _mounts_at(config, target)
+    )
+    assert not unmounted, (
+        f"{unmounted} name BIFROST_LANE_OVERLAY_PATH but mount nothing at it; "
+        "add `- *lane-overlay-mount` to their volumes"
+    )
