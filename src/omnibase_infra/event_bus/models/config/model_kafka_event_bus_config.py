@@ -457,6 +457,64 @@ class ModelKafkaEventBusConfig(BaseModel):
         le=86_400.0,
     )
 
+    # Consume-loop survival and the consume-task watchdog (OMN-17427). On the
+    # dev lane on 2026-10-22 one group of the effects runtime sat Empty
+    # with 0 members while its two siblings on the same topic were Stable, and
+    # the runtime's own consumer_sync read green. aiokafka keeps a member's
+    # group through heartbeats for max_poll_interval_ms after its owner stops
+    # calling getmany, then leaves and never rejoins on its own: it rejoins
+    # only inside the next poll. A consume loop that ended on an error, or
+    # that was parked in an await, therefore lost its group for good. These
+    # bounds keep a loop polling through a failure and restart one that stops.
+    #
+    # Contract-config only, like the other consumer bounds above --
+    # deliberately NOT env overrides, so a lane cannot quietly disarm them.
+    consume_loop_failure_backoff_initial_seconds: float = Field(
+        default=1.0,
+        description=(
+            "Seconds the consume loop waits after the first failed iteration "
+            "(a poll or a batch that raised) before it replaces its consumer "
+            "and polls again. Doubles on each consecutive failure up to "
+            "consume_loop_failure_backoff_max_seconds, and resets on the first "
+            "poll that returns."
+        ),
+        gt=0.0,
+        le=60.0,
+    )
+    consume_loop_failure_backoff_max_seconds: float = Field(
+        default=30.0,
+        description=(
+            "Upper bound on the wait between consecutive failed consume-loop "
+            "iterations. A fault that survives every replacement degrades to "
+            "one attempt per this many seconds, never to a tight loop and "
+            "never to a loop that has ended."
+        ),
+        gt=0.0,
+        le=600.0,
+    )
+    consume_task_watchdog_interval_seconds: float = Field(
+        default=10.0,
+        description=(
+            "Seconds between consume-task watchdog sweeps. Each sweep restarts "
+            "a consume task that has ended, or whose last poll is older than "
+            "effective_consume_task_parked_after_seconds, while its "
+            "subscription is still registered."
+        ),
+        gt=0.0,
+        le=300.0,
+    )
+    consume_task_parked_poll_fraction: float = Field(
+        default=0.9,
+        description=(
+            "Share of max_poll_interval_ms a consume loop may go without "
+            "polling before the watchdog treats it as parked. The bound "
+            "actually applied is effective_consume_task_parked_after_seconds, "
+            "which never cuts a batch the serial loop is still allowed to run."
+        ),
+        gt=0.0,
+        lt=1.0,
+    )
+
     # Per-dispatch deadline (OMN-19355). The serial consume loop awaits each
     # handler before it polls again, so a handler that never returns stops the
     # group: on the .201 dev lane on 2026-09-23 the lab_lane_health handler
@@ -1106,6 +1164,24 @@ class ModelKafkaEventBusConfig(BaseModel):
     def serial_batch_poll_budget_seconds(self) -> float:
         """Seconds the serial loop may spend on one fetched batch (OMN-19355)."""
         return self.max_poll_interval_ms / 1000.0 * SERIAL_BATCH_POLL_BUDGET_FRACTION
+
+    @property
+    def effective_consume_task_parked_after_seconds(self) -> float:
+        """Seconds without a poll after which a consume loop is parked (OMN-17427).
+
+        ``consume_task_parked_poll_fraction`` of ``max_poll_interval_ms``, but
+        never below the serial batch poll budget plus one poll timeout. The
+        serial loop may legitimately spend the whole budget on one batch
+        (OMN-19355: no record starts unless its full dispatch deadline still
+        fits, so the budget already covers the per-dispatch deadline), and the
+        poll after it may take up to its own timeout to return. A smaller bound
+        would cancel a slow dispatch the deadline was about to settle.
+        """
+        return max(
+            self.max_poll_interval_ms / 1000.0 * self.consume_task_parked_poll_fraction,
+            self.serial_batch_poll_budget_seconds
+            + self.consumer_poll_timeout_ms / 1000.0,
+        )
 
     # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]

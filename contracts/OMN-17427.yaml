@@ -397,6 +397,21 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-consume-loop-rejoin
+    statement: While the bus runs and a subscription is registered, its consumer group has a polling member -- a consume loop survives any poll or dispatch failure, and a dead or parked consume task is restarted with a rebuilt consumer.
+    acceptance:
+      - id: AC148
+        statement: 'AC148: a poll raising a KafkaError or a RuntimeError once, and a batch raising once, leave the serial and concurrent loops running with the consumer rebuilt once and the later records dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"'
+      - id: AC149
+        statement: 'AC149: a subscriber raising CancelledError inside its own coroutine takes the handler-failure arm and the next record is dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"'
+      - id: AC150
+        statement: 'AC150: cancelling the loop task ends it promptly, also inside a failure backoff, and close() stops the consumer -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"'
+      - id: AC151
+        statement: 'AC151: the watchdog restarts a dead consume task within one interval with CONSUME_TASK_DEAD, cancels and restarts a parked one with CONSUME_TASK_PARKED, does not restart twice inside the cooldown and leaves an unsubscribed group alone -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"'
+      - id: AC152
+        statement: 'AC152: sync_status reports a group whose last poll is older than sync_unready_seconds as stalled with CONSUME_TASK_PARKED, and a recently polled group as before -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"'
+      - id: AC153
+        statement: 'AC153: get_readiness_status reports a topic dead when any one of its groups has a dead consume task -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"'
 evidence_requirements:
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
@@ -569,6 +584,9 @@ evidence_requirements:
   - kind: tests
     description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
     command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+  - kind: tests
+    description: Fake consumers and an injectable clock drive the real consume loop, the consume-task watchdog, the supervisor's sync status and the readiness view; no broker is contacted.
+    command: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1865,3 +1883,57 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac148-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn-17427-ac149-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC149
+  - id: dod-omn-17427-ac150-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC150
+  - id: dod-omn-17427-ac151-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC151
+  - id: dod-omn-17427-ac152-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC152
+  - id: dod-omn-17427-ac153-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC153

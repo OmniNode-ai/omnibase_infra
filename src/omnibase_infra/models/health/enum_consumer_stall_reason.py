@@ -43,5 +43,16 @@ class EnumConsumerStallReason(StrEnum):
     and the configured window has elapsed. This is the ``Empty`` group shape
     recorded on OMN-18640 as the second outage class."""
 
+    CONSUME_TASK_DEAD = "consume_task_dead"
+    """The consume task for this group ENDED while the bus was running and the
+    subscription was still registered (OMN-17427). Nothing polls, so aiokafka
+    keeps the membership through heartbeats for ``max_poll_interval_ms`` and
+    then leaves the group without rejoining."""
+
+    CONSUME_TASK_PARKED = "consume_task_parked"
+    """The consume task for this group is alive but has not polled for longer
+    than the declared bound (OMN-17427): it is parked in an await, and the
+    group is about to lose, or has lost, its member for the same reason."""
+
 
 __all__ = ["EnumConsumerStallReason"]

@@ -231,6 +231,7 @@ from omnibase_infra.enums.enum_kafka_permanent_failure import (
     EnumKafkaPermanentFailure,
 )
 from omnibase_infra.errors import (
+    DispatchCancelledError,
     DispatchDeadlineExceededError,
     DlqPersistenceUnconfirmedError,
     EventPayloadTooLargeError,
@@ -294,6 +295,9 @@ from omnibase_infra.models.health.enum_consumer_health_event_type import (
 )
 from omnibase_infra.models.health.enum_consumer_health_severity import (
     EnumConsumerHealthSeverity,
+)
+from omnibase_infra.models.health.enum_consumer_stall_reason import (
+    EnumConsumerStallReason,
 )
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
@@ -659,6 +663,13 @@ class EventBusKafka(
         # Background consumer tasks
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._group_consumer_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
+        # OMN-17427: one bus-level task that restarts a consume task which has
+        # ended or stopped polling while its subscription is registered.
+        # Started with the first consumer, stopped by close().
+        self._consume_watchdog_task: asyncio.Task[None] | None = None
+        # Monotonic clock for the watchdog and the rejoin supervisors;
+        # replaced by a fake in tests so a parked bound need not be waited out.
+        self._clock: Callable[[], float] = time.monotonic
 
         # Topics marked as required for readiness (OMN-1931)
         # Readiness is blocked until all required topics have active consumers
@@ -1131,6 +1142,17 @@ class EventBusKafka(
             self._shutdown = True
 
         await self._settle_live_dispatches()
+
+        # OMN-17427: stop the watchdog before the consume tasks, or it would
+        # read the tasks cancelled below as dead and restart them.
+        watchdog = self._consume_watchdog_task
+        self._consume_watchdog_task = None
+        if watchdog is not None and not watchdog.done():
+            watchdog.cancel()
+            try:
+                await watchdog
+            except asyncio.CancelledError:
+                pass
 
         async with self._lock:
             self._closing = True
@@ -2736,6 +2758,7 @@ class EventBusKafka(
         task = asyncio.create_task(self._consume_loop(topic, group_id, correlation_id))
         self._group_consumer_tasks[consumer_key] = task
         self._refresh_topic_consumer_views(topic)
+        self._ensure_consume_watchdog()
 
         logger.info(
             f"Started consumer for topic {topic}",
@@ -2957,6 +2980,22 @@ class EventBusKafka(
             raise
 
         if done:
+            if dispatch.cancelled():
+                # OMN-17427: the callback raised CancelledError from inside its
+                # own coroutine (the awaiting task was not cancelled, or the
+                # arm above would have run). Re-raised as itself it ended the
+                # consume task; as a typed handler failure it takes the retry
+                # and DLQ arms like any other, and the loop polls on.
+                partition, offset = record_coordinate or (None, None)
+                raise DispatchCancelledError(
+                    f"subscriber {subscription_id} ended in CancelledError for "
+                    f"{topic} partition {partition} offset {offset} while the "
+                    "consume loop was not being cancelled (OMN-17427)",
+                    topic=topic,
+                    partition=partition,
+                    offset=offset,
+                    subscription_id=subscription_id,
+                )
             dispatch.result()
             return
 
@@ -3525,7 +3564,7 @@ class EventBusKafka(
         topic: str,
         group_id: str,
         correlation_id: UUID,
-        e: Exception,
+        e: BaseException,
     ) -> None:
         """Emit a consumer health event for an unexpected consume-loop error."""
         if self._health_emitter is None:
@@ -3630,6 +3669,7 @@ class EventBusKafka(
             poll_timeout_ms=self._config.consumer_poll_timeout_ms,
             recreate_consumer=_recreate,
             emit_event=self._record_consumer_rejoin_event,
+            clock=self._clock,
         )
         self._rejoin_supervisors[key] = supervisor
         return supervisor
@@ -3687,6 +3727,161 @@ class EventBusKafka(
             extra={"topic": topic, "group_id": effective_group_id},
         )
         return consumer
+
+    # ------------------------------------------------------------------
+    # OMN-17427: consume-task watchdog
+    # ------------------------------------------------------------------
+
+    def _ensure_consume_watchdog(self) -> None:
+        """Start the consume-task watchdog once, with the first consumer."""
+        if self._shutdown:
+            return
+        task = self._consume_watchdog_task
+        if task is not None and not task.done():
+            return
+        self._consume_watchdog_task = asyncio.create_task(self._consume_watchdog_loop())
+
+    async def _consume_watchdog_loop(self) -> None:
+        """Sweep the consume tasks every declared interval until shutdown.
+
+        Nothing else reads a consume task back while the bus runs: before
+        OMN-17427 ``_group_consumer_tasks`` was consulted only by shutdown,
+        unsubscribe and a readiness view that one live sibling group could
+        hide. A sweep that raises is logged and the next one runs; the
+        watchdog itself must not be the thing that silently stops.
+        """
+        interval = self._config.consume_task_watchdog_interval_seconds
+        while not self._shutdown:
+            await asyncio.sleep(interval)
+            try:
+                await self._check_consume_tasks()
+            except Exception:
+                logger.exception("consume_task_watchdog_sweep_failed (OMN-17427)")
+
+    async def _check_consume_tasks(self) -> None:
+        """Restart every consume task that has ended or stopped polling.
+
+        A task is restarted when its subscription is still registered and it
+        is either DEAD (``done()`` while the bus runs) or PARKED (alive, with
+        no poll started or finished for longer than
+        ``effective_consume_task_parked_after_seconds`` -- before aiokafka's
+        own ``max_poll_interval_ms`` makes the member leave its group). The
+        consumer is rebuilt in the same group from committed offsets and a
+        new loop is started. Each restart is a typed rejoin event, and the
+        rejoin cooldown bounds how often one group is restarted.
+        """
+        parked_after = self._config.effective_consume_task_parked_after_seconds
+        for consumer_key in list(self._group_consumer_tasks):
+            if self._shutdown:
+                return
+            topic, group_id = consumer_key
+            async with self._lock:
+                task = self._group_consumer_tasks.get(consumer_key)
+                if task is None or self._shutdown:
+                    continue
+                if not any(
+                    sub_group_id == group_id
+                    for sub_group_id, _, _ in self._subscribers.get(topic, [])
+                ):
+                    continue
+
+                supervisor = self._rejoin_supervisor_for(topic, group_id)
+                idle_seconds = supervisor.seconds_since_last_poll()
+                if task.done():
+                    reason = EnumConsumerStallReason.CONSUME_TASK_DEAD
+                elif idle_seconds > parked_after:
+                    reason = EnumConsumerStallReason.CONSUME_TASK_PARKED
+                else:
+                    continue
+
+                if not supervisor.restart_allowed():
+                    logger.debug(
+                        "consume_task_restart_deferred topic=%s group=%s "
+                        "reason=%s -- inside the rejoin cooldown",
+                        topic,
+                        group_id,
+                        reason.value,
+                    )
+                    continue
+
+                await self._restart_consume_task(
+                    topic,
+                    group_id,
+                    task,
+                    supervisor,
+                    reason,
+                    idle_seconds,
+                )
+
+    async def _restart_consume_task(
+        self,
+        topic: str,
+        group_id: str,
+        task: asyncio.Task[None],
+        supervisor: ConsumerRejoinSupervisor,
+        reason: EnumConsumerStallReason,
+        idle_seconds: float,
+    ) -> None:
+        """Replace one dead or parked consume task. Caller holds ``self._lock``."""
+        consumer_key = (topic, group_id)
+        task_error: BaseException | None = None
+        if task.done():
+            if not task.cancelled():
+                task_error = task.exception()
+            logger.error(
+                "consume_task_dead topic=%s group=%s error_type=%s error=%s -- "
+                "the consume task ended while its subscription is registered; "
+                "rebuilding the consumer and starting a new loop (OMN-17427)",
+                topic,
+                group_id,
+                type(task_error).__name__ if task_error is not None else "none",
+                task_error,
+                exc_info=task_error,
+                extra={"topic": topic, "group_id": group_id},
+            )
+        else:
+            logger.error(
+                "consume_task_parked topic=%s group=%s idle_seconds=%.1f "
+                "parked_after=%.1f -- the consume task has not polled within "
+                "the bound; cancelling it, rebuilding the consumer and starting "
+                "a new loop (OMN-17427)",
+                topic,
+                group_id,
+                idle_seconds,
+                self._config.effective_consume_task_parked_after_seconds,
+                extra={"topic": topic, "group_id": group_id},
+            )
+            task.cancel()
+            await asyncio.wait({task}, timeout=self._timeout_seconds)
+
+        succeeded = True
+        failure_detail = ""
+        try:
+            await self._replace_consumer(
+                topic, group_id, self._group_consumers.get(consumer_key)
+            )
+        except Exception as rebuild_error:
+            # The new loop is started anyway: it polls the old handle, fails,
+            # and replaces it on its own backoff, which retries far sooner
+            # than the cooldown would let this watchdog.
+            succeeded = False
+            failure_detail = f"{type(rebuild_error).__name__}: {rebuild_error}"
+            logger.exception(
+                "consume_task_restart_rebuild_failed topic=%s group=%s",
+                topic,
+                group_id,
+            )
+
+        supervisor.note_loop_restarted()
+        new_task = asyncio.create_task(self._consume_loop(topic, group_id, uuid4()))
+        self._group_consumer_tasks[consumer_key] = new_task
+        self._refresh_topic_consumer_views(topic)
+        await supervisor.record_consume_task_restart(
+            reason,
+            idle_seconds=idle_seconds,
+            succeeded=succeeded,
+            failure_detail=failure_detail,
+        )
 
     async def _record_consumer_rejoin_event(
         self, event: ModelConsumerGroupRejoinEvent
@@ -3897,9 +4092,15 @@ class EventBusKafka(
     ) -> None:
         """Background loop to consume messages and dispatch to subscribers.
 
-        This method runs in a background task and continuously polls the Kafka consumer
-        for new messages. It handles graceful cancellation, dispatches messages to all
-        registered subscribers, and logs all errors without terminating the loop.
+        Runs until the bus shuts down or the task itself is cancelled, and for
+        no other reason (OMN-17427). The ``try`` is per iteration: a poll or a
+        batch that raises is logged, reported, and answered by replacing the
+        consumer after a bounded backoff (:meth:`_recover_consume_iteration`),
+        and the loop polls on. Before OMN-17427 one ``try`` wrapped the whole
+        loop, so any such error ENDED the task with its consumer still started:
+        aiokafka kept the membership through heartbeats for
+        ``max_poll_interval_ms``, then left the group and never rejoined,
+        because a rejoin only happens inside the next poll.
 
         Args:
             topic: Topic being consumed.
@@ -3932,37 +4133,81 @@ class EventBusKafka(
         # Absent or 1 means the inline serial path below, unchanged.
         max_in_flight = self._consume_concurrency.get((topic, group_id), 1)
 
+        consecutive_failures = 0
+        needs_replacement = False
         try:
-            if max_in_flight > 1:
-                await self._consume_loop_concurrent(
-                    topic=topic,
-                    group_id=group_id,
-                    correlation_id=correlation_id,
-                    consumer=consumer,
-                    supervisor=supervisor,
-                    max_in_flight=max_in_flight,
-                )
-                return
-
-            # OMN-18640: poll with a deadline rather than iterating the
-            # consumer. ``async for msg in consumer`` never returns and never
-            # raises while aiokafka retries a dead group coordinator in its own
-            # background task, so a client that lost its coordinator across a
-            # broker restart waited here indefinitely -- 30 minutes on
-            # 2026-09-17 and 97 on 2026-09-18, both cleared only by recreating
-            # the container. Every bounded poll that comes back empty is an
-            # opportunity for the supervisor to ask whether the silence is
-            # idleness or a wedge, and to rebuild the consumer if it is a wedge.
             while not self._shutdown:
-                batch = await supervisor.next_batch(consumer)
-                consumer = cast("AIOKafkaConsumer", batch.consumer)
-                await self._process_serial_batch(
-                    batch.records,
+                batch: ModelConsumerPollBatch | None = None
+                try:
+                    if needs_replacement:
+                        consumer = await self._replace_consumer(
+                            topic, group_id, consumer
+                        )
+                        needs_replacement = False
+
+                    if max_in_flight > 1:
+                        # The concurrent driver polls in its own loop and
+                        # returns only on shutdown; any failure inside it
+                        # raises out to the arms below, after it has drained
+                        # every record it dispatched.
+                        await self._consume_loop_concurrent(
+                            topic=topic,
+                            group_id=group_id,
+                            correlation_id=correlation_id,
+                            consumer=consumer,
+                            supervisor=supervisor,
+                            max_in_flight=max_in_flight,
+                        )
+                        continue
+
+                    # OMN-18640: poll with a deadline rather than iterating the
+                    # consumer. ``async for msg in consumer`` never returns and
+                    # never raises while aiokafka retries a dead group
+                    # coordinator in its own background task, so a client that
+                    # lost its coordinator across a broker restart waited here
+                    # indefinitely -- 30 minutes on 2026-09-17 and 97 on
+                    # 2026-09-18, both cleared only by recreating the
+                    # container. Every bounded poll that comes back empty is an
+                    # opportunity for the supervisor to ask whether the
+                    # silence is idleness or a wedge, and to rebuild the
+                    # consumer if it is a wedge.
+                    batch = await supervisor.next_batch(consumer)
+                    consumer = cast("AIOKafkaConsumer", batch.consumer)
+                    consecutive_failures = 0
+                    await self._process_serial_batch(
+                        batch.records,
+                        topic=topic,
+                        group_id=group_id,
+                        correlation_id=correlation_id,
+                        consumer=consumer,
+                    )
+                    continue
+
+                except asyncio.CancelledError as cancelled:
+                    if self._shutdown or self._current_task_cancelling():
+                        raise
+                    # Not this task being cancelled: a CancelledError leaked
+                    # out of something the iteration awaited. It is that
+                    # thing failing, never the loop ending (OMN-17427).
+                    failure: BaseException = cancelled
+                except Exception as error:  # noqa: BLE001 — boundary: any failed iteration is answered by replacing the consumer, never by ending the loop
+                    failure = error
+
+                consecutive_failures += 1
+                if max_in_flight > 1:
+                    # The driver may have rejoined onto a newer handle; the
+                    # live one is the one published for shutdown.
+                    consumer = self._group_consumers.get((topic, group_id), consumer)
+                await self._recover_consume_iteration(
                     topic=topic,
                     group_id=group_id,
                     correlation_id=correlation_id,
                     consumer=consumer,
+                    failed_batch=batch,
+                    error=failure,
+                    consecutive_failures=consecutive_failures,
                 )
+                needs_replacement = True
 
         except asyncio.CancelledError:
             # Graceful cancellation - this is expected during shutdown
@@ -3975,21 +4220,6 @@ class EventBusKafka(
             )
             raise  # Re-raise to properly handle task cancellation
 
-        except Exception as e:
-            logger.exception(
-                f"Consumer loop error for topic {topic}: {e}",
-                extra={
-                    "topic": topic,
-                    "correlation_id": str(correlation_id),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            await self._emit_consume_loop_error_health_event(
-                topic, group_id, correlation_id, e
-            )
-            # Don't raise - allow task to complete and cleanup to proceed
-
         finally:
             logger.info(
                 f"Consumer loop exiting for topic {topic}",
@@ -3998,6 +4228,95 @@ class EventBusKafka(
                     "correlation_id": str(correlation_id),
                 },
             )
+
+    @staticmethod
+    def _current_task_cancelling() -> bool:
+        """True when the running task itself has a cancellation pending."""
+        task = asyncio.current_task()
+        return task is not None and task.cancelling() > 0
+
+    async def _recover_consume_iteration(
+        self,
+        *,
+        topic: str,
+        group_id: str,
+        correlation_id: UUID,
+        consumer: AIOKafkaConsumer,
+        failed_batch: ModelConsumerPollBatch | None,
+        error: BaseException,
+        consecutive_failures: int,
+    ) -> None:
+        """Report one failed consume-loop iteration and wait out its backoff.
+
+        The caller replaces the consumer on its next iteration. Before that
+        replacement stops this consumer, every partition of a failed serial
+        batch is pinned back at the batch's first record: under auto-commit
+        ``stop()`` commits the fetch position, which after ``getmany`` is past
+        the whole batch, and records the batch never reached would otherwise
+        be committed past without having run. Records it did run are
+        redelivered -- at-least-once, the delivery contract of this path.
+        """
+        logger.error(
+            "consume_loop_iteration_failed topic=%s group=%s error_type=%s "
+            "error=%s consecutive_failures=%d -- replacing the consumer and "
+            "polling on; the loop does not end (OMN-17427)",
+            topic,
+            group_id,
+            type(error).__name__,
+            error,
+            consecutive_failures,
+            exc_info=error,
+            extra={
+                "topic": topic,
+                "group_id": group_id,
+                "correlation_id": str(correlation_id),
+                "error": str(error),
+                "error_type": type(error).__name__,
+            },
+        )
+        await self._emit_consume_loop_error_health_event(
+            topic, group_id, correlation_id, error
+        )
+
+        if failed_batch is not None and failed_batch.records:
+            starts = [
+                (partition, coordinate[1])
+                for partition, records in failed_batch.records.items()
+                if records
+                and (coordinate := _record_coordinate(records[0])) is not None
+            ]
+            if starts:
+                SerialBatchWithhold(consumer, starts).engage()
+
+        backoff = min(
+            self._config.consume_loop_failure_backoff_initial_seconds
+            * 2 ** min(consecutive_failures - 1, 16),
+            self._config.consume_loop_failure_backoff_max_seconds,
+        )
+        await asyncio.sleep(backoff)
+
+    async def _replace_consumer(
+        self, topic: str, group_id: str, consumer: AIOKafkaConsumer | None
+    ) -> AIOKafkaConsumer:
+        """Stop ``consumer`` and start its replacement in the same group.
+
+        The replacement goes through :meth:`_rebuild_consumer_for_rejoin`, so it
+        joins the same effective group with the same instance id and resumes
+        from the committed offsets. A failure to start it propagates; the
+        consume loop answers it with its backoff and tries again.
+        """
+        if consumer is not None:
+            try:
+                await asyncio.wait_for(consumer.stop(), timeout=self._timeout_seconds)
+            except Exception as stop_error:  # noqa: BLE001 — boundary: a failed client may also fail to close
+                logger.warning(
+                    "consume_consumer_stop_failed topic=%s group=%s error=%s",
+                    topic,
+                    group_id,
+                    stop_error,
+                    exc_info=True,
+                )
+        return await self._rebuild_consumer_for_rejoin(topic, group_id)
 
     async def _process_serial_batch(
         self,
@@ -4648,10 +4967,14 @@ class EventBusKafka(
                         for topic, task in self._consumer_tasks.items()
                     ]
 
+                # OMN-17427: a topic is alive only when EVERY group consuming
+                # it has a live task. ORing per topic let one live sibling hide
+                # a group whose loop had ended -- the 2026-10-22 shape, where
+                # one of three groups on a topic sat Empty with 0 members.
                 for (topic, _group_id), task in task_views:
                     consume_tasks_alive[topic] = consume_tasks_alive.get(
-                        topic, False
-                    ) or (not task.done())
+                        topic, True
+                    ) and (not task.done())
 
             # Determine required topics readiness
             required_topics_ready = consumers_started and all(
