@@ -62,6 +62,11 @@ HOST_ID = "lab-202"
 HOSTNAME_ON_HOST = "omnipc2"
 COMPOSE_PROJECT = "omnibase-infra-dev-202"
 NETWORK = "omnibase-infra-dev-202-network"
+#: Every lane the private census declares for .202 (OMN-17292). The collaborator
+#: lane brought up there for the dashboard owner on 2026-10-22 (operator RULING
+#: 2026-10-22T07:02:21Z, OMN-17427) is declared as ``lakshman`` and
+#: ``dashboard-owner`` beside the dev-202 and sim-202 lanes.
+LANES_ON_202 = ["dashboard-owner", "dev-202", "lakshman", "sim-202"]
 
 #: The declared block. 61090 (onex-api) is published by a disabled service, so
 #: it is reserved and never bound; it is still in the block.
@@ -376,7 +381,7 @@ def test_dev_202_lane_boundary_host_resolves_and_carries_dev_202() -> None:
     lanes_on_host = sorted(
         name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
     )
-    assert lanes_on_host == ["dev-202", "sim-202"]
+    assert lanes_on_host == LANES_ON_202
 
 
 @pytest.mark.lab_overlay
@@ -384,11 +389,10 @@ def test_dev_202_lane_boundary_census_on_202_reads_clean() -> None:
     plan = _plan_on_202(_healthy_dev_202_rows(), [NETWORK])
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    assert sorted(plan["lanes_checked"]) == ["dev-202", "sim-202"]
-    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - {
-        "dev-202",
-        "sim-202",
-    }
+    assert sorted(plan["lanes_checked"]) == LANES_ON_202
+    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - set(
+        LANES_ON_202
+    )
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 
