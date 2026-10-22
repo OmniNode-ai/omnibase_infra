@@ -1558,3 +1558,60 @@ def test_the_documented_request_is_issued_with_exactly_the_documented_fields(
         status, again, _ = _proxy_post(url, request, None)
     assert status == HTTPStatus.CREATED
     assert again["action"] == "rotated"
+
+
+@pytest.mark.parametrize("command", ["apply-grants", "audit-grants"])
+def test_no_selected_principals_is_a_refusal(
+    command: str,
+    apply_broker: FakeBroker,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert not ledger_path.exists()
+    assert (
+        lpi.main([command, "--grants", str(GRANTS), "--ledger", str(ledger_path)]) == 2
+    )
+    assert "no developer principals selected" in capsys.readouterr().err
+    assert not ledger_path.exists()
+    assert apply_broker.acl_argvs == [] and apply_broker.set_calls == []
+
+
+def test_a_listing_row_with_an_error_is_refused() -> None:
+    listing = (
+        ACL_HEADER + "\n"
+        "User:dev-a-mac  *  TOPIC  some-topic  LITERAL  READ  ALLOW  AUTHORIZATION_FAILED\n"
+    )
+    with pytest.raises(lpi.IssuerError, match=r"ACL row.*error"):
+        lpi.parse_acl_listing(listing, "dev-a-mac")
+
+
+def test_audit_refuses_a_listing_row_with_an_error(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    principal = "dev-a-mac"
+    rows = _derived_listing(principal)
+    rows[0] += "  AUTHORIZATION_FAILED"
+    broker = ListingBroker({principal: _listing(rows)})
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    assert (
+        lpi.main(
+            [
+                "audit-grants",
+                "--grants",
+                str(GRANTS),
+                "--ledger",
+                str(ledger_path),
+                "--principal",
+                principal,
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    assert "ACL row carries an error" in captured.err
+    assert "missing=0 extra=0" not in captured.out
+    assert not ledger_path.exists()
+    assert broker.acl_argvs == [] and broker.set_calls == []

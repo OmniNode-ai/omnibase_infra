@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -53,10 +54,22 @@ def check_scripts(scripts_dir: Path) -> list[str]:
 
     if not scripts_dir.is_dir():
         return [f"ERROR: {scripts_dir} is not a scripts directory."]
-    candidates = sorted(scripts_dir.rglob("*.py"))
+
+    def record_walk_error(error: OSError) -> None:
+        findings.append(f"ERROR: cannot scan {error.filename}: {error}")
+
+    candidates: list[Path] = []
+    for directory, dirs, files in os.walk(scripts_dir, onerror=record_walk_error):
+        root = Path(directory)
+        # Nested project tools create environments under scripts/. Their
+        # installed dependencies are not this repository's seed publishers.
+        # Recognize the environment marker rather than a directory name, so
+        # an ordinary source directory named venv is still checked.
+        dirs[:] = [name for name in dirs if not (root / name / "pyvenv.cfg").is_file()]
+        candidates.extend(root / name for name in files if name.endswith(".py"))
     if not candidates:
         return [f"ERROR: {scripts_dir} contains no Python scripts to check."]
-    for path in candidates:
+    for path in sorted(candidates):
         if not _is_seed_or_demo(path):
             continue
         try:
