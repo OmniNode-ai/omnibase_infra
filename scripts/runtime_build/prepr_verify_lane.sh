@@ -528,6 +528,13 @@ done
     printf '\n  }\n}\n'
 } > "${STAGING_ROOT}/repo/workspace/sibling-vcs-provenance.json"
 
+# OMN-21279: Dockerfile.runtime COPYs workspace/routing_tiers.yaml (the image
+# installs no omnimarket). The committed file is an empty-ladder placeholder; the
+# slot gets the ladder from the omnimarket snapshot staged above, as
+# stage_workspace.sh does for the declared lanes.
+cp "${STAGING_ROOT}/repo/workspace/sibling-repos/omnimarket/src/omnimarket/configs/routing_tiers.yaml" \
+    "${STAGING_ROOT}/repo/workspace/routing_tiers.yaml"
+
 TARGET_SNAPSHOT_DIGEST="$(snapshot_digest "${STAGING_ROOT}/repo")"
 declare -A SIBLING_SNAPSHOT_DIGEST=()
 for repo in "${SIBLING_REPOS[@]}"; do
@@ -826,7 +833,6 @@ BUILD_ARGS=(
     --build-arg "NON_MAIN_LINEAGE=true"
     --build-arg "OMNI_HOME=${OMNI_HOME_RESOLVED}"
     --build-arg "OMNIBASE_COMPAT_REF=${SIBLING_COMMIT[omnibase_compat]}"
-    --build-arg "OMNIMARKET_REF=${SIBLING_COMMIT[omnimarket]}"
     # Empty deliberately: the node inventory is a property of the image and
     # cannot be known before the image exists, and an empty value skips the
     # Dockerfile's verify guard. The two-pass stamping the declared lanes do

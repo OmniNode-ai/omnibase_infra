@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 PROVENANCE_SCRIPT = (
@@ -43,7 +45,7 @@ def _git(repo: Path, *args: str) -> None:
         cwd=repo,
         check=True,
         capture_output=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env={**scrub_git_location_env(os.environ), "GIT_TERMINAL_PROMPT": "0"},
     )
 
 
@@ -69,6 +71,12 @@ def _init_repo(path: Path, dist: str, *, dirty: bool = False) -> None:
         f"[project]\nname = '{dist}'\nversion = '{_PIN_VERSION}'\n",
         encoding="utf-8",
     )
+    if dist == "omnimarket":
+        # OMN-21279: stage_workspace.sh copies the delegation routing ladder out
+        # of the staged omnimarket tree into the build context.
+        ladder = path / "src" / "omnimarket" / "configs"
+        ladder.mkdir(parents=True)
+        (ladder / "routing_tiers.yaml").write_text("tiers: []\n", encoding="utf-8")
     _git(path, "add", "-A")
     _git(path, "commit", "-q", "-m", "init")
     if dirty:

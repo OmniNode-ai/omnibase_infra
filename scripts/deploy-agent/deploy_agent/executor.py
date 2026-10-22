@@ -154,6 +154,7 @@ COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 SELF_UPDATE_KNOWN_BYPRODUCT_PATHS: tuple[str, ...] = (
     "workspace/sibling-pin-comparison.json",
     "workspace/sibling-vcs-provenance.json",
+    "workspace/routing_tiers.yaml",
 )
 COMPOSE_PROJECT = "omnibase-infra"
 # OMN-18640: the deps-convergence observation runs before the deps leg and
