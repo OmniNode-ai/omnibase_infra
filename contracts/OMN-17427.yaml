@@ -400,7 +400,7 @@ requirements:
   - id: req-omn17427-omn19937-ac4-dev202-writer
     statement: The main runtime takes the board-probe projection from the lane class selection its private env fragment supplies through the base passthrough, alongside the landing nodes, so the installed writer can consume lab probe results.
     acceptance:
-      - id: AC144
+      - id: AC160
         statement: 'OMN-19937 AC4 prerequisite: the instance overlay leaves ONEX_RUNTIME_LANE_CLASS and ONEX_RUNTIME_LANE_CLASS_CONTRACTS to the base passthrough, and with the fragment selection supplied the real ownership filter admits projection_board_probe_results and the landing nodes while retaining instance identity and excluding unselected class contracts; the absent-selection control reproduces the missing consumer -- falsifier: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py -q'
   - id: req-omn17427-shared-ticket-contract-composer
     statement: Repository-side preparation composes independent branch fragments without shared root edits; hosted adoption remains blocked on the external gate owners.
@@ -420,18 +420,18 @@ requirements:
   - id: req-omn17427-prepr-verify-signal-in-cleanup
     statement: A pre-PR verify run that receives its first SIGTERM, SIGHUP or SIGINT during the teardown, snap-post, lease take or lease release finishes that step before it exits INTERRUPTED, and its summary names only the cleanup that ran (OMN-20085, the 2026-10-20T15:20Z slot 2 run whose teardown one SIGTERM cut short).
     acceptance:
-      - id: AC148
-        statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+      - id: AC161
+        statement: 'AC161: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
   - id: req-omn17427-developer-grants-complete-audit
     statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
     acceptance:
-      - id: AC146
-        statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
+      - id: AC162
+        statement: 'AC162: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
   - id: req-omn17427-broker-listener-alarm
     statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
     acceptance:
-      - id: AC158
-        statement: 'AC158: broker_listener is ALARM when every bootstrap address refuses, times out or accepts without a Kafka ApiVersions answer, OK when one address answers, and INDETERMINATE for an unresolvable name or a malformed bootstrap -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q'
+      - id: AC163
+        statement: 'AC163: broker_listener is ALARM when every bootstrap address refuses, times out or accepts without a Kafka ApiVersions answer, OK when one address answers, and INDETERMINATE for an unresolvable name or a malformed bootstrap -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q'
   - id: req-omn17427-seed-scan-virtualenv-scope
     statement: Seed provenance scans repository publishers without descending into nested Python environments identified by pyvenv.cfg, while source publishers and incomplete scans still fail the gate.
     acceptance:
@@ -631,7 +631,7 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC144
+      - AC160
   - id: dod-omn17427-omn19937-ac4-hosted-deploy-check
     description: Hosted-runner check of the deployment environment against the real ownership filter, including a missing-selection control and exclusion of an unselected class node; no Docker daemon, live lane, broker or credentials required.
     source: manual
@@ -640,7 +640,7 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_dev_202_board_probe_results_omn19937.py tests/unit/runtime/auto_wiring/test_runtime_lane_class_omn20867.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC144
+      - AC160
   - id: dod-omn-17427-ac142-teardown-small-batches
     description: Fake-host teardown of 120 slot topics checks multiple bounded delete batches and an immediately following broker health read for each batch. The head tests fail on the merge-base product, which has no broker health pacing.
     source: manual
@@ -2015,7 +2015,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC148
+      - AC161
   - id: dod-omn-17427-ac146-verify-signal-deploy-check
     description: Hosted-runner deploy check -- the verify signal tests over a fake transport; they do not claim a live verify run on a slot.
     source: manual
@@ -2024,7 +2024,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC148
+      - AC161
   - id: dod-omn17427-ac146-complete-developer-grant-audit
     description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
     source: manual
@@ -2032,7 +2032,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC146]
+    binds_ac: [AC162]
   - id: dod-omn17427-ac146-developer-grant-deploy-check
     description: Hosted-runner deploy check exercises grant application and readback through the real issuer with fake broker responses, including empty selections and erroneous ACL listings. No Docker daemon, broker, overlay checkout or credential is required.
     source: manual
@@ -2040,7 +2040,7 @@ dod_evidence:
       - check_type: command
         check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC146]
+    binds_ac: [AC162]
   - id: dod-omn-17427-ac158-broker-listener-alarm
     description: scripts/lab_alarm.py evaluates a broker_listener condition every run against kafka_bootstrap_servers with a Kafka ApiVersions v0 probe; refused, timed out or unanswered on every address is ALARM, one answering address is OK, an unresolvable or malformed bootstrap is INDETERMINATE.
     source: manual
@@ -2049,7 +2049,7 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC158
+      - AC163
   - id: dod-omn-17427-ac158-broker-listener-deploy-check
     description: Hosted-runner deploy check of the broker_listener condition against local sockets and fake probes; no broker, credentials or live lane is required.
     source: manual
@@ -2058,7 +2058,7 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "real_probe or refused"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC158
+      - AC163
   - id: dod-omn-17427-ac159-seed-scan-scope
     description: Temporary source trees contain marked virtual environments and real source publishers, with positive and negative controls that keep provenance enforcement on repository scripts.
     source: manual
