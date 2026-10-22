@@ -18,6 +18,14 @@
 #   used_pct >= warn_pct (85): emit severity=warning, exit 10. The percentage is a
 #                       SECONDARY signal only and can never, on its own, produce
 #                       the critical exit code.
+#   inode_used_pct >= warn_pct (85): emit severity=warning, exit 10 (OMN-17427).
+#                       A filesystem out of inodes fails every write with ENOSPC
+#                       while `df -h` looks healthy: on 2026-10-21 a lab host's
+#                       CI runner scratch disk read 77% of bytes and 100% of inodes,
+#                       every runner job that wrote a temp file failed, and
+#                       nothing alarmed. The same declared warn_pct applies.
+#                       Unreadable inode use (a df without -i) is logged and
+#                       skipped; bytes still decide.
 #   otherwise         : no-op (exit 0, quiet).
 #
 # WHY THE PERCENTAGE IS NOT THE HALT (OMN-17872). Until 2026-09-04 this script
@@ -50,6 +58,12 @@
 #   ./scripts/disk-watermark-check.sh                                       # check /data (.201)
 #   ./scripts/disk-watermark-check.sh --mount /System/Volumes/Data          # Mac Data volume
 #   ./scripts/disk-watermark-check.sh --dry-run                             # print event, no publish
+#   ./scripts/disk-watermark-check.sh --mount /scratch --mount-optional     # quiet no-op where absent
+#
+# --mount-optional (OMN-17427): when the named mount does not exist on this host,
+# exit 0 quietly instead of falling back to /. One hourly unit then checks
+# /scratch (the CI runner scratch disk where a host has one) on every host without a second alarm
+# on / where there is no /scratch.
 #
 # There is deliberately no --warn/--crit flag: a threshold an operator can retype
 # per invocation is not a declared threshold. Edit the JSON, in a reviewed commit.
@@ -67,6 +81,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MOUNT="/data"
 DRY_RUN=false
+MOUNT_OPTIONAL=false
 TOPIC="onex.evt.infra.disk-watermark.v1"
 THRESHOLDS_FILE="${SCRIPT_DIR}/disk-watermark-thresholds.json"
 LOG_FILE="${HOME}/.local/log/onex/disk-watermark.log"
@@ -76,6 +91,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mount) MOUNT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --mount-optional) MOUNT_OPTIONAL=true; shift ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -105,6 +121,10 @@ read -r CRIT_FREE_GB WARN_FREE_GB WARN_PCT <<<"$THRESHOLDS_RAW"
 # same 276 GiB. The runner-side gate already used `df -Pk`
 # (docker/runners/runner-job-started.sh:697); this matches it.
 target="$MOUNT"
+if [[ "$MOUNT_OPTIONAL" == true ]] && [[ ! -d "$MOUNT" ]]; then
+  log "mount=$MOUNT not present on this host (--mount-optional) -- quiet"
+  exit 0
+fi
 df -Pk "$target" >/dev/null 2>&1 || target="/"
 USED_PCT="$(df -Pk "$target" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 AVAIL_KB="$(df -Pk "$target" | awk 'NR==2 {print $4}')"
@@ -116,7 +136,18 @@ fi
 
 AVAIL_GB=$(( AVAIL_KB / 1024 / 1024 ))
 
-log "mount=$target avail_gb=${AVAIL_GB} (crit_floor=${CRIT_FREE_GB} warn_floor=${WARN_FREE_GB}) used=${USED_PCT}% (advisory warn=${WARN_PCT}%) avail_kb=${AVAIL_KB}"
+# Inode use (OMN-17427). The header names the column (GNU: IUse%, BSD: %iused),
+# so the parse does not depend on column order. Fail-soft: unreadable is logged
+# and the byte checks still decide; it is never read as zero.
+INODE_USED_PCT="$(df -Pi "$target" 2>/dev/null | awk '
+  NR==1 { for (i = 1; i <= NF; i++) if ($i == "IUse%" || $i == "%iused") col = i; next }
+  NR==2 && col { v = $col; gsub(/%/, "", v); print v }')" || INODE_USED_PCT=""
+if ! [[ "$INODE_USED_PCT" =~ ^[0-9]+$ ]]; then
+  log "mount=$target inode use unreadable -- byte checks only"
+  INODE_USED_PCT=""
+fi
+
+log "mount=$target avail_gb=${AVAIL_GB} (crit_floor=${CRIT_FREE_GB} warn_floor=${WARN_FREE_GB}) used=${USED_PCT}% (advisory warn=${WARN_PCT}%) avail_kb=${AVAIL_KB} inode_used_pct=${INODE_USED_PCT:-unknown}%"
 
 # Free space is the halt. The percentage only ever warns.
 if (( AVAIL_GB < CRIT_FREE_GB )); then
@@ -131,8 +162,12 @@ elif (( USED_PCT >= WARN_PCT )); then
   SEVERITY="warning"
   EXIT_CODE=10
   HALT_REASON="used_pct_advisory"
+elif [[ -n "$INODE_USED_PCT" ]] && (( INODE_USED_PCT >= WARN_PCT )); then
+  SEVERITY="warning"
+  EXIT_CODE=10
+  HALT_REASON="inode_used_pct_advisory"
 else
-  log "above both free-space floors and under the advisory percentage -- quiet"
+  log "above both free-space floors and under the advisory percentage (bytes and inodes) -- quiet"
   exit 0
 fi
 
@@ -141,7 +176,7 @@ fi
 EVENT_JSON="$(
   USED_PCT="$USED_PCT" AVAIL_KB="$AVAIL_KB" AVAIL_GB="$AVAIL_GB" MOUNT="$target" \
   SEVERITY="$SEVERITY" HALT_REASON="$HALT_REASON" WARN_PCT="$WARN_PCT" \
-  CRIT_FREE_GB="$CRIT_FREE_GB" WARN_FREE_GB="$WARN_FREE_GB" \
+  CRIT_FREE_GB="$CRIT_FREE_GB" WARN_FREE_GB="$WARN_FREE_GB" INODE_USED_PCT="$INODE_USED_PCT" \
   HOSTNAME_TAG="$HOSTNAME_TAG" TOPIC="$TOPIC" \
   python3 "${SCRIPT_DIR}/disk_watermark_event.py"
 )"
