@@ -407,6 +407,11 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-developer-grants-complete-audit
+    statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
 evidence_requirements:
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
@@ -1938,3 +1943,19 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn17427-ac146-complete-developer-grant-audit
+    description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC146]
+  - id: dod-omn17427-ac146-developer-grant-deploy-check
+    description: Hosted-runner deploy check exercises grant application and readback through the real issuer with fake broker responses, including empty selections and erroneous ACL listings. No Docker daemon, broker, overlay checkout or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC146]
