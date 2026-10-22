@@ -73,8 +73,8 @@ class _Lane:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.omni_home = root / "omni_home"
-        self.clone = self.omni_home / "omnibase_infra"
+        self.workspace = root / "workspace"
+        self.clone = self.workspace / "omnibase_infra"
         origin = root / "origin.git"
         seed = root / "seed"
         seed.mkdir()
@@ -92,8 +92,8 @@ class _Lane:
         _git(seed, "commit", "-q", "-m", "feature")
         self.feature = _git(seed, "rev-parse", "HEAD")
         _git(root, "clone", "-q", "--bare", str(seed), str(origin))
-        self.omni_home.mkdir()
-        _git(self.omni_home, "clone", "-q", str(origin), str(self.clone))
+        self.workspace.mkdir()
+        _git(self.workspace, "clone", "-q", str(origin), str(self.clone))
         # A commit the clone first learns of by the script's own fetch.
         (seed / "g").write_text("later\n")
         _git(seed, "commit", "-q", "-am", "feature later")
@@ -118,7 +118,7 @@ class _Lane:
         env = scrub_git_location_env(os.environ)
         env["PATH"] = f"{bin_dir}:{env['PATH']}"
         env["HOME"] = str(root)
-        env["OMNI_HOME"] = str(self.omni_home)
+        env["OMNI_HOME"] = str(self.workspace)
         env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
         env["LANE_CENSUS_HOST"] = NEUTRAL_HOSTNAME
         env["LANE_CENSUS_PYTHON"] = sys.executable

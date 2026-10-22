@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """OMN-21272 -- durable_backfill re-measures a merge whose receipt is binding-only.
 
-On 2026-10-21 the compose-dev receipt for 54ca4ac5f was a ``deployed_revision``
+On 2026-10-21 the dev-lane receipt for 54ca4ac5f was a ``deployed_revision``
 verdict about a deploy that never started. ``durable_backfill`` answered only
 for merges with NO receipt, so once the lane reached 54ca4ac5f nothing could
 measure it again. A receipt whose only failures are binding-class
@@ -233,5 +233,8 @@ def test_backfill_remeasures_binding_failure_through_the_artifact_reader(
     read: ModelLaneRead, expected: bool
 ) -> None:
     with patch("scripts.ci.lab_pass_receipt.read_lane", return_value=read) as fake:
-        assert read_receipt_binding_only("o/r", "compose-dev", _TARGET) is expected
+        assert (
+            read_receipt_binding_only("o/r", EnumLabLane.COMPOSE_DEV.value, _TARGET)
+            is expected
+        )
     fake.assert_called_once_with("o/r", EnumLabLane.COMPOSE_DEV, _TARGET)
