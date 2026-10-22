@@ -248,6 +248,31 @@ def discover_runtime_local_ingress_routes(
     return routes
 
 
+def local_ingress_contract_fingerprint(
+    package_names: Sequence[str],
+) -> tuple[tuple[str, int, int], ...]:
+    """Return the cheap identity of the installed contract set discovery would read.
+
+    Walks the same ``nodes/*/contract.yaml`` files as
+    :func:`discover_runtime_local_ingress_routes`, in the same order, and records
+    each file's path, ``st_mtime_ns`` and ``st_size``. It only calls ``stat``;
+    it never opens a contract. It raises what ``_resolve_package_root`` raises.
+    """
+
+    fingerprint: list[tuple[str, int, int]] = []
+    for package_name in package_names:
+        package_root = _resolve_package_root(package_name)
+        nodes_dir = package_root / "nodes"
+        if not nodes_dir.is_dir():
+            continue
+        for contract_path in sorted(nodes_dir.glob("*/contract.yaml")):
+            contract_stat = contract_path.stat()
+            fingerprint.append(
+                (str(contract_path), contract_stat.st_mtime_ns, contract_stat.st_size)
+            )
+    return tuple(fingerprint)
+
+
 def _register_local_ingress_route_alias(
     routes: dict[str, ModelRuntimeLocalIngressRoute],
     alias_sources: dict[str, str],
