@@ -258,6 +258,11 @@ requirements:
     acceptance:
       - id: AC52
         statement: 'AC52: with a failing cloud-migration fixture the bash preflight logs "cloud-migration exited 7" and the redacted tail, the runtime refresh still completes, report_cloud_migration_failure returns 3 after DEPLOYMENT_COMPLETE=true in main, a succeeding or out-of-scope cloud migration returns 0, and refresh_dev_lane.sh turns SUCCESS plus deploy exit 3 into FAILED_CLOUD_MIGRATION with exit 1 and deploy_exit in the receipt -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q'
+  - id: req-omn17427-cloud-migration-runtime-graph
+    statement: In the dev lane's rendered compose graph (docker-compose.infra.yml layered with docker-compose.dev-lane.yml, profile runtime) only onex-api reaches the cloud-migration-files or cloud-migration one-shot through depends_on, so a failing cloud migration cannot keep omninode-runtime, runtime-effects, runtime-worker or a projection writer from starting.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: the render shows onex-api waiting on cloud-migration with service_completed_successfully and no other service reaching either cloud one-shot directly or transitively, and a fixture that wires omninode-runtime to a failing cloud-migration is flagged with its dependency path -- falsifier: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"'
   - id: req-omn17427-prepr-teardown-stop-on-failure
     statement: The pre-PR slot teardown stops after a failed container removal and keeps the staging root whenever an earlier step failed, and a staging root it cannot remove is reported in the teardown report instead of raised.
     acceptance:
@@ -574,6 +579,9 @@ evidence_requirements:
   - kind: tests
     description: A failing cloud migration one-shot in the bash deploy handler is reported with its exit code and redacted log tail and ends the deploy with exit 3 after the runtime deploys; the dev refresh ends FAILED_CLOUD_MIGRATION.
     command: uv run pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py tests/unit/scripts/test_refresh_dev_lane_cloud_migration_omn18496.py tests/scripts/test_deploy_runtime_registry_commit_on_success.py -q
+  - kind: tests
+    description: In the rendered dev-lane compose graph only onex-api reaches a cloud migration one-shot through depends_on; a fixture wiring the runtime to a failing cloud-migration is flagged.
+    command: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
   - kind: tests
     description: Tests use a fake docker host to verify a refused container removal preserves the slot and an unremovable staging root is reported; they do not claim a live slot teardown.
     command: uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q
@@ -2020,6 +2028,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac146-cloud-migration-runtime-graph
+    description: Renders the dev lane's compose files with docker compose config (non-mutating) and walks every service's depends_on closure; only onex-api reaches cloud-migration or cloud-migration-files, and a fixture that wires omninode-runtime to a failing cloud-migration is flagged with its path. Reads repository files only; does not claim a live dev-lane deployment.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
+  - id: dod-omn-17427-ac146-runtime-graph-deploy-check
+    description: Hosted-runner deploy check -- the same render-and-walk over the committed compose files, which are what the deploy agent renders on the dev lane; no container is started.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k "cloud or reachability"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
   - id: dod-omn-17427-ac146-verify-signal-in-cleanup
     description: The verify_signal tests send a real SIGTERM to the test process from a fake transport while the teardown, snap-post, lease release or lease take command runs, and read the fake host's phases and lease and the result file. Five of the new tests fail against the previous module, where the signal raised inside the cleanup step and the summary always said torn down.
     source: manual
