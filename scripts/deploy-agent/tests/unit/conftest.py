@@ -200,6 +200,15 @@ def _derive_runtime_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(executor_mod, "runtime_compose_up_budget", _budget)
 
+    def _health_budget(lane: object, service: str) -> int:
+        return compose_budget.derive_runtime_health_budget(
+            compose_files,
+            service,
+            floor_seconds=executor_mod.RUNTIME_COMPOSE_UP_FLOOR_SECONDS,
+        )
+
+    monkeypatch.setattr(executor_mod, "runtime_health_probe_budget", _health_budget)
+
 
 @pytest.fixture(autouse=True)
 def _derive_deps_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
