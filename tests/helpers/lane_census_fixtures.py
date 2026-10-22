@@ -103,12 +103,18 @@ LAB_MANIFEST = _lab_census_path("lane-manifest.yaml")
 LAB_SNAPSHOT = _lab_census_path("census-snapshot.json")
 
 
-def _collaborator_runtime_profiles() -> frozenset[str]:
-    """The runtime-policy profiles that are neither dev, dogfood nor governed.
+def collaborator_lanes_on_second_host() -> frozenset[str]:
+    """Every lane name the lab's second host carries for its collaborator lane.
 
-    Returned as a set rather than unpacked to one name: this module is imported
-    by many test modules, and a change to the profile set must fail the tests
-    that compare lanes, not the collection of every importer.
+    OMN-17292: since 2026-10-22 that host also carries the collaborator lane
+    brought up there for the dashboard owner (operator RULING
+    2026-10-22T07:02:21Z, OMN-17427). The private census declares it under two
+    lane names: ``dashboard-owner`` and the runtime-policy collaborator profile,
+    the profile that is neither dev, dogfood nor governed.
+
+    A function, not a module constant: this module is imported by many test
+    modules, so the lookup runs only in the tests that call it, and a change to
+    the profile set fails those tests rather than every importer's collection.
     """
     from typing import get_args
 
@@ -117,20 +123,5 @@ def _collaborator_runtime_profiles() -> frozenset[str]:
     )
     from scripts.preflight_lane_deploy_attribution import GOVERNED_LANES
 
-    return (
-        frozenset(get_args(RuntimeProfileName))
-        - GOVERNED_LANES
-        - {
-            "dev",
-            "dogfood",
-        }
-    )
-
-
-#: OMN-17292: since 2026-10-22 the lab's second host also carries the
-#: collaborator lane brought up there for the dashboard owner (operator RULING
-#: 2026-10-22T07:02:21Z, OMN-17427). The private census declares it under two
-#: lane names: the runtime-policy collaborator profile and ``dashboard-owner``.
-COLLABORATOR_LANES_ON_SECOND_HOST = (
-    frozenset({"dashboard-owner"}) | _collaborator_runtime_profiles()
-)
+    profiles = frozenset(get_args(RuntimeProfileName)) - GOVERNED_LANES
+    return frozenset({"dashboard-owner"}) | (profiles - {"dev", "dogfood"})

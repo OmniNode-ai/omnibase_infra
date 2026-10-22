@@ -41,8 +41,8 @@ from scripts.preflight_lane_deploy_attribution import (
     resolve_grant_block,
 )
 from tests.helpers.lane_census_fixtures import (
-    COLLABORATOR_LANES_ON_SECOND_HOST,
     LAB_MANIFEST,
+    collaborator_lanes_on_second_host,
 )
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
@@ -178,8 +178,11 @@ def test_manifest_declares_sim_202_on_lab_202_only() -> None:
 #: OMN-19505: .202 also carries the second deployed dev lane. No .201 lane is
 #: declared for it.
 LANES_ON_202 = ["dev-202", LANE]
-#: OMN-17292: and the dashboard owner's collaborator lane, under both its names.
-LANES_ON_202 = sorted([*LANES_ON_202, *COLLABORATOR_LANES_ON_SECOND_HOST])
+
+
+def _lanes_on_202() -> list[str]:
+    """OMN-17292: and the dashboard owner's collaborator lane, under both names."""
+    return sorted([*LANES_ON_202, *collaborator_lanes_on_second_host()])
 
 
 @pytest.mark.lab_overlay
@@ -190,7 +193,7 @@ def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> 
     lanes_on_host = sorted(
         name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
     )
-    assert lanes_on_host == LANES_ON_202, (
+    assert lanes_on_host == _lanes_on_202(), (
         f"no .201 lane may be declared for .202; got {lanes_on_host}"
     )
 
@@ -284,9 +287,9 @@ def test_census_on_202_reads_sim_202_clean_and_every_other_lane_not_applicable()
     plan = _plan_on_202(_healthy_sim_202_rows())
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    assert sorted(plan["lanes_checked"]) == LANES_ON_202
+    assert sorted(plan["lanes_checked"]) == _lanes_on_202()
     assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - set(
-        LANES_ON_202
+        _lanes_on_202()
     )
     assert plan["findings"] == []
     assert plan["has_drift"] is False
