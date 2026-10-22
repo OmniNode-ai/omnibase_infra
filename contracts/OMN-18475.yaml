@@ -60,6 +60,22 @@ dod_evidence:
         check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_removal_race_omn18475.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
+  - id: "dod-omn18475-cli-executor-integration"
+    description: "The CLI replaces a real store in a separate process; the same executor reads the new pin into its next child environment, preserves unit-owned values and shell quoting, and reads the original pin after ledger refusal restores the store. Local Docker and ledger executables keep the check runnable on a hosted runner."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/test_dev_lane_pin_env_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1", "AC2"]
+  - id: "dod-omn18475-cli-executor-deploy-check"
+    description: "Hosted-runner deploy check: read back the executor's child environment after an out-of-process pin update and after a refused ledger append. Requires no shared daemon, host credentials or production service."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_dev_lane_pin_env_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1", "AC2"]
   - id: "dod-omn18475-deploy-probe-env-store"
     description: "Deploy probe: the deploy agent's executor at this commit applies the operator store overlay in _compose_env (AC1)."
     source: "manual"
