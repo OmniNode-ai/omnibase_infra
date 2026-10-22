@@ -37,10 +37,10 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  Headless Infisical secret seeding (OMN-16897). Reads a local dotenv-style source file (or stdin), upserts the named secrets into a caller-named Infisical instance/project/environment/path via the existing InfisicalSecretStore write path, and verifies by NAME readback only. Idempotent. Defaults to dry-run. Secret values never enter the request, the result, the bus, the event log, or any log line.
+  Headless Infisical secret seeding (OMN-16897). Reads a local dotenv-style source file (or stdin), upserts the named secrets into a caller-named Infisical instance/project/environment/path via the existing InfisicalSecretStore write path, and verifies by NAME readback only. Idempotent. Defaults to dry-run. Secret values never enter the request, the result, the bus, the event log, or any log line. Exception messages replace held values of at least four characters with *** before shared credential-shape sanitization of the remainder, preserving non-sensitive diagnostics and redacting provider keys not among the held values.
 
 input_model:
   name: "ModelSecretSeedRequest"
@@ -172,7 +172,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "infisical"
   created: "2026-08-28"
-  updated: "2026-08-28"
+  updated: "2026-10-21"
   tags:
     - "effect"
     - "secrets"

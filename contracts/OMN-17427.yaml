@@ -407,6 +407,11 @@ requirements:
         statement: 'AC142: topic deletes use batches of at most 25 names and each batch is followed by a broker health read -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k topic_deletes_are_small_chunks'
       - id: AC143
         statement: 'AC143: a broker that stops reporting healthy halts further topic deletes, returns INCOMPLETE and reports remaining topics while preserving other namespaces -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k a_broker_that_stops_reporting_healthy'
+  - id: req-omn17427-provider-key-redaction
+    statement: Runtime logs, DLQ bodies, error sanitizers and refusal or gate receipts share one declared credential-shape list covering the BYOK provider catalogue.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: synthetic OpenAI, project, Anthropic, OpenRouter, Gemini and GLM fixtures are redacted on the shared logging bootstrap and adjacent error, DLQ and receipt paths, ordinary text survives, and the regression file runs in CI and pre-commit -- falsifier: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov'
   - id: req-omn17427-census-restart-window
     statement: The lane census grades a container's cumulative RestartCount past its bound as a restart loop only while the container is not running or was last started within the last 1800 s of the census; a container running since a start older than that is not a loop, and an unreadable start or census time stays a finding.
     acceptance:
@@ -417,7 +422,20 @@ requirements:
     acceptance:
       - id: AC151
         statement: 'AC151: uv.lock resolves virtualenv to 21.14.12 or above and uv lock --check passes -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c "import tomllib; from packaging.version import Version; p = next(p for p in tomllib.load(open(''uv.lock'', ''rb''))[''package''] if p[''name''] == ''virtualenv''); assert Version(p[''version'']) >= Version(''21.14.12''), p[''version'']"'
+  - id: req-omn17427-runner-image-python-source
+    statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: docker/runners/Dockerfile has no add-apt-repository, deadsnakes or launchpad instruction, installs uv before running `uv python install 3.12`, and links python3.12, python3, python, pip3 and pip to the managed interpreter with a 3.12 version assertion -- falsifier: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q'
+  - id: req-omn17427-lockfile-virtualenv-floor
+    statement: uv.lock pins virtualenv at or above 21.14.12, the release the Lockfile CVE Scan reads clean of GHSA-5vjq-rrrf-7h2q, GHSA-8rjx-v5ww-45pp, GHSA-c947-3pg5-gm8q and GHSA-vxj4-q4g9-crj7, so the dev merge groups are no longer ejected by that scan.
+    acceptance:
+      - id: AC147
+        statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
 evidence_requirements:
+  - kind: tests
+    description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
+    command: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
     command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
@@ -583,6 +601,12 @@ evidence_requirements:
   - kind: tests
     description: The census planner grades a restart count past its bound against the container's last start and the census time; the collector reads both.
     command: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
+  - kind: tests
+    description: A text-level read of the runner Dockerfile pins the Python source to uv-managed CPython installed after uv; build-smoke proves the built image.
+    command: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+  - kind: tests
+    description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
+    command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -616,6 +640,27 @@ dod_evidence:
     binds_ac:
       - AC142
       - AC143
+  - id: dod-omn-17427-ac142-provider-key-redaction
+    description: Synthetic provider shapes fail before the patch and pass through the shared logging bootstrap and adjacent redaction paths after it; this uses no live credential or external service.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_provider_key_redaction_process_omn17427.py tests/unit/nodes/node_secret_seed_effect/test_handler_secret_seed.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac142-provider-key-redaction-deploy
+    description: Hosted-runner deploy check exercises the runtime logging bootstrap, handler and formatter with every synthetic provider shape and the adjacent DLQ, error and receipt sanitizers; no service deployment or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py tests/unit/nodes/node_secret_seed_effect/test_secret_seed_contract.py tests/unit/nodes/node_secret_seed_effect/test_handler_secret_seed.py tests/integration/runtime/test_provider_key_redaction_process_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual
@@ -1925,3 +1970,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC151
+  - id: dod-omn-17427-ac146-runner-image-python-source
+    description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_python_source_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC146
+  - id: dod-omn-17427-ac147-lockfile-virtualenv-floor
+    description: The test reads uv.lock and fails when virtualenv is below 21.14.12; it refuses the recorded 21.7.13 pin as its positive control. No scheduled run is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC147
