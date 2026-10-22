@@ -412,6 +412,11 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-prepr-verify-signal-in-cleanup
+    statement: A pre-PR verify run that receives its first SIGTERM, SIGHUP or SIGINT during the teardown, snap-post, lease take or lease release finishes that step before it exits INTERRUPTED, and its summary names only the cleanup that ran (OMN-20085, the 2026-10-20T15:20Z slot 2 run whose teardown one SIGTERM cut short).
+    acceptance:
+      - id: AC148
+        statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
   - id: req-omn17427-developer-grants-complete-audit
     statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
     acceptance:
@@ -605,6 +610,9 @@ evidence_requirements:
   - kind: tests
     description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
     command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+  - kind: tests
+    description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -1976,6 +1984,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac146-verify-signal-in-cleanup
+    description: The verify_signal tests send a real SIGTERM to the test process from a fake transport while the teardown, snap-post, lease release or lease take command runs, and read the fake host's phases and lease and the result file. Five of the new tests fail against the previous module, where the signal raised inside the cleanup step and the summary always said torn down.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn-17427-ac146-verify-signal-deploy-check
+    description: Hosted-runner deploy check -- the verify signal tests over a fake transport; they do not claim a live verify run on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
   - id: dod-omn17427-ac146-complete-developer-grant-audit
     description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
     source: manual
