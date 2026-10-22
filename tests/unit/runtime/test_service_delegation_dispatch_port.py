@@ -331,6 +331,29 @@ async def test_runtime_delegation_dispatch_port_respects_dispatch_timeout_contra
 
 
 @pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_carries_trace_id_onto_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_id = uuid4()
+    _, payloads, _, _ = await _dispatch_with_fake_broker(
+        monkeypatch, trace_id=trace_id, queue_wait_ms=42
+    )
+
+    assert payloads[0]["trace_id"] == str(trace_id)
+    assert "queue_wait_ms" not in payloads[0]
+    assert ModelDelegationRequest.model_validate(payloads[0]).trace_id == trace_id
+
+
+@pytest.mark.asyncio
+async def test_runtime_delegation_dispatch_port_omits_absent_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, payloads, _, _ = await _dispatch_with_fake_broker(monkeypatch)
+
+    assert "trace_id" not in payloads[0]
+
+
+@pytest.mark.asyncio
 async def test_runtime_delegation_dispatch_port_forwards_quality_contract_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

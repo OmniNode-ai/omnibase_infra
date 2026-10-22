@@ -360,11 +360,16 @@ requirements:
     acceptance:
       - id: AC141
         statement: 'AC141: soft is raised to hard, left alone when already there, capped when hard is unlimited, a refused setrlimit is reported not raised, a real subprocess started at 256 soft ends at the hard limit, and service_kernel.main raises it before the event loop starts -- falsifier: uv run pytest tests/unit/runtime/test_service_kernel_nofile_omn17427.py -q'
+  - id: req-omn17427-dispatch-port-trace-queue-wait
+    statement: RuntimeDelegationDispatchPort and ProtocolDelegationDispatchPort accept the trace_id and queue_wait_ms keywords the OmniMarket delegate-skill consumer passes since omnimarket#4252, both defaulted; trace_id rides the published delegation command and queue_wait_ms is accepted and not published, because the Core wire request has no field for it and forbids extras.
+    acceptance:
+      - id: AC157
+        statement: 'AC157: the consumer-kwarg-parity module passes against an omnimarket checkout whose handler declares trace_id and queue_wait_ms, a dispatch with trace_id publishes it as a string the Core ModelDelegationRequest validates back to the same UUID, a dispatch without it publishes no trace_id key, and queue_wait_ms is never on the wire -- falsifier: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q -k trace_id'
   - id: req-omn17427-dispatch-terminal-measure-wire
-    statement: The runtime delegation dispatch port accepts caller-local trace and queue measurements while publishing only fields the strict delegation wire accepts.
+    statement: The runtime delegation dispatch port accepts caller-local trace and queue measurements while publishing only fields the strict delegation wire accepts -- trace_id, which the Core wire declares, and never queue_wait_ms.
     acceptance:
       - id: AC142
-        statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal without trace_id or queue_wait_ms in the request payload -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
+        statement: 'AC142: None, a trace UUID, a queue wait and zero queue wait dispatch through the real Pattern-B broker to a strict Core wire decoder and return a completed terminal with trace_id in the request payload only when one was passed and queue_wait_ms never -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q -k terminal_measure_kwargs'
   - id: req-omn17427-one-runtime-fold
     statement: A lane folds the effects, worker, tenant-projection and projection-writer roles into its one main runtime by declaring folded_profiles in the runtime policy contract (rendered as ONEX_RUNTIME_FOLDED_PROFILES); the auto-wiring ownership filter then attaches every contract those roles own in that process, an unregistered folded name is refused, and a node whose handler raises does not stop delivery to the other nodes on the shared bus.
     acceptance:
@@ -382,11 +387,21 @@ requirements:
         statement: 'AC142: topic deletes use batches of at most 25 names and each batch is followed by a broker health read -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k topic_deletes_are_small_chunks'
       - id: AC143
         statement: 'AC143: a broker that stops reporting healthy halts further topic deletes, returns INCOMPLETE and reports remaining topics while preserving other namespaces -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_prepr_teardown_slot_omn18896.py -q -k a_broker_that_stops_reporting_healthy'
+  - id: req-omn17427-provider-key-redaction
+    statement: Runtime logs, DLQ bodies, error sanitizers and refusal or gate receipts share one declared credential-shape list covering the BYOK provider catalogue.
+    acceptance:
+      - id: AC142
+        statement: 'AC142: synthetic OpenAI, project, Anthropic, OpenRouter, Gemini and GLM fixtures are redacted on the shared logging bootstrap and adjacent error, DLQ and receipt paths, ordinary text survives, and the regression file runs in CI and pre-commit -- falsifier: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov'
   - id: req-omn17427-census-restart-window
     statement: The lane census grades a container's cumulative RestartCount past its bound as a restart loop only while the container is not running or was last started within the last 1800 s of the census; a container running since a start older than that is not a loop, and an unreadable start or census time stays a finding.
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-shared-ticket-contract-composer
+    statement: Repository-side preparation composes independent branch fragments without shared root edits; hosted adoption remains blocked on the external gate owners.
+    acceptance:
+      - id: AC17427001
+        statement: 'Independent branch trees each add one bound criterion under contracts/OMN-17427.d, validate separately, and merge in either order with no textual conflict and no root change; malformed fragments are refused -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q'
   - id: req-omn17427-runner-image-python-source
     statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
     acceptance:
@@ -397,7 +412,30 @@ requirements:
     acceptance:
       - id: AC147
         statement: 'AC147: the floor test refuses the recorded 21.7.13 pin and fails when uv.lock holds a virtualenv below 21.14.12 -- falsifier: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q'
+  - id: req-omn17427-prepr-verify-signal-in-cleanup
+    statement: A pre-PR verify run that receives its first SIGTERM, SIGHUP or SIGINT during the teardown, snap-post, lease take or lease release finishes that step before it exits INTERRUPTED, and its summary names only the cleanup that ran (OMN-20085, the 2026-10-20T15:20Z slot 2 run whose teardown one SIGTERM cut short).
+    acceptance:
+      - id: AC148
+        statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+  - id: req-omn17427-developer-grants-complete-audit
+    statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
+    acceptance:
+      - id: AC146
+        statement: 'AC146: apply-grants and audit-grants exit 2 when no principal is selected, with no ledger or broker writes, and an rpk ACL row carrying an error is refused rather than counted as a grant -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"'
+  - id: req-omn17427-broker-listener-alarm
+    statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
+    acceptance:
+      - id: AC158
+        statement: 'AC158: broker_listener is ALARM when every bootstrap address refuses, times out or accepts without a Kafka ApiVersions answer, OK when one address answers, and INDETERMINATE for an unresolvable name or a malformed bootstrap -- falsifier: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q'
+  - id: req-omn17427-seed-scan-virtualenv-scope
+    statement: Seed provenance scans repository publishers without descending into nested Python environments identified by pyvenv.cfg, while source publishers and incomplete scans still fail the gate.
+    acceptance:
+      - id: AC159
+        statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
 evidence_requirements:
+  - kind: tests
+    description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
+    command: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
   - kind: tests
     description: The verify script's own staging block is run in bash and the resulting directory modes are read; this does not claim a live mint.
     command: uv run pytest tests/unit/scripts/test_prepr_tenant_state_writable_omn19064.py -q
@@ -558,6 +596,9 @@ evidence_requirements:
     description: The drift checker compares onex-disk-gc.service to the installer-rendered unit for the declared registry root.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
   - kind: tests
+    description: The runtime dispatch port carries trace_id onto the delegation command and accepts queue_wait_ms without publishing it.
+    command: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q -k trace_id
+  - kind: tests
     description: The runtime-profile fold attaches the folded roles' contracts in one process and one failing node stops no other.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_profile_fold_omn17427.py -q
   - kind: tests
@@ -569,6 +610,9 @@ evidence_requirements:
   - kind: tests
     description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
     command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
+  - kind: tests
+    description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -602,6 +646,27 @@ dod_evidence:
     binds_ac:
       - AC142
       - AC143
+  - id: dod-omn-17427-ac142-provider-key-redaction
+    description: Synthetic provider shapes fail before the patch and pass through the shared logging bootstrap and adjacent redaction paths after it; this uses no live credential or external service.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_provider_key_redaction_process_omn17427.py tests/unit/nodes/node_secret_seed_effect/test_handler_secret_seed.py -q -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
+  - id: dod-omn-17427-ac142-provider-key-redaction-deploy
+    description: Hosted-runner deploy check exercises the runtime logging bootstrap, handler and formatter with every synthetic provider shape and the adjacent DLQ, error and receipt sanitizers; no service deployment or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py tests/unit/nodes/node_secret_seed_effect/test_secret_seed_contract.py tests/unit/nodes/node_secret_seed_effect/test_handler_secret_seed.py tests/integration/runtime/test_provider_key_redaction_process_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC142
   - id: dod-omn-17427-ac141-prepr-tenant-state-writable
     description: The test runs the mkdir and chmod block of prepr_verify_lane.sh in bash and reads the modes of tenant-state and .slot-env. It fails against the previous script, which leaves tenant-state at the umask default with no write for others.
     source: manual
@@ -1753,8 +1818,44 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC141
+  - id: dod-omn-17427-ac157-dispatch-trace-queue-wait
+    description: Unit tests drive RuntimeDelegationDispatchPort.dispatch through a fake broker and read the published command payload; no broker, lane or omnimarket process is used. The consumer-kwarg-parity hook result against omnimarket f782334a4 is recorded in the pull request body, not by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q -k trace_id
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC157
+  - id: dod-omn-17427-ac157-dispatch-trace-deploy-check
+    description: Hosted-runner deploy check -- the same fake-broker unit tests over the dispatch port; it reads no deployed lane and sends no delegation.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC157
+  - id: dod-omn-17427-ac157-dispatch-telemetry-integration
+    description: The real runtime dispatch port and Pattern B broker send a command through EventBusInmemory. A consumer validates it with the Core wire model and returns a correlated terminal containing the received trace ID. Present, explicit None and omitted telemetry are exercised; queue_wait_ms must never enter the wire payload.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_delegation_dispatch_trace_queue_wait.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC157
+  - id: dod-omn-17427-ac157-dispatch-telemetry-hosted
+    description: Hosted-runner deploy check of the runtime port, real Pattern B broker, in-memory transport and Core wire decoding. No credentials, containers, sibling checkout or deployed lane is required; this checks command and terminal delivery inside one process.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/test_delegation_dispatch_trace_queue_wait.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC157
   - id: dod-omn-17427-ac142-dispatch-measure-wire
-    description: The runtime port and real Pattern-B broker publish bytes on EventBusInmemory; the consumer decodes them with ModelDelegationRequest and returns a terminal. Four measurement combinations complete with no caller-local measurement in the strict wire. The same test fails on dev before keyword parity with TypeError for trace_id. No external model or live deployment is claimed.
+    description: The runtime port and real Pattern-B broker publish bytes on EventBusInmemory; the consumer decodes them with ModelDelegationRequest and returns a terminal. Four measurement combinations complete with queue_wait_ms never on the strict wire and trace_id on it only when passed. The same test fails on dev before keyword parity with TypeError for trace_id. No external model or live deployment is claimed.
     source: manual
     checks:
       - check_type: test_passes
@@ -1847,6 +1948,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn17427-shared-ticket-contract-composer
+    description: Two branch trees are merged file by file with Git in both orders, then composed and structurally validated. Legacy root data is preserved and invalid additions fail closed. This is repository-side preparation, not a claim that external hosted gates accept fragments.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_compose_ticket_contract_omn17427.py tests/integration/runtime/test_ticket_contract_compose_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427001
+  - id: dod-omn17427-contract-compose-deploy
+    description: Hosted-runner source and routing smoke. Loads the head-side node contract through the explicit contract path, validates the request, dispatches the real filesystem composer over the repository contract and persists its typed terminal verdict. Fails when the node, handler, input model or routing is absent or broken; requires no broker, credentials or running lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=src uv run --frozen onex node node_ticket_contract_compose_effect --contract src/omnibase_infra/nodes/node_ticket_contract_compose_effect/contract.yaml --input tests/ci/fixtures/ticket_contract_compose_request_omn17427.json --backend event_bus=inmemory --state-root .onex_state/ticket-contract-compose-deploy
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427001
   - id: dod-omn-17427-ac146-runner-image-python-source
     description: The runner Dockerfile installs Python 3.12 through uv after uv itself, with no Launchpad PPA; a text-level test over the repository file, no builder or network required.
     source: manual
@@ -1865,3 +1984,64 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC147
+  - id: dod-omn-17427-ac146-verify-signal-in-cleanup
+    description: The verify_signal tests send a real SIGTERM to the test process from a fake transport while the teardown, snap-post, lease release or lease take command runs, and read the fake host's phases and lease and the result file. Five of the new tests fail against the previous module, where the signal raised inside the cleanup step and the summary always said torn down.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn-17427-ac146-verify-signal-deploy-check
+    description: Hosted-runner deploy check -- the verify signal tests over a fake transport; they do not claim a live verify run on a slot.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC148
+  - id: dod-omn17427-ac146-complete-developer-grant-audit
+    description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "no_selected_principals or listing_row_with_an_error"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC146]
+  - id: dod-omn17427-ac146-developer-grant-deploy-check
+    description: Hosted-runner deploy check exercises grant application and readback through the real issuer with fake broker responses, including empty selections and erroneous ACL listings. No Docker daemon, broker, overlay checkout or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC146]
+  - id: dod-omn-17427-ac158-broker-listener-alarm
+    description: scripts/lab_alarm.py evaluates a broker_listener condition every run against kafka_bootstrap_servers with a Kafka ApiVersions v0 probe; refused, timed out or unanswered on every address is ALARM, one answering address is OK, an unresolvable or malformed bootstrap is INDETERMINATE.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac158-broker-listener-deploy-check
+    description: Hosted-runner deploy check of the broker_listener condition against local sockets and fake probes; no broker, credentials or live lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_lab_alarm_broker_listener_omn17427.py -q -k "real_probe or refused"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC158
+  - id: dod-omn-17427-ac159-seed-scan-scope
+    description: Temporary source trees contain marked virtual environments and real source publishers, with positive and negative controls that keep provenance enforcement on repository scripts.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC159

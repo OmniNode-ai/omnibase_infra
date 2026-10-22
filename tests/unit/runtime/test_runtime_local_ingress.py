@@ -37,6 +37,7 @@ from omnibase_infra.runtime.runtime_local_ingress import (
     ModelRuntimeLocalIngressRoute,
     RuntimeLocalIngressServer,
     discover_runtime_local_ingress_routes,
+    local_ingress_contract_fingerprint,
     parse_active_runtime_packages,
     validate_runtime_local_ingress_payload,
 )
@@ -1539,3 +1540,77 @@ handler_routing:
     assert message.count(str(contract_path)) == 1
     # The reader is told this is one contract disagreeing with itself.
     assert "same contract" in message
+
+
+def _fingerprint_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    package_root = tmp_path / "fakepkg"
+    (package_root / "nodes" / "node_demo").mkdir(parents=True)
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    (package_root / "nodes" / "node_demo" / "contract.yaml").write_text(
+        "name: demo\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+    return package_root
+
+
+def test_local_ingress_contract_fingerprint_tracks_the_installed_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-21271: an edit, an addition and a removal each change the fingerprint."""
+
+    package_root = _fingerprint_package(tmp_path, monkeypatch)
+    demo_contract = package_root / "nodes" / "node_demo" / "contract.yaml"
+
+    initial = local_ingress_contract_fingerprint(("fakepkg",))
+    assert [entry[0] for entry in initial] == [str(demo_contract.resolve())]
+    assert local_ingress_contract_fingerprint(("fakepkg",)) == initial
+
+    demo_contract.write_text("name: demo-renamed\n", encoding="utf-8")
+    edited = local_ingress_contract_fingerprint(("fakepkg",))
+    assert edited != initial
+
+    (package_root / "nodes" / "node_extra").mkdir()
+    (package_root / "nodes" / "node_extra" / "contract.yaml").write_text(
+        "name: extra\n", encoding="utf-8"
+    )
+    added = local_ingress_contract_fingerprint(("fakepkg",))
+    assert len(added) == 2
+    assert added != edited
+
+    (package_root / "nodes" / "node_extra" / "contract.yaml").unlink()
+    removed = local_ingress_contract_fingerprint(("fakepkg",))
+    assert removed == edited
+
+
+def test_local_ingress_contract_fingerprint_never_opens_a_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fingerprint_package(tmp_path, monkeypatch)
+
+    def refuse_read(self: Path, *_args: object, **_kwargs: object) -> str:
+        raise AssertionError(f"fingerprint opened {self}")
+
+    monkeypatch.setattr(Path, "read_text", refuse_read)
+    monkeypatch.setattr(Path, "read_bytes", refuse_read)
+
+    assert len(local_ingress_contract_fingerprint(("fakepkg",))) == 1
+
+
+def test_local_ingress_contract_fingerprint_skips_package_without_nodes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "bare"
+    package_root.mkdir()
+    (package_root / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "omnibase_infra.runtime.runtime_local_ingress.importlib.import_module",
+        lambda _name: SimpleNamespace(__file__=str(package_root / "__init__.py")),
+    )
+
+    assert local_ingress_contract_fingerprint(("bare",)) == ()

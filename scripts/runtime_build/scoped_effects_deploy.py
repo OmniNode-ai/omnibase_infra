@@ -14,6 +14,7 @@ import copy
 import getpass
 import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -39,6 +40,19 @@ _FILES_LABEL = "com.docker.compose.project.config_files"
 _VERSION_LABEL = "com.docker.compose.version"
 _CONFIG_HASH_LABEL = "com.docker.compose.config-hash"
 _PROCESS_TERM_GRACE = 15
+# The in-image probe's former fixed 120 s bound took 497.9 s on a loaded lab host
+# at a load ratio (load1 / cpus) of 1.5 to 2.0, 4.15 times the bound
+# (OMN-17991). Scaling the 120 s base by 4 per unit of load ratio gives 720 s to
+# 960 s there.
+_PROBE_BASE_SECONDS = 120
+_PROBE_LOAD_FACTOR = 4
+_PROBE_MAX_SECONDS = 1800
+_SASL_MECHANISMS = frozenset({"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"})
+# Credentials arrive on stdin, never argv: the script reads them and execs rpk.
+_TOPIC_CHECK_SCRIPT = (
+    'IFS= read -r RPK_USER && IFS= read -r RPK_PASS && export RPK_USER RPK_PASS RPK_SASL_MECHANISM="$1"'
+    " && exec rpk topic list -X brokers=redpanda:9092"
+)
 _IMAGE_CONFIG_FIELDS = (
     "Env",
     "Cmd",
@@ -50,6 +64,35 @@ _IMAGE_CONFIG_FIELDS = (
     "Volumes",
     "StopSignal",
 )
+
+
+def probe_timeout(
+    declared: int | None,
+    *,
+    loadavg: Callable[[], tuple[float, float, float]] = os.getloadavg,
+    cpu_count: Callable[[], int | None] = os.cpu_count,
+) -> dict[str, Any]:
+    """Bound one in-image probe: a declared value wins, else scale to host load."""
+    if declared is not None:
+        return {"seconds": declared, "source": "declared"}
+    try:
+        load1 = loadavg()[0]
+    except OSError as exc:
+        raise RuntimeError(
+            "host load is unreadable; declare probe_timeout_seconds in the plan"
+        ) from exc
+    cpus = cpu_count()
+    if cpus is None or cpus < 1:
+        raise RuntimeError(
+            "host CPU count is unreadable; declare probe_timeout_seconds in the plan"
+        )
+    ratio = max(1.0, _PROBE_LOAD_FACTOR * load1 / cpus)
+    return {
+        "seconds": min(_PROBE_MAX_SECONDS, math.ceil(_PROBE_BASE_SECONDS * ratio)),
+        "source": "host-load",
+        "load1": load1,
+        "cpus": cpus,
+    }
 
 
 def _canonical(value: object) -> bytes:
@@ -200,6 +243,73 @@ def _healthy(container: Mapping[str, Any]) -> bool:
         and state.get("Status") == "running"
         and not any(state.get(key, False) for key in ("Paused", "Restarting", "Dead"))
         and state.get("Health", {}).get("Status") == "healthy"
+    )
+
+
+def _running(container: Mapping[str, Any]) -> bool:
+    state = container.get("State", {})
+    return (
+        state.get("Running") is True
+        and state.get("Status") == "running"
+        and not any(state.get(key, False) for key in ("Paused", "Restarting", "Dead"))
+    )
+
+
+def _settled(container: Mapping[str, Any]) -> bool:
+    """Running, with a health verdict reached: healthy or unhealthy, not starting."""
+    return _running(container) and container.get("State", {}).get("Health", {}).get(
+        "Status"
+    ) in {"healthy", "unhealthy"}
+
+
+def _environment(container: Mapping[str, Any]) -> dict[str, str]:
+    return dict(
+        entry.split("=", 1)
+        for entry in container.get("Config", {}).get("Env") or []
+        if "=" in entry
+    )
+
+
+def _health_reading(container: Mapping[str, Any]) -> dict[str, Any]:
+    """Health state only; a check's Output can carry arbitrary text and is never read."""
+    state = container.get("State", {})
+    health = state.get("Health", {})
+    log = health.get("Log") or []
+    last = log[-1] if log and isinstance(log[-1], dict) else {}
+    return {
+        "container_id": container.get("Id"),
+        "image": container.get("Image"),
+        "running": state.get("Running"),
+        "status": state.get("Status"),
+        "health": health.get("Status"),
+        "failing_streak": health.get("FailingStreak"),
+        "last_check_exit_code": last.get("ExitCode"),
+        "last_check_end": last.get("End"),
+        "read_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _admission(plan: ModelEffectsDeployPlan, target: Mapping[str, Any]) -> str:
+    """Admit a healthy target, or an unhealthy one only on the plan's flag.
+
+    Dev-lane confinement of ``admit_unhealthy_target`` is the compose project:
+    the plan model can only name the dev project, and the shell entrypoint
+    refuses any other lane before this runs. The target must still be running
+    with an unhealthy or starting health check; restarting or stopped refuses.
+    """
+    if _healthy(target):
+        return "healthy"
+    if (
+        plan.admit_unhealthy_target
+        and _running(target)
+        and target.get("State", {}).get("Health", {}).get("Status")
+        in {"unhealthy", "starting"}
+    ):
+        return "unhealthy-admitted"
+    raise RuntimeError(
+        "current effects service must already be healthy; an unhealthy target is"
+        " admitted only with admit_unhealthy_target (dev compose project only)"
+        " while running with an unhealthy or starting health check"
     )
 
 
@@ -454,7 +564,7 @@ def _assert_mutable_resources(
 
 def _preflight(
     plan: ModelEffectsDeployPlan, runner: CommandRunner
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     if compose_chain_sha256(plan.compose_files) != plan.expected_compose_sha256:
         raise RuntimeError("compose chain bytes differ from the approved plan")
     containers = _project(plan, runner)
@@ -464,8 +574,7 @@ def _preflight(
         or target["Image"] != plan.expected_image_id
     ):
         raise RuntimeError("active effects identity differs from the approved plan")
-    if not _healthy(target):
-        raise RuntimeError("current effects service must already be healthy")
+    admission = _admission(plan, target)
     labels = target["Config"]["Labels"]
     if labels.get(_WORKDIR_LABEL) != str(plan.compose_working_dir):
         raise RuntimeError(
@@ -497,7 +606,7 @@ def _preflight(
         raise RuntimeError("effects-only rollout requires exactly one replica")
     _assert_active_config(plan, target, _unescape_render(rendered))
     _assert_dependencies(plan, containers, rendered)
-    return containers, rendered
+    return containers, rendered, admission
 
 
 def _unescape_render(value: Any) -> Any:
@@ -557,6 +666,7 @@ def _probe(
     runner: CommandRunner,
     script: str,
     *,
+    timeout: int,
     image: str | None = None,
     container: str | None = None,
 ) -> dict[str, Any]:
@@ -580,7 +690,13 @@ def _probe(
     else:
         raise RuntimeError("probe requires a specific image or container")
     args.append("-")
-    value = json.loads(runner(args, script, 120))
+    try:
+        output = runner(args, script, timeout)
+    except CommandProcessUnfencedError:
+        raise  # Rollback dispatches on this type; never rewrap it.
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}; image probe bound {timeout} s") from exc
+    value = json.loads(output)
     if not isinstance(value, dict) or not isinstance(value.get("source_pins"), dict):
         raise RuntimeError("image probe returned incomplete provenance")
     for key in (
@@ -625,7 +741,10 @@ def _hotpatch_preflight(
         raise RuntimeError("scoped effects rollout refuses HOTPATCH_PREFLIGHT_BYPASS")
     if not plan.hotpatch_ledger.is_file() or not plan.source_clones_root.is_dir():
         raise RuntimeError("required hotpatch ledger or source clone root is absent")
-    refs = {"omnibase_infra": plan.infra_source_sha, **plan.source_pins}
+    refs = {
+        "omnibase_infra": plan.infra_source_sha,
+        **{str(repo): sha for repo, sha in plan.source_pins.items()},
+    }
     for repo, expected in refs.items():
         clone = plan.source_clones_root / repo
         if not clone.is_dir():
@@ -686,26 +805,70 @@ def _hotpatch_preflight(
     }
 
 
+def _broker_login(target: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    """Authenticate as the effects runtime does, from its admitted environment."""
+    environment = _environment(target)
+    protocol = environment.get("KAFKA_SECURITY_PROTOCOL") or "PLAINTEXT"
+    if protocol == "PLAINTEXT":
+        return None
+    mechanism = environment.get("KAFKA_SASL_MECHANISM", "")
+    if protocol != "SASL_PLAINTEXT" or mechanism not in _SASL_MECHANISMS:
+        raise RuntimeError(
+            "effects broker security protocol or SASL mechanism is not supported"
+            " by the scoped topic check"
+        )
+    username = environment.get("KAFKA_SASL_USERNAME", "")
+    password = environment.get("KAFKA_SASL_PASSWORD", "")
+    if not username or not password or any("\n" in v for v in (username, password)):
+        raise RuntimeError(
+            "effects SASL credentials are empty or malformed; the scoped topic"
+            " check never falls back to an unauthenticated read"
+        )
+    return mechanism, username, password
+
+
 def _assert_topics(
-    containers: Sequence[dict[str, Any]], required: list[str], runner: CommandRunner
-) -> None:
+    containers: Sequence[dict[str, Any]],
+    required: list[str],
+    runner: CommandRunner,
+    target: Mapping[str, Any],
+) -> dict[str, Any]:
+    login = _broker_login(target)
     broker = _service(containers, "redpanda")
     if not _healthy(broker):
         raise RuntimeError("existing project broker is not healthy")
-    raw = runner(
-        [
-            "docker",
-            "exec",
-            broker["Id"],
-            "rpk",
-            "topic",
-            "list",
-            "-X",
-            "brokers=redpanda:9092",
-        ],
-        None,
-        30,
-    )
+    if login is None:
+        raw = runner(
+            [
+                "docker",
+                "exec",
+                broker["Id"],
+                "rpk",
+                "topic",
+                "list",
+                "-X",
+                "brokers=redpanda:9092",
+            ],
+            None,
+            30,
+        )
+    else:
+        mechanism, username, password = login
+        raw = runner(
+            [
+                "docker",
+                "exec",
+                "-i",
+                broker["Id"],
+                "/usr/bin/bash",
+                "-c",
+                _TOPIC_CHECK_SCRIPT,
+                "onex-topic-check",
+                mechanism,
+            ],
+            f"{username}\n{password}\n",
+            30,
+        )
     rows = [line.split() for line in raw.splitlines() if line.strip()]
     if not rows or rows[0][:2] != ["NAME", "PARTITIONS"]:
         raise RuntimeError("broker topic metadata format is unrecognized")
@@ -719,6 +882,10 @@ def _assert_topics(
         raise RuntimeError(
             f"required broker topics are absent ({len(missing)}); scoped rollout cannot provision them"
         )
+    return {
+        "auth": "none" if login is None else f"sasl:{login[0]}",
+        "required_beyond_target": len(required),
+    }
 
 
 def _write(path: Path, payload: object, *, mode: int = 0o600) -> None:
@@ -740,7 +907,10 @@ def _wait_target(
     runner: CommandRunner,
     sleep: Callable[[float], None],
     monotonic: Callable[[], float],
+    require_healthy: bool = True,
 ) -> dict[str, Any]:
+    """Wait for healthy, or, restoring a prior admitted unhealthy, for a settled verdict."""
+    ready = _healthy if require_healthy else _settled
     deadline = monotonic() + plan.health_timeout_seconds
     while True:
         target = _service(_project(plan, runner), plan.service)
@@ -748,7 +918,7 @@ def _wait_target(
             raise RuntimeError(
                 "recreated effects container is not the intended immutable image"
             )
-        if _healthy(target):
+        if ready(target):
             return target
         if monotonic() >= deadline:
             raise RuntimeError(
@@ -802,7 +972,8 @@ def _assert_unchanged(
     snapshot_sha: str,
     verified_target: Mapping[str, Any],
     rendered: Mapping[str, Any],
-) -> None:
+    require_healthy: bool = True,
+) -> dict[str, Any]:
     after = _project(plan, runner)
     if hashlib.sha256(snapshot.read_bytes()).hexdigest() != snapshot_sha:
         raise RuntimeError("private admitted Compose snapshot changed during rollout")
@@ -814,7 +985,7 @@ def _assert_unchanged(
     if (
         target["Id"] != verified_target["Id"]
         or target["Image"] != verified_target["Image"]
-        or not _healthy(target)
+        or not (_healthy(target) if require_healthy else _settled(target))
     ):
         raise RuntimeError(
             "final effects identity/image/health differs from the installed-code readback"
@@ -831,6 +1002,7 @@ def _assert_unchanged(
         )
     if compose_chain_sha256(plan.compose_files) != plan.expected_compose_sha256:
         raise RuntimeError("shared compose files changed during the scoped rollout")
+    return target
 
 
 def _assert_lock(lock: Path, identity: tuple[int, int]) -> None:
@@ -869,6 +1041,8 @@ def run_deploy(
     runner: CommandRunner = _run_command,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    loadavg: Callable[[], tuple[float, float, float]] = os.getloadavg,
+    cpu_count: Callable[[], int | None] = os.cpu_count,
 ) -> dict[str, Any]:
     """Preview by default; serialize, prove compatibility, replace and verify on execute."""
     state_root = (
@@ -881,8 +1055,13 @@ def run_deploy(
         raise RuntimeError(
             "deployment lock already exists; scoped executor never steals it"
         )
-    before, rendered_before = _preflight(plan, runner)
+    bound = probe_timeout(
+        plan.probe_timeout_seconds, loadavg=loadavg, cpu_count=cpu_count
+    )
+    timeout = bound["seconds"]
+    before, rendered_before, admission = _preflight(plan, runner)
     target_before = _service(before, plan.service)
+    health_before = _health_reading(target_before)
     if not execute:
         return {
             "status": "PREVIEW",
@@ -890,6 +1069,9 @@ def run_deploy(
             "ticket_id": plan.ticket_id,
             "current_image_id": plan.expected_image_id,
             "candidate_image_id": plan.candidate_image_id,
+            "probe_timeout": bound,
+            "admission": admission,
+            "target_health_before": health_before,
         }
 
     state_root.mkdir(parents=True, exist_ok=True)
@@ -922,7 +1104,13 @@ def run_deploy(
         "candidate_image_id": plan.candidate_image_id,
         "compose_sha256": plan.expected_compose_sha256,
         "source_pins": dict(plan.source_pins),
+        "probe_timeout": bound,
+        "admission": admission,
+        "target_health_before": health_before,
     }
+    # The prior target's health verdict, read at the last preflight before
+    # recreation, is what a verified rollback must restore.
+    prior_healthy = admission == "healthy"
     mutation_attempted = False
     observed_candidate_id: str | None = None
     live_before: dict[str, Any] | None = None
@@ -989,8 +1177,10 @@ def run_deploy(
             raise RuntimeError(
                 "active effects environment contains drift outside rendered compose/image defaults"
             )
-        baseline = _probe(runner, script, image=plan.expected_image_id)
-        candidate = _probe(runner, script, image=plan.candidate_image_id)
+        baseline = _probe(runner, script, timeout=timeout, image=plan.expected_image_id)
+        candidate = _probe(
+            runner, script, timeout=timeout, image=plan.candidate_image_id
+        )
         if candidate["base_image_id"] != plan.expected_image_id:
             raise RuntimeError(
                 "candidate provenance does not name the exact current base image"
@@ -1006,12 +1196,14 @@ def run_deploy(
         ):
             if candidate[key] != baseline[key]:
                 raise RuntimeError(f"candidate {key} differs from the current image")
-        current, rendered_current = _preflight(plan, runner)
+        current, rendered_current, _ = _preflight(plan, runner)
         if _snapshot(before, plan.service) != _snapshot(current, plan.service):
             raise RuntimeError(
                 "non-target state changed during image compatibility checks"
             )
-        live_before = _probe(runner, script, container=plan.expected_container_id)
+        live_before = _probe(
+            runner, script, timeout=timeout, container=plan.expected_container_id
+        )
         if live_before["dependency_fingerprint"] != baseline["dependency_fingerprint"]:
             raise RuntimeError(
                 "live effects dependencies differ from its immutable image"
@@ -1030,7 +1222,7 @@ def run_deploy(
         # healthy target is the evidence for the part it shares. The lane's
         # contract mounts are frozen in the admitted snapshot and re-verified
         # after replacement.
-        _assert_topics(
+        receipt["topic_check"] = _assert_topics(
             current,
             sorted(
                 set(candidate["required_topics"]).difference(
@@ -1038,6 +1230,7 @@ def run_deploy(
                 )
             ),
             runner,
+            _service(current, plan.service),
         )
         retention_tag = (
             f"onex-scoped-effects-rollback:{plan.ticket_id.lower()}-{run_id}"
@@ -1086,7 +1279,7 @@ def run_deploy(
             mode=0o400,
         )
         # Final compare under the same exclusion lock, immediately before effects.
-        current, _ = _preflight(plan, runner)
+        current, _, _ = _preflight(plan, runner)
         if _snapshot(before, plan.service) != _snapshot(current, plan.service):
             raise RuntimeError("non-target state changed before recreation")
         if _runtime_settings(target_before) != _runtime_settings(
@@ -1096,7 +1289,8 @@ def run_deploy(
         receipt["hotpatch_evidence"] = _hotpatch_preflight(
             plan, candidate, _service(current, plan.service), runner
         )
-        current, rendered_current = _preflight(plan, runner)
+        current, rendered_current, final_admission = _preflight(plan, runner)
+        prior_healthy = final_admission == "healthy"
         if _snapshot(before, plan.service) != _snapshot(
             current, plan.service
         ) or _runtime_settings(target_before) != _runtime_settings(
@@ -1134,7 +1328,7 @@ def run_deploy(
         )
         target = _wait_target(plan, plan.candidate_image_id, runner, sleep, monotonic)
         observed_candidate_id = target["Id"]
-        live_after = _probe(runner, script, container=target["Id"])
+        live_after = _probe(runner, script, timeout=timeout, container=target["Id"])
         if (
             live_after["source_pins"] != plan.source_pins
             or live_after["dependency_fingerprint"]
@@ -1156,7 +1350,7 @@ def run_deploy(
             or live_after["required_topics"] != live_before["required_topics"]
         ):
             raise RuntimeError("mounted runtime material changed during replacement")
-        _assert_unchanged(
+        verified = _assert_unchanged(
             plan,
             before,
             target_before,
@@ -1170,6 +1364,7 @@ def run_deploy(
         _assert_lock(lock, lock_identity)
         receipt.update(
             status="PASSED",
+            target_health_after=_health_reading(verified),
             container_id=target["Id"],
             installed_evidence=live_after,
             verified_at=datetime.now(UTC).isoformat(),
@@ -1229,14 +1424,21 @@ def run_deploy(
                     plan.expected_image_id,
                 )
                 target = _wait_target(
-                    plan, plan.expected_image_id, runner, sleep, monotonic
+                    plan,
+                    plan.expected_image_id,
+                    runner,
+                    sleep,
+                    monotonic,
+                    require_healthy=prior_healthy,
                 )
-                restored = _probe(runner, script, container=target["Id"])
+                restored = _probe(
+                    runner, script, timeout=timeout, container=target["Id"]
+                )
                 if restored != live_before:
                     raise RuntimeError(
                         "restored installed evidence differs from the prior effects container"
                     )
-                _assert_unchanged(
+                restored_target = _assert_unchanged(
                     plan,
                     before,
                     target_before,
@@ -1246,11 +1448,13 @@ def run_deploy(
                     snapshot_sha,
                     target,
                     rendered_current,
+                    require_healthy=prior_healthy,
                 )
                 _assert_lock(lock, lock_identity)
                 receipt.update(
                     status="FAILED_ROLLED_BACK",
                     rollback_verified=True,
+                    rollback_health=_health_reading(restored_target),
                     rollback_container_id=target["Id"],
                     verified_at=datetime.now(UTC).isoformat(),
                 )
