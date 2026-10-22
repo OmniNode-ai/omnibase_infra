@@ -32,7 +32,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly -k "dockerfile_checker or workflow_checker or fixture_checker"
     binds_ac:
       - "AC1"
-  - id: dod-omn-21279-ac2-dockerfile-installs-no-omnimarket
+  - id: dod-omn-21279-ac2-dockerfile-no-omnimarket
     description: >-
       AC2, static half. The layering pytest reads the real docker/Dockerfile.runtime and finds no instruction line naming omnimarket, and the Dockerfile-derived tests agree: the foundation import smoke imports compat, core and infra, the routing ladder is COPYed from the tracked config/delegation file, and no git install of an ONEX package remains. The boot half of AC2 is the runtime-boot-smoke job on the pull request head, run by CI.
     source: generated
@@ -41,7 +41,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py tests/unit/docker/test_delegation_import_smoke_guard.py tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
       - "AC2"
-  - id: dod-omn-21279-ac2-deployed-dockerfile-names-no-omnimarket
+  - id: dod-omn-21279-ac2-deploy-probe-dockerfile
     description: >-
       AC2, deploy-scope probe. Reads docker/Dockerfile.runtime through the GitHub API at the commit that carries this contract and exits nonzero unless no instruction line outside a comment names omnimarket and the routing ladder is COPYed from the build context. At the merge base the file installs omnimarket and copies the ladder out of the wheel, so the probe prints false there; the runtime-boot-smoke job on the pull request head is the boot half of AC2 and runs on a hosted runner.
     source: generated
