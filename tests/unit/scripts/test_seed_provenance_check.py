@@ -60,6 +60,35 @@ class TestHelperFunctions:
 
 @pytest.mark.unit
 class TestCheckScripts:
+    @pytest.mark.parametrize("name", [".venv", "venv", "custom-env"])
+    def test_nested_virtualenv_dependencies_are_not_repo_publishers(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        env = tmp_path / "deploy-agent" / name
+        dependency = env / "lib" / "python3.13" / "site-packages" / "demo.py"
+        dependency.parent.mkdir(parents=True)
+        (env / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        dependency.write_text("producer.publish(payload)\n")
+        script = tmp_path / "seed_source.py"
+        script.write_text('payload = {"data_provenance": "demo_seeded"}\n')
+        assert check_scripts(tmp_path) == []
+
+        # The same tree must still refuse an actual unclassified publisher.
+        script.write_text("producer.publish(payload)\n")
+        findings = check_scripts(tmp_path)
+        assert len(findings) == 1
+        assert "seed_source.py" in findings[0]
+
+    def test_directory_named_venv_without_environment_marker_is_checked(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "venv" / "demo.py"
+        source.parent.mkdir()
+        source.write_text("producer.publish(payload)\n")
+        findings = check_scripts(tmp_path)
+        assert len(findings) == 1
+        assert "demo.py" in findings[0]
+
     def test_no_warnings_when_provenance_present(self, tmp_path: Path) -> None:
         script = tmp_path / "seed_example.py"
         script.write_text(
