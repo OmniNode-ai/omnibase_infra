@@ -2788,6 +2788,114 @@ def test_verify_signal_a_second_signal_during_cleanup_does_not_cut_it_short(
     assert hosts["pool-c-slot-1"].lease is None
 
 
+@pytest.mark.parametrize("phase", ["teardown", "snap-post"])
+def test_verify_signal_first_reaching_a_cleanup_phase_lets_it_finish(
+    tmp_path: Path, phase: str
+) -> None:
+    # 2026-10-20T15:20Z on pre-PR slot 2: one SIGTERM arrived during the
+    # teardown phase, the phase was cut short and the summary said torn down
+    hosts = _slot_hosts()
+
+    class SignalledInCleanup(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if command.endswith(f" {phase}"):
+                os.kill(os.getpid(), signal.SIGTERM)
+            return super().run(host, command, timeout)
+
+    out = tmp_path / "result.json"
+    code, text = _verify(
+        SignalledInCleanup(hosts), tmp_path, result_out=out, handle_signals=True
+    )
+    one = hosts["pool-c-slot-1"]
+    assert code == 128 + signal.SIGTERM.value
+    assert one.ran[-2:] == ["teardown", "snap-post"], one.ran
+    assert one.lease is None
+    assert "torn down" in text
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["outcome"] == "INTERRUPTED" and data["exit_code"] == code
+    assert data["restored"] is True
+
+
+def test_verify_signal_during_the_lease_release_still_releases(
+    tmp_path: Path,
+) -> None:
+    hosts = _slot_hosts()
+
+    class SignalledInRelease(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if "RELEASED" in command and "prove.sh" not in command:
+                os.kill(os.getpid(), signal.SIGTERM)
+            return super().run(host, command, timeout)
+
+    code, text = _verify(SignalledInRelease(hosts), tmp_path, handle_signals=True)
+    assert code == 128 + signal.SIGTERM.value
+    assert hosts["pool-c-slot-1"].lease is None
+    assert hosts["pool-c-slot-1"].ran[-2:] == ["teardown", "snap-post"]
+    assert "the lease was released" in text
+
+
+def test_verify_signal_while_the_lease_is_taken_releases_it(tmp_path: Path) -> None:
+    # the host took the lease and the signal arrived before the reply was read:
+    # the run must still know it holds the slot and give it back
+    hosts = _slot_hosts()
+
+    class SignalledInAcquire(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            reply = super().run(host, command, timeout)
+            if "then printf" in command and "prove.sh" not in command:
+                os.kill(os.getpid(), signal.SIGTERM)
+            return reply
+
+    out = tmp_path / "result.json"
+    code, _ = _verify(
+        SignalledInAcquire(hosts), tmp_path, result_out=out, handle_signals=True
+    )
+    assert code == 128 + signal.SIGTERM.value
+    assert all(h.lease is None for h in hosts.values())
+    assert hosts["pool-c-slot-1"].ran == []
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["outcome"] == "INTERRUPTED" and data["slot"] == "pool-c-slot-1"
+
+
+def test_verify_signal_text_claims_only_the_cleanup_that_ran(tmp_path: Path) -> None:
+    hosts = _slot_hosts()
+
+    class SignalledInSurvey(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if "CORES=$(getconf" in command:
+                os.kill(os.getpid(), signal.SIGTERM)
+            return super().run(host, command, timeout)
+
+    out = tmp_path / "result.json"
+    _, text = _verify(
+        SignalledInSurvey(hosts), tmp_path, result_out=out, handle_signals=True
+    )
+    assert "torn down" not in text and "released" not in text
+    assert "nothing was leased" in text
+    assert (
+        "nothing was leased" in json.loads(out.read_text(encoding="utf-8"))["summary"]
+    )
+
+    lost = _slot_hosts()
+
+    class LeaseLostThenSignalled(FakeTransport):
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if command.endswith(" probe"):
+                # a peer broke the lease; the run stops without teardown, and a
+                # signal then arrives while the driver gives up the slot
+                self.hosts[host.name].lease = _lease(
+                    "peer", NOW + dt.timedelta(hours=3)
+                )
+            if "RELEASED" in command and "prove.sh" not in command:
+                os.kill(os.getpid(), signal.SIGTERM)
+            return super().run(host, command, timeout)
+
+    code, text = _verify(LeaseLostThenSignalled(lost), tmp_path, handle_signals=True)
+    assert code == 128 + signal.SIGTERM.value
+    assert "teardown" not in lost["pool-c-slot-1"].ran
+    assert "torn down" in text and "not torn down" in text
+
+
 def test_local_transport_is_this_host_loopback() -> None:
     current_user = pwd.getpwuid(os.getuid()).pw_name
     assert pool.is_this_host(f"{current_user}@127.0.0.1") is True
