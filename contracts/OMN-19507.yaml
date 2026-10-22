@@ -46,12 +46,13 @@ dod_evidence:
         check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py -k unreadable -q
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-admission-restore-regressions
-    description: Run the complete focused admission and restore suites.
+    description: >-
+      Run the complete focused admission and restore suites on a passing head. Stop at the first regression on the merge-base control so its known failures produce a verdict within the per-check budget.
     source: manual
     binds_ac: [AC3]
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py tests/scripts/test_runner_disk_admission_restore.py -q
+        check_value: uv run pytest tests/scripts/test_runner_job_started_disk_admission.py tests/scripts/test_runner_disk_admission_restore.py -q -x
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-admission-deploy-check
     description: >-
