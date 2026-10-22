@@ -432,6 +432,15 @@ requirements:
     acceptance:
       - id: AC163
         statement: 'AC163: the slow-tests pytest command in nightly-tests.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the two-way registration deselect, the workflow''s own arguments with -m "slow or chaos" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q'
+  - id: req-omn17427-deploy-agent-health-convergence
+    statement: Post-deploy verification retries transient failures, permits recreation only for a Docker-unhealthy or exited container, and honours the selected service's own healthcheck budget.
+    acceptance:
+      - id: AC181
+        statement: 'AC181: a transient 503 while Docker reports healthy is retried with backoff and never recreated; a persistent host failure or unreadable Docker state fails without recreation; Docker unhealthy or exited permits exactly one service recreation -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC182
+        statement: 'AC182: re-probing a recreated service waits at least its compose start_period plus interval times retries, even without health-gated dependents, and includes probe time in its deadline; a 900-second effects startup passes inside its 1800-second start period -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
+      - id: AC183
+        statement: 'AC183: a successful host HTTP response with a differing JSON status passes when Docker reports the dev service healthy, while an HTTP 503 remains a failed probe requiring retry -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q'
   - id: req-omn17427-branch-protection-audit-setup-uv
     statement: 'The Audit Branch Protection job installs uv with a sha-pinned setup-uv step before any uv run, and runs the required-context parity report with uv run --no-project --with the PyYAML version uv.lock pins, so the job on its ubuntu-latest runs-on fallback no longer fails "uv: command not found" (exit 127).'
     acceptance:
@@ -462,6 +471,11 @@ requirements:
     acceptance:
       - id: AC148
         statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+  - id: req-omn17427-satellite-lane-freeze-until-tenant
+    statement: The satellite-host instance in config/deploy_lane_routing.yaml carries a freeze naming OMN-20530, so its deploy agent does not idle-restore, idle-converge or rebuild the full dev stack on that host while the runtime-only lab-tenant overlay waits on that ticket; no other committed instance carries a freeze.
+    acceptance:
+      - id: AC160
+        statement: 'AC160: exactly one committed instance, the one on the satellite host, is frozen at 2026-10-21 until 2026-11-20 with a reason naming OMN-20530 and the restore decision for its down runtime is FROZEN, while every other committed instance, the default one included, is not frozen -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k "committed"'
   - id: req-omn17427-developer-grants-complete-audit
     statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
     acceptance:
@@ -482,6 +496,17 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-compose-up-convergence
+    statement: A failed or interrupted compose up passes its phase only when every service in scope has its declared configuration hash.
+    acceptance:
+      - id: AC524901
+        statement: A nonzero or interrupted up with a mismatched hash or missing container raises and never reports phase success.
+      - id: AC524902
+        statement: A nonzero or interrupted up whose services have converged passes, using the same project and profile to render hashes.
+      - id: AC524903
+        statement: A failed configuration hash render after a compose error raises rather than accepting unknown convergence.
+      - id: AC524904
+        statement: A clean compose up makes no additional configuration hash or container label reads.
   - id: req-omn17427-role-omnidash-lab-job-check-select
     statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
     acceptance:
@@ -492,7 +517,15 @@ requirements:
     acceptance:
       - id: AC170
         statement: 'AC170: the integration-tests pytest command in nightly-integration.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the kwarg-parity and two-way registration deselects, the workflow''s own arguments with -m "integration and not bastion" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_integration_live_adapter_deselect_omn17427.py -q'
+  - id: req-omn17427-deploy-gate-fires-on-edit
+    statement: A workflow whose job reads the pull request body fires when the body is edited, so a body fixed after the first run clears the red it caused; deploy-gate.yml gains the edited type and a CI test holds every body-reading workflow to it.
+    acceptance:
+      - id: AC172
+        statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
 evidence_requirements:
+  - kind: tests
+    description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
   - kind: tests
     description: Synthetic BYOK fixtures traverse configure_logging and its handler, plus the shared DLQ, error and receipt sanitizers; ordinary text controls remain readable.
     command: uv run pytest tests/unit/utils/test_provider_key_redaction_omn17427.py -q -n 0 --no-cov
@@ -679,11 +712,36 @@ evidence_requirements:
   - kind: tests
     description: The lab job check store's SELECT grants to role_omnidash are issued, asserted, ledger-bound and declared.
     command: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+  - kind: tests
+    description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
+    command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17427-deploy-agent-health-convergence
+    description: Focused verification replays of the reported job sequences; Docker and the clock are controlled, and the readiness budget is read from compose. No live deploy is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
+      - AC182
+      - AC183
+  - id: dod-omn-17427-deploy-agent-convergence-deploy
+    description: Hosted-runner deploy check using the real executor with a fake Docker runner and clock, including recovery after the old 600-second ceiling. No host, broker or credential is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC181
+      - AC182
+      - AC183
   - id: dod-omn17427-omn19937-ac4-dev202-writer
     description: The regression failed before the deployment selection was added (empty owned manifest) and passes after it. This proves placement configuration, not a deployed consumer or successful live row readback; OMN-19937 AC4 remains open until deployment and re-probe.
     source: manual
@@ -2194,6 +2252,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC148
+  - id: dod-omn-17427-ac160-satellite-freeze
+    description: Unit tests over the committed routing table read the satellite instance's freeze and feed it to the idle-restore decision. Does not claim a live readback of that host's deploy agent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k committed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
+  - id: dod-omn-17427-ac160-satellite-freeze-deploy-check
+    description: Hosted-runner deploy check -- the deploy agent's own routing-table loader parses the committed table and reports the satellite instance frozen with OMN-20530 in its reason and every other instance not frozen. No container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k "committed_satellite or committed_dev_lanes"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
   - id: dod-omn17427-ac146-complete-developer-grant-audit
     description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
     source: manual
@@ -2255,6 +2331,46 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn17427-ac524901-compose-up
+    description: Mismatched or absent container hashes refuse phase success.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k unconverged
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524901]
+  - id: dod-omn17427-ac524902-compose-up
+    description: Converged containers permit recovery after a nonzero exit or timeout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k converged_passes
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524902]
+  - id: dod-omn17427-ac524903-compose-up
+    description: A failed hash render refuses an unknown convergence state.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k config_hash_failure
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524903]
+  - id: dod-omn17427-ac524904-compose-up
+    description: Clean exits preserve the path without extra hash or label reads, paired with unconverged-error regressions that fail at the merge base to distinguish the two paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q -k "clean_up or unconverged"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524904]
+  - id: dod-omn17427-compose-up-convergence-deploy-check
+    description: Hosted-runner deploy check runs the real compose phase and hash readers with mocked command responses, including mismatch, absence, timeout and render failure. No Docker daemon, credentials or live deployment is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC524901, AC524902, AC524903, AC524904]
   - id: dod-omn-17427-ac160
     description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
     source: manual
@@ -2282,3 +2398,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC170
+  - id: dod-omn-17427-ac172-edit-trigger
+    description: The test parses every committed workflow, finds the ones that read the pull request body, and requires edited in their pull_request types; synthetic workflows are the positive and negative controls. Does not claim a live rerun on a pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC172
+  - id: dod-omn-17427-ac172-edit-trigger-deploy
+    description: Hosted-runner deploy check -- the same test over the committed workflow files; it reads no live pull request.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC172

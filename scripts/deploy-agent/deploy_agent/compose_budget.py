@@ -72,10 +72,13 @@ class _ComposeLoader(yaml.SafeLoader):
     defines ``!reset``) on overlay keys. ``yaml.safe_load`` refuses an unknown
     tag outright, which would make the ceiling derivation unreadable on exactly
     the lane it matters most for. The tags are resolved the way compose
-    resolves them: ``!override`` yields the tagged value (this module merges
-    overlays by replacing the key, which is that semantic), ``!reset`` yields
-    ``None`` (the key is removed).
+    resolves them: ``!override`` replaces the tagged value rather than merging
+    its mapping, ``!reset`` yields ``None`` (the key is removed).
     """
+
+
+class _ComposeOverrideMap(dict[str, Any]):
+    """A mapping Compose explicitly replaces instead of merging."""
 
 
 def _compose_tag_constructor(
@@ -88,7 +91,12 @@ def _compose_tag_constructor(
     if isinstance(node, yaml.SequenceNode):
         return loader.construct_sequence(node, deep=True)
     if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node, deep=True)
+        mapping = loader.construct_mapping(node, deep=True)
+        return (
+            _ComposeOverrideMap({str(key): value for key, value in mapping.items()})
+            if tag_suffix == "override"
+            else mapping
+        )
     return None
 
 
@@ -159,9 +167,8 @@ def parse_compose_duration(value: object) -> int:
 def _merge_service_maps(documents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Merge each compose file's ``services`` map, later files winning per key.
 
-    This mirrors how compose layers an overlay onto the base for a lane: an
-    overlay that redeclares ``healthcheck`` or ``depends_on`` replaces that key
-    wholesale, which is exactly the semantics the ceiling must be read under.
+    Healthcheck mappings merge per key unless explicitly tagged !override.
+    Other keys retain the phase-budget reader's replacement semantics.
     """
     merged: dict[str, dict[str, Any]] = {}
     for document in documents:
@@ -171,7 +178,16 @@ def _merge_service_maps(documents: list[dict[str, Any]]) -> dict[str, dict[str, 
         for name, spec in services.items():
             if not isinstance(spec, dict):
                 continue
-            merged.setdefault(str(name), {}).update(spec)
+            previous = merged.setdefault(str(name), {})
+            health = spec.get("healthcheck")
+            inherited_health = previous.get("healthcheck")
+            if (
+                isinstance(health, dict)
+                and not isinstance(health, _ComposeOverrideMap)
+                and isinstance(inherited_health, dict)
+            ):
+                spec = {**spec, "healthcheck": {**inherited_health, **health}}
+            previous.update(spec)
     return merged
 
 
@@ -192,23 +208,10 @@ def _services_gated_on_health(services: dict[str, dict[str, Any]]) -> set[str]:
     return gated
 
 
-def derive_runtime_phase_budget(
+def _read_compose_services(
     compose_files: tuple[str, ...] | list[str],
-    scope_services: tuple[str, ...] | list[str],
-    *,
-    margin_seconds: int,
-    floor_seconds: int,
-) -> ModelPhaseBudget:
-    """Derive the compose-up ceiling for the runtime phase from the compose model.
-
-    ``scope_services`` bounds the search to the services this phase actually
-    brings up, so an unrelated service's long start_period elsewhere in the file
-    can never inflate the ceiling.
-
-    Raises ``ComposeBudgetError`` when a declared compose file cannot be read or
-    parsed: a ceiling silently falling back to its floor because the model was
-    unreadable is the same class of undetectable wrongness as the bare constant.
-    """
+) -> dict[str, dict[str, Any]]:
+    """Read the lane's compose model, refusing an unreadable declaration."""
     documents: list[dict[str, Any]] = []
     for compose_file in compose_files:
         path = Path(compose_file)
@@ -237,7 +240,55 @@ def derive_runtime_phase_budget(
         if isinstance(document, dict):
             documents.append(document)
 
-    services = _merge_service_maps(documents)
+    return _merge_service_maps(documents)
+
+
+def derive_runtime_health_budget(
+    compose_files: tuple[str, ...] | list[str],
+    service: str,
+    *,
+    floor_seconds: int,
+) -> int:
+    """Bound readiness by the target's own healthcheck, including its failure tail.
+
+    Unlike compose up, a readiness probe must wait for the selected service even
+    when no dependent service gates on it. Include each check's timeout as well
+    as its interval, matching runtime_health_wait.sh's conservative bound.
+    """
+    services = _read_compose_services(compose_files)
+    if service not in services:
+        raise ComposeBudgetError(
+            f"health probe service {service!r} is absent from compose"
+        )
+    health = services[service].get("healthcheck") or {}
+    if not isinstance(health, dict):
+        raise ComposeBudgetError(f"healthcheck for {service!r} must be a mapping")
+    if not health or health.get("disable") is True or health.get("test") == ["NONE"]:
+        return floor_seconds
+    retries = health.get("retries", 3)
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+        raise ComposeBudgetError(
+            f"healthcheck retries for {service!r} must be nonnegative"
+        )
+    start = parse_compose_duration(health.get("start_period", "0s"))
+    interval = parse_compose_duration(health.get("interval", "30s")) or 30
+    timeout = parse_compose_duration(health.get("timeout", "30s")) or 30
+    return max(floor_seconds, start + (retries or 3) * (interval + timeout))
+
+
+def derive_runtime_phase_budget(
+    compose_files: tuple[str, ...] | list[str],
+    scope_services: tuple[str, ...] | list[str],
+    *,
+    margin_seconds: int,
+    floor_seconds: int,
+) -> ModelPhaseBudget:
+    """Derive compose up's ceiling from health-gated services within its scope.
+
+    Unreadable compose files raise ComposeBudgetError rather than silently
+    reverting to the floor.
+    """
+    services = _read_compose_services(compose_files)
     gated = _services_gated_on_health(services)
     in_scope = [name for name in scope_services if name in gated]
 
