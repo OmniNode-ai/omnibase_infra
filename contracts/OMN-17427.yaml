@@ -457,6 +457,11 @@ requirements:
     acceptance:
       - id: AC148
         statement: 'AC148: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+  - id: req-omn17427-satellite-lane-freeze-until-tenant
+    statement: The satellite-host instance in config/deploy_lane_routing.yaml carries a freeze naming OMN-20530, so its deploy agent does not idle-restore, idle-converge or rebuild the full dev stack on that host while the runtime-only lab-tenant overlay waits on that ticket; no other committed instance carries a freeze.
+    acceptance:
+      - id: AC160
+        statement: 'AC160: exactly one committed instance, the one on the satellite host, is frozen at 2026-10-21 until 2026-11-20 with a reason naming OMN-20530 and the restore decision for its down runtime is FROZEN, while every other committed instance, the default one included, is not frozen -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k "committed"'
   - id: req-omn17427-developer-grants-complete-audit
     statement: Developer grant apply and audit commands refuse an empty principal selection, and grant audits refuse broker ACL rows carrying an error.
     acceptance:
@@ -2171,6 +2176,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC148
+  - id: dod-omn-17427-ac160-satellite-freeze
+    description: Unit tests over the committed routing table read the satellite instance's freeze and feed it to the idle-restore decision. Does not claim a live readback of that host's deploy agent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k committed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
+  - id: dod-omn-17427-ac160-satellite-freeze-deploy-check
+    description: Hosted-runner deploy check -- the deploy agent's own routing-table loader parses the committed table and reports the satellite instance frozen with OMN-20530 in its reason and every other instance not frozen. No container, lab host or credential is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k "committed_satellite or committed_dev_lanes"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC160
   - id: dod-omn17427-ac146-complete-developer-grant-audit
     description: Regression tests fail against the original successful empty selection and ignored rpk error column; the issuer now refuses both incomplete proofs.
     source: manual
