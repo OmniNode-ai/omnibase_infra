@@ -211,9 +211,11 @@ def test_the_store_log_line_names_changes_and_never_values(
     with caplog.at_level(logging.INFO, logger=executor_mod.__name__):
         operator_store_overlay()
 
-    assert "1 differ from the agent's start-time environment: ESTIMATOR_FERNET_KEY" in (
-        caplog.text
+    expected = (
+        "1 of them not owned by the unit and applied to compose commands: "
+        "ESTIMATOR_FERNET_KEY"
     )
+    assert expected in caplog.text
     assert _SYNTHETIC_KEY not in caplog.text
 
 

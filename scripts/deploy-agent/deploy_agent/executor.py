@@ -1539,8 +1539,9 @@ def _operator_store_assigned(path: Path, environ: Mapping[str, str]) -> dict[str
         if name not in protected and environ.get(name) != value
     )
     logger.info(
-        "operator env store %s read again (OMN-18475): %d name(s) assigned, %d "
-        "differ from the agent's start-time environment%s",
+        "operator env store %s read again (OMN-18475): it sets %d name(s) "
+        "differently from this process, %d of them not owned by the unit and "
+        "applied to compose commands%s",
         path,
         len(assigned),
         len(changed),
