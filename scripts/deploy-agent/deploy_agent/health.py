@@ -279,6 +279,12 @@ async def _job_handler(request: web.Request) -> web.Response:
             "current_phase": str(job.current_phase),
             "phase_results": {str(k): str(v) for k, v in job.phase_results.items()},
             "errors": job.errors,
+            # OMN-21272. Why the job never ran its first phase, or ``None``
+            # when it started. The post-merge lab guard reads this route; a
+            # job that ended lane_lock_contended never touched the lane, so a
+            # convergence wait that cannot see this reason measures a deploy
+            # that did not happen and writes a FAIL about the wrong thing.
+            "not_started": job.not_started.value if job.not_started else None,
             "accepted_at": job.accepted_at.isoformat(),
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
             "result_publish_pending": job.result_publish_pending,
