@@ -104,9 +104,15 @@ jobs:
           # ci.yml's service-integration-suites job (OMN-18795) runs the whole
           # file by path against real services with its opt-in set; selecting
           # it here only made the fail-closed opt-in guard error every night.
+          # OMN-17427: the live LLM adapter documentation suite carries `slow`
+          # and fails closed without LLM_DEEPSEEK_R1_URL (OMN-21147), which no
+          # hosted runner sets. It runs by explicit path against a configured
+          # endpoint; selecting it here only made its fail-closed fixture error
+          # every night.
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
             --deselect tests/integration/registration/e2e/test_two_way_registration_e2e.py \
+            --deselect tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py \
             -m "$FILTER" \
             -n 2 \
             --timeout=600 \
