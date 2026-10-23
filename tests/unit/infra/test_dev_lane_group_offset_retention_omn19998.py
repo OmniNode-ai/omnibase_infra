@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19998: the dev lane expires consumer-group offsets a day after the last member.
+"""OMN-19998: the dev lane expires consumer-group offsets two hours after the last
+member.
 
 The dev-lane broker held 41,398 Empty consumer groups on 2026-10-16, almost all
 one-shot per-run groups. The cluster default keeps a group's offsets for seven days,
 so a per-run client that opens a fresh group every call piles up ~40k of them. The dev
 lane sets ``group_offset_retention_sec`` through the shared broker-profile one-shot;
 every other lane (the base infra file here) renders the same one-shot with the value
-empty and leaves the cluster default alone.
+empty and leaves the cluster default alone. On 2026-10-23 the dev-lane broker still
+held 22,467 consumer groups at one day of retention.
 """
 
 from __future__ import annotations
@@ -52,16 +54,16 @@ def _run_profile(tmp_path: Path, lane: str) -> tuple[str, str, int]:
 
 
 @pytest.mark.unit
-def test_dev_lane_declares_a_one_day_group_offset_retention() -> None:
+def test_dev_lane_declares_a_two_hour_group_offset_retention() -> None:
     env = _render("dev")["services"][_SERVICE]["environment"]
-    assert env[_ENV] == "86400"
+    assert env[_ENV] == "7200"
 
 
 @pytest.mark.unit
 def test_dev_lane_profile_sets_the_retention_and_reads_it_back(tmp_path: Path) -> None:
     trace, stdout, returncode = _run_profile(tmp_path, "dev")
     assert returncode == 0, stdout
-    set_at = trace.index("cluster config set group_offset_retention_sec 86400")
+    set_at = trace.index("cluster config set group_offset_retention_sec 7200")
     assert trace.index("cluster config get group_offset_retention_sec", set_at) > set_at
     assert "broker profile read back" in stdout
 

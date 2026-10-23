@@ -740,7 +740,18 @@ services:
       # cluster default keeps each for 7 days after its last member; 24 hours
       # expires them a day after the run, and an expired offset set removes the
       # group.
-      REDPANDA_GROUP_OFFSET_RETENTION_SEC: "86400"
+      # OMN-19998 (2026-10-23): measured on the dev-lane broker
+      # omnibase-infra-redpanda on h201: RestartCount=11 since the container was
+      # created 2026-10-22T00:01Z, each a Redpanda process crash (5 libc GPFs on
+      # the abort path, 6 redpanda segfaults; oom=0, memory.max=max), and 4 of
+      # the 5 aborts log "seastar - Failed to allocate" 3,110,832-3,456,640
+      # bytes with 2441M used / 3703M free of 6G and no 4M page span. It held
+      # 22,467 groups (21,895 Empty: 11,694 ledger append, 5,765 terminal run,
+      # 3,668 scm command); the 30s `rpk group describe -r '.*'` readiness
+      # probe's only 3MB+ allocations (3,592,192 = ~160B x 22,467) after the
+      # 07:45:56Z restart hit at ticks 07:47:14Z/07:47:45Z; two hours keeps
+      # about a twelfth of a day's per-run groups.
+      REDPANDA_GROUP_OFFSET_RETENTION_SEC: "7200"
     depends_on:
       redpanda-sasl-enable:
         condition: service_completed_successfully

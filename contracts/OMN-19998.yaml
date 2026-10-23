@@ -100,17 +100,17 @@ requirements:
     statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
     acceptance:
       - id: AC27
-        statement: 'AC27: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
+        statement: 'AC27: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 7200; the original topic creation, race and failure tests pass with the additional setting.'
   - id: req-omn19998-forwarder-inbound-survives-bad-record
     statement: The gateway forwarder inbound leg keeps delivering when one cloud record carries no event_type or a consumer start does not finish.
     acceptance:
       - id: AC17
         statement: 'AC17: an inbound envelope with no event_type is refused as a GatewayRecordRefusedError (quarantined, never republished), and a KafkaTransport whose consumer start raised or was cancelled holds no never-started consumer and builds a fresh one on the next poll -- falsifier: uv run pytest tests/unit/nodes/node_bus_forwarder_effect/test_gateway_inbound_untyped_envelope_omn19998.py tests/unit/event_bus/test_kafka_transport_failed_start_omn19998.py -q -n 0 fails on the merge-base tree'
   - id: req-omn19998-dev-lane-group-offset-retention
-    statement: The dev lane's shared broker-profile one-shot must set the Redpanda cluster property group_offset_retention_sec to 86400 and read it back, so per-run consumer groups with no member for a day expire instead of accumulating for seven; a lane that declares no value keeps the cluster default.
+    statement: The dev lane's shared broker-profile one-shot must set the Redpanda cluster property group_offset_retention_sec to 7200 and read it back, so per-run consumer groups with no member for two hours expire instead of accumulating for seven; a lane that declares no value keeps the cluster default.
     acceptance:
       - id: AC16
-        statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=86400 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
+        statement: 'AC16: the dev lane renders REDPANDA_GROUP_OFFSET_RETENTION_SEC=7200 on redpanda-partition-cap and its script sets then reads back group_offset_retention_sec; the base infra file renders the value empty and its script never sets it -- falsifier: uv run pytest tests/unit/infra/test_dev_lane_group_offset_retention_omn19998.py -q -n 0 fails at the merge base, where the variable is not rendered'
   - id: req-omn19998-bump-regenerates-runner-lock
     statement: The release workflow's post-release dev version bump must regenerate docker/runners/runner-image.lock.json after it re-locks uv.lock and stage it in the bump commit, because uv.lock bytes feed the runner image identity and a bump PR with a stale lock fails tests/ci/test_runner_image_identity.py and runner-image-build-smoke.
     acceptance:
@@ -470,7 +470,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py tests/unit/infra/test_lane_control_plane_topic_omn19543.py -q
         cwd: .
       - check_type: command
-        check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 86400 ;;' in t"
+        check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 7200 ;;' in t"
         cwd: .
     binds_ac:
       - AC27
@@ -502,11 +502,11 @@ dod_evidence:
     binds_ac:
       - AC16
   - id: dod-omn19998-group-offset-retention-deploy-probe
-    description: Hosted-runner probe reads the dev-lane overlay in this checkout and requires the 86400 retention on the broker-profile one-shot; the merge-base overlay has no such line and the probe fails.
+    description: Hosted-runner probe reads the dev-lane overlay in this checkout and requires the 7200 retention on the broker-profile one-shot; the merge-base overlay has no such line and the probe fails.
     source: manual
     checks:
       - check_type: command
-        check_value: grep -q 'REDPANDA_GROUP_OFFSET_RETENTION_SEC. "86400"' docker/docker-compose.dev-lane.yml
+        check_value: grep -q 'REDPANDA_GROUP_OFFSET_RETENTION_SEC. "7200"' docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC16
