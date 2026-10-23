@@ -111,6 +111,11 @@ REDPANDA_IMAGE = (
 # never published and lives only in the broker's own namespace.
 INTERNAL_PORT = 9092
 
+# Ports the broker binds inside its own container: the internal Kafka listener,
+# RPC, admin API, schema registry and HTTP proxy. The published external port
+# is bound in that same namespace, so it must never be one of these.
+_BROKER_OWN_PORTS = frozenset({INTERNAL_PORT, 33145, 9644, 8081, 8082})
+
 # Applied to every container this harness starts. Concurrent CI jobs share one
 # Docker host; a leaked container has to be attributable.
 HARNESS_LABEL = "com.omninode.omn18012-harness"
@@ -173,9 +178,17 @@ class RuntimePrincipal:
 
 
 def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+    # Free on the host is not enough: the external listener binds the same
+    # number INSIDE the broker container, where Redpanda already holds its own
+    # listeners. 33145 (internal RPC) sits in the kernel's ephemeral range, and
+    # drawing it made the broker exit with "Address already in use" after a
+    # successful `docker run` -- a collision the retry above never sees.
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = int(sock.getsockname()[1])
+        if port not in _BROKER_OWN_PORTS:
+            return port
 
 
 def _read_cgroup() -> str:

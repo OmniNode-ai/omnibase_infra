@@ -11,6 +11,16 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3: omnibase_infra's run_duplication_sweep.py D2 reads the omnimarket path and the Duplication Sweep check run on that PR's head is green. -- falsifier: uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py scripts/ci/tests/test_sweep_clis.py -q -p no:randomly"
+  - id: req-omn20949-manifest-beside-node
+    statement: The Kafka boundary manifest lives in omnimarket beside node_duplication_sweep, at the path the pinned omnimarket ships.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The manifest lives in omnimarket beside the node -- falsifier: `src/omnimarket/nodes/node_duplication_sweep/kafka_boundaries.yaml` exists on the PR head and is byte-identical to onex_change_control dev''s `src/onex_change_control/boundaries/kafka_boundaries.yaml` at the sha named in the PR body (a test asserts the file parses and carries topic_name/producer_repo entries)'
+  - id: req-omn20949-d2-reads-omnimarket
+    statement: D2 reads the omnimarket copy and no onex_change_control path.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: D2 reads the omnimarket copy and no onex_change_control path -- falsifier: a test runs \_check_d2_kafka_topics against a workspace with no onex_change_control directory and gets PASS from the bundled manifest, and a planted conflicting producer in a manifest passed explicitly still FAILs (uv run pytest tests/test_golden_chain_duplication_sweep.py)'
 evidence_requirements:
   - kind: tests
     description: "D2 passes against the omnimarket manifest with no onex_change_control directory, ignores a conflicting manifest left at the retired path, and the workflow checks out omnimarket at the pin."
@@ -29,3 +39,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-20949-ac1
+    description: "AC1, this repository's part: the omnimarket checkout this repository pins ships the manifest at the path run_duplication_sweep.py reads. The byte-identity with the onex_change_control copy and the parse test are in omnimarket's contracts/OMN-20949.yaml (dod-omn20949-ac1-manifest-beside-node)."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py -q -p no:randomly -k test_pinned_omnimarket_ships_the_manifest_path_the_script_reads
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20949-ac2
+    description: "AC2, this repository's part: run_duplication_sweep.py reads the omnimarket manifest only, and D2 replays the recorded read of the omnimarket manifest. The omnimarket handler's own test is dod-omn20949-ac2-d2-reads-omnimarket in omnimarket's contracts/OMN-20949.yaml."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_duplication_sweep_manifest_omn20949.py -q -p no:randomly -k "test_script_reads_the_omnimarket_manifest_only or test_d2_replays_the_recorded_omnimarket_manifest_read"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
