@@ -146,6 +146,24 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "topic",
+        "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.work-ledger-query-completed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "group",
+        "local.omnimarket.work_ledger_query_client.consume.v1.",
+        "prefixed",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
         "onex.cmd.omnimarket.pr-polish-start.v1",
         "literal",
         ("write", "describe"),
@@ -627,3 +645,68 @@ def test_the_hook_edge_grants_produce_metadata_only() -> None:
         for _, resource_type, resource, _, _ in rows
         if resource_type == "TOPIC" and (resource_type, resource) not in mirror
     )
+
+
+def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> None:
+    """A query writes one request and reads one terminal under its own prefix."""
+    bindings = shipped_bindings()
+    prefix = "local.omnimarket.work_ledger_query_client.consume.v1."
+    request = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
+    terminal = "onex.evt.omnimarket.work-ledger-query-completed.v1"
+    query_bindings = tuple(
+        binding
+        for binding in bindings.bindings
+        if binding.physical_topic in (request, terminal)
+    )
+    assert {
+        (
+            binding.broker,
+            binding.physical_topic,
+            binding.direction,
+            binding.consumer_group,
+        )
+        for binding in query_bindings
+    } == {
+        (BROKER, request, "produce", None),
+        (BROKER, terminal, "consume", prefix + "call"),
+    }
+    before = bindings.model_copy(
+        update={
+            "bindings": tuple(b for b in bindings.bindings if b not in query_bindings),
+            "group_prefixes": tuple(
+                p for p in bindings.group_prefixes if p.prefix != prefix
+            ),
+        }
+    )
+    expected = {
+        (BROKER, "TOPIC", request, "LITERAL", "WRITE"),
+        (BROKER, "TOPIC", request, "LITERAL", "DESCRIBE"),
+        (BROKER, "TOPIC", terminal, "LITERAL", "READ"),
+        (BROKER, "TOPIC", terminal, "LITERAL", "DESCRIBE"),
+        (BROKER, "GROUP", prefix, "PREFIXED", "READ"),
+        (BROKER, "GROUP", prefix, "PREFIXED", "DESCRIBE"),
+    }
+    assert derive(bindings) - derive(before) == expected
+    assert derive(before) - derive(bindings) == set()
+
+
+@pytest.mark.parametrize(
+    "runtime_group",
+    [
+        "local.omnimarket.node_work_ledger_query_effect.consume.v1.worker",
+        "local.omnimarket.work_ledger_query_effect.consume.v1.worker",
+        "local.omnimarket.work_ledger_append_client.consume.v1.call",
+        "local.omnibase_infra.node_work_ledger_query_effect.consume.v1.worker",
+    ],
+)
+def test_developer_principal_query_acl_prefix_cannot_join_runtime_groups(
+    runtime_group: str,
+) -> None:
+    """Query callers cannot join a node's command group or another client's group."""
+    prefixes = [
+        p for p in shipped_bindings().group_prefixes if "work_ledger_query" in p.prefix
+    ]
+    assert [(p.broker, p.prefix) for p in prefixes] == [
+        (BROKER, "local.omnimarket.work_ledger_query_client.consume.v1.")
+    ]
+    assert not any(runtime_group.startswith(p.prefix) for p in prefixes)
