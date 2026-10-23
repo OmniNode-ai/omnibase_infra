@@ -972,6 +972,17 @@ services:
       # 2026-10-09 the same absence crash-looped runtime-effects (14 restarts)
       # because the node read its overlay while the runtime was wiring it.
       ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays
+      #
+      # -- Context-source tenant (OMN-21099) -------------------------------------
+      # node_context_compaction_orchestrator (compaction_runtime.tenant_id) and
+      # the context sources it builds from (node_context_source_ledger_effect,
+      # node_context_source_work_state_effect, tenant_ids) read their tenant from
+      # this one overlay value; all of them run in this container. Unset, every
+      # compaction command falls back pack_builder_unavailable and every source
+      # read is denied. It is the context-source access tenant only, a separate
+      # variable from the lane identity ONEX_TENANT_ID, which this file leaves
+      # alone. Non-secret; the operator env may override the dev-lane default.
+      ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
