@@ -27,7 +27,7 @@ requirements:
         statement: "AC4: Usage shows tokens in and tokens out per day as a stacked series split by model (requirement US-1), and its by-model table shows each model's share of calls and its tier beside the calls column it already has -- falsifier: the window sums differ from `onex metering --json`, or the shares do not sum to 100"
   - id: req-omn21015-ac17-infra-vendor
     statement: >-
-      Migration 099 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound tenant ledger row and the forward-only class.
+      Migration 100 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound tenant ledger row and the forward-only class.
     acceptance:
       - id: AC17
         statement: "AC17: `cost.savings-overview.v1` serves `tokens_input_total` = `COALESCE(SUM(prompt_tokens), 0)` and `tokens_output_total` = `COALESCE(SUM(completion_tokens), 0)` over the same `combined_runs` rows, tenant and window as `tokens_total`, so the two sum to it -- falsifier: a real-Postgres test in hosted CI, with runs from both sources for two tenants, fails when either column is absent from the served row, when input + output differs from `tokens_total` for a tenant, or when the two directions are swapped"
@@ -45,7 +45,7 @@ evidence_requirements:
     description: Infra deployment half only; the vendored 0003 bytes, its kept three-column key, ledger checksum and forward-only class match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
   - kind: tests
-    description: Infra deployment half only; the vendored 099 bytes, tenant ledger checksum and forward-only class match the pinned omnimarket source.
+    description: Infra deployment half only; the vendored 100 bytes, tenant ledger checksum and forward-only class match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn21015_overview_token_directions_vendored.py -q
 emergency_bypass:
   enabled: false
@@ -137,8 +137,8 @@ dod_evidence:
         check_value: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
-  - id: dod-omn21015-ac17-infra-vendor-099
-    description: Infra half only. Pins 099's source bytes, its exact tenant ledger checksum and forward-only class; at the merge base the file is absent, so it fails there. It does not prove the view's sums or the Overview page.
+  - id: dod-omn21015-ac17-infra-vendor-100
+    description: Infra half only. Pins 100's source bytes, its exact tenant ledger checksum and forward-only class; at the merge base the file is absent, so it fails there. It does not prove the view's sums or the Overview page.
     source: manual
     checks:
       - check_type: test_passes

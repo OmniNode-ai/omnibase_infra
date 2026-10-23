@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-21015: migration 099 is vendored as declared.
+"""OMN-21015: migration 100 is vendored as declared.
 
 Failure modes this delivery check catches:
 
@@ -27,7 +27,7 @@ FORWARD = ROOT / "docker/migrations/forward"
 
 # SHA-256 digest of the approved omnimarket source migration.
 VENDORED = {
-    "nodes/node_projection_savings/099_savings_overview_token_directions.sql": (
+    "nodes/node_projection_savings/100_savings_overview_token_directions.sql": (
         "node:node_projection_savings",
         "f0c50314b5e0f4ed58361b41ceb22def397a9dd3c31ee12c1659b27df5796450",
     ),
