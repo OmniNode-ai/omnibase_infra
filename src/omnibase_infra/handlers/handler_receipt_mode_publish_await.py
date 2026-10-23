@@ -32,13 +32,12 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
-    resolve_lane_declaration_path,
+    resolve_lane_selection_at,
 )
 from omnibase_infra.cli.delegate_lane_credentials import (
     DelegateLaneCredentialError,
     resolve_lane_client_transport_for,
 )
-from omnibase_infra.cli.model_delegate_lane_selection import ModelDelegateLaneSelection
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
@@ -49,36 +48,6 @@ from omnibase_infra.protocols.protocol_receipt_mode_bus import ProtocolReceiptMo
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
-
-
-def _resolve_lane(lane: str, workspace: Path | None) -> ModelDelegateLaneSelection:
-    """Resolve ``lane`` to its declared broker and transport.
-
-    The same reads ``delegate_lane.resolve_lane_selection`` makes (locate the
-    declaration under the workspace config root, then ``load_lane_transport``),
-    through their positional entry points.
-
-    Raises:
-        DelegateLaneSelectionError: the declaration is unreachable, or it does
-            not bind ``lane`` to a usable broker.
-    """
-    # Lazy, as in delegate_lane: the canary node package constructs a node on import.
-    from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
-        load_lane_transport,
-    )
-
-    declaration = resolve_lane_declaration_path(workspace)
-    try:
-        transport = load_lane_transport(declaration, lane)
-    except ValueError as exc:
-        raise DelegateLaneSelectionError(f"lane {lane!r} is not usable: {exc}") from exc
-    return ModelDelegateLaneSelection(
-        lane=transport.lane,
-        bootstrap_servers=transport.bootstrap_servers,
-        security_protocol=transport.security_protocol,
-        sasl_mechanism=transport.sasl_mechanism,
-        declared_in=declaration,
-    )
 
 
 class HandlerReceiptModePublishAwait:
@@ -105,7 +74,7 @@ class HandlerReceiptModePublishAwait:
 
         workspace = self._environ.get("OMNIBASE_PATH") or self._environ.get("OMNI_HOME")
         try:
-            selection = _resolve_lane(
+            selection = resolve_lane_selection_at(
                 self._lane, Path(workspace) if workspace else None
             )
             transport = resolve_lane_client_transport_for(

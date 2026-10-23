@@ -312,7 +312,7 @@ def test_default_lane_binding_covers_construction_through_cleanup(
     )
     resolve = Mock(return_value=selection)
     credentials = Mock(return_value=transport)
-    monkeypatch.setattr(handler_module, "_resolve_lane", resolve)
+    monkeypatch.setattr(handler_module, "resolve_lane_selection_at", resolve)
     monkeypatch.setattr(
         handler_module, "resolve_lane_client_transport_for", credentials
     )
@@ -400,7 +400,9 @@ def test_credential_refusal_becomes_runtime_error(
         security_protocol="PLAINTEXT",
         declared_in=tmp_path / "lanes.yaml",
     )
-    monkeypatch.setattr(handler_module, "_resolve_lane", Mock(return_value=selection))
+    monkeypatch.setattr(
+        handler_module, "resolve_lane_selection_at", Mock(return_value=selection)
+    )
     error = DelegateLaneCredentialError("lane credential refused")
     monkeypatch.setattr(
         handler_module,
