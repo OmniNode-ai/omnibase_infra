@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3: the resolver returns a base pin's commit sha for the predecessor read and still refuses a sha or a branch as the committed pin -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
+  - id: req-omn17292-local-environment-bridge
+    statement: Retiring the local_environment interim declaration keeps its vendored migrations and the shipped tenant_projection_writer grant.
+    acceptance:
+      - id: AC4
+        statement: "AC4: no supplemental declaration carries local_environment, its three vendored migrations remain, and every shipped topology instance grants tenant_projection_writer exactly SELECT, INSERT, UPDATE on public.local_environment -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry v0.4.319.
@@ -31,6 +36,9 @@ evidence_requirements:
   - kind: tests
     description: The resolver reads the base pin's commit sha as the predecessor and keeps the committed pin tag-only.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
+  - kind: tests
+    description: The local_environment bridge is retired with its migrations and shipped grants intact.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -60,3 +68,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn-17292-ac4-local-environment-bridge
+    description: The local_environment bridge is retired with its migrations and shipped grants intact; the merge base still carries the bridge.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
