@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21334
+title: Vendor the compaction barrier and receipts migrations ahead of omnimarket
+summary: >-
+  Vendors the session_content barrier stamps, claude_hook_events producer sequence, and compaction_receipts create and writer-grant migrations byte for byte from omnimarket. Adds checksum-bound ledger rows, migration classes and an interim receipts grant declaration until the omnimarket pin carries the node contract. This is the infrastructure deployment half of OMN-21334 and OMN-21336.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21334-infra-vendor
+    statement: >-
+      The four vendored migrations retain the source bytes, each has exactly one checksum-bound ledger row and the correct class, and none is fenced.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: session_content/0002, claude_hook_events/0008 and compaction_receipts/0000-0001 match the measured omnimarket bytes, ledger checksums and classes without a FORCE fence -- falsifier: the vendor unit test fails any assertion.
+  - id: req-omn21334-live-apply-and-grants
+    statement: >-
+      The complete migration chains apply to an ephemeral PostgreSQL database, reapply without changing populated rows, and deliver the column types and receipts writer privileges required by the new node.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the live-apply tests preserve rows and cursors on a second apply, assert the new column types, and prove omninode_runtime has exactly SELECT, INSERT, UPDATE on compaction_receipts plus schema and sequence USAGE; topology derivation resolves every profile -- falsifier: any live-apply assertion or the generator's --check --prove fails.
+evidence_requirements:
+  - kind: tests
+    description: Source byte pins, ledger checksums, classes and absence of fences.
+    command: uv run pytest tests/unit/migrations/test_omn21334_compaction_vendor.py -q
+  - kind: tests
+    description: Real migration apply, replay, column types and runtime writer privileges.
+    command: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_vendor_omn21334.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21334-infra-vendor
+    description: Pins all four source digests, their exact ledger rows and classes, and proves none is fenced.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21334_compaction_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21334-live-apply-and-writer
+    description: Applies all three chains twice around populated rows and proves column types, exact ACLs and a non-superuser writer upsert with its generated cursor.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_vendor_omn21334.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run python scripts/generate_application_database_table_grants.py --check --prove
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
