@@ -7,9 +7,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from aiokafka.consumer.group_coordinator import GroupCoordinator
@@ -19,6 +19,7 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
 )
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
+    COORDINATOR_ERROR_LOG_GATE,
     ConsumerRejoinSupervisor,
 )
 
@@ -36,12 +37,46 @@ GROUP = (
 )
 PARTITION = TopicPartition(TOPIC, 0)
 
+POLL_SECONDS = 5.0
+COORDINATOR_UNAVAILABLE_SECONDS = 60.0
+COORDINATOR_REJOIN_COOLDOWN_SECONDS = 60.0
+INCIDENT_SECONDS = 30 * 60
+
 POLICY = ModelConsumerRejoinPolicy(
     stall_seconds=120.0,
     required_consecutive_stalls=3,
     rejoin_cooldown_seconds=300.0,
     sync_unready_seconds=600.0,
 )
+
+
+def polls_for(seconds: float, step: float = POLL_SECONDS) -> int:
+    return int(seconds // step)
+
+
+@pytest.fixture(autouse=True)
+def restore_coordinator_log_gate() -> Iterator[None]:
+    active = COORDINATOR_ERROR_LOG_GATE._active.copy()
+    coordinator_logger = logging.getLogger("aiokafka.consumer.group_coordinator")
+    filters = coordinator_logger.filters.copy()
+    try:
+        yield
+    finally:
+        COORDINATOR_ERROR_LOG_GATE._active.clear()
+        COORDINATOR_ERROR_LOG_GATE._active.update(active)
+        coordinator_logger.filters[:] = filters
+
+
+def test_supervisor_defaults_match_poll_budgets() -> None:
+    parameters = inspect.signature(ConsumerRejoinSupervisor.__init__).parameters
+    assert (
+        parameters["coordinator_unavailable_seconds"].default
+        == COORDINATOR_UNAVAILABLE_SECONDS
+    )
+    assert (
+        parameters["coordinator_rejoin_cooldown_seconds"].default
+        == COORDINATOR_REJOIN_COOLDOWN_SECONDS
+    )
 
 
 class FakeClock:
@@ -159,12 +194,12 @@ class Harness:
             **kwargs,
         )
 
-    async def poll(self, seconds: float = 5) -> Any:
+    async def poll(self, seconds: float = POLL_SECONDS) -> Any:
         self.clock.advance(seconds)
         batch = await asyncio.wait_for(
             self.supervisor.next_batch(self.consumer), timeout=5
         )
-        self.consumer = batch.consumer
+        self.consumer = cast("FakeConsumer", batch.consumer)
         return batch
 
 
@@ -174,7 +209,7 @@ async def test_consumer_rejoins_after_broker_restart_when_idle_and_coordinator_l
 ):
     h = Harness()  # Exercise constructor defaults.
     await h.poll(0)
-    for _ in range(11):
+    for _ in range(polls_for(COORDINATOR_UNAVAILABLE_SECONDS) - 1):
         await h.poll()
     assert h.recreates == 0
     assert h.consumer.end_offset_probes == 0
@@ -198,9 +233,10 @@ async def test_consumer_rejoins_after_broker_restart_when_position_waits_on_coor
     h.consumer._coordinator.coordinator_id = 0 if reported_known else None
     h.consumer._end_offsets = [100]
     h.consumer.hang_position = True
-    h.clock.advance(125)
+    h.clock.advance(POLICY.stall_seconds + POLL_SECONDS)
     await h.poll(0)
-    for _ in range(13):
+    # Cover the coordinator-loss bound plus one observation poll.
+    for _ in range(polls_for(COORDINATOR_UNAVAILABLE_SECONDS) + 1):
         batch = await h.poll()
         if batch.rejoined:
             break
@@ -214,12 +250,12 @@ async def test_consumer_rejoins_after_broker_restart_not_while_broker_unreachabl
 ):
     h = Harness()
     h.consumer._leaders_reachable = False
-    for _ in range(360):
+    for _ in range(polls_for(INCIDENT_SECONDS)):
         await h.poll()
     assert h.recreates == 0
     h.consumer._leaders_reachable = True
     await h.poll()
-    for _ in range(11):
+    for _ in range(polls_for(COORDINATOR_UNAVAILABLE_SECONDS) - 1):
         await h.poll()
     assert h.recreates == 0
     await h.poll()
@@ -232,7 +268,7 @@ async def test_consumer_rejoins_after_broker_restart_leaves_a_healthy_idle_consu
 ):
     h = Harness()
     h.consumer._coordinator.coordinator_id = 0
-    for _ in range(360):
+    for _ in range(polls_for(INCIDENT_SECONDS)):
         await h.poll()
     assert h.recreates == 0
 
@@ -241,9 +277,6 @@ async def test_consumer_rejoins_after_broker_restart_leaves_a_healthy_idle_consu
 async def test_consumer_rejoin_failure_alarms_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
-        COORDINATOR_ERROR_LOG_GATE,
-    )
     from omnibase_infra.models.health.model_consumer_rejoin_alarm import (
         ModelConsumerRejoinAlarm,
     )
@@ -260,7 +293,7 @@ async def test_consumer_rejoin_failure_alarms_once(
         emit_alarm=emit,
     )
     with caplog.at_level(logging.INFO):
-        for _ in range(360):
+        for _ in range(polls_for(INCIDENT_SECONDS)):
             await h.poll()
     assert h.recreates > 10
     assert len(h.supervisor.alarms) == 1
@@ -301,7 +334,11 @@ async def test_consumer_rejoin_failure_alarms_once_per_episode_and_rearms_after_
 ) -> None:
     h = Harness(fail=True)
     with caplog.at_level(logging.INFO):
-        for _ in range(15):
+        # Cover the loss bound with a full policy confirmation window of slack.
+        for _ in range(
+            polls_for(COORDINATOR_UNAVAILABLE_SECONDS)
+            + POLICY.required_consecutive_stalls
+        ):
             await h.poll()
         assert len(h.supervisor.alarms) == 1
         h.consumer._wedged = False
@@ -312,7 +349,13 @@ async def test_consumer_rejoin_failure_alarms_once_per_episode_and_rearms_after_
             r.getMessage().startswith("consumer_group_rejoin_recovered ")
             for r in caplog.records
         )
-        for _ in range(30):
+        # Cover a new loss bound and cooldown, plus both confirmation windows.
+        for _ in range(
+            polls_for(
+                COORDINATOR_UNAVAILABLE_SECONDS + COORDINATOR_REJOIN_COOLDOWN_SECONDS
+            )
+            + 2 * POLICY.required_consecutive_stalls
+        ):
             await h.poll()
         assert len(h.supervisor.alarms) == 2
         h.consumer._pending = [object()]
@@ -324,6 +367,7 @@ def test_read_coordinator_known_pins_aiokafka_group_coordinator() -> None:
         read_coordinator_known,
     )
 
+    # Pin the private attribute read_coordinator_known needs so upgrades fail here first.
     assert "self.coordinator_id = None" in inspect.getsource(
         GroupCoordinator.coordinator_dead
     )
@@ -381,8 +425,11 @@ def test_coordinator_log_gate_reference_counts_and_preserves_other_errors() -> N
 async def test_end_offset_timeout_does_not_trigger_rejoin() -> None:
     h = Harness(probe_timeout_seconds=0.01)
     h.consumer.hang_end_offsets = True
-    for _ in range(20):
-        await h.poll(60)
+    # Cover two unready windows with probes spaced at the coordinator-loss bound.
+    for _ in range(
+        polls_for(2 * POLICY.sync_unready_seconds, step=COORDINATOR_UNAVAILABLE_SECONDS)
+    ):
+        await h.poll(COORDINATOR_UNAVAILABLE_SECONDS)
     assert h.recreates == 0
 
 
@@ -392,7 +439,11 @@ async def test_started_replacement_without_coordinator_counts_as_failed_rejoin()
 ):
     h = Harness()
     h.replacement._coordinator.coordinator_id = None
-    for _ in range(25):
+    # Cover the initial loss bound and a retry cooldown, plus the first observation.
+    for _ in range(
+        polls_for(COORDINATOR_UNAVAILABLE_SECONDS + COORDINATOR_REJOIN_COOLDOWN_SECONDS)
+        + 1
+    ):
         await h.poll()
     assert h.recreates == 2
     assert len(h.supervisor.alarms) == 1
@@ -409,8 +460,8 @@ async def test_backlog_rejoin_failure_alarms_without_claiming_coordinator_loss()
     h = Harness(fail=True)
     h.consumer._coordinator.coordinator_id = 0
     h.consumer._end_offsets = [100]
-    for _ in range(4):
-        await h.poll(125)
+    for _ in range(POLICY.required_consecutive_stalls + 1):
+        await h.poll(POLICY.stall_seconds + POLL_SECONDS)
     assert h.recreates >= 1
     assert len(h.supervisor.alarms) == 1
     assert h.supervisor.alarms[0].reason == "stalled_backlog_not_draining"
@@ -426,12 +477,15 @@ async def test_alarm_emitter_failure_never_breaks_recovery() -> None:
         raise ConnectionError("health pipeline unavailable")
 
     h = Harness(fail=True, emit_alarm=emit)
-    for _ in range(15):
+    # Cover the loss bound with a full policy confirmation window of slack.
+    for _ in range(
+        polls_for(COORDINATOR_UNAVAILABLE_SECONDS) + POLICY.required_consecutive_stalls
+    ):
         await h.poll()
     assert len(h.supervisor.alarms) == 1
     h.consumer._coordinator.coordinator_id = 0
     h.consumer._end_offsets = [10]
-    await h.poll(125)
+    await h.poll(POLICY.stall_seconds + POLL_SECONDS)
     assert not h.supervisor.alarm_active
 
 
@@ -475,8 +529,9 @@ async def test_bus_wires_bounds_identity_and_retains_bounded_alarms(
     consumer = FakeConsumer(
         member_id="bus-original", position=10, end_offsets=(10,), wedged=True
     )
-    for _ in range(5):
-        clock.advance(5)
+    # Cover the configured loss bound plus the first observation poll.
+    for _ in range(polls_for(config.consumer_coordinator_unavailable_seconds) + 1):
+        clock.advance(POLL_SECONDS)
         await asyncio.wait_for(supervisor.next_batch(consumer), timeout=5)
     assert len(bus.consumer_rejoin_alarms()) == 1
     alarm = bus.consumer_rejoin_alarms()[0]
@@ -503,9 +558,18 @@ async def test_bus_wires_bounds_identity_and_retains_bounded_alarms(
         is EnumConsumerHealthSeverity.CRITICAL
     )
     emitter.emit_event.side_effect = ConnectionError("mirror failed")
-    for _ in range(REJOIN_HISTORY_CAPACITY + 1):
-        await bus._record_consumer_rejoin_alarm(alarm)
-    assert len(bus.consumer_rejoin_alarms()) == REJOIN_HISTORY_CAPACITY
+    recorded_alarms = [
+        alarm.model_copy(update={"failed_rejoins": i + 1})
+        for i in range(REJOIN_HISTORY_CAPACITY + 1)
+    ]
+    for recorded_alarm in recorded_alarms:
+        await bus._record_consumer_rejoin_alarm(recorded_alarm)
+    retained_alarms = bus.consumer_rejoin_alarms()
+    assert len(retained_alarms) == REJOIN_HISTORY_CAPACITY
+    assert retained_alarms == tuple(recorded_alarms[1:])
+    assert alarm not in retained_alarms
+    assert recorded_alarms[0] not in retained_alarms
+    assert retained_alarms[-1] == recorded_alarms[-1]
 
 
 @pytest.mark.asyncio

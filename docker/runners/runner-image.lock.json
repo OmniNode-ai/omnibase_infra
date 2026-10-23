@@ -1,12 +1,12 @@
 {
   "base_image_digest": "sha256:3ba65aa20f86a0fad9df2b2c259c613df006b2e6d0bfcc8a146afb8c525a9751",
   "gh_version": "2.67.0",
-  "identity_digest": "25f6d7f3c0e89a747c59290f4da5fdde",
+  "identity_digest": "33089558a60e4dd3ea864d760e6d61ef",
   "image_version": 11,
   "kubectl_version": "1.32.1",
   "python_version": "3.12",
   "runner_version": "2.336.0",
-  "shared_env_digest": "c0baef443c4db9b7e368ae28",
+  "shared_env_digest": "464f9ab6175aa3cc960eae63",
   "shared_env_install_args": "--frozen --all-extras --all-groups --no-install-project",
   "trivy_version": "0.74.0",
   "uv_version": "0.6.14"

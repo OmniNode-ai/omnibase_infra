@@ -53,11 +53,20 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn-21337-ac4
-    description: The pull request body carries the crash report, which names the broker version, the log lines and the request in flight (ListGroups, group_state_to_kafka_name); the orchestrator attaches it to the ticket.
+    description: The crash report committed at docs/incidents/OMN-21337/broker-abort-crash-report.json (also carried in the pull request body) names the broker version, the broker log lines and the request in flight (ListGroups, group_state_to_kafka_name), and records that it names no version bump or config change; the orchestrator attaches it to the ticket.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/pulls?head=OmniNode-ai:omn-21337-consumer-rejoin-after-broker-restart&state=all" --jq '.[0].body' | grep -F 'kafka::group_state_to_kafka_name' > /dev/null
+        check_value: |
+          python3 - <<'PY'
+          import json
+          r = json.load(open('docs/incidents/OMN-21337/broker-abort-crash-report.json'))
+          assert r['broker']['image'] == 'redpandadata/redpanda:v24.3.18'
+          assert any('Aborting on shard 0.' in line for line in r['broker_log'])
+          assert r['request_in_flight']['api'] == 'ListGroups'
+          assert 'kafka::group_state_to_kafka_name' in r['request_in_flight']['backtrace'][0]
+          assert r['version_bump_or_config_change']['named'] is False
+          PY
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
