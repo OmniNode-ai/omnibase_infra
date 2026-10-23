@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21341
+title: Build the receipt-mode client the Claude Code hook adapter loads
+summary: >-
+  omnimarket's onex-claude-code-hook loads omnibase_infra.cli.receipt_mode_client:ReceiptModeClient with a zero-argument call and no repository defined it, so every manual /compact through the installed binding exited 4 and Claude Code compacted natively. This adds the client as HandlerReceiptModePublishAwait in omnibase_infra.handlers.handler_receipt_mode_publish_await, because this repository's canonical-location and lifecycle-class gates refuse a new cli/ module and a Client class name; omnimarket's adapter default spec moves to it in the same ticket. The handler resolves the dev lane from the lane declaration (with the lane's client transport bound for the whole call), subscribes to every awaited topic, publishes one envelope on the command topic, and returns the correlated events (by correlation id or the payload invocation_id echo) up to the first one carrying an action, or what it has at the deadline. The rendered mod module's failure line is the omnimarket half of this ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21341-client
+    statement: >-
+      ReceiptModeClient.publish_and_await subscribes before it publishes, returns only correlated events in arrival order, stops at the first event carrying an action, returns what it has at the deadline, and always unsubscribes and closes the bus.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: ReceiptModeClient.publish_and_await subscribes to every awaited topic before it publishes one envelope on the command topic, returns only the events correlated to that envelope (its correlation id, or the payload invocation_id echo) in arrival order, stops at the first correlated event whose payload carries an action, and returns what it has when the deadline passes -- falsifier: uv run pytest tests/unit/cli/test_receipt_mode_client.py -q over the in-memory bus fails.
+evidence_requirements:
+  - kind: tests
+    description: The client over the real in-memory bus, the lane binding scope, the deadline and the cleanup paths.
+    command: uv run pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21341-client
+    description: Subscribe-before-publish, correlation by id or invocation echo, stop at the action, deadline, cleanup.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_receipt_mode_publish_await.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
