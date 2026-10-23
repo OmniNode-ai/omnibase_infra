@@ -2338,7 +2338,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-infra"
-version = "0.38.76"
+version = "0.38.77"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
