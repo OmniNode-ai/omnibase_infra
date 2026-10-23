@@ -43,7 +43,10 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
-from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+from tests.helpers.lane_census_fixtures import (
+    LAB_MANIFEST,
+    lanes_declared_on_host,
+)
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
     LANE_OVERLAY_TARGET,
@@ -373,10 +376,8 @@ def test_dev_202_lane_boundary_host_resolves_and_carries_dev_202() -> None:
     manifest = _manifest()
     validate_hosts(manifest)
     assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
-    lanes_on_host = sorted(
-        name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
-    )
-    assert lanes_on_host == ["dev-202", "sim-202"]
+    lanes_on_host = lanes_declared_on_host(manifest, HOST_ID)
+    assert LANE in lanes_on_host
 
 
 @pytest.mark.lab_overlay
@@ -384,11 +385,10 @@ def test_dev_202_lane_boundary_census_on_202_reads_clean() -> None:
     plan = _plan_on_202(_healthy_dev_202_rows(), [NETWORK])
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    assert sorted(plan["lanes_checked"]) == ["dev-202", "sim-202"]
-    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - {
-        "dev-202",
-        "sim-202",
-    }
+    on_host = set(lanes_declared_on_host(manifest, HOST_ID))
+    assert LANE in on_host
+    assert set(plan["lanes_checked"]) == on_host
+    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - on_host
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 

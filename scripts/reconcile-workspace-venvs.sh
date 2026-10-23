@@ -190,7 +190,7 @@
 #
 #   1. This observation NEVER fetches. `--check` exempts itself from the
 #      OMN-17366 ownership plan because a read-only probe writes nothing -- a fetch
-#      writes, depositing objects, refs and reflogs. On the `.201` root cron
+#      writes, depositing objects, refs and reflogs. On the production host root cron
 #      that is exactly how 1118 root-owned paths ended up inside operator-owned
 #      clones. The target is read AS LAST FETCHED and the report says so;
 #      reconcile-host.sh is the actor that fetches, under an ownership plan.
@@ -800,6 +800,70 @@ swap_dispatch_venv() {
   rm -rf "$previous"
 }
 
+# One writer at a time on the staging path (OMN-17427). `$DISPATCH_VENV.rebuilding`
+# is a fixed name, and nothing stopped two runs of this script from using it at
+# once. The host reconciler's own lock only serialises host-reconcile against
+# itself; a hand-run or orphaned run of this script never took it. Measured
+# 2026-10-22: one run was `cp -a` populating the staging directory while the
+# tick's run was `rm -rf` deleting it, the second `rm` printed "Directory not
+# empty" four times, and the venv it then built had no interpreter ("target
+# python is not executable"), so venv:omnimarket read DID_NOT_MOVE and the
+# reconcile failed.
+#
+# The lock is a symlink whose TARGET is the holder record (pid, host, UTC time).
+# `ln -s` is the atomic claim (macOS has no flock) and writes the record in the
+# same step, so there is no window in which a lock exists with no holder in it,
+# which is the corpse a `mkdir` followed by a pid write leaves when the run dies
+# between the two (OMN-18608). Staleness is decided from the record: the same
+# host and a pid that no longer runs. A record from another host is never
+# reclaimed here, because this script cannot tell whether that process is live.
+STAGING_LOCK=""
+
+release_staging_lock() {
+  [[ -n "$STAGING_LOCK" ]] || return 0
+  rm -f "$STAGING_LOCK"
+  STAGING_LOCK=""
+}
+
+staging_lock_field() {
+  # $1 = holder record, $2 = key. Records are `pid=N;host=H;at=T`.
+  local part
+  local -a parts
+  IFS=';' read -r -a parts < <(printf '%s\n' "$1")
+  for part in "${parts[@]}"; do
+    [[ "$part" == "$2="* ]] && { printf '%s' "${part#"$2="}"; return 0; }
+  done
+  return 0
+}
+
+acquire_staging_lock() {
+  local path="$1.lock" record holder holder_host attempt
+  record="pid=$$;host=$(hostname);at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  for attempt in 1 2; do
+    if ln -s "$record" "$path" 2>/dev/null; then
+      STAGING_LOCK="$path"
+      trap release_staging_lock EXIT
+      return 0
+    fi
+    local seen
+    seen="$(readlink "$path" 2>/dev/null || true)"
+    holder="$(staging_lock_field "$seen" pid)"
+    holder_host="$(staging_lock_field "$seen" host)"
+    if [[ -n "$holder" ]] \
+       && { [[ "$holder_host" != "$(hostname)" ]] || kill -0 "$holder" 2>/dev/null; }; then
+      fail "another run of this script (pid $holder on ${holder_host:-unknown host}, since $(staging_lock_field "$seen" at)) is staging $1;" \
+        "two runs on one staging directory delete each other's venv." \
+        "Wait for it to finish, or stop it if it is orphaned:" \
+        "  ps -p $holder -o pid,etime,command"
+    fi
+    # A dead or unreadable holder. Remove it only if it is still the record just
+    # read, so a run that reclaimed it first is not displaced.
+    [[ "$(readlink "$path" 2>/dev/null || true)" == "$seen" ]] && rm -f "$path"
+  done
+  fail "could not take the staging lock $path" \
+    "Remove it if no run of this script is live, then retry."
+}
+
 INSTALL_SCRIPT="${ONEX_RECONCILE_INSTALL_SCRIPT:-$INFRA_DIR/scripts/install-node-skill-package.sh}"
 
 if [[ ! -d "$MARKET_CLONE/.git" ]]; then
@@ -812,7 +876,7 @@ fi
 # --------------------------------------------------------------------------- #
 # Surface ownership, and resolving the one tool that does all the writing
 # --------------------------------------------------------------------------- #
-# OMN-17335. The first live `.201` run of this reconciler refused with
+# OMN-17335. The first live production-host run of this reconciler refused with
 # "`uv` is not on PATH", and the ticket filed against it concluded uv was not
 # installed on the host at all. That conclusion was wrong, and the probe that
 # produced it is the same shape as the defect this whole epic exists to close:
@@ -961,7 +1025,7 @@ resolve_uv() {
     return 0
   fi
 
-  # The case that actually broke `.201`: uv installed under the surface owner's
+  # The case that actually broke the production host: uv installed under the surface owner's
   # home, invisible to a cron PATH.
   owner_home="$SURFACE_OWNER_HOME"
   if [[ -n "$owner_home" ]]; then
@@ -1107,7 +1171,7 @@ lock_layer_ok_in() {
     # inside an activated venv, a `uv run` parent -- silently redirects a sync
     # that means "the project's own venv" to somewhere else entirely. Measured
     # on this repo's CI, where the runner exports it: the gate pass targeted
-    # /home/runner/work/omnibase_infra/omnibase_infra/.venv and the canonical
+    # the runner checkout's .venv and the canonical
     # clone's venv was never purified at all, while the run still exited 0.
     (cd "$project" && as_owner env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT "$UV_BIN" sync --frozen --check --project "$project" "$@" >/dev/null 2>&1)
   fi
@@ -1421,7 +1485,7 @@ report_unowned_cli_venvs() {
 # git directory, which is the same class of thing as a venv.
 #
 # ONE INSTALL PER CLONE COVERS EVERY WORKTREE. Git worktrees share the main
-# clone's hooks directory, so the 400-odd worktrees under `omni_worktrees/`
+# clone's hooks directory, so the 400-odd worktrees under the worktrees root
 # need no install of their own. Stating it here because the obvious reading of
 # "arm every clone" is that the worktrees are a second, uncovered surface, and
 # they are not.
@@ -1855,6 +1919,9 @@ run_repair() {
   # (below, OMN-19432). A venv that does not exist YET is also built in place --
   # there is no live environment to protect, and no lane can be using it.
   local target_venv="$DISPATCH_VENV" target_python="$DISPATCH_PYTHON" staging=""
+  if [[ "$rebuild" -eq 1 || "$need_lock" -eq 1 || "$need_provider" -eq 1 ]]; then
+    acquire_staging_lock "$DISPATCH_VENV.rebuilding"
+  fi
   if [[ "$rebuild" -eq 1 ]]; then
     staging="$DISPATCH_VENV.rebuilding"
     target_venv="$staging"
@@ -1959,7 +2026,7 @@ run_repair() {
     # ...EXCEPT that a lock layer already BEHIND is applied before it as well
     # (OMN-20154). The co-install's own readback (OMN-18752) refuses when the
     # provider's declared floor is above what the venv carries, and a floor the
-    # LOCK already satisfies is exactly that case: on .202 the lock pinned
+    # LOCK already satisfies is exactly that case: on a second host the lock pinned
     # omnibase-core 0.47.27, omnimarket declared >=0.47.27, the venv held
     # 0.47.25, the co-install refused on every tick, and the lock pass after it
     # never ran -- so nothing ever moved. Applying the lock first gives the
@@ -1990,7 +2057,7 @@ run_repair() {
       trace "OMNIMARKET_REF=$head $INSTALL_SCRIPT --execute $target_python"
       # PATH carries the resolved uv down to the child (OMN-17383). The
       # co-install calls bare `uv`, and it inherits the cron PATH -- which is
-      # exactly the PATH that cannot reach a user-local install, so on `.201`
+      # exactly the PATH that cannot reach a user-local install, so on the production host
       # this step died with "uv: command not found" even after resolve_uv() had
       # already located the binary in the parent. The interpreter is PASSED
       # DOWN rather than re-resolved: two independent resolutions can disagree,
@@ -1998,7 +2065,7 @@ run_repair() {
       #
       # `cd "$OMNI_HOME"` for the same reason, one variable over (OMN-17800).
       # `runuser` changes UID, GID and HOME; it does NOT change the inherited
-      # working directory. Under the `.201` root cron that directory is /root,
+      # working directory. Under the production-host root cron that directory is /root,
       # mode 0700 -- so the child became the operator while still standing in
       # root's home, and uv, which discovers configuration by walking UP from
       # the working directory, died on:

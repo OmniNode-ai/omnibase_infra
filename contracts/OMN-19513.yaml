@@ -12,7 +12,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: The base compose x-runtime-base anchor and the omninode-runtime, runtime-effects and runtime-worker catalog manifests declare ulimits.nofile soft and hard 65535 -- falsifier: uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py fails at origin/dev, which declares none"
+  - id: req-omn19513-emit-spool-on-volume
+    statement: "The dev runtime and effects services keep owed-event spools on their own persistent data volumes."
+    acceptance:
+      - id: AC2
+        statement: "AC2: The rendered dev-lane omninode-runtime and runtime-effects services set ONEX_EMIT_EFFECT_SPOOL_DIR under /app/data, mount a named volume there, and use distinct data volumes so no other service drains the same spool -- falsifier: uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider fails with the merge-base dev-lane overlay."
 evidence_requirements:
+  - kind: tests
+    description: "Render the base and dev-lane compose files and check both spool paths, their persistent mounts, and volume isolation."
+    command: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: a hosted runner renders the dev deployment configuration and refuses a spool outside either service's own named data volume; this checks configuration, not a live deployment."
+    command: "deploy: uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
   - kind: tests
     description: "Every service built from docker/Dockerfile.runtime in the base compose file, and the three runtime catalog manifests, declare nofile soft >= 65535."
     command: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
@@ -38,4 +49,19 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'OMN-19513: the container default is 1024 open files' | grep -qx 1"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19513-emit-spool-on-volume"
+    description: "The rendered dev deployment puts both owed-event spools under distinct named data volumes. The merge-base overlay fails the per-service spool assertions."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC2]
+  - id: "dod-omn19513-deploy-emit-spool-on-volume"
+    description: "Hosted-runner deploy configuration check: render the actual dev compose stack and assert spool persistence and isolation without contacting a live lane."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
