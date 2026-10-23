@@ -20,7 +20,8 @@ THE RULE
 Each instance may declare ``flags.max_dev_lag_minutes`` in
 ``config/deploy_lane_routing.yaml``. A lane that has run behind a followed
 repository's dev head for that long is OVERDUE: its converge no longer waits out
-the idle period or the probe windows. Every other bound stays: a job in flight,
+the idle period or an unreadable schedule, but still never starts inside a
+reserved C15/C16 window (OMN-19175). Every other bound stays: a job in flight,
 the FROZEN flag, the load gate, and one converge per head. And an overdue lane
 is loud: the agent publishes a ``ModelDevLaneDrift`` naming the running image,
 the dev head it lags and by how long, and serves the latest one per repository
@@ -110,7 +111,7 @@ class TestTheIncident:
             first_clear += timedelta(minutes=1)
         assert first_clear == datetime(2026, 10, 15, 18, 47, tzinfo=UTC)
 
-    def test_an_overdue_lane_converges_inside_the_probe_window(self) -> None:
+    def test_an_overdue_lane_refuses_inside_the_probe_window(self) -> None:
         windows = load_probe_windows(REPO_ROOT)
         now = MERGED + BOUND + timedelta(minutes=1)  # 17:38Z, under C15's lead
         blocker = probe_blocking(now, windows)
@@ -118,10 +119,8 @@ class TestTheIncident:
 
         decision = decide(_inputs(now=now, probe_blocker=blocker))
 
-        assert decision.verdict is EnumIdleConvergeVerdict.CONVERGE
-        assert decision.head_ref == HEAD
-        assert "overdue" in decision.detail
-        assert blocker in decision.detail
+        assert decision.verdict is EnumIdleConvergeVerdict.PROBE_WINDOW
+        assert decision.detail == blocker
 
     def test_within_the_bound_the_probe_window_still_refuses(self) -> None:
         now = MERGED + BOUND - timedelta(minutes=1)
@@ -250,7 +249,7 @@ class TestInTheAgent:
         agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=True)
         now = MERGED + BOUND + timedelta(minutes=1)
         agent._idle_converge_now = lambda: now
-        agent._idle_probe_blocker = lambda at: "C15 run at 2026-10-15T17:41Z"
+        agent._idle_probe_blocker = lambda at: None
         agent._idle_read_running_image = lambda: "omnibase-infra-omninode-runtime"
         agent._lane_flags = ModelLaneFlags(max_dev_lag_minutes=30)
         agent._dev_lag_behind_since["omnimarket"] = MERGED
@@ -264,6 +263,34 @@ class TestInTheAgent:
         assert len(jobs) == 1
         assert jobs[0] is not None
         assert jobs[0].command["requested_by"] == IDLE_CONVERGE_REQUESTER
+        assert len(published) == 1
+        drift = ModelDevLaneDrift.model_validate(published[0])
+        assert drift.overdue is True
+        assert drift.repository == "omnimarket"
+        assert drift.head_ref == HEAD
+        assert drift.lag_seconds == (BOUND + timedelta(minutes=1)).total_seconds()
+        assert agent._latest_dev_lane_drift()["omnimarket"]["overdue"] is True
+
+    def test_an_overdue_agent_refuses_a_probe_window_and_publishes_drift(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        published: list[dict[str, Any]] = []
+        monkeypatch.setattr(
+            agent_mod,
+            "publish_dev_lane_drift",
+            lambda payload, config: published.append(payload) or True,
+        )
+        agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=True)
+        now = MERGED + BOUND + timedelta(minutes=1)
+        agent._idle_converge_now = lambda: now
+        agent._idle_probe_blocker = lambda at: "C15 run at 2026-10-15T17:41Z"
+        agent._idle_read_running_image = lambda: "omnibase-infra-omninode-runtime"
+        agent._lane_flags = ModelLaneFlags(max_dev_lag_minutes=30)
+        agent._dev_lag_behind_since["omnimarket"] = MERGED
+
+        agent._maybe_idle_converge()
+
+        assert list((tmp_path / "jobs").glob("*.json")) == []
         assert len(published) == 1
         drift = ModelDevLaneDrift.model_validate(published[0])
         assert drift.overdue is True

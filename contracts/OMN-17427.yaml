@@ -439,6 +439,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-nightly-live-adapter-deselect
+    statement: The nightly Slow & Chaos job deselects the live LLM adapter documentation suite, which carries slow and fails closed without LLM_DEEPSEEK_R1_URL (OMN-21147), so the job no longer errors on that suite's fixture when no endpoint is configured; the OMN-20317 two-way registration deselect stays.
+    acceptance:
+      - id: AC17427522601
+        statement: 'AC17427522601: the slow-tests pytest command in nightly-tests.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the two-way registration deselect, the workflow''s own arguments with -m "slow or chaos" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q'
   - id: req-omn17427-deploy-agent-health-convergence
     statement: Post-deploy verification retries transient failures, permits recreation only for a Docker-unhealthy or exited container, and honours the selected service's own healthcheck budget.
     acceptance:
@@ -510,6 +515,13 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-dev-broker-image
+    statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
+    acceptance:
+      - id: AC17427520601
+        statement: 'AC17427520601: the dev broker, partition-cap, SCRAM and SASL services and all three catalog declarations use redpandadata/redpanda:v24.3.18 -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"'
+      - id: AC17427520602
+        statement: 'AC17427520602: every other compose file that starts a dev-named broker or rpk service declares its own image or independent template -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits'
   - id: req-omn17427-compose-up-convergence
     statement: A failed or interrupted compose up passes its phase only when every service in scope has its declared configuration hash.
     acceptance:
@@ -2290,6 +2302,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac163-nightly-live-adapter-deselect
+    description: Reads the slow-tests step of nightly-tests.yml and runs pytest --collect-only with that step's own arguments over tests/integration/adapters/llm; the same test fails on dev before the deselect, where the selection collects the suite's 6 tests. It does not run the nightly workflow or any live LLM endpoint.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427522601
+  - id: dod-omn-17427-ac163-live-adapter-deploy-check
+    description: Hosted-runner deploy check -- the same workflow-argument collection test over repository files with LLM_DEEPSEEK_R1_URL removed from the environment; no credentials, lab host or live endpoint is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427522601
   - id: dod-omn-17427-ac171-audit-setup-uv
     description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
     source: manual
@@ -2459,6 +2489,34 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac146-dev-broker-image
+    description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520601
+  - id: dod-omn-17427-ac147-other-lanes-pinned
+    description: Scans the other compose files for broker and rpk services inheriting the dev image. It fails against the merge base, where those lanes inherit the base compose image.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520602
+  - id: dod-omn-17427-dev-broker-image-deploy-check
+    description: Hosted-runner deploy check reads the compose and catalog declarations and refuses a dev image other than v24.3.18 or an unpinned borrower lane. It requires no Docker daemon, private lab overlay or credentials and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place or no_other_compose_file_inherits"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520601
+      - AC17427520602
   - id: dod-omn17427-ac524901-compose-up
     description: Mismatched or absent container hashes refuse phase success.
     source: manual
