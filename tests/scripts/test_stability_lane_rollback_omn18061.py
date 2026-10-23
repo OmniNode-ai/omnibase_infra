@@ -159,9 +159,9 @@ def test_red_control_the_pre_fix_rule_rolls_back_the_same_input() -> None:
         (
             {
                 "core_services_running": False,
-                "core_services_not_running": ["runtime-effects=created"],
+                "core_services_not_running": ["runtime-worker=created"],
             },
-            "core_services_running=false[runtime-effects=created]",
+            "core_services_running=false[runtime-worker=created]",
         ),
         ({"errors": ["health fetch failed: HTTP Error 503"]}, "gate_errors=1"),
     ],
@@ -580,9 +580,10 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     # never the property under test -- the three assertions below are -- and a
     # literal here means every service legitimately added to the lane arrives
     # with an unrelated red test and an invitation to "just bump the number".
-    # Shrink-only instead: 10 is the floor this ticket found, and losing a
-    # service from the build scope is the regression worth catching.
+    # OMN-21288: effects now run inside main and must not be rebuilt or restored
+    # as a separate service. Keep the remaining build coverage.
     assert len(build_set) >= 10, sorted(build_set)
+    assert "runtime-effects" not in core_set | build_set | rollback_set
     assert core_set < build_set, "CORE_SERVICES must be a strict subset of the build"
     assert rollback_set == build_set, (
         f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
@@ -590,6 +591,76 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     assert rollback_set > core_set, (
         "a rollback set equal to CORE_SERVICES is the mixed-revision defect"
     )
+
+
+@pytest.mark.unit
+def test_folded_lane_verifier_checks_only_the_remaining_core_services() -> None:
+    from verify_stability_refresh import CORE_SERVICES
+
+    assert set(CORE_SERVICES) == {
+        "omninode-runtime",
+        "runtime-worker",
+        "projection-api",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("container_exists", "main_logged_fold", "retires"),
+    [(False, True, False), (True, False, False), (True, True, True)],
+)
+def test_retired_effects_cleanup_runs_on_pass_only_and_keeps_volumes(
+    container_exists: bool, main_logged_fold: bool, retires: bool
+) -> None:
+    """OMN-21288: the old effects container is retired only on a PASS refresh,
+    only after main logged its folded roles, and never with ``-v``.
+
+    Runs the block with a fake ``docker`` function, never a daemon.
+    """
+    text = REFRESH_STABILITY.read_text()
+    start = text.index("    # OMN-21288: the main runtime carries the effects role")
+    cleanup = text[start : text.index("    # Prune old preflight tags", start)]
+    # Inside the SUCCESS branch: a failed refresh that rolls main back to an
+    # image predating the fold keeps the old effects container.
+    success = text.index('    RESULT="SUCCESS"')
+    assert success < start < text.index("elif [[", success)
+    script = f"""
+set -euo pipefail
+INSPECT_EXIT={0 if container_exists else 1}
+MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
+COMPOSE_PROJECT=lane-a
+declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
+LANE_COMPOSE_FILE_ARGS=(-f base.yml -f lane-a.yml)
+log() {{ :; }}
+err() {{ :; }}
+docker() {{
+    case "$1" in
+        ps) [[ "$INSPECT_EXIT" -eq 0 ]] && printf 'c0ffee\\n' || true ;;
+        logs) printf '%s\\n' "$MAIN_LOG" ;;
+        *) printf '%s\\n' "$@" ;;
+    esac
+}}
+"""
+    result = subprocess.run(
+        ["bash", "-c", script + cleanup], capture_output=True, text=True, check=True
+    )
+    expected = [
+        "compose",
+        "-p",
+        "lane-a",
+        "-f",
+        "base.yml",
+        "-f",
+        "lane-a.yml",
+        "--profile",
+        "folded-effects",
+        "rm",
+        "-s",
+        "-f",
+        "runtime-effects",
+    ]
+    assert result.stdout.splitlines() == (expected if retires else [])
+    assert "-v" not in result.stdout.splitlines()
 
 
 @pytest.mark.unit

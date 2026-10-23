@@ -33,7 +33,6 @@ COMPOSE_FILES = (
 STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
-    "runtime-effects",
     "runtime-worker",
 }
 _BIFROST_CONTRACT_PATH = "/app/data/delegation/bifrost_delegation.yaml"
@@ -108,6 +107,7 @@ EXPECTED_RENDERED_SERVICES = {
     *PROFILE_CARRIER_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
+    "runtime-effects",
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
@@ -122,7 +122,6 @@ EXPECTED_PUBLISHED_PORTS = {
     "redpanda": {"39092", "39093", "29644"},
     "valkey": {"26379"},
     "omninode-runtime": {"18085"},
-    "runtime-effects": {"18086"},
     "runtime-worker": set(),
     "projection-api": {"13002"},
     "forward-migration": set(),
@@ -513,8 +512,12 @@ def test_stability_lane_render_contains_isolated_runtime_identity(
     assert services["omninode-runtime"]["container_name"] == (
         "omninode-stability-test-runtime"
     )
-    assert services["runtime-effects"]["container_name"] == (
-        "omninode-stability-test-runtime-effects"
+    assert "runtime-effects" not in services
+    main_env = services["omninode-runtime"]["environment"]
+    assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"] == "effects"
+    assert main_env["ONEX_DEAD_LETTER_ARCHIVE_DIR"] == "/app/data/dead-letter-archive"
+    assert (
+        main_env["ONEX_CONSUMER_FLOW_ARCHIVE_DIR"] == "/app/data/consumer-flow-archive"
     )
     assert services["runtime-worker"]["container_name"] == (
         "omninode-stability-test-runtime-worker"
@@ -767,14 +770,9 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         "omnibase-infra-stability-test-network"
     )
     assert rendered_config["networks"]["omnibase-infra-network"]["driver"] == "bridge"
-    assert rendered_config["networks"]["omnimemory-network"]["name"] == (
-        "omnibase-infra-stability-test-omnimemory-network"
-    )
-    assert rendered_config["networks"]["omnimemory-network"]["driver"] == "bridge"
-    assert (
-        rendered_config["networks"]["omnimemory-network"].get("external", False)
-        is False
-    )
+    # OMN-21288: the gated effects service was this profile's last user of
+    # omnimemory-network, so Compose omits the unused network from this render.
+    assert "omnimemory-network" not in rendered_config["networks"]
 
     rendered_container_names = {
         service_config["container_name"]

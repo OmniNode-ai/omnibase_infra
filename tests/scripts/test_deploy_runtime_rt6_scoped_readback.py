@@ -383,7 +383,7 @@ def test_stability_lane_readback_covers_its_own_writer_services(
     the readback would silently skip the six containers whose whole purpose is
     to prove the lane writes rows.
     """
-    lane_agnostic = ["omninode-runtime", "runtime-effects", "runtime-worker"]
+    lane_agnostic = ["omninode-runtime", "runtime-worker"]
     writers = [
         "projection-tenant-registry-writer",
         "projection-delegation-writer",
@@ -400,7 +400,6 @@ def test_stability_lane_readback_covers_its_own_writer_services(
     ]
     ps_map = {
         "omninode-runtime": "omninode-stability-test-runtime",
-        "runtime-effects": "omninode-stability-test-runtime-effects",
         "runtime-worker": "omninode-stability-test-runtime-worker",
         **{name: f"omnimarket-stability-test-{name}" for name in writers},
     }

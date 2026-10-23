@@ -250,6 +250,10 @@ services:
       ONEX_STATE_DIR: /app/data/.onex_state_stability_test
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-main
+      ONEX_RUNTIME_FOLDED_PROFILES: ${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES}
+      # The prune effects now run in this process.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
@@ -327,6 +331,8 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
+    # OMN-21288, 2026-10-20 ruling: effects run as nodes inside the one runtime.
+    profiles: !override ["folded-effects"]
     container_name: omninode-stability-test-runtime-effects
     restart: unless-stopped
     depends_on:

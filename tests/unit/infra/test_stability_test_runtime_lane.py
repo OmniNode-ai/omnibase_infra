@@ -30,7 +30,7 @@ RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 # must agree with this constant, or the assertions below fail.
 STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 
-RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+RUNTIME_SERVICES = ("omninode-runtime", "runtime-worker")
 RUNTIME_ADDRESS_PREFIX = "runtime://omninode-pc/stability-test/"
 OUT_OF_LANE_SERVICES = {
     "agent-actions-consumer",
@@ -283,6 +283,8 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
         "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
     ]
     assert policy_env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
+    # OMN-21288: the effects port stays reserved on the retained opt-in service.
+    assert services["runtime-effects"]["profiles"] == ["folded-effects"]
     assert services["runtime-effects"]["ports"] == [
         "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
     ]
