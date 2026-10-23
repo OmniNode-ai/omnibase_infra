@@ -488,6 +488,13 @@ requirements:
     acceptance:
       - id: AC164
         statement: 'AC164: fake-kubectl tests exercise crash-loop diagnostics, full artifact logs, ReplicaSet events without pods, unreadable kubectl output, selection of only unready Deployments and the uploaded artifact path -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_boot_gate_not_ready_explain_omn17427.py -q'
+  - id: req-omn17427-hostile-review-thread-disposition
+    statement: On a PR into dev every hostile-reviewer finding thread ends in a recorded disposition, a reply fixed-in <sha> whose commit is in the PR and touched the cited lines or rejected with a reason, CI Summary holds the PR until the Hostile Review Thread Gate is green, the gate passes with no threads so a reviewer outage never holds a merge, and the poster creates the threads the gate reads.
+    acceptance:
+      - id: AC180
+        statement: 'AC180: a resolved hostile-reviewer thread with no disposition reply blocks, an outdated open one blocks, a fixed-in commit that is not in the PR or did not touch the carried-forward cited lines blocks, a valid reply clears the thread without needing it resolved, no threads passes, and each finding is recorded per voter model -- falsifier: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
+      - id: AC17427523402
+        statement: 'AC17427523402: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
   - id: req-omn17427-broker-listener-alarm
     statement: The lab alarm raises when the dev broker's external Kafka listener does not answer a Kafka ApiVersions request on any bootstrap address, independent of container restarts.
     acceptance:
@@ -524,6 +531,11 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-issuer-overlay-coverage
+    statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
+    acceptance:
+      - id: AC526601
+        statement: 'AC526601: lab_principal_issuer.py check --overlay FILE --ledger FILE exits 1 and names each principal issued in the lane that the overlay does not declare for its login, exits 0 when every issued principal is declared or the ledger is absent, ignores other lanes and grants-applied rows, never prints a login, and exits 2 for --ledger without --overlay -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"'
   - id: req-omn17427-branch-install-record
     statement: "A fix installed into a dev-lane container from its branch is declared in a record the deploy agent keeps (repository, PR, branch head, services, each file's container path and sha256, an expiry at most seven days out), and the registrar refuses any lane but dev, a compose project that names prod or stability, a path outside /app, an expiry in the past or too far out, and a source whose hash is not the one the registrar was shown."
     acceptance:
@@ -549,6 +561,15 @@ requirements:
     acceptance:
       - id: AC188
         statement: "AC188: the real _run_deploy replays the refresh and applies after the recreate and the verify; an idle tick applies a loss under the dev lane lock, leaves a whole lane alone, is throttled, skips while a deploy holds the lane and runs nothing on an agent fenced from dev; a handler that cannot run or times out leaves the job a success; /branch-installs serves the declared installs, an empty list, an unreadable record as unreadable, and says indeterminate without a getter -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q"
+  - id: req-omn17427-c28-autovacuum
+    statement: The consumer-flow window table uses per-table autovacuum thresholds so newest-window index-only probes can benefit from vacuumed pages without changing rows, columns, indexes or grants.
+    acceptance:
+      - id: AC527401
+        statement: Migration 0007 changes only the vacuum, insert-vacuum and analyze scale factors on omninode_internal.consumer_flow_windows.
+      - id: AC527402
+        statement: Each of the three scale factors is positive and at most 0.05.
+      - id: AC527403
+        statement: The application migration ledger declares node_projection_consumer_flow migration 0007 exactly once under its node migration identity.
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -734,6 +755,12 @@ evidence_requirements:
     description: The floor test reads uv.lock and refuses a virtualenv below 21.14.12; no scheduled scan run is claimed.
     command: uv run pytest tests/ci/test_lockfile_virtualenv_floor_omn17427.py -q
   - kind: tests
+    description: The thread gate's disposition rule against fake thread payloads and a real temporary git history, and the recorded GitHub 422 and 20-head admission replays; no live GitHub call.
+    command: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+  - kind: tests
+    description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
+    command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+  - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
   - kind: tests
@@ -797,6 +824,42 @@ dod_evidence:
       - AC181
       - AC182
       - AC183
+  - id: dod-omn17427-ac180-thread-disposition
+    description: The gate tests drive classify_threads, GitFixVerifier on a temporary git repository and run_gate with the thread fetch replaced; the live-contact tests replay GitHub's recorded 422 to the old create-review payload and the thread gate check-runs of the 20 latest merged dev heads. They fail on the merge base, whose gate ignores resolved threads and has no disposition rule.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC180
+  - id: dod-omn17427-ac180-thread-disposition-deploy-check
+    description: Hosted-runner deploy check -- the thread gate and live-contact replay tests; they do not claim a live PR thread.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC180
+  - id: dod-omn17427-ac184-dev-only-ci-summary
+    description: CI Summary evaluated over synthetic check-run rows for a dev PR and a main PR, and the poster's publish() over a recording transport. They fail on the merge base, whose CI Summary asserts no thread gate and whose poster has no publish().
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427523402
+  - id: dod-omn17427-ac184-ci-summary-deploy-check
+    description: Hosted-runner deploy check -- the CI Summary and poster tests; they do not claim a live CI Summary run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427523402
   - id: dod-omn17427-omn19937-ac4-dev202-writer
     description: The regression failed before the deployment selection was added (empty owned manifest) and passes after it. This proves placement configuration, not a deployed consumer or successful live row readback; OMN-19937 AC4 remains open until deployment and re-probe.
     source: manual
@@ -2453,6 +2516,22 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC172
+  - id: dod-omn17427-ac526601-issuer-overlay-coverage
+    description: Regression tests fail at the merge base, where check has no --ledger, and pass at the head; they cover a fully declared ledger, an undeclared issued machine, a login that differs from the overlay row, another lane, an absent ledger and --ledger without --overlay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
+  - id: dod-omn17427-ac526601-overlay-coverage-deploy
+    description: Hosted-runner deploy check runs the issuer's check command over synthetic overlay and ledger files, and the compose file the issuer is recreated from still parses. No Docker daemon, broker, overlay checkout or credential is required; the one lane-manifest test, which reads the CI overlay checkout, is deselected.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q --deselect tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_manifest_issuer_and_dev_networks_match_dev_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
   - id: dod-omn-17427-ac184-branch-install-record
     description: "The branch install record refuses what is not a dev-lane /app file with a bounded expiry and the shown hash. Fails at the merge base, which has no branch install handler."
     source: manual
@@ -2543,3 +2622,41 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC188
+  - id: dod-omn17427-c28-autovacuum-options
+    description: Reads migration 0007 and refuses additional SQL statements, another relation or any storage parameter beyond the three autovacuum thresholds.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_the_migration_only_sets_the_three_autovacuum_thresholds
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527401
+  - id: dod-omn17427-c28-autovacuum-bounds
+    description: Reads every threshold from migration 0007 and refuses zero, negative or greater-than-five-percent values.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_every_threshold_is_well_under_the_default
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527402
+  - id: dod-omn17427-c28-autovacuum-ledger
+    description: Refuses an absent or duplicate migration 0007 application ledger row or an incorrect node migration identity.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_the_migration_is_declared_in_the_application_ledger
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527403
+  - id: dod-omn17427-c28-autovacuum-deploy
+    description: Hosted-runner deploy check of the committed migration's SQL scope, scale-factor bounds and ledger identity. Runs the existing focused tests without a database, container, credential or live lane; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527401
+      - AC527402
+      - AC527403

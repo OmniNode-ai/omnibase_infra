@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+# hostile-review-thread-gate.yml (OMN-17427)
+#
+# Re-runs the "Hostile Review Thread Gate" when someone answers a finding.
+#
+# The gate itself is the `hostile-review-thread-gate` job of
+# hostile-reviewer.yml, which runs after every review on a pull_request
+# event. It is REQUIRED on dev through CI Summary (operator RULING
+# 2026-10-21T13:00:04Z): every hostile-reviewer thread needs a reply
+# `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
+# `rejected: <reason>`. Resolving a thread fires no workflow event, so the
+# reply is the trigger: this workflow runs the same script on the reply and
+# the script checks it. The script calls no checks API (hence no
+# `checks: write`): the fresh result is this job's own check-run, named
+# "Hostile Review Thread Gate", the same name as the pull_request run's job.
+# A cancelled superseded run is never a pass: CI Summary waits out a
+# `cancelled` row (CANCELLED_SUPERSESSION_GRACE_S) and fails closed after it.
+# A review the reviewer bot posts with GITHUB_TOKEN fires nothing here (GitHub
+# does not start workflows from GITHUB_TOKEN events), so this never loops on
+# its own output.
+#
+# This file runs no reviewer and no model; a reply on any thread (a human's or
+# another bot's) only re-reads thread state.
+
+name: Hostile Review Thread Gate (on reply)
+
+on:
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+# Read-only: the gate reads thread state and writes nothing to the PR, so a
+# fork PR's read-only token runs it the same way.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hostile-review-thread-gate:
+    name: Hostile Review Thread Gate
+    # GitHub-hosted: a public repository adds no self-hosted job (OMN-19998),
+    # and this job reads only GitHub thread state and the PR's history.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (gate script and PR history)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Check hostile-reviewer threads and their dispositions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DISPOSITION_RECORD_PATH: ${{ runner.temp }}/hostile-review-dispositions.jsonl
+        run: python3 scripts/ci/check_hostile_review_threads.py
+      - name: Upload the disposition record
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hostile-review-dispositions-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hostile-review-dispositions.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
