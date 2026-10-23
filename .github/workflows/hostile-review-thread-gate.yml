@@ -11,11 +11,15 @@
 # 2026-10-21T13:00:04Z): every hostile-reviewer thread needs a reply
 # `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
 # `rejected: <reason>`. Resolving a thread fires no workflow event, so the
-# reply is the trigger: this workflow runs the same script on the reply, the
-# script checks it and publishes a fresh check-run of the same name on the PR
-# head. A review the reviewer bot posts with GITHUB_TOKEN
-# fires nothing here (GitHub does not start workflows from GITHUB_TOKEN
-# events), so this never loops on its own output.
+# reply is the trigger: this workflow runs the same script on the reply and
+# the script checks it. The script calls no checks API (hence no
+# `checks: write`): the fresh result is this job's own check-run, named
+# "Hostile Review Thread Gate", the same name as the pull_request run's job.
+# A cancelled superseded run is never a pass: CI Summary waits out a
+# `cancelled` row (CANCELLED_SUPERSESSION_GRACE_S) and fails closed after it.
+# A review the reviewer bot posts with GITHUB_TOKEN fires nothing here (GitHub
+# does not start workflows from GITHUB_TOKEN events), so this never loops on
+# its own output.
 #
 # This file runs no reviewer and no model; a reply on any thread (a human's or
 # another bot's) only re-reads thread state.
@@ -28,7 +32,8 @@ on:
   pull_request_review:
     types: [submitted, edited, dismissed]
 
-# Read-only: the gate reads thread state and writes nothing to the PR.
+# Read-only: the gate reads thread state and writes nothing to the PR, so a
+# fork PR's read-only token runs it the same way.
 permissions:
   contents: read
   pull-requests: read
