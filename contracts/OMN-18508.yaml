@@ -5,6 +5,13 @@ summary: The compose dev lane applied the omninode_cloud corpus as role_omninode
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+context:
+  ac_binding_provenance:
+    dod-omn18508-ac6-accepted-20261018t2045z:
+      - label: AC6
+        criterion_hash: b8f1ed0b655b545cd280b96405e3346334fad1332f86e70400c09ab9ea2c0580
+        proposed_by: lane=dod-closeout-bind-2026-10-22T1845Z-c3
+        accepted_by: lane=dod-closeout-accept-2026-10-22T1845Z-c3
 requirements:
   - id: req-omn-18508-criteria
     statement: The ticket's labelled acceptance criteria.
@@ -26,6 +33,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/infra/test_corpus_applier_database_create_omn18508.py -q -k test_a_non_superuser_applier_waits_for_its_own_provisioning
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn18508-pr5285-ac6-provisioning-order
+    description: 'PR 5285 rechecks the accepted AC6 binding: every non-superuser corpus applier waits for successful completion of its identity provisioner. The exact test fails with the compose ordering change from omnibase_infra#3664 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_corpus_applier_database_create_omn18508.py::test_a_non_superuser_applier_waits_for_its_own_provisioning -q -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6

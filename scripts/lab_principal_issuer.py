@@ -73,6 +73,11 @@ WHO HOLDS A PRINCIPAL (OMN-19975)
     and ``serve`` issues only a (login, device) the document declares. The document
     carries no grant; the grants are the ones this file's grant declaration derives.
 
+    With ``check --overlay FILE --ledger FILE`` the issuer names every machine its
+    ledger issued that the overlay does not declare and exits 1. Run this check
+    before a container is (re)created with ``--overlay``: serve under that overlay
+    refuses to rotate such a machine.
+
 WHAT IT RECORDS
     One JSON line per issuance in the ledger: when, which login and device, which
     principal, created or rotated, and the digest of the grant file applied. Never
@@ -91,7 +96,7 @@ HOW IT TALKS TO THE BROKER
 
 Usage::
 
-    lab_principal_issuer.py check --grants FILE [--overlay FILE]
+    lab_principal_issuer.py check --grants FILE [--overlay FILE [--ledger FILE]]
     lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
     lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
     lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
@@ -736,6 +741,25 @@ class Ledger:
                 held.add(row["principal"])
         return held
 
+    def issued_in_lane(self, lane: str) -> set[tuple[str, str]]:
+        """Find every principal and login issued in this declaration's lane."""
+        if not self._path.exists():
+            return set()
+        issued: set[tuple[str, str]] = set()
+        for line in self._path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                isinstance(row, dict)
+                and row.get("lane") == lane
+                and isinstance(row.get("principal"), str)
+                and isinstance(row.get("login"), str)
+            ):
+                issued.add((row["principal"], row["login"].strip().lower()))
+        return issued
+
 
 def _apply_grants(broker: Broker, principal: str, grants: tuple[Grant, ...]) -> None:
     for declared in grants:
@@ -1025,6 +1049,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     check = sub.add_parser("check", help="validate the grant file and exit")
     check.add_argument("--grants", type=Path, required=True)
     check.add_argument("--overlay", type=Path)
+    check.add_argument("--ledger", type=Path)
     serve = sub.add_parser("serve", help="serve issuance requests")
     serve.add_argument("--grants", type=Path, required=True)
     serve.add_argument("--ledger", type=Path, required=True)
@@ -1076,11 +1101,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"lab_principal_issuer: {exc}", file=sys.stderr)
         return 2
     if args.command == "check":
+        if args.ledger is not None and overlay is None:
+            print("lab_principal_issuer: --ledger needs --overlay", file=sys.stderr)
+            return 2
         print(
             f"{args.grants}: {len(declaration.grants)} grants for lane {declaration.lane}, sha256 {declaration.digest}"
         )
         if overlay is not None:
             print(f"{args.overlay}: {len(overlay.rows)} developer principals")
+            if args.ledger is not None:
+                try:
+                    issued = Ledger(args.ledger).issued_in_lane(declaration.lane)
+                except OSError as exc:
+                    print(f"lab_principal_issuer: {exc}", file=sys.stderr)
+                    return 2
+                undeclared = {
+                    principal
+                    for principal, login in issued
+                    if not overlay.declares(principal, login)
+                }
+                print(
+                    f"{args.ledger}: issued={len({principal for principal, _ in issued})} "
+                    f"undeclared={len(undeclared)}"
+                )
+                for principal in sorted(undeclared):
+                    print(
+                        f"UNDECLARED {principal}: issued by this issuer, absent from the "
+                        "developer.principal overlay; serve --overlay would refuse to rotate it",
+                        file=sys.stderr,
+                    )
+                return int(bool(undeclared))
         return 0
 
     try:
