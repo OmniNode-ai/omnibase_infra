@@ -434,6 +434,11 @@ requirements:
     acceptance:
       - id: AC145
         statement: 'AC145: 201 restarts with the container running since 17:45:04Z at a census of 18:49:18Z yields no container_restart_loop, a start 30 s before the census yields one, the boundary is 1800 s, a missing or zero start time, a missing census time and a restarting or exited container each still yield one, and the collector carries State.StartedAt on both inventory paths and observed_at on the envelope -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"'
+  - id: req-omn17427-nightly-live-adapter-deselect
+    statement: The nightly Slow & Chaos job deselects the live LLM adapter documentation suite, which carries slow and fails closed without LLM_DEEPSEEK_R1_URL (OMN-21147), so the job no longer errors on that suite's fixture when no endpoint is configured; the OMN-20317 two-way registration deselect stays.
+    acceptance:
+      - id: AC17427522601
+        statement: 'AC17427522601: the slow-tests pytest command in nightly-tests.yml deselects tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py and keeps the two-way registration deselect, the workflow''s own arguments with -m "slow or chaos" collect none of that suite''s tests, and the same arguments without the new deselect collect them -- falsifier: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q'
   - id: req-omn17427-deploy-agent-health-convergence
     statement: Post-deploy verification retries transient failures, permits recreation only for a Docker-unhealthy or exited container, and honours the selected service's own healthcheck budget.
     acceptance:
@@ -510,6 +515,13 @@ requirements:
     acceptance:
       - id: AC17427525901
         statement: 'AC17427525901: with a fake consumer whose commit raises CommitFailedError, a routed-elsewhere record returns (None, None) with no seek, lane_not_allowed and duplicate return their rejection, the accept returns the command and logs accept_commit_failed, the record and fetch quarantines and the rewind log a warning without raising, and the next poll handles the redelivered record and commits it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q'
+  - id: req-omn17427-dev-broker-image
+    statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
+    acceptance:
+      - id: AC17427520601
+        statement: 'AC17427520601: the dev broker, partition-cap, SCRAM and SASL services and all three catalog declarations use redpandadata/redpanda:v24.3.18 -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"'
+      - id: AC17427520602
+        statement: 'AC17427520602: every other compose file that starts a dev-named broker or rpk service declares its own image or independent template -- falsifier: uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits'
   - id: req-omn17427-compose-up-convergence
     statement: A failed or interrupted compose up passes its phase only when every service in scope has its declared configuration hash.
     acceptance:
@@ -536,6 +548,11 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-issuer-overlay-coverage
+    statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
+    acceptance:
+      - id: AC526601
+        statement: 'AC526601: lab_principal_issuer.py check --overlay FILE --ledger FILE exits 1 and names each principal issued in the lane that the overlay does not declare for its login, exits 0 when every issued principal is declared or the ledger is absent, ignores other lanes and grants-applied rows, never prints a login, and exits 2 for --ledger without --overlay -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"'
   - id: req-omn17427-branch-install-record
     statement: "A fix installed into a dev-lane container from its branch is declared in a record the deploy agent keeps (repository, PR, branch head, services, each file's container path and sha256, an expiry at most seven days out), and the registrar refuses any lane but dev, a compose project that names prod or stability, a path outside /app, an expiry in the past or too far out, and a source whose hash is not the one the registrar was shown."
     acceptance:
@@ -570,6 +587,11 @@ requirements:
         statement: Each of the three scale factors is positive and at most 0.05.
       - id: AC527403
         statement: The application migration ledger declares node_projection_consumer_flow migration 0007 exactly once under its node migration identity.
+  - id: req-omn17427-c28-probe-pairing-window
+    statement: The C28 probe pairs a stall-alert validation error with its boundary line across a busy runtime log.
+    acceptance:
+      - id: AC189
+        statement: 'AC189: the C28 script and the board-probe node search 5,000 lines for an error''s applied-topic boundary line, an error whose probe boundary sits 63 or 171 lines behind is the probe''s, and an unprefixed error stays natural -- falsifier: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py -q fails at the merge base, where the window is 60 lines'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2265,6 +2287,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC145
+  - id: dod-omn-17427-ac163-nightly-live-adapter-deselect
+    description: Reads the slow-tests step of nightly-tests.yml and runs pytest --collect-only with that step's own arguments over tests/integration/adapters/llm; the same test fails on dev before the deselect, where the selection collects the suite's 6 tests. It does not run the nightly workflow or any live LLM endpoint.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427522601
+  - id: dod-omn-17427-ac163-live-adapter-deploy-check
+    description: Hosted-runner deploy check -- the same workflow-argument collection test over repository files with LLM_DEEPSEEK_R1_URL removed from the environment; no credentials, lab host or live endpoint is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_nightly_live_adapter_deselect_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427522601
   - id: dod-omn-17427-ac171-audit-setup-uv
     description: Workflow-shape tests over .github/workflows/branch-protection-audit.yml, uv.lock and the parity CLI sources. They read files only; they do not claim a scheduled Audit Branch Protection run has gone green.
     source: manual
@@ -2452,6 +2492,34 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427525901
+  - id: dod-omn-17427-ac146-dev-broker-image
+    description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520601
+  - id: dod-omn-17427-ac147-other-lanes-pinned
+    description: Scans the other compose files for broker and rpk services inheriting the dev image. It fails against the merge base, where those lanes inherit the base compose image.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k no_other_compose_file_inherits
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520602
+  - id: dod-omn-17427-dev-broker-image-deploy-check
+    description: Hosted-runner deploy check reads the compose and catalog declarations and refuses a dev image other than v24.3.18 or an unpinned borrower lane. It requires no Docker daemon, private lab overlay or credentials and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -k "operator_ruled or same_in_every_place or no_other_compose_file_inherits"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427520601
+      - AC17427520602
   - id: dod-omn17427-ac524901-compose-up
     description: Mismatched or absent container hashes refuse phase success.
     source: manual
@@ -2519,6 +2587,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC170
+  - id: dod-omn-17427-ac189-c28-pairing-window
+    description: Runs the script and the node over the recorded runtime-seam logs with 63 and 171 unrelated lines after each validation error; both agree and count every probe error as the probe's, while unprefixed errors stay natural.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py tests/unit/nodes/node_board_probe_effect/test_handler_consumer_flow.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC189
   - id: dod-omn-17427-ac172-edit-trigger
     description: The test parses every committed workflow, finds the ones that read the pull request body, and requires edited in their pull_request types; synthetic workflows are the positive and negative controls. Does not claim a live rerun on a pull request.
     source: manual
@@ -2537,6 +2614,22 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC172
+  - id: dod-omn17427-ac526601-issuer-overlay-coverage
+    description: Regression tests fail at the merge base, where check has no --ledger, and pass at the head; they cover a fully declared ledger, an undeclared issued machine, a login that differs from the overlay row, another lane, an absent ledger and --ledger without --overlay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
+  - id: dod-omn17427-ac526601-overlay-coverage-deploy
+    description: Hosted-runner deploy check runs the issuer's check command over synthetic overlay and ledger files, and the compose file the issuer is recreated from still parses. No Docker daemon, broker, overlay checkout or credential is required; the one lane-manifest test, which reads the CI overlay checkout, is deselected.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q --deselect tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_manifest_issuer_and_dev_networks_match_dev_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
   - id: dod-omn-17427-ac184-branch-install-record
     description: "The branch install record refuses what is not a dev-lane /app file with a bounded expiry and the shown hash. Fails at the merge base, which has no branch install handler."
     source: manual
