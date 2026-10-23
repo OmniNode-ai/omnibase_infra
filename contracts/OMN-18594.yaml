@@ -43,6 +43,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_sha_pin_ratchet_node.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_sibling_sha_pin_ratchet_cli_omn18594.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC18594002
   - id: dod-omn18594-ac3-ci-wired
@@ -54,3 +57,10 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC18594003
+  - id: dod-deploy
+    description: Run the installed ratchet CLI against real disposable Git trees. Added and relocated pins must exit 1, unchanged, moved and removed pins must exit 0, and an unreadable base must exit 2. This hosted-runner check needs no deployed services.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/ci/test_sibling_sha_pin_ratchet_cli_omn18594.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
