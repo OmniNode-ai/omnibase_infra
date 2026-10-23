@@ -197,7 +197,6 @@ scripts/ci/publish_lab_fact_event.py
 scripts/ci/publish_with_retry.py
 scripts/ci/r1_front_door_probe.py
 scripts/ci/reject-node-implementations.sh
-scripts/ci/release_dependency_advance.py
 scripts/ci/release_train.py
 scripts/ci/replay_hook_history.py
 scripts/ci/resolve_modern_bash.sh

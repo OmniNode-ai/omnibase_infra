@@ -1,0 +1,1 @@
+Live-contact exception: this change deletes the hourly dependency-advance workflow and its PyPI measure script, and adds a CI step that runs git grep over the checked-out tree; nothing it adds contacts a live service.
