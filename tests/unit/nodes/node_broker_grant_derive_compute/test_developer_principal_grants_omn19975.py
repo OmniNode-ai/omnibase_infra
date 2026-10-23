@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -687,8 +688,15 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
         (BROKER, "GROUP", prefix, "PREFIXED", "READ"),
         (BROKER, "GROUP", prefix, "PREFIXED", "DESCRIBE"),
     }
-    assert derive(bindings) - derive(before) == expected
-    assert derive(before) - derive(bindings) == set()
+    after = derive(bindings)
+    assert after - derive(before) == expected
+    assert derive(before) - after == set()
+    assert len(after) == len(derive(before)) + len(expected)
+    committed = {
+        (g["broker"], g["resource_type"], g["resource"], g["pattern"], g["operation"])
+        for g in json.loads(DERIVED.read_text())["grants"]
+    }
+    assert committed == after
 
 
 def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> None:
@@ -716,6 +724,9 @@ def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> N
     ]
     assert f"{query_client}." in dev_prefixes
     assert f"{append_client}." in dev_prefixes
+    # A PREFIXED group ACL covers a group whose id starts with the prefix.
+    covering = [p for p in dev_prefixes if f"{query_client}.call".startswith(p)]
+    assert covering == [f"{query_client}."]
     for group in (query_node, f"{query_node}.worker"):
         assert not any(group.startswith(prefix) for prefix in dev_prefixes), group
     assert not f"{append_client}.call".startswith(f"{query_client}.")

@@ -23,7 +23,7 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn21339-ac1-derived-query-grants"
-    description: "The derivation adds exactly the six work-ledger query grants from the bindings and removes none; the committed derived file is its output."
+    description: "The derivation adds exactly the six work-ledger query grants from the bindings and removes none: the derived row count rises by six, and the committed derived file holds exactly the derived rows."
     source: "manual"
     checks:
       - check_type: "command"
