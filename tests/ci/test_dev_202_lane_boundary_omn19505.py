@@ -45,7 +45,7 @@ from scripts.preflight_lane_deploy_attribution import (
 )
 from tests.helpers.lane_census_fixtures import (
     LAB_MANIFEST,
-    collaborator_lanes_on_second_host,
+    lanes_declared_on_host,
 )
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
@@ -376,14 +376,8 @@ def test_dev_202_lane_boundary_host_resolves_and_carries_dev_202() -> None:
     manifest = _manifest()
     validate_hosts(manifest)
     assert resolve_host(HOSTNAME_ON_HOST, manifest) == HOST_ID
-    on_host = {
-        name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
-    }
-    # OMN-17292: the collaborator lane is declared there too, under both names.
-    collaborator = collaborator_lanes_on_second_host()
-    assert on_host >= collaborator
-    lanes_on_host = sorted(on_host - collaborator)
-    assert lanes_on_host == ["dev-202", "sim-202"]
+    lanes_on_host = lanes_declared_on_host(manifest, HOST_ID)
+    assert LANE in lanes_on_host
 
 
 @pytest.mark.lab_overlay
@@ -391,18 +385,10 @@ def test_dev_202_lane_boundary_census_on_202_reads_clean() -> None:
     plan = _plan_on_202(_healthy_dev_202_rows(), [NETWORK])
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    # OMN-17292: the collaborator lane is checked there too, under both names.
-    collaborator = collaborator_lanes_on_second_host()
-    assert set(plan["lanes_checked"]) >= collaborator
-    plan["lanes_checked"] = [
-        name for name in plan["lanes_checked"] if name not in collaborator
-    ]
-    assert sorted(plan["lanes_checked"]) == ["dev-202", "sim-202"]
-    not_applicable = set(plan["lanes_not_applicable"]) | collaborator
-    assert not_applicable == set(manifest["lanes"]) - {
-        "dev-202",
-        "sim-202",
-    }
+    on_host = set(lanes_declared_on_host(manifest, HOST_ID))
+    assert LANE in on_host
+    assert set(plan["lanes_checked"]) == on_host
+    assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - on_host
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 

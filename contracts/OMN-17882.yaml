@@ -26,10 +26,18 @@ requirements:
       - id: AC6
         statement: |-
           AC6: The fields OMN-17340's view needs are carried: counterfactual / baseline / model routing / token usage. Previously measured 2026-09-04 (`cumulative_counterfactual_baseline_usd`, `baseline_cost_usd`, `local_pct`/`cheap_pct`/`prem_pct`, `tokens_total`/`prompt_tokens`/`completion_tokens`), so this is a re-confirmation, not new exposure work.
+  - id: req-lane-boundary-declared-lanes
+    statement: "The host lane boundary tests accept every lane the lab manifest declares for that host, read from the manifest."
+    acceptance:
+      - id: AC7
+        statement: "AC7: the host's lane set is read from the lab manifest -- falsifier: pytest over a neutral manifest"
 evidence_requirements:
   - kind: tests
     description: "Verify migration 099 is delivered byte-for-byte with its exact ledger identity and forward-only class; source behavior is tested in omnimarket PR 4273."
     command: "uv run --frozen pytest tests/unit/migrations/test_omn17882_savings_series_vendored.py -q"
+  - kind: tests
+    description: "The manifest reader behind the host boundary tests, over a neutral manifest."
+    command: "uv run --frozen pytest tests/ci/test_lane_boundary_declared_lanes_omn17882.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -47,6 +55,15 @@ dod_evidence:
         check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && uv run --frozen python scripts/validation/check_migration_class.py"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC1, AC2, AC3, AC4, AC5, AC6]
+  - id: dod-omn17882-lane-boundary-declared-lanes
+    description: >-
+      Runs the reader the host boundary tests use to take the host's lanes from the lab manifest, over a neutral manifest with an extra lane. The merge base lacks the reader, so the check fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_lane_boundary_declared_lanes_omn17882.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC7]
 context:
   vendor_provenance:
     repository: OmniNode-ai/omnimarket
