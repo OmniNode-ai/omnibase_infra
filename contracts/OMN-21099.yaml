@@ -1,0 +1,41 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21099
+title: The dev lane delivers the context-source tenant the compaction contract reads
+summary: >-
+  node_context_compaction_orchestrator binds its pack build with compaction_runtime.tenant_id = ${env.ONEX_CONTEXT_SOURCE_TENANT_ID:}, and the ledger and work-state context sources read the same variable for their tenant_ids. All of them run in runtime-effects. The dev-lane compose overlay never delivered the variable, so every compaction command on the dev lane fell back pack_builder_unavailable. This adds ONEX_CONTEXT_SOURCE_TENANT_ID to runtime-effects in docker-compose.dev-lane.yml from the operator env (DEV_LANE_CONTEXT_SOURCE_TENANT_ID) with a dev-lane default. The lane identity ONEX_TENANT_ID is not touched.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21099-context-source-tenant
+    statement: >-
+      The dev-lane runtime-effects service receives a non-empty ONEX_CONTEXT_SOURCE_TENANT_ID, so the compaction orchestrator's pack build is bound.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the rendered dev-lane compose gives runtime-effects a non-empty ONEX_CONTEXT_SOURCE_TENANT_ID and leaves ONEX_TENANT_ID as the base file sets it -- falsifier: grep -n 'ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}' docker/docker-compose.dev-lane.yml finds nothing.
+evidence_requirements:
+  - kind: command
+    description: The dev-lane overlay line that delivers the tenant to runtime-effects.
+    command: grep -n 'ONEX_CONTEXT_SOURCE_TENANT_ID' docker/docker-compose.dev-lane.yml
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21099-dev-lane-tenant-line
+    description: The dev-lane overlay delivers ONEX_CONTEXT_SOURCE_TENANT_ID to runtime-effects.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -q 'ONEX_CONTEXT_SOURCE_TENANT_ID. .{DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}' docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21099-deploy-dev-runtime-effects-tenant
+    description: >-
+      Deploy probe: the live dev-lane runtime-effects container carries a non-empty ONEX_CONTEXT_SOURCE_TENANT_ID (the variable name is checked, never printed with its value).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: ssh -o BatchMode=yes omni-201 'docker inspect omninode-runtime-effects --format "{{range .Config.Env}}{{println .}}{{end}}"' | grep -q '^ONEX_CONTEXT_SOURCE_TENANT_ID=.'
+    binds_ac: [AC1]
