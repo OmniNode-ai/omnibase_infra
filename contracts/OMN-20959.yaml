@@ -21,11 +21,6 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: neither form, an empty contract, or a receipt that fails or names another PR, head or ticket exits 1 -- falsifier: uv run pytest tests/ci -k release_evidence_refuses -q'
-  - id: req-omn20959-cascade-branch-check
-    statement: The cascade branch regression check uses release commit evidence for its valid-input cases.
-    acceptance:
-      - id: AC4
-        statement: 'AC4: branch rendering, ticket suffixes and deduplication remain covered with a release commit SHA sample, and the evidence positive control covers short, full and uppercase commit SHAs instead of a retired OCC citation.'
 evidence_requirements:
   - kind: tests
     description: The shipped resolver, run under bash with a stub gh, resolves both evidence forms and refuses every unbound or absent one.
@@ -75,3 +70,17 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn-20959-ac4-retired
+    description: AC4 was deleted from OMN-20959. This item carries the retirement of the AC4 claim of dod-omn-20959-ac4-cascade-branch-check and keeps that item's branch regression test running; it binds no criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dependency_cascade_bump_branch_ticket_omn18596.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    supersedes_ac_binding:
+      - item: dod-omn-20959-ac4-cascade-branch-check
+        label: AC4
+        reason_kind: no_longer_applicable
+        reason: AC4 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: occ-children-0045
+        retired_at: '2026-10-23T00:55:00Z'
