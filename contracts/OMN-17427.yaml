@@ -517,6 +517,15 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-c28-autovacuum
+    statement: The consumer-flow window table uses per-table autovacuum thresholds so newest-window index-only probes can benefit from vacuumed pages without changing rows, columns, indexes or grants.
+    acceptance:
+      - id: AC527401
+        statement: Migration 0007 changes only the vacuum, insert-vacuum and analyze scale factors on omninode_internal.consumer_flow_windows.
+      - id: AC527402
+        statement: Each of the three scale factors is positive and at most 0.05.
+      - id: AC527403
+        statement: The application migration ledger declares node_projection_consumer_flow migration 0007 exactly once under its node migration identity.
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2393,3 +2402,41 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC172
+  - id: dod-omn17427-c28-autovacuum-options
+    description: Reads migration 0007 and refuses additional SQL statements, another relation or any storage parameter beyond the three autovacuum thresholds.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_the_migration_only_sets_the_three_autovacuum_thresholds
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527401
+  - id: dod-omn17427-c28-autovacuum-bounds
+    description: Reads every threshold from migration 0007 and refuses zero, negative or greater-than-five-percent values.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_every_threshold_is_well_under_the_default
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527402
+  - id: dod-omn17427-c28-autovacuum-ledger
+    description: Refuses an absent or duplicate migration 0007 application ledger row or an incorrect node migration identity.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q -k test_the_migration_is_declared_in_the_application_ledger
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527403
+  - id: dod-omn17427-c28-autovacuum-deploy
+    description: Hosted-runner deploy check of the committed migration's SQL scope, scale-factor bounds and ledger identity. Runs the existing focused tests without a database, container, credential or live lane; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/db/test_consumer_flow_windows_autovacuum_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC527401
+      - AC527402
+      - AC527403
