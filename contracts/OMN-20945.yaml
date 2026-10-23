@@ -49,7 +49,7 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-contracts-strict-load-ac3
-    description: "AC3, this repository's part of the scan: every contracts/*.yaml in omnibase_infra loads through load_yaml_mapping_no_duplicates with no duplicate mapping key. The scan of all nine product repositories is item dod-omn20945-ac3-duplicates-scanned in omnimarket's contracts/OMN-20945.yaml; this item does not run it."
+    description: "AC3, this repository's part of the scan: every contracts/*.yaml in omnibase_infra loads through load_yaml_mapping_no_duplicates with no duplicate mapping key. The strict-load repair merged in 32f44592ef3612cb0603b0ee09b5da7173944a7f (#4844). The scan of all nine product repositories is item dod-omn20945-ac3-duplicates-scanned in omnimarket's contracts/OMN-20945.yaml; this item does not run it."
     source: manual
     checks:
       - check_type: test_passes
