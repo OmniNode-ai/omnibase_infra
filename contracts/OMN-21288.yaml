@@ -19,6 +19,12 @@ requirements:
       - id: AC2
         statement: |-
           AC2: the dev stack definition holds only the runtime and its backing services -- falsifier: the same pytest run over the real dev compose file
+  - id: req-omn21288-ac3-fold-effects-lab-lane
+    statement: "Step 1: the lab proof lane's main runtime carries the effects role and the lane runs no separate effects container."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: on the lab proof lane (compose project STABILITY_TEST_COMPOSE_PROJECT) the main runtime logs its folded roles and no runtime-effects container runs -- falsifier: the docker probe below exits non-zero while the separate effects container still runs
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -59,5 +65,15 @@ dod_evidence:
           uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21288-ac3-lab-lane-effects-folded-deploy
+    description: >-
+      Live probe on the lab proof lane after a refresh carrying this change: no container of the lane's compose project runs the runtime-effects service, and the lane's main runtime container logged "Auto-wiring folded roles". Both are read from the running Docker daemon by compose labels, so it exits 1 while the separate effects container runs or while main runs an image that predates the fold.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          sh -c 'p="${STABILITY_TEST_COMPOSE_PROJECT:?source docker/runtime-policy.env}"; test -z "$(docker ps -q --filter label=com.docker.compose.project=$p --filter label=com.docker.compose.service=runtime-effects)" && docker logs "$(docker ps -q --filter label=com.docker.compose.project=$p --filter label=com.docker.compose.service=omninode-runtime)" 2>&1 | grep "Auto-wiring folded roles" >/dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
