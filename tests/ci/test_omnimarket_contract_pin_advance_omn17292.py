@@ -22,7 +22,8 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TAG = re.compile(r"\bv[0-9]+\.[0-9]+\.[0-9]+\b")
 INLINE_OMNIMARKET_REF = re.compile(
-    r"repository:\s*OmniNode-ai/omnimarket\s*\n\s*ref:\s*(\S+)"
+    r"repository:\s*OmniNode-ai/omnimarket\s*\n\s*ref:\s*"
+    r"(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})\b"
 )
 
 

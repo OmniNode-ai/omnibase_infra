@@ -93,7 +93,11 @@ def test_sibling_checkout_refs_are_the_pin(name: str) -> None:
     for lineno, repo, ref in _checkout_refs(text):
         if ref is None or ref in {"dev", "main"}:
             bad.append(f"{name}:{lineno} {repo} ref={ref}")
-        elif repo == "omnimarket" and not RELEASE_TAG.fullmatch(ref):
+        elif (
+            repo == "omnimarket"
+            and not ref.startswith("${{")
+            and not RELEASE_TAG.fullmatch(ref)
+        ):
             bad.append(f"{name}:{lineno} omnimarket ref={ref} is not a release tag")
         elif HEX40.fullmatch(ref):
             # a sha that predates the pin file is tolerated only when it is not a
