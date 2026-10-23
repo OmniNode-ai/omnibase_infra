@@ -2679,12 +2679,21 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
-  - id: dod-omn17427-ac190-delegation-lab-job-runtime-grants
+  - id: dod-omn17427-ac190-delegation-runtime-grants
     description: Every supported profile grants the runtime role both delegation execution tables and the vendored migration matches the source sha256.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC190
+  - id: dod-omn17427-ac190-delegation-deploy
+    description: Hosted-runner check of both delegation tables' runtime grants in every shipped topology and the vendored source migration hash; no database, container, credentials or deployed lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC190
