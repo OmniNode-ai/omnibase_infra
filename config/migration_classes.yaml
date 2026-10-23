@@ -408,6 +408,7 @@ migrations:
   forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql: forward-only # Replace aggregate population and append run count
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
+  forward/nodes/node_projection_savings/099_savings_overview_token_directions.sql: forward-only # Replace the overview view and append its token directions
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
