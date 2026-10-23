@@ -1,0 +1,19 @@
+{
+ "_provenance": {
+  "source": "onex scm job-log over the dev bus (node_github_repo_gateway_effect) for job 119316797666 'Hostile Review Thread Gate' of run 39626556756 on omnibase_infra#5234 head 8f4e58c57192289876ce70f1b6903380bfd26510: the gate's resolveReviewThread call with the workflow GITHUB_TOKEN (pull-requests: write) on two threads whose rejected disposition it had accepted. Lines are verbatim from the job log; the error is GitHub's GraphQL response.",
+  "captured_utc": "2026-10-21T15:47:59Z",
+  "source_sha256": "ff0039093d092df5b77754e047275b23a349942ed3c3c8c47629a15e3490d22a",
+  "bus_correlation_id": "d5b1fa13-7e76-4cc7-9962-6d47260abba3",
+  "ticket": "OMN-17427",
+  "command": "onex scm job-log OmniNode-ai/omnibase_infra --job-id 119316797666 --tail-bytes 30000 --bus-lane dev --source bus"
+ },
+ "response": {
+  "job_id": 119316797666,
+  "run_id": 39626556756,
+  "pr": 5234,
+  "log_lines": [
+   "2026-10-21T15:39:16.4848661Z   BLOCKING: .github/workflows/hostile-review-thread-gate.yml (correctness) \u2014 rejected with a reason; could not resolve the thread: GraphQL errors: [{'type': 'FORBIDDEN', 'path': ['resolveReviewThread'], 'extensions': {'saml_failure': False, 'ip_allow_list_failure': False}, 'locations': [{'line': 3, 'column': 3}], 'message': 'Resource not accessible by integration'}] \u2014 https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489373",
+   "2026-10-21T15:39:16.4851621Z   BLOCKING: .github/workflows/hostile-review-thread-gate.yml (sonnet) \u2014 rejected with a reason; could not resolve the thread: GraphQL errors: [{'type': 'FORBIDDEN', 'path': ['resolveReviewThread'], 'extensions': {'saml_failure': False, 'ip_allow_list_failure': False}, 'locations': [{'line': 3, 'column': 3}], 'message': 'Resource not accessible by integration'}] \u2014 https://github.com/OmniNode-ai/omnibase_infra/pull/5234#discussion_r4338489546"
+  ]
+ }
+}
