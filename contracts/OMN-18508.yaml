@@ -36,3 +36,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn18508-pr5285-ac6-provisioning-order
+    description: 'PR 5285 rechecks the accepted AC6 binding: every non-superuser corpus applier waits for successful completion of its identity provisioner. The exact test fails with the compose ordering change from omnibase_infra#3664 reverted.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_corpus_applier_database_create_omn18508.py::test_a_non_superuser_applier_waits_for_its_own_provisioning -q -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
