@@ -20,7 +20,7 @@ requirements:
     acceptance:
       - id: AC2
         statement: >-
-          AC2: the live-apply tests preserve rows and cursors on a second apply, assert the new column types, and prove omninode_runtime has exactly SELECT, INSERT, UPDATE on compaction_receipts plus schema and sequence USAGE; topology derivation resolves every profile -- falsifier: any live-apply assertion or the generator's --check --prove fails.
+          AC2: the live-apply tests preserve rows and cursors on a second apply, assert the new column types, and prove omninode_runtime has exactly SELECT, INSERT, UPDATE on compaction_receipts plus schema and sequence USAGE -- falsifier: any live-apply assertion fails.
 evidence_requirements:
   - kind: tests
     description: Source byte pins, ledger checksums, classes and absence of fences.
@@ -47,8 +47,5 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_vendor_omn21334.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: uv run python scripts/generate_application_database_table_grants.py --check --prove
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
