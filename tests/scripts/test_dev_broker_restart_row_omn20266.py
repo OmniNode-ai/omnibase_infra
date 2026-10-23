@@ -134,11 +134,24 @@ def test_measured_incident_stays_critical_across_confirmation_ticks(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("now", ["2026-10-23T09:06:32Z", "2026-10-23T10:06:32Z"])
-def test_restart_hold_expires_at_the_boundary(tmp_path: Path, now: str) -> None:
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        ("2026-10-23T09:06:31Z", "CRITICAL"),
+        ("2026-10-23T09:06:32Z", "OK"),
+        ("2026-10-23T09:06:33Z", "OK"),
+        ("2026-10-23T10:06:32Z", "OK"),
+    ],
+)
+def test_restart_hold_expires_at_the_boundary(
+    tmp_path: Path, now: str, expected: str
+) -> None:
     status, detail = _run(tmp_path, _payload(), now=now)["dev-broker-restart"]
-    assert status == "OK"
-    assert detail == f"restart_count=12 started_at={STARTED_AT}"
+    assert status == expected
+    if expected == "OK":
+        assert detail == f"restart_count=12 started_at={STARTED_AT}"
+    else:
+        assert "restart within hold window 3600s" in detail
 
 
 @pytest.mark.unit
@@ -206,6 +219,46 @@ def test_unparseable_started_at_is_critical(tmp_path: Path, started_at: str) -> 
     assert "StartedAt=" in rows["dev-broker-restart"][1]
     assert "could not be parsed" in rows["dev-broker-restart"][1]
     assert rows["dev-broker-memory"][0] == "WARNING"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("restart_count", ["not-a-number", "", "-1"])
+def test_unparseable_restart_count_is_critical(
+    tmp_path: Path, restart_count: str
+) -> None:
+    payload = _payload().replace("12|", f"{restart_count}|", 1)
+    rows = _run(tmp_path, payload)
+    assert rows["dev-broker-restart"][0] == "CRITICAL"
+    assert (
+        f"RestartCount={restart_count} could not be parsed"
+        in rows["dev-broker-restart"][1]
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "state", ["created", "restarting", "paused", "exited", "dead", "removing", ""]
+)
+@pytest.mark.parametrize("restarts", [0, 12])
+def test_non_running_broker_is_critical_even_after_hold_expires(
+    tmp_path: Path, state: str, restarts: int
+) -> None:
+    payload = _payload(restarts=restarts).replace("|running|", f"|{state}|")
+    rows = _run(tmp_path, payload, now="2026-10-23T10:06:32Z")
+    assert set(rows) == {"dev-broker-restart"}
+    status, detail = rows["dev-broker-restart"]
+    assert status == "CRITICAL"
+    assert f"state={state or 'unknown'}; dev broker is not running" in detail
+
+
+@pytest.mark.unit
+def test_old_fractional_start_does_not_extend_restart_hold(tmp_path: Path) -> None:
+    started_at = "2026-10-23T07:06:32.999999999Z"
+    rows = _run(tmp_path, _payload(started_at=started_at))
+    assert rows["dev-broker-restart"] == (
+        "OK",
+        f"restart_count=12 started_at={started_at}",
+    )
 
 
 @pytest.mark.unit

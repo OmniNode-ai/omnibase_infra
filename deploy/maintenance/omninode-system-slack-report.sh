@@ -1209,6 +1209,12 @@ check_dev_broker() {
   fi
 
   IFS='|' read -r restart_count started_at state cmd <<<"$body"
+  # A stopped or restarting broker is unavailable regardless of how old its
+  # last start is or whether its restart policy has recorded a restart yet.
+  if [[ "$state" != "running" ]]; then
+    printf 'broker|CRITICAL|dev-broker-restart|%s state=%s; dev broker is not running\n' "$container" "${state:-unknown}"
+    return 0
+  fi
   started_seconds=$(sed 's/\.[0-9][0-9]*Z$/Z/' <<<"$started_at")
   started_epoch=""
   if [[ -n "$started_seconds" ]]; then
