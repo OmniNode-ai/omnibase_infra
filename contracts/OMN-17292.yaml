@@ -11,15 +11,23 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry f9bc19a9105a526ed0823cb11bc8271f3deec814 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - id: req-omn17292-dashboard-owner-lane
+    statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - id: req-omn17292-local-environment-bridge
     statement: The local_environment supplemental declaration is retired now that the pinned omnimarket contract declares the relation, and its vendored migrations and shipped writer grants survive.
     acceptance:
-      - id: AC2
-        statement: "AC2: LEGACY_MIGRATION_TABLE_DECLARATIONS carries no local_environment entry, the vendored node_projection_local_environment 0000-0002 migrations remain, and every shipped instance grants tenant_projection_writer exactly SELECT, INSERT, UPDATE on public.local_environment -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
+      - id: AC3
+        statement: "AC3: LEGACY_MIGRATION_TABLE_DECLARATIONS carries no local_environment entry, the vendored node_projection_local_environment 0000-0002 migrations remain, and every shipped instance grants tenant_projection_writer exactly SELECT, INSERT, UPDATE on public.local_environment -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f9bc19a9105a526ed0823cb11bc8271f3deec814.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - kind: tests
     description: The local_environment bridge is retired and its migrations and writer grants survive.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
@@ -36,6 +44,14 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn-17292-ac2-dashboard-owner-lane
+    description: The lane table generator declares the dashboard-owner lane's port and boundary rows; the merge base has neither.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
   - id: dod-omn-17292-ac2-local-environment-bridge
     description: The local_environment supplemental declaration is gone while its vendored migrations and shipped writer grants remain; the merge base still carries the declaration.
     source: manual
@@ -43,4 +59,4 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
+    binds_ac: [AC3]

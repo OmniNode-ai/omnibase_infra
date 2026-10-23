@@ -23,6 +23,7 @@ import yaml
 from scripts.ci.ci_summary_gate import (
     ACTOR_CONDITIONAL_CONTEXTS,
     CANCELLED_SUPERSESSION_GRACE_S,
+    DEV_BASE_ONLY_CONTEXTS,
     DOCS_ONLY_MARKER_JOB,
     DOCS_ONLY_SKIPPABLE_GATE_JOBS,
     EXIT_FAILURE,
@@ -53,6 +54,7 @@ from scripts.ci.ci_summary_gate import (
     latest_check_run_by_name,
     latest_check_run_rows,
     resolve_check_run_event,
+    scoped_to_base,
     strict_gates_for_event,
     validate_sweep_exclusions,
 )
@@ -3653,3 +3655,96 @@ class TestDraftReadySupersessionOmn19379:
         code, report = self._evaluate(fixture)
         assert code == EXIT_PENDING, report
         assert "draft_era_without_ready_counterpart" not in report
+
+
+class TestDevBaseExternalContextsOmn17427:
+    """The Hostile Review Thread Gate is required on dev, not on main.
+
+    Operator RULING 2026-10-21T13:00:04Z. Before this, a dev PR whose thread
+    gate was absent or still running could pass CI Summary: the gate was in no
+    asserted tuple, and the default-deny sweep only sees a red that has
+    already posted.
+    """
+
+    THREAD_GATE = "Hostile Review Thread Gate"
+    NOW = datetime(2026, 10, 21, 13, 0, 0, tzinfo=UTC)
+
+    def _row(
+        self, name: str, conclusion: str | None, status: str = "completed"
+    ) -> dict[str, Any]:
+        return {
+            "id": abs(hash(name)) % 10_000_000,
+            "name": name,
+            "status": status,
+            "conclusion": conclusion,
+            "started_at": "2026-10-21T11:00:00Z",
+            "completed_at": "2026-10-21T11:05:00Z" if status == "completed" else None,
+            "head_sha": "a" * 40,
+        }
+
+    def _check_runs(self, thread_gate: str | None) -> list[dict[str, Any]]:
+        rows = [
+            self._row(c, "success")
+            for c in EXPECTED_EXTERNAL_CONTEXTS
+            if c != self.THREAD_GATE
+        ]
+        if thread_gate == "in_progress":
+            rows.append(self._row(self.THREAD_GATE, None, status="in_progress"))
+        elif thread_gate is not None:
+            rows.append(self._row(self.THREAD_GATE, thread_gate))
+        return rows
+
+    def test_the_thread_gate_is_registered_and_dev_only(self) -> None:
+        assert self.THREAD_GATE in EXPECTED_EXTERNAL_CONTEXTS
+        assert frozenset({self.THREAD_GATE}) == DEV_BASE_ONLY_CONTEXTS
+        assert set(EXPECTED_EXTERNAL_CONTEXTS) >= DEV_BASE_ONLY_CONTEXTS
+
+    def test_dev_asserts_it_and_main_does_not(self) -> None:
+        assert scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev") == (
+            EXPECTED_EXTERNAL_CONTEXTS
+        )
+        on_main = scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "main")
+        assert set(EXPECTED_EXTERNAL_CONTEXTS) - set(on_main) == {self.THREAD_GATE}
+        assert scoped_to_base((), "dev") == ()
+
+    def test_an_unknown_base_enforces(self) -> None:
+        assert scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "") == (
+            EXPECTED_EXTERNAL_CONTEXTS
+        )
+
+    @pytest.mark.parametrize(
+        ("thread_gate", "expected"),
+        [
+            ("success", EXIT_SUCCESS),
+            ("failure", EXIT_FAILURE),
+            ("skipped", EXIT_FAILURE),
+            (None, EXIT_PENDING),
+            ("in_progress", EXIT_PENDING),
+        ],
+    )
+    def test_a_dev_pr_needs_a_green_thread_gate(
+        self, thread_gate: str | None, expected: int
+    ) -> None:
+        code, report = evaluate(
+            _all_gates(),
+            check_runs=self._check_runs(thread_gate),
+            external_contexts=scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "dev"),
+            now=self.NOW,
+        )
+        assert code == expected, report
+
+    def test_a_main_pr_is_not_held_by_an_absent_thread_gate(self) -> None:
+        code, report = evaluate(
+            _all_gates(),
+            check_runs=self._check_runs(None),
+            external_contexts=scoped_to_base(EXPECTED_EXTERNAL_CONTEXTS, "main"),
+            now=self.NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+
+    def test_the_ci_workflow_passes_the_base_ref(self) -> None:
+        text = (
+            Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
+        ).read_text()
+        assert "BASE_REF: ${{ github.base_ref }}" in text
+        assert '--base-ref "${BASE_REF}"' in text
