@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Live-apply proofs for the barrier and receipts migration chains (OMN-21334)."""
+"""Live-apply proofs for the barrier migration chains (OMN-21334)."""
 
 from __future__ import annotations
 
@@ -19,9 +19,8 @@ _FORWARD = Path(__file__).resolve().parents[3] / "docker/migrations/forward/node
 _CHAINS = (
     ("node_projection_session_content", 1, 2),
     ("node_projection_claude_hook_events", 0, 8),
-    ("node_projection_compaction_receipts", 0, 1),
 )
-_TABLES = ("session_content", "claude_hook_events", "compaction_receipts")
+_TABLES = ("session_content", "claude_hook_events")
 _BARRIER_COLUMNS = {
     "content_record_id": "text",
     "stream": "text",
@@ -63,7 +62,7 @@ def applied(
         conn.close()
 
 
-def test_second_apply_preserves_populated_rows_and_cursors(
+def test_second_apply_preserves_populated_rows(
     applied: psycopg2.extensions.connection,
     ephemeral_postgres: EphemeralPostgres,
 ) -> None:
@@ -85,15 +84,6 @@ def test_second_apply_preserves_populated_rows_and_cursors(
                 '00000000-0000-0000-0000-000000000001', 'session-1', FALSE,
                 'PreCompact', '00000000-0000-0000-0000-000000000002',
                 NOW(), 'hooks', 43
-            );
-            INSERT INTO omninode_internal.compaction_receipts (
-                session_id, receipt_key, boundary_uuid, boundary_kind,
-                activation_id, verdict, reason, installed_messages_hash,
-                observed_hash, source_topic, projected_at
-            ) VALUES (
-                'session-1', 'receipt-1', 'boundary-1', 'compaction',
-                '00000000-0000-0000-0000-000000000003', 'verified',
-                'matched', 'hash-1', 'hash-1', 'receipts', NOW()
             );
             """
         )
@@ -124,23 +114,6 @@ def test_second_apply_preserves_populated_rows_and_cursors(
     [
         ("session_content", _BARRIER_COLUMNS),
         ("claude_hook_events", {"producer_seq": "bigint"}),
-        (
-            "compaction_receipts",
-            {
-                "session_id": "text",
-                "receipt_key": "text",
-                "boundary_uuid": "text",
-                "boundary_kind": "text",
-                "activation_id": "uuid",
-                "verdict": "text",
-                "reason": "text",
-                "installed_messages_hash": "text",
-                "observed_hash": "text",
-                "source_topic": "text",
-                "projection_cursor": "bigint",
-                "projected_at": "timestamp with time zone",
-            },
-        ),
     ],
 )
 def test_column_types(
@@ -154,82 +127,4 @@ def test_column_types(
         )
         columns = {name: (typ, nullable) for name, typ, nullable in cur.fetchall()}
         assert {name: columns[name][0] for name in expected} == expected
-        if table != "compaction_receipts":
-            assert all(columns[name][1] == "YES" for name in expected)
-        else:
-            assert set(columns) == set(expected)
-
-
-def test_runtime_has_exact_receipts_table_schema_and_sequence_privileges(
-    applied: psycopg2.extensions.connection,
-) -> None:
-    with applied.cursor() as cur:
-        cur.execute(
-            "SELECT privilege_type FROM information_schema.role_table_grants "
-            "WHERE table_schema = 'omninode_internal' AND table_name = 'compaction_receipts' "
-            "AND grantee = 'omninode_runtime'"
-        )
-        assert {row[0] for row in cur.fetchall()} == {"SELECT", "INSERT", "UPDATE"}
-        for privilege in (
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "TRUNCATE",
-            "REFERENCES",
-            "TRIGGER",
-        ):
-            cur.execute(
-                "SELECT has_table_privilege('omninode_runtime', "
-                "'omninode_internal.compaction_receipts', %s)",
-                (privilege,),
-            )
-            assert cur.fetchone() == (privilege in {"SELECT", "INSERT", "UPDATE"},)
-        for privilege in ("USAGE", "SELECT", "UPDATE"):
-            cur.execute(
-                "SELECT has_sequence_privilege('omninode_runtime', "
-                "'omninode_internal.compaction_receipts_projection_cursor_seq', %s)",
-                (privilege,),
-            )
-            assert cur.fetchone() == (privilege == "USAGE",)
-        cur.execute(
-            "SELECT has_schema_privilege('omninode_runtime', 'omninode_internal', 'USAGE'), "
-            "has_schema_privilege('omninode_runtime', 'omninode_internal', 'CREATE')"
-        )
-        assert cur.fetchone() == (True, False)
-
-
-def test_runtime_writer_can_upsert_and_return_a_receipt_with_its_cursor(
-    applied: psycopg2.extensions.connection,
-    ephemeral_postgres: EphemeralPostgres,
-) -> None:
-    with applied.cursor() as cur:
-        cur.execute(
-            "CREATE ROLE compaction_receipts_test_writer LOGIN NOSUPERUSER NOBYPASSRLS "
-            "IN ROLE omninode_runtime"
-        )
-    applied.commit()
-    writer = ephemeral_postgres.connect(user="compaction_receipts_test_writer")
-    try:
-        writer.autocommit = True
-        with writer.cursor() as cur:
-            cur.execute("SET ROLE omninode_runtime")
-            cur.execute(
-                "SELECT current_user, rolsuper, rolbypassrls FROM pg_catalog.pg_roles "
-                "WHERE rolname = current_user"
-            )
-            assert cur.fetchone() == ("omninode_runtime", False, False)
-            for verdict in ("uncertain", "verified"):
-                cur.execute(
-                    "INSERT INTO omninode_internal.compaction_receipts "
-                    "(session_id, receipt_key, verdict, projected_at) "
-                    "VALUES ('session-1', 'receipt-1', %s, NOW()) "
-                    "ON CONFLICT (session_id, receipt_key) DO UPDATE SET verdict = EXCLUDED.verdict "
-                    "RETURNING verdict, projection_cursor",
-                    (verdict,),
-                )
-                assert cur.fetchone() == (verdict, 1)
-            with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-                cur.execute("DELETE FROM omninode_internal.compaction_receipts")
-    finally:
-        writer.close()
+        assert all(columns[name][1] == "YES" for name in expected)

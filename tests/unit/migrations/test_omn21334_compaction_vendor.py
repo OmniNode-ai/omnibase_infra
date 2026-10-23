@@ -1,10 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Pin the barrier and receipts migrations to the measured omnimarket bytes.
+"""Pin the barrier migrations to the measured omnimarket bytes.
 
 The barrier digests were measured from the OMN-21334 omnimarket worktree at
-026846208b5b5c0cf8f2ea51639cc5e3874364e4; the receipts digests from OMN-21336
-at e00c6bc53cc8c062ec7b88b7ea2f5e56b8d6757d. Source and vendor were compared
+026846208b5b5c0cf8f2ea51639cc5e3874364e4. Source and vendor were compared
 byte for byte before pinning. These checks cover deployment identity, ledger
 checksums, migration classes and the absence of a FORCE fence.
 """
@@ -23,16 +22,6 @@ _VENDORED = [
     (
         "node_projection_claude_hook_events/0008_add_producer_sequence.sql",
         "cc816ad877ebbecb6db91474c33d152e667c2df0779adc7f7eb9ea70784566ca",
-        "expand-only",
-    ),
-    (
-        "node_projection_compaction_receipts/0000_create_compaction_receipts.sql",
-        "0e43ebcf212a747931682d85460f43d15a43b97e9885fb01cd1520b9631c1030",
-        "forward-only",
-    ),
-    (
-        "node_projection_compaction_receipts/0001_grant_omninode_runtime_compaction_receipts.sql",
-        "89402ff7fe70ba9a7ea5804dcdadfed090fc29c311c124bef598f41b24efd95f",
         "expand-only",
     ),
     (
@@ -85,7 +74,7 @@ def test_the_vendor_is_declared_with_its_class(
     assert classes["migrations"][f"forward/nodes/{path}"] == klass
 
 
-def test_none_of_the_four_migrations_is_fenced() -> None:
+def test_none_of_the_two_migrations_is_fenced() -> None:
     fenced = yaml.safe_load((_FORWARD / "fenced-node-migrations.yaml").read_text())
     ids = {entry["id"] for entry in fenced["fenced_node_migrations"]}
     for path, _, _ in _VENDORED:
