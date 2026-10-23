@@ -191,7 +191,15 @@ def test_recorded_throttled_run_names_the_throttle_not_the_key(
     """
     obs = recorded_response["response"]
     spec = probe.PROVIDERS["openrouter"]
-    receipt = json.loads(obs["run_files"]["receipt.json"])
+    receipt = obs["run_files"]["receipt.json"]
+    assert isinstance(receipt, dict)
+    obs = {
+        **recorded_response["response"],
+        "run_files": {
+            **recorded_response["response"]["run_files"],
+            "receipt.json": json.dumps(receipt),
+        },
+    }
 
     customer_key = probe.grade_customer_key(obs, spec, receipt)
     names = probe.grade_names_provider(obs, spec, receipt)
