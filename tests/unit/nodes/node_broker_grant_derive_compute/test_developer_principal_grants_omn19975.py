@@ -10,6 +10,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from omnibase_core.event_bus.util_consumer_group import compute_consumer_group_id
 from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
 from omnibase_core.models.event_bus.model_bus_group_describe import (
     ModelBusGroupDescribe,
@@ -690,23 +691,31 @@ def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> N
     assert derive(before) - derive(bindings) == set()
 
 
-@pytest.mark.parametrize(
-    "runtime_group",
-    [
-        "local.omnimarket.node_work_ledger_query_effect.consume.v1.worker",
-        "local.omnimarket.work_ledger_query_effect.consume.v1.worker",
-        "local.omnimarket.work_ledger_append_client.consume.v1.call",
-        "local.omnibase_infra.node_work_ledger_query_effect.consume.v1.worker",
-    ],
-)
-def test_developer_principal_query_acl_prefix_cannot_join_runtime_groups(
-    runtime_group: str,
-) -> None:
-    """Query callers cannot join a node's command group or another client's group."""
-    prefixes = [
-        p for p in shipped_bindings().group_prefixes if "work_ledger_query" in p.prefix
+def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> None:
+    """The query prefix is core's derived client group and covers no runtime group."""
+    query_client = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_query_client",
+        version="v1",
+    )
+    append_client = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_append_client",
+        version="v1",
+    )
+    query_node = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_query_effect",
+        version="v1",
+    )
+    dev_prefixes = [
+        p.prefix for p in shipped_bindings().group_prefixes if p.broker == BROKER
     ]
-    assert [(p.broker, p.prefix) for p in prefixes] == [
-        (BROKER, "local.omnimarket.work_ledger_query_client.consume.v1.")
-    ]
-    assert not any(runtime_group.startswith(p.prefix) for p in prefixes)
+    assert f"{query_client}." in dev_prefixes
+    assert f"{append_client}." in dev_prefixes
+    for group in (query_node, f"{query_node}.worker"):
+        assert not any(group.startswith(prefix) for prefix in dev_prefixes), group
+    assert not f"{append_client}.call".startswith(f"{query_client}.")
