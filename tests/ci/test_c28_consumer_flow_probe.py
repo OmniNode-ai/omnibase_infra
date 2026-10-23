@@ -467,6 +467,47 @@ def test_an_unpaired_error_is_never_excused() -> None:
     assert total > 0 and own == 0 and natural == total
 
 
+#: An unrelated runtime line, the kind that fills the log between a probe's
+#: validation error and its boundary line on a busy lane.
+_BUSY_LINE = (
+    "2026-10-22 11:56:10 [INFO] omnibase_infra.runtime.service_kernel: Dispatch started"
+)
+
+
+def _spread(lines: list[str], gap: int) -> list[str]:
+    """Put ``gap`` unrelated lines after every stall-alert validation error."""
+    out: list[str] = []
+    for ln in lines:
+        out.append(ln)
+        if probe.VALIDATION_ERROR_RE.search(ln):
+            out.extend([_BUSY_LINE] * gap)
+    return out
+
+
+@pytest.mark.parametrize("gap", [63, 171])
+def test_an_error_whose_boundary_sits_behind_a_busy_log_is_still_the_probes(
+    gap: int,
+) -> None:
+    """OMN-17427: on the lab dev lane on 2026-10-22 the probe's boundary line
+    sat 63 and 171 lines after its own validation error, and a 60-line search
+    read both as natural, so C28 went red on the probe's own injection."""
+    lines = _spread(_lines("runtime_seam_probe_prefixed.captured.txt"), gap)
+    total, own, natural = probe.natural_validation_errors(lines)
+    assert total > 0
+    assert (own, natural) == (total, 0)
+
+
+def test_a_natural_error_pairs_with_its_own_boundary_before_a_probe_one() -> None:
+    """A wide search must not let a later probe boundary excuse a natural error."""
+    natural_lines = _spread(_lines("runtime_seam_unprefixed.captured.txt"), 171)
+    probe_lines = _lines("runtime_seam_probe_prefixed.captured.txt")
+    total, own, natural = probe.natural_validation_errors(natural_lines + probe_lines)
+    nat_total = probe.natural_validation_errors(natural_lines)[0]
+    assert nat_total > 0
+    assert natural == nat_total
+    assert own == total - nat_total
+
+
 def test_both_model_names_count() -> None:
     for name in ("Request", "Trigger"):
         line = f"x failed: ValidationError: 6 validation errors for ModelConsumerFlowStallAlert{name}"

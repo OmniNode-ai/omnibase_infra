@@ -99,8 +99,8 @@ requirements:
   - id: req-omn19998-broker-profile-checks
     statement: Broker profile regressions require the five original settings by name while permitting additional settings, and the control-plane fake broker accepts group_offset_retention_sec without dropping any topic assertions.
     acceptance:
-      - id: AC21
-        statement: 'AC21: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
+      - id: AC27
+        statement: 'AC27: the disk profile positive control asserts all original keys by name, and the control-plane fake broker answers group_offset_retention_sec with 86400; the original topic creation, race and failure tests pass with the additional setting.'
   - id: req-omn19998-forwarder-inbound-survives-bad-record
     statement: The gateway forwarder inbound leg keeps delivering when one cloud record carries no event_type or a consumer start does not finish.
     acceptance:
@@ -119,8 +119,8 @@ requirements:
   - id: req-omn19998-public-runner-placement
     statement: 'Operator RULING 2026-10-16T07:07:09Z: CI runners are for private repositories only. omnibase_infra is public, so no workflow routing fallback may name the self-hosted fleet except the two lab-broker carve-outs (runtime rebuild, hostile review), the nightly performance benchmarks and the dev merge tag run on a GitHub-hosted label, and omnibase_core''s check-public-runner-placement runs as a CI Summary registered job and as a pre-commit hook at one core pin.'
     acceptance:
-      - id: AC22
-        statement: 'AC22: no workflow line outside the two carve-outs carries the self-hosted fleet fallback, performance-tests and dev-merge-tag run on ubuntu-latest, the Public Runner Placement job is unconditional, hosted, carries a positive control and the same core pin as the hook, and CI Summary registers it -- falsifier: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0 fails at the merge base, where 178 fallback lines name the fleet and neither the job nor the hook exists'
+      - id: AC28
+        statement: 'AC28: no workflow line outside the two carve-outs carries the self-hosted fleet fallback, performance-tests and dev-merge-tag run on ubuntu-latest, the Public Runner Placement job is unconditional, hosted, carries a positive control and the same core pin as the hook, and CI Summary registers it -- falsifier: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0 fails at the merge base, where 178 fallback lines name the fleet and neither the job nor the hook exists'
   - id: req-omn19998-routing-audit-quota-isolation
     statement: The routing audit must retain its live organization and private-repository assertions without GraphQL reads or a REST read per workflow file. Same-repository content uses the run token, while organization variable metadata and private sibling content retain the existing privileged reader. Unread state must fail separately from drift.
     acceptance:
@@ -473,7 +473,7 @@ dod_evidence:
         check_value: python3 -c "from pathlib import Path; d=Path('tests/unit/infra/test_dev_redpanda_disk_dials_omn19082.py').read_text(); t=Path('tests/unit/infra/test_lane_control_plane_topic_omn19543.py').read_text(); assert 'assert set(_BASE_KEYS + _DIALS) <=' in d; assert 'group_offset_retention_sec) echo 86400 ;;' in t"
         cwd: .
     binds_ac:
-      - AC21
+      - AC27
   - id: dod-omn19998-ac17-forwarder-inbound-recovery
     description: AC17 tests refuse an untyped inbound envelope and recover a transport whose consumer start raised or was cancelled on the refused-topic retry path.
     source: manual
@@ -529,7 +529,7 @@ dod_evidence:
     binds_ac:
       - AC23
   - id: dod-omn19998-ac22-public-runner-placement
-    description: AC22 tests read the workflows, the CI job, the pre-commit hook and the CI Summary gate list; the runner routing audit accepts the two new bare hosted pins.
+    description: AC28 tests read the workflows, the CI job, the pre-commit hook and the CI Summary gate list; the runner routing audit accepts the two new bare hosted pins.
     source: manual
     checks:
       - check_type: test_passes
@@ -539,4 +539,4 @@ dod_evidence:
         check_value: uv run python scripts/audit-runner-routing.py --local-workflows
         cwd: .
     binds_ac:
-      - AC22
+      - AC28

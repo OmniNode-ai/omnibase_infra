@@ -10,9 +10,19 @@
 # The issuer checks the kernel-attested peer uid is root before trusting the
 # tailnet login header set by tailscale serve:
 #
-#   PRINCIPAL_ISSUER_OVERLAY_FILE=<the lab developer.principal overlay file> \
+#   export PRINCIPAL_ISSUER_OVERLAY_FILE=<the lab developer.principal overlay file>
 #   docker compose -f docker/docker-compose.principal-issuer.yml \
-#     --env-file <the operator env file> up -d --build
+#     --env-file <the operator env file> build
+#   docker compose -f docker/docker-compose.principal-issuer.yml \
+#     --env-file <the operator env file> run --rm principal-issuer check \
+#     --grants /app/developer-principal-grants.yaml \
+#     --overlay /overlay/developer-principal-overlay.yaml --ledger /data/issuances.jsonl
+#   docker compose -f docker/docker-compose.principal-issuer.yml \
+#     --env-file <the operator env file> up -d
+#
+# The check exits 1 naming every machine the issuer's ledger issued that the overlay
+# does not declare (OMN-19975): serve under that overlay refuses to rotate such a
+# machine, so declare it, or decide it is retired, before the container is recreated.
 #   tailscale serve --bg --https=8443 "unix:$(docker volume inspect -f '{{.Mountpoint}}' omnibase-infra-principal-issuer_principal-issuer-socket)/issuer.sock"
 #
 # The URL developer machines use is deployment configuration, kept with the

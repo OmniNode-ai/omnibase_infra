@@ -280,9 +280,11 @@ def format_finding_body(finding: dict[str, Any]) -> str:
         f"<!-- {MARKER} fp={fp} -->\n"
         f"**[{label}] hostile-reviewer ({model})**\n\n"
         f"{message}\n\n"
-        f"_Resolve this thread when addressed — the `Hostile Review Thread "
-        f"Gate` blocks while hostile-reviewer threads are unresolved "
-        f"(OMN-17492)._"
+        "_Reply on this thread with a line `fixed-in <sha>` (the commit of "
+        "this PR that changed these lines) or `rejected: <reason>`. The "
+        "`Hostile Review Thread Gate` re-runs on the reply, checks it, and "
+        "blocks a merge to dev while any finding has no accepted reply "
+        "(OMN-17427)._"
     )
 
 
@@ -369,9 +371,9 @@ def build_review(
         f"Nit-level findings suppressed: {suppressed_hints}",
         "",
         "The model is the FINDER, never the gate: merge is gated only by the",
-        "deterministic `Hostile Review Thread Gate`, which blocks while",
-        "hostile-reviewer threads are unresolved. Resolve each thread after",
-        "addressing (or rejecting, with a reply) its finding.",
+        "deterministic `Hostile Review Thread Gate`, which blocks while a",
+        "finding thread has no accepted reply. Answer each one with a line",
+        "`fixed-in <sha>` or `rejected: <reason>` (OMN-17427).",
     ]
     if truncated:
         body_parts += [
@@ -488,47 +490,126 @@ def main() -> int:
         print("No new findings to post (all deduped or none postable).")
         return 0
 
+    return publish(
+        payload, base=base, pr_number=pr_number, token=token, head_sha=head_sha
+    )
+
+
+def publish(
+    payload: dict[str, Any],
+    *,
+    base: str,
+    pr_number: int,
+    token: str,
+    head_sha: str,
+    api: Any = None,
+) -> int:
+    """Publish the review, then each file-level finding as its own thread.
+
+    OMN-17427: the create-review endpoint takes LINE comments only. A
+    ``subject_type`` on any comment in its ``comments`` array is a 422 for
+    the WHOLE review ("subjectType ... is not defined on
+    DraftPullRequestReviewComment"), and the retry below then demoted every
+    finding to the review body, so no thread was created at all. Measured on
+    the 15 reviewed omnibase_infra dev PRs merged 2026-10-19..21: the thread
+    gate passed on every run with 0 threads to read. A file-level comment is
+    posted through the single-comment endpoint instead, which accepts
+    ``subject_type: file`` and needs the head commit.
+    """
+    call = api or _api
+    line_comments = [c for c in payload["comments"] if "subject_type" not in c]
+    file_comments = [c for c in payload["comments"] if "subject_type" in c]
+    review = dict(payload, comments=line_comments)
     if head_sha:
-        payload["commit_id"] = head_sha
+        review["commit_id"] = head_sha
+    threads = len(line_comments)
     try:
-        _api("POST", f"{base}/pulls/{pr_number}/reviews", token, payload)
+        call("POST", f"{base}/pulls/{pr_number}/reviews", token, review)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:1000]
-        if payload["comments"]:
-            # A single bad anchor 422s the WHOLE review. Retry once with every
-            # finding demoted to the review body so nothing is silently lost.
-            print(
-                f"::warning::review POST failed ({exc.code}): {detail} — "
-                "retrying with all findings demoted to the review body"
-            )
-            demoted = [c["body"].replace("\n", "\n  ") for c in payload["comments"]]
-            payload_retry = {
-                "event": payload["event"],
-                "body": (
-                    payload["body"]
-                    + "\n\n### Findings demoted from threads (anchor rejected)\n\n"
-                    + "\n".join(f"- {body}" for body in demoted)
-                )[:MAX_BODY_CHARS],
-                "comments": [],
-            }
-            if head_sha:
-                payload_retry["commit_id"] = head_sha
-            try:
-                _api("POST", f"{base}/pulls/{pr_number}/reviews", token, payload_retry)
-            except urllib.error.HTTPError as retry_exc:
-                retry_detail = retry_exc.read().decode(errors="replace")[:1000]
-                print(
-                    f"::error::review POST retry failed "
-                    f"({retry_exc.code}): {retry_detail}"
-                )
-                return 1
-        else:
+        if not line_comments:
             print(f"::error::review POST failed ({exc.code}): {detail}")
+            return 1
+        # A single bad anchor 422s the WHOLE review. Retry once with every
+        # line finding demoted to the review body so nothing is silently lost.
+        print(
+            f"::warning::review POST failed ({exc.code}): {detail} — "
+            "retrying with the line findings demoted to the review body"
+        )
+        retry = dict(
+            review,
+            body=(
+                review["body"]
+                + "\n\n### Findings demoted from threads (anchor rejected)\n\n"
+                + "\n".join(
+                    f"- {c['body']}".replace("\n", "\n  ") for c in line_comments
+                )
+            )[:MAX_BODY_CHARS],
+            comments=[],
+        )
+        try:
+            call("POST", f"{base}/pulls/{pr_number}/reviews", token, retry)
+        except urllib.error.HTTPError as retry_exc:
+            retry_detail = retry_exc.read().decode(errors="replace")[:1000]
+            print(
+                f"::error::review POST retry failed ({retry_exc.code}): {retry_detail}"
+            )
+            return 1
+        threads = 0
+
+    demoted: list[dict[str, Any]] = []
+    for comment in file_comments:
+        if not head_sha:
+            demoted.append(comment)
+            continue
+        try:
+            call(
+                "POST",
+                f"{base}/pulls/{pr_number}/comments",
+                token,
+                {
+                    "body": comment["body"],
+                    "path": comment["path"],
+                    "subject_type": "file",
+                    "commit_id": head_sha,
+                },
+            )
+            threads += 1
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:300]
+            print(
+                f"::warning::file-level finding on {comment['path']} not posted ({exc.code}): {detail}"
+            )
+            demoted.append(comment)
+    if demoted:
+        try:
+            call(
+                "POST",
+                f"{base}/pulls/{pr_number}/reviews",
+                token,
+                {
+                    "event": "COMMENT",
+                    "body": (
+                        f"<!-- {MARKER} summary -->\n"
+                        "### Findings demoted from threads (file comment rejected)\n\n"
+                        + "\n".join(
+                            f"- {c['body']}".replace("\n", "\n  ") for c in demoted
+                        )
+                    )[:MAX_BODY_CHARS],
+                    "comments": [],
+                    **({"commit_id": head_sha} if head_sha else {}),
+                },
+            )
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:1000]
+            print(
+                f"::error::demoted file findings could not be posted ({exc.code}): {detail}"
+            )
             return 1
 
     print(
-        f"Posted hostile review ({payload['event']}) with "
-        f"{len(payload['comments'])} thread comment(s)."
+        f"Posted hostile review ({payload['event']}) with {threads} finding "
+        f"thread(s); {len(payload['comments']) - threads} demoted to a review body."
     )
     return 0
 
