@@ -468,8 +468,6 @@ requirements:
     acceptance:
       - id: AC180
         statement: 'AC180: a resolved hostile-reviewer thread with no disposition reply blocks, an outdated open one blocks, a fixed-in commit that is not in the PR or did not touch the carried-forward cited lines blocks, a valid reply clears the thread without needing it resolved, no threads passes, and each finding is recorded per voter model -- falsifier: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
-      - id: AC523701
-        statement: 'AC523701: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
       - id: AC17427523402
         statement: 'AC17427523402: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
   - id: req-omn17427-review-bot-judges-rejections
@@ -768,12 +766,6 @@ evidence_requirements:
     description: The census planner grades a restart count past its bound against the container's last start and the census time; the collector reads both.
     command: uv run pytest tests/unit/scripts/test_lane_census_plan.py tests/unit/scripts/test_lane_census_inventory.py -q -k "restart_loop or start_time or census_looked or recorded_api"
   - kind: tests
-    description: The thread gate's disposition rule against fake thread payloads and a real temporary git history, and the recorded GitHub 422 and 20-head admission replays; no live GitHub call.
-    command: uv run pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
-  - kind: tests
-    description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
-    command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
-  - kind: tests
     description: The gate's pending and post-verdicts modes driven by a recording GitHub and the judge's JSON output, the posted verdicts read back through the gate, a temporary git checkout for the cited lines, and the job-log replay of the rejections the old gate accepted; no live model or GitHub call.
     command: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q
   - kind: tests
@@ -823,24 +815,6 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC180
-  - id: dod-omn17427-ac523701-dev-only-ci-summary
-    description: CI Summary evaluated over synthetic check-run rows for a dev PR and a main PR, and the poster's publish() over a recording transport. They fail on the merge base, whose CI Summary asserts no thread gate and whose poster has no publish().
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC523701
-  - id: dod-omn17427-ac523701-ci-summary-deploy-check
-    description: Hosted-runner deploy check -- the CI Summary and poster tests; they do not claim a live CI Summary run.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC523701
   - id: dod-omn17427-ac523702-review-bot-judgement
     description: The gate's pending and post-verdicts modes run against a recording GitHub transport and the judge's JSON, and what is posted is fed back through classify_threads. They fail on the merge base, where a rejected reply clears its thread with no judgement and the gate has neither mode.
     source: manual
