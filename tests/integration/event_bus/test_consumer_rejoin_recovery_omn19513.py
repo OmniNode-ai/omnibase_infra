@@ -9,8 +9,8 @@ Kafka transport and elapsed time are simulated; no shared broker is contacted.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from itertools import pairwise
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -33,6 +33,17 @@ TOPIC = (
 )
 GROUP = "local.consumer-rejoin-recovery.consume.1.0.0"
 PARTITION = TopicPartition(TOPIC, 0)
+POLL_TIMEOUT_MS = 100
+
+
+class _AsyncioWithVirtualSleep:
+    """The real asyncio module, except that ``sleep`` advances a virtual clock."""
+
+    def __init__(self, sleep: Callable[[float], Awaitable[None]]) -> None:
+        self.sleep = sleep
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(asyncio, name)
 
 
 @pytest.mark.parametrize("poll_raises", [False, True], ids=["wedged", "poll-failed"])
@@ -48,7 +59,7 @@ async def test_consume_loop_delivers_after_two_failed_rejoins(
             consumer_stall_required_confirmations=1,
             consumer_rejoin_cooldown_seconds=300.0,
             consumer_sync_unready_seconds=1.0,
-            consumer_poll_timeout_ms=100,
+            consumer_poll_timeout_ms=POLL_TIMEOUT_MS,
         )
     )
     now = [1_000.0]
@@ -91,7 +102,7 @@ async def test_consume_loop_delivers_after_two_failed_rejoins(
         await asyncio.sleep(0)
 
     monkeypatch.setattr(
-        consumer_rejoin_supervisor, "asyncio", SimpleNamespace(sleep=retry_sleep)
+        consumer_rejoin_supervisor, "asyncio", _AsyncioWithVirtualSleep(retry_sleep)
     )
 
     async def start_replacement() -> None:
@@ -131,7 +142,13 @@ async def test_consume_loop_delivers_after_two_failed_rejoins(
     assert stopped_polls == 0, "the loop polled the stopped consumer"
     old.stop.assert_awaited_once()
     assert len(attempts) == 3
-    assert all(30.0 <= later - earlier < 30.2 for earlier, later in pairwise(attempts))
+    # While lost, each next_batch sleeps one poll interval, so a retry lands
+    # within one interval after the retry period has elapsed.
+    retry = consumer_rejoin_supervisor.LOST_CONSUMER_RETRY_SECONDS
+    assert all(
+        retry <= later - earlier <= retry + POLL_TIMEOUT_MS / 1000
+        for earlier, later in pairwise(attempts)
+    )
     assert lost_readiness and not any(lost_readiness)
     assert bus._group_consumers[(TOPIC, GROUP)] is recovered
     assert [event.rejoin_succeeded for event in bus.consumer_rejoin_events()] == [
