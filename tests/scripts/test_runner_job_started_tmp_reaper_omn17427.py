@@ -186,3 +186,137 @@ def test_headroom_under_85_percent_is_quiet(tmp_path: Path) -> None:
     result = _run_hook(tmp_path, tmpdir, df_shim=_df_shim(77, 84))
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RUNNER-TMP-HEADROOM" not in result.stdout
+
+
+@pytest.mark.parametrize(("byte_pct", "inode_pct"), [(85, 10), (77, 85)])
+def test_headroom_at_exactly_85_percent_warns(
+    tmp_path: Path, byte_pct: int, inode_pct: int
+) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.mkdir()
+    result = _run_hook(tmp_path, tmpdir, df_shim=_df_shim(byte_pct, inode_pct))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::warning title=RUNNER-TMP-HEADROOM::" in result.stdout
+
+
+@pytest.mark.parametrize("inode_only", [False, True])
+def test_failed_df_is_reported_without_stopping_the_job(
+    tmp_path: Path, inode_only: bool
+) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.mkdir()
+    shim = "#!/usr/bin/env bash\nexit 1\n"
+    if inode_only:
+        shim = _df_shim(90, 10).replace(
+            'if [[ " $* " == *" -Pi "* ]]; then\n',
+            'if [[ " $* " == *" -Pi "* ]]; then\nexit 1\n',
+        )
+    result = _run_hook(tmp_path, tmpdir, df_shim=shim)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "headroom unreadable:" in result.stdout
+    assert "inodes unknown%" in result.stdout
+    assert ("RUNNER-TMP-HEADROOM" in result.stdout) == inode_only
+
+
+def test_unset_tmpdir_emits_no_headroom_warning(tmp_path: Path) -> None:
+    result = _run_hook(tmp_path, None, df_shim=_df_shim(100, 100))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RUNNER-TMP-HEADROOM" not in result.stdout
+    assert "[runner-tmp]" not in result.stdout
+
+
+def test_home_and_symlinked_shared_tmpdir_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    stale = home_dir / "keep"
+    stale.write_text("keep")
+    _age(stale, 120)
+    monkeypatch.setenv("HOME", str(home_dir))
+    home_result = _run_hook(tmp_path, home_dir)
+    assert home_result.returncode == 0, home_result.stdout + home_result.stderr
+    assert "not a dedicated runner TMPDIR" in home_result.stdout
+    assert stale.read_text() == "keep"
+
+    link = tmp_path / "shared-link"
+    link.symlink_to(Path("/") / "tmp", target_is_directory=True)
+    result = _run_hook(tmp_path, link, reap_minutes=99999999)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[runner-tmp] /tmp is not a dedicated runner TMPDIR" in result.stdout
+
+
+def test_reap_dir_override_and_symlink_target_survive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    default = tmp_path / "default-tmp"
+    selected = tmp_path / "selected-tmp"
+    default.mkdir()
+    selected.mkdir()
+    keep = default / "keep"
+    keep.write_text("keep")
+    _age(keep, 120)
+    stale_link = selected / "stale-link"
+    stale_link.symlink_to(keep)
+    then = time.time() - 120 * 60
+    os.utime(stale_link, (then, then), follow_symlinks=False)
+    monkeypatch.setenv("RUNNER_TMP_REAP_DIR", str(selected))
+    result = _run_hook(tmp_path, default)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not stale_link.is_symlink()
+    assert keep.read_text() == "keep"
+    assert "reaped 1 of 1 entries" in result.stdout
+
+
+def test_entries_owned_by_another_uid_are_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.mkdir()
+    stale = tmpdir / "other-owner"
+    stale.write_text("keep")
+    _age(stale, 120)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # Present the reaper as a different uid without needing privileged chown.
+    uid = bin_dir / "id"
+    uid.write_text("#!/usr/bin/env bash\necho 2147483646\n")
+    uid.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    result = _run_hook(tmp_path, tmpdir)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stale.read_text() == "keep"
+    assert "reaped 0 of 1 entries" in result.stdout
+
+
+def test_spent_budget_skips_reaping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.mkdir()
+    stale = tmpdir / "keep"
+    stale.write_text("keep")
+    _age(stale, 120)
+    monkeypatch.setenv("OMNI_GIT_MIRROR_HOOK_BUDGET", "0")
+    result = _run_hook(tmp_path, tmpdir)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "hook budget spent; reap" in result.stdout
+    assert stale.read_text() == "keep"
+
+
+def test_slow_counting_is_inside_the_reap_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    find = bin_dir / "find"
+    find.write_text("#!/usr/bin/env bash\nexec sleep 10\n")
+    find.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    monkeypatch.setenv("RUNNER_TMP_REAP_SECONDS", "1")
+    started = time.monotonic()
+    result = _run_hook(tmp_path, tmpdir, df_shim=_df_shim(10, 10))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert time.monotonic() - started < 5, result.stdout + result.stderr

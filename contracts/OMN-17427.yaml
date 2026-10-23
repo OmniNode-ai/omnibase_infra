@@ -873,7 +873,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427523002]
   - id: dod-omn17427-scratch-watermark
-    description: Reads the installed unit source and runs the watermark against an absent optional mount, refusing a missing scratch check or an emitted fallback event.
+    description: Reads the installed unit source and checks absent optional mounts, plain directories, real mounts and unreadable filesystems, refusing an emitted fallback event.
     source: manual
     checks:
       - check_type: test_passes
@@ -881,11 +881,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427523003]
   - id: dod-omn17427-runner-tmp-deploy-check
-    description: Hosted-runner deploy check exercises the real runner hook, watermark and event builder using temporary directories and fake df responses, and reads the disk-gc unit. Requires GNU realpath, with no Docker daemon, broker, credentials or live lane changes.
+    description: Hosted-runner deploy check requires GNU realpath before exercising the real runner hook, watermark and event builder using temporary directories and fake df responses. Includes BSD inode parsing, mount identity, warning boundaries, ownership, symlink and timeout safety; reads the disk-gc unit without a Docker daemon, broker, credentials or live lane changes.
     source: manual
     checks:
       - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q
+        check_value: bash -c 'realpath -m . >/dev/null && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427523001, AC17427523002, AC17427523003]
   - id: dod-omn17427-ac180-thread-disposition

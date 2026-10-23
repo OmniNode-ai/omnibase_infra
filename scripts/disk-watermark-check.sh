@@ -60,7 +60,7 @@
 #   ./scripts/disk-watermark-check.sh --dry-run                             # print event, no publish
 #   ./scripts/disk-watermark-check.sh --mount /scratch --mount-optional     # quiet no-op where absent
 #
-# --mount-optional (OMN-17427): when the named mount does not exist on this host,
+# --mount-optional (OMN-17427): when the named filesystem is not mounted on this host,
 # exit 0 quietly instead of falling back to /. One hourly unit then checks
 # /scratch (the CI runner scratch disk where a host has one) on every host without a second alarm
 # on / where there is no /scratch.
@@ -121,11 +121,17 @@ read -r CRIT_FREE_GB WARN_FREE_GB WARN_PCT <<<"$THRESHOLDS_RAW"
 # same 276 GiB. The runner-side gate already used `df -Pk`
 # (docker/runners/runner-job-started.sh:697); this matches it.
 target="$MOUNT"
-if [[ "$MOUNT_OPTIONAL" == true ]] && [[ ! -d "$MOUNT" ]]; then
+if [[ "$MOUNT_OPTIONAL" == true ]] && ! python3 -c 'import os, sys; sys.exit(0 if os.path.ismount(sys.argv[1]) else 1)' "$MOUNT"; then
   log "mount=$MOUNT not present on this host (--mount-optional) -- quiet"
   exit 0
 fi
-df -Pk "$target" >/dev/null 2>&1 || target="/"
+if ! df -Pk "$target" >/dev/null 2>&1; then
+  if [[ "$MOUNT_OPTIONAL" == true ]]; then
+    log "ERROR: could not read mounted filesystem $target (--mount-optional)"
+    exit 2
+  fi
+  target="/"
+fi
 USED_PCT="$(df -Pk "$target" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
 AVAIL_KB="$(df -Pk "$target" | awk 'NR==2 {print $4}')"
 
@@ -139,9 +145,15 @@ AVAIL_GB=$(( AVAIL_KB / 1024 / 1024 ))
 # Inode use (OMN-17427). The header names the column (GNU: IUse%, BSD: %iused),
 # so the parse does not depend on column order. Fail-soft: unreadable is logged
 # and the byte checks still decide; it is never read as zero.
-INODE_USED_PCT="$(df -Pi "$target" 2>/dev/null | awk '
-  NR==1 { for (i = 1; i <= NF; i++) if ($i == "IUse%" || $i == "%iused") col = i; next }
-  NR==2 && col { v = $col; gsub(/%/, "", v); print v }')" || INODE_USED_PCT=""
+INODE_USED_PCT=""
+# BSD df can reject the POSIX/inode flag combination. Its native -i output
+# includes byte columns too, so select the inode header explicitly.
+for inode_flag in -Pi -i; do
+  INODE_USED_PCT="$(df "$inode_flag" "$target" 2>/dev/null | awk '
+    NR==1 { for (i = 1; i <= NF; i++) if ($i == "IUse%" || $i == "%iused") col = i; next }
+    NR==2 && col { v = $col; gsub(/%/, "", v); print v }')" || INODE_USED_PCT=""
+  [[ "$INODE_USED_PCT" =~ ^[0-9]+$ ]] && break
+done
 if ! [[ "$INODE_USED_PCT" =~ ^[0-9]+$ ]]; then
   log "mount=$target inode use unreadable -- byte checks only"
   INODE_USED_PCT=""

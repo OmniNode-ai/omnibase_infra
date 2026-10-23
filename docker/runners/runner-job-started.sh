@@ -1206,21 +1206,22 @@ _C4_TMP_WARN_PCT="${RUNNER_TMP_WARN_PCT:-85}"
 # Echo the use percentage df reports for a mount, from the column the header names
 # (GNU: Capacity/Use%/IUse%, BSD: %iused), or nothing when it cannot be read.
 _c4_df_pct() {
-    local flag="$1" mount="$2"
-    df "${flag}" "${mount}" 2>/dev/null | awk '
+    local flag="$1" mount="$2" bound
+    bound="$(_c2_budget_timeout "${_C4_TMP_REAP_SECONDS}")" || return 0
+    timeout "${bound}" df "${flag}" "${mount}" 2>/dev/null | awk '
         NR==1 { for (i = 1; i <= NF; i++) if ($i ~ /^(Capacity|Use%|IUse%|%iused)$/) col = i; next }
         NR==2 && col { v = $col; gsub(/%/, "", v); print v }' || true
 }
 
 runner_tmp_reap() {
-    local dir="${_C4_TMP_DIR}" real home_real bound before after
+    local dir="${_C4_TMP_DIR}" real home_real bound
     if [[ -z "${dir}" || ! -d "${dir}" ]]; then
         return 0
     fi
-    real="$(realpath -m -- "${dir}")"
-    home_real="$(realpath -m -- "${HOME:-/}")"
+    real="$(realpath -m -- "${dir}")" || return 0
+    home_real="$(realpath -m -- "${HOME:-/}")" || return 0
     case "${real}" in
-        / | /tmp | /var/tmp | /home | /home/runner | "${home_real}")
+        / | /tmp | /var/tmp | /scratch | /home | /home/runner | "${home_real}")
             echo "[runner-tmp] ${real} is not a dedicated runner TMPDIR; not reaping."
             return 0
             ;;
@@ -1229,14 +1230,19 @@ runner_tmp_reap() {
         echo "[runner-tmp] hook budget spent; reap of ${real} skipped this job."
         return 0
     fi
-    before="$(find "${real}" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')" || before="?"
-    timeout "${bound}" find "${real}" -mindepth 1 -maxdepth 1 -user "$(id -u)" \
-        \( -type d -o -type f -o -type l \) -mmin "+${_C4_TMP_REAP_MINUTES}" ! -name 'pytest-of-*' \
-        -exec rm -rf --one-file-system -- {} + 2>/dev/null || true
-    after="$(find "${real}" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')" || after="?"
-    if [[ "${before}" =~ ^[0-9]+$ && "${after}" =~ ^[0-9]+$ ]]; then
-        echo "[runner-tmp] reaped $(( before - after )) of ${before} entries older than ${_C4_TMP_REAP_MINUTES} min in ${real} (bound ${bound}s)."
-    fi
+    # Counting a large backlog is part of the same bound as deleting it.
+    timeout "${bound}" bash -c '
+        set -o pipefail
+        dir=$1 minutes=$2 bound=$3
+        before=$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d " ") || before="?"
+        find "$dir" -mindepth 1 -maxdepth 1 -user "$(id -u)" \
+            \( -type d -o -type f -o -type l \) -mmin "+$minutes" ! -name "pytest-of-*" \
+            -exec rm -rf --one-file-system -- {} + 2>/dev/null || true
+        after=$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d " ") || after="?"
+        if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]]; then
+            echo "[runner-tmp] reaped $(( before - after )) of $before entries older than $minutes min in $dir (bound ${bound}s)."
+        fi
+    ' _ "${real}" "${_C4_TMP_REAP_MINUTES}" "${bound}" || true
     return 0
 }
 
@@ -1249,6 +1255,9 @@ runner_tmp_headroom() {
     inodes="$(_c4_df_pct -Pi "${dir}")"
     [[ "${bytes}" =~ ^[0-9]+$ ]] || bytes=""
     [[ "${inodes}" =~ ^[0-9]+$ ]] || inodes=""
+    if [[ -z "${bytes}" || -z "${inodes}" ]]; then
+        echo "[runner-tmp] TMPDIR ${dir} headroom unreadable: bytes ${bytes:-unknown}%, inodes ${inodes:-unknown}%."
+    fi
     if [[ -n "${bytes}" && "${bytes}" -ge "${_C4_TMP_WARN_PCT}" ]] \
         || [[ -n "${inodes}" && "${inodes}" -ge "${_C4_TMP_WARN_PCT}" ]]; then
         echo "::warning title=RUNNER-TMP-HEADROOM::Runner '${runner}' TMPDIR ${dir}: bytes ${bytes:-unknown}% used, inodes ${inodes:-unknown}% used (warn at ${_C4_TMP_WARN_PCT}%). At 100% of either, every write fails with ENOSPC. The reaper removes entries older than ${_C4_TMP_REAP_MINUTES} min before each job; past that, find what fills it (OMN-17427)."

@@ -166,3 +166,76 @@ class TestDiskWatermarkInodes:
             encoding="utf-8"
         )
         assert 'disk-watermark-check.sh" --mount /scratch --mount-optional' in unit
+
+    def test_optional_mount_plain_directory_does_not_check_root(
+        self, tmp_path: Path
+    ) -> None:
+        proc = _run(
+            tmp_path,
+            avail_gb=20,
+            inode_pct=100,
+            mount=str(tmp_path),
+            extra=("--mount-optional",),
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "not present on this host" in proc.stderr
+        assert not proc.stdout.strip()
+        assert "avail_gb=" not in proc.stderr
+
+    def test_optional_mount_real_filesystem_is_checked(self, tmp_path: Path) -> None:
+        proc = _run(
+            tmp_path,
+            avail_gb=20,
+            inode_pct=100,
+            mount="/",
+            extra=("--mount-optional",),
+        )
+        assert proc.returncode == 20, proc.stderr
+        assert _event(proc)["halt_reason"] == "free_space_below_crit_floor"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_optional_mount_never_substitutes_root_and_bsd_inodes_are_read(
+    tmp_path: Path, unreadable: bool
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    df = bin_dir / "df"
+    df.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == -Pi ]]; then exit 64; fi\n'
+        'if [[ "$1" == -i ]]; then\n'
+        "echo 'Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on'\n"
+        "echo '/dev/disk1 1900000000 1400000000 500000000 74% 850 150 85% /'\n"
+        "exit 0\nfi\n"
+        + ("exit 1\n" if unreadable else "")
+        + 'if [[ "$1" != -Pk ]]; then exit 64; fi\n'
+        "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+        "echo '/dev/disk1 1900000000 1400000000 500000000 74% /'\n"
+    )
+    df.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", HOME=str(tmp_path))
+    proc = subprocess.run(
+        [
+            "bash",
+            str(_SCRIPTS / "disk-watermark-check.sh"),
+            "--mount",
+            "/",
+            "--mount-optional",
+            "--dry-run",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if unreadable:
+        assert proc.returncode == 2, proc.stderr
+        assert "could not read mounted filesystem /" in proc.stderr
+        assert not proc.stdout.strip()
+    else:
+        assert proc.returncode == 10, proc.stderr
+        assert _event(proc)["inode_used_pct"] == 85
+        assert _event(proc)["halt_reason"] == "inode_used_pct_advisory"
