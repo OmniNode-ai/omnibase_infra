@@ -11,6 +11,8 @@ import logging
 import os
 import signal
 import socket
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -73,6 +75,7 @@ from deploy_agent.executor import (
     select_dev_instance,
     set_lane_overlay_clone,
 )
+from deploy_agent.executor import _run as run_command
 from deploy_agent.health import create_health_app
 from deploy_agent.host_slot import (
     HostSlotHeldError,
@@ -208,6 +211,17 @@ def _sibling_clone(repository: str) -> Path | None:
     return Path(registry_root) / repository
 
 
+def _declared_branch_install_repos() -> list[str]:
+    """The repositories of the dev lane's declared branch installs; none when unreadable (OMN-17427)."""
+    try:
+        payload = json.loads(
+            (STATE_DIR / "branch-installs" / "records.json").read_text(encoding="utf-8")
+        )
+        return sorted({str(install["repo"]) for install in payload["installs"]})
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
 def _read_dev_tags(repository: str) -> list[ModelDevTag] | None:
     """Every dev tag on ``repository``'s origin, oldest first (OMN-19998)."""
     clone = _sibling_clone(repository)
@@ -285,6 +299,20 @@ ACCEPT_BACKLOG_INTERVAL_SECONDS = DEFAULT_SAMPLE_INTERVAL_SECONDS
 SELF_UPDATE_IDLE_INTERVAL_SECONDS = int(
     os.environ.get("DEPLOY_AGENT_SELF_UPDATE_IDLE_INTERVAL", "300")
 )
+
+#: OMN-17427. How often an idle agent reads the declared dev-lane branch installs
+#: back from their containers, and how long it waits for the lane lock to put a
+#: missing one back. Two minutes bounds how long a recreate that the job path did
+#: not see leaves a fix out of the running container.
+BRANCH_INSTALL_CHECK_INTERVAL_SECONDS = 120
+BRANCH_INSTALL_LOCK_TIMEOUT_SECONDS = 120.0
+BRANCH_INSTALL_CHECK_TIMEOUT_SECONDS = 180
+BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS = 900
+#: The handler the declared installs are read, checked and applied by. It is run
+#: from the deploy-source clone's ``src`` (the same tree the job just built), so a
+#: change to it needs no release of the omnibase_infra package the agent venv holds.
+BRANCH_INSTALL_HANDLER = "omnibase_infra.handlers.handler_dev_lane_branch_install"
+BRANCH_INSTALL_EXIT_NOT_WHOLE = 4
 
 #: OMN-18200 AC5. The k3s ``onex-lab`` overlay re-apply, ON by default.
 #:
@@ -487,6 +515,11 @@ class DeployAgent:
         self._migration_converge_attempted: set[str] = set()
         self._migration_converge_last_verdict: str | None = None
         self._idle_converge_now: Callable[[], datetime] = lambda: datetime.now(UTC)
+        # OMN-17427: the idle tick of the dev-lane branch installs.
+        self._branch_installs_last_check: float | None = None
+        self._branch_install_exec: Callable[
+            [list[str], int, dict[str, str]], subprocess.CompletedProcess[str]
+        ] = lambda argv, timeout, env: run_command(argv, timeout, env=env)
         self._idle_read_running_ref: Callable[[str], str | None] = lambda repo: (
             read_running_ref(_runtime_container_for_lane(EnumRuntimeLane.DEV), repo)
         )
@@ -785,6 +818,7 @@ class DeployAgent:
             get_unit_drift=_unit_drift_report,
             get_dev_lane_drift=self._latest_dev_lane_drift,
             get_dev_tag_heartbeat=self._latest_dev_tag_heartbeat,
+            get_branch_installs=self._latest_branch_installs,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -902,6 +936,7 @@ class DeployAgent:
                     # and QueuedFirst). OMN-19507: a command the load gate
                     # deferred IS one already waiting, so no converge while a
                     # deferral holds its partition paused.
+                    await self._offload(self._maybe_reapply_branch_installs)
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
                         await self._offload(self._maybe_converge_forward_migration)
@@ -1139,6 +1174,157 @@ class DeployAgent:
                 "friction_type=self_update_boundary_failed",
                 e,
             )
+
+    def _branch_install_argv(self, command: str) -> list[str]:
+        """The handler's argv; a merge probe gets each declared repository's clone and running ref."""
+        argv = [
+            sys.executable,
+            "-m",
+            BRANCH_INSTALL_HANDLER,
+            command,
+            "--state-dir",
+            str(STATE_DIR),
+            "--compose-project",
+            lane_config_for(EnumRuntimeLane.DEV).compose_project,
+        ]
+        if command in ("apply", "release-due"):
+            for repository in _declared_branch_install_repos():
+                clone = (
+                    Path(REPO_DIR)
+                    if repository == "omnibase_infra"
+                    else _sibling_clone(repository)
+                )
+                running = self._idle_read_running_ref(repository)
+                if clone is not None and running:
+                    argv += [
+                        "--clone",
+                        f"{repository}={clone}",
+                        "--running-ref",
+                        f"{repository}={running}",
+                    ]
+        return argv
+
+    def _run_branch_installs(
+        self, command: str
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Run one handler command and relay its log lines into the agent's log (OMN-17427).
+
+        The handler writes the detector line (``BRANCH-INSTALL-MISSING``) and the
+        apply report to stderr; relaying them is what puts them in the job log.
+        ``None`` when the handler could not be run at all.
+        """
+        env = {
+            **os.environ,
+            "PYTHONPATH": ":".join(
+                p for p in (f"{REPO_DIR}/src", os.environ.get("PYTHONPATH", "")) if p
+            ),
+        }
+        timeout = (
+            BRANCH_INSTALL_APPLY_TIMEOUT_SECONDS
+            if command == "apply"
+            else BRANCH_INSTALL_CHECK_TIMEOUT_SECONDS
+        )
+        try:
+            result = self._branch_install_exec(
+                self._branch_install_argv(command), timeout, env
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            logger.exception(
+                "branch install %s could not run friction_type=branch_install_failed",
+                command,
+            )
+            return None
+        for line in result.stderr.splitlines():
+            if "friction_type=" in line:
+                logger.error("%s", line)
+            elif line.strip():
+                logger.info("%s", line)
+        if result.returncode not in (0, BRANCH_INSTALL_EXIT_NOT_WHOLE):
+            logger.error(
+                "branch install %s exited %s: %s friction_type=branch_install_failed",
+                command,
+                result.returncode,
+                (result.stdout.strip() or result.stderr.strip())[-300:],
+            )
+        return result
+
+    def _reapply_branch_installs(self, lane: EnumRuntimeLane) -> bool:
+        """Re-apply the declared dev-lane branch installs inside a job (OMN-17427).
+
+        Called with the lane lock held, after the compose verdict. Dev lane
+        only; a failure is logged at ERROR and never changes the job's verdict.
+        Returns whether every declared install read back whole.
+        """
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or EnumRuntimeLane.DEV not in self._allowed_lanes
+            or not _declared_branch_install_repos()
+        ):
+            return True
+        result = self._run_branch_installs("apply")
+        return result is not None and result.returncode == 0
+
+    def _maybe_reapply_branch_installs(self) -> None:
+        """Idle tick: detect a declared install missing from its container and put it back.
+
+        Covers every recreate the job path does not see (a hand refresh, the
+        settle worker's pin recreate, a rollback). Throttled. Releasing a merged
+        or expired install touches no container and runs unlocked; an apply takes
+        the dev lane lock and is skipped for this tick when another writer holds it.
+        """
+        if EnumRuntimeLane.DEV not in self._allowed_lanes:
+            return
+        tick = time.monotonic()
+        if (
+            self._branch_installs_last_check is not None
+            and tick - self._branch_installs_last_check
+            < BRANCH_INSTALL_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        self._branch_installs_last_check = tick
+        if not _declared_branch_install_repos():
+            return
+        self._run_branch_installs("release-due")
+        checked = self._run_branch_installs("check")
+        if checked is None or checked.returncode != BRANCH_INSTALL_EXIT_NOT_WHOLE:
+            return
+        try:
+            with lane_lock(
+                lane_config_for(EnumRuntimeLane.DEV).compose_project,
+                lane=EnumRuntimeLane.DEV.value,
+                ref="branch-installs",
+                timeout=BRANCH_INSTALL_LOCK_TIMEOUT_SECONDS,
+            ):
+                self._run_branch_installs("apply")
+        except LaneLockContendedError as exc:
+            logger.info("branch install apply waits for the dev lane lock: %s", exc)
+
+    def _latest_branch_installs(self) -> dict[str, object]:
+        """The declared installs and the last readback, for ``/branch-installs``."""
+        root = STATE_DIR / "branch-installs"
+        try:
+            declared = json.loads((root / "records.json").read_text(encoding="utf-8"))[
+                "installs"
+            ]
+        except FileNotFoundError:
+            declared = []
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return {"installs": None, "reason": f"{type(exc).__name__}: {exc}"}
+        try:
+            status = json.loads((root / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            status = None
+        readbacks = status.get("readbacks") if isinstance(status, dict) else None
+        return {
+            "read_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "declared": declared,
+            "last_check": status,
+            "missing": [
+                str(r.get("install_key"))
+                for r in (readbacks if isinstance(readbacks, list) else [])
+                if isinstance(r, dict) and r.get("state") in ("missing", "failed")
+            ],
+        }
 
     def _maybe_idle_converge(self) -> None:
         """Converge on a followed repository's dev head when idle (OMN-19509).
@@ -1842,6 +2028,13 @@ class DeployAgent:
                 lane_mirror = self.executor.run_lane_mirror(
                     lane=cmd.runtime_lane, materialize_root=STATE_DIR / "lane-mirror"
                 )
+
+                # OMN-17427: a fix installed into a dev-lane container from its
+                # branch lives in the container's layer, and this job may have
+                # recreated that container. Put every declared install back,
+                # read it back, and say in the job log which are missing. Never
+                # part of the verdict: the receipt is logged and served.
+                self._reapply_branch_installs(cmd.runtime_lane)
 
                 # OMN-18496: runtime restarted, verified and keeps serving. Fail
                 # loudly on the job and terminal event before lab apply/promotion;
