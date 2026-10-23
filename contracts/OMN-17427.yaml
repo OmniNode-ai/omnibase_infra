@@ -570,6 +570,11 @@ requirements:
         statement: Each of the three scale factors is positive and at most 0.05.
       - id: AC527403
         statement: The application migration ledger declares node_projection_consumer_flow migration 0007 exactly once under its node migration identity.
+  - id: req-omn17427-c28-probe-pairing-window
+    statement: The C28 probe pairs a stall-alert validation error with its boundary line across a busy runtime log.
+    acceptance:
+      - id: AC189
+        statement: 'AC189: the C28 script and the board-probe node search 5,000 lines for an error''s applied-topic boundary line, an error whose probe boundary sits 63 or 171 lines behind is the probe''s, and an unprefixed error stays natural -- falsifier: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py -q fails at the merge base, where the window is 60 lines'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2498,6 +2503,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC170
+  - id: dod-omn-17427-ac189-c28-pairing-window
+    description: Runs the script and the node over the recorded runtime-seam logs with 63 and 171 unrelated lines after each validation error; both agree and count every probe error as the probe's, while unprefixed errors stay natural.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py tests/unit/nodes/node_board_probe_effect/test_handler_consumer_flow.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC189
   - id: dod-omn-17427-ac172-edit-trigger
     description: The test parses every committed workflow, finds the ones that read the pull request body, and requires edited in their pull_request types; synthetic workflows are the positive and negative controls. Does not claim a live rerun on a pull request.
     source: manual
