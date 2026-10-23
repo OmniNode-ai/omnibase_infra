@@ -21,6 +21,11 @@ requirements:
     acceptance:
       - id: "AC3"
         statement: "AC3: node_broker_grant_derive_compute derives from deploy/lab/developer-principal-bindings.yaml exactly the set of grants deploy/lab/developer-principal-grants.yaml typed by hand (literal topics, prefixed group read and describe, the describe-only group *), the committed deploy/lab/developer-principal-derived-grants.json is that output, and scripts/lab_principal_issuer.py takes its grants from that file through grants_from and refuses a policy file that also types grants -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -k derive fails at the merge base and passes at the head"
+  - id: "req-issuer-overlay-coverage"
+    statement: "Before the issuer is recreated with --overlay, it can name every machine it already issued that the overlay does not declare, since serve under that overlay refuses to rotate such a machine."
+    acceptance:
+      - id: "AC4"
+        statement: "AC4: scripts/lab_principal_issuer.py check --overlay FILE --ledger FILE exits 1 naming each issued principal the overlay does not declare for its login, and 0 when the overlay declares every issued principal -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -k check_with_a_ledger fails at the merge base and passes at the head"
 evidence_requirements:
   - kind: "tests"
     description: "The audit tests pin the derived rows, a clean listing, an extra row, a missing row, DENY and other-principal rows ignored, a host-bound ALLOW row as extra, and the command's exit codes."
@@ -73,3 +78,11 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/scripts/test_lab_principal_issuer_rpk_container_omn17427.py tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-omn19975-ac4-overlay-coverage"
+    description: "The issuer's check compares its issuance ledger with the overlay and names each issued machine the overlay does not declare. A read-only h201 run at 2026-10-22T04:35:15Z over a copy of the live issuer's ledger and the host's overlay reported issued=7 undeclared=4 and exited 1."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k 'check_with_a_ledger or check_refuses_a_ledger'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC4"]
