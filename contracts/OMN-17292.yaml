@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 370f405566c19cdf269c67eb06a40244cae36a81"
+title: "The omnimarket contract pin advances to f2b91cc2bd5431cbce3af37b5dcd3ce5510196f2"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,7 +10,9 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 370f405566c19cdf269c67eb06a40244cae36a81 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry f2b91cc2bd5431cbce3af37b5dcd3ce5510196f2 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+      - id: AC3
+        statement: "AC3: the local_environment supplemental declaration is retired while its migration behavior and exact writer privileges remain in every shipped topology and rendered catalog -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -18,7 +20,7 @@ requirements:
         statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 370f405566c19cdf269c67eb06a40244cae36a81.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f2b91cc2bd5431cbce3af37b5dcd3ce5510196f2.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
@@ -29,7 +31,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 370f405566c19cdf269c67eb06a40244cae36a81.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f2b91cc2bd5431cbce3af37b5dcd3ce5510196f2.
     source: manual
     checks:
       - check_type: test_passes
@@ -44,3 +46,18 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac2-local-environment-bridge-retired
+    description: The local_environment bridge is absent, its vendored migration statements remain, and all shipped topologies and rendered catalogs retain exactly SELECT, INSERT and UPDATE for tenant_projection_writer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn-17292-deploy-published-derivation
+    description: Hosted-runner source readback at the evaluated commit fails if the published grant derivation still carries the retired local_environment bridge or the source cannot be read. It does not assess a running container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/topology/table_grant_derivation.py" | python3 -c 'import sys; source = sys.stdin.read(); assert "LEGACY_MIGRATION_TABLE_DECLARATIONS" in source; assert "legacy_migration:local_environment" not in source'
