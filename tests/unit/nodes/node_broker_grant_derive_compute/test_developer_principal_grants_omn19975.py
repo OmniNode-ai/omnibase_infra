@@ -668,14 +668,20 @@ def test_the_hook_edge_grants_produce_metadata_only() -> None:
     # The laptop lane mirror (OMN-19983) is the one producer of an omniintelligence
     # topic; the hook edge adds none.
     mirror = {(r[1], r[2]) for r in lane_mirror_rows()}
-    assert not any(
-        "omniintelligence" in resource
+    # The only omniintelligence topics outside the mirror are the compaction request and
+    # the one omniintelligence-named compaction reply; the exclusion is exact, not a
+    # blanket pass for anything compaction-shaped.
+    non_mirror_omniintelligence = {
+        resource
         for _, resource_type, resource, _, _ in rows
         if resource_type == "TOPIC"
+        and "omniintelligence" in resource
         and (resource_type, resource) not in mirror
-        and resource not in COMPACTION_REPLY_TOPICS
-        and resource != COMPACTION_COMMAND_TOPIC
-    )
+    }
+    assert non_mirror_omniintelligence == {
+        COMPACTION_COMMAND_TOPIC,
+        *(t for t in COMPACTION_REPLY_TOPICS if "omniintelligence" in t),
+    }
 
 
 def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix() -> (
