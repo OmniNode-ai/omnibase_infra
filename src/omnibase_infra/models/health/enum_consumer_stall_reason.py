@@ -43,5 +43,9 @@ class EnumConsumerStallReason(StrEnum):
     and the configured window has elapsed. This is the ``Empty`` group shape
     recorded on OMN-18640 as the second outage class."""
 
+    STALLED_CONSUMER_FAILED = "stalled_consumer_failed"
+    """The consumer raised on poll or its replacement could not be started,
+    so no live consumer holds the group."""
+
 
 __all__ = ["EnumConsumerStallReason"]

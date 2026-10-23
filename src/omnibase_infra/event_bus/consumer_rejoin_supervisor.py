@@ -30,10 +30,12 @@ unreachable end-offset probe returns "not stalled" and leaves the consumer to
 aiokafka's own reconnect. It does not change delivery semantics; the
 replacement consumer joins the same group and resumes from the same committed
 offsets, which is at-least-once exactly as before.
+A failed or raising consumer is replaced on a 30 s retry.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -72,6 +74,10 @@ logger = logging.getLogger(__name__)
 # this in one lifetime has a problem the newest entries already describe.
 REJOIN_HISTORY_CAPACITY: Final[int] = 32
 
+# With no live consumer left to reconnect, retry independently of the stall
+# cooldown, but leave time for the broker to recover between attempts.
+LOST_CONSUMER_RETRY_SECONDS: Final[float] = 30.0
+
 # The reasons under which a group is BEHIND AND NOT ADVANCING, which is the
 # question readiness asks. ``NOT_STALLED_WITHIN_COOLDOWN`` is in this set on
 # purpose: it means the stall signature still holds and the rejoin path is
@@ -82,6 +88,7 @@ _STALL_SIGNATURES: Final[frozenset[EnumConsumerStallReason]] = frozenset(
     {
         EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING,
         EnumConsumerStallReason.STALLED_NO_ASSIGNMENT,
+        EnumConsumerStallReason.STALLED_CONSUMER_FAILED,
         EnumConsumerStallReason.NOT_STALLED_WITHIN_COOLDOWN,
     }
 )
@@ -158,6 +165,7 @@ class ConsumerRejoinSupervisor:
 
         self._last_record_at: float = clock()
         self._last_rejoin_at: float | None = None
+        self._consumer_lost: bool = False
         self._consecutive_stalls: int = 0
         self._rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
 
@@ -261,7 +269,29 @@ class ConsumerRejoinSupervisor:
             The records fetched (possibly empty), the consumer handle to use
             for the next call, and the stall verdict when one was evaluated.
         """
-        records = await consumer.getmany(timeout_ms=self._poll_timeout_ms)
+        if self._consumer_lost:
+            since_rejoin = self._since_last_rejoin(self._clock())
+            if since_rejoin is not None and since_rejoin < LOST_CONSUMER_RETRY_SECONDS:
+                # A stopped consumer cannot provide the poll's usual pacing.
+                await asyncio.sleep(self._poll_timeout_ms / 1000)
+                return ModelConsumerPollBatch(
+                    records={}, consumer=consumer, rejoined=False, verdict=None
+                )
+            return await self._recover_lost_consumer(consumer)
+
+        try:
+            records = await consumer.getmany(timeout_ms=self._poll_timeout_ms)
+        except Exception as poll_error:
+            failure_detail = f"{type(poll_error).__name__}: {poll_error}"[:500]
+            logger.exception(
+                "consumer_poll_failed topic=%s group=%s error=%s",
+                self._topic,
+                self._group_id,
+                failure_detail,
+            )
+            return await self._recover_lost_consumer(
+                consumer, failure_detail=failure_detail
+            )
         if records:
             self._last_record_at = self._clock()
             self._consecutive_stalls = 0
@@ -283,6 +313,42 @@ class ConsumerRejoinSupervisor:
             )
 
         replacement = await self._rejoin(consumer, verdict, observation)
+        return ModelConsumerPollBatch(
+            records={},
+            consumer=replacement,
+            rejoined=replacement is not consumer,
+            verdict=verdict,
+        )
+
+    async def _recover_lost_consumer(
+        self,
+        consumer: ProtocolRejoinableConsumer,
+        *,
+        failure_detail: str = "",
+    ) -> ModelConsumerPollBatch:
+        """Replace a failed consumer without waiting for stall confirmations."""
+        now = self._clock()
+        reason = EnumConsumerStallReason.STALLED_CONSUMER_FAILED
+        required = self._policy.required_consecutive_stalls
+        verdict = ModelConsumerStallVerdict(
+            reason=reason,
+            consecutive_stalls=required,
+            required_consecutive_stalls=required,
+        )
+        observation = ModelConsumerPollObservation(
+            topic=self._topic,
+            consumer_group=self._group_id,
+            seconds_since_last_record=max(0.0, now - self._last_record_at),
+            assigned_partitions=0,
+            broker_reachable=False,
+            backlog_records=0,
+            seconds_since_last_rejoin=self._since_last_rejoin(now),
+        )
+        self._latest_measurement = observation
+        self._note_evaluation(reason, now)
+        replacement = await self._rejoin(
+            consumer, verdict, observation, failure_detail=failure_detail
+        )
         return ModelConsumerPollBatch(
             records={},
             consumer=replacement,
@@ -396,12 +462,14 @@ class ConsumerRejoinSupervisor:
         consumer: ProtocolRejoinableConsumer,
         verdict: ModelConsumerStallVerdict,
         observation: ModelConsumerPollObservation,
+        *,
+        failure_detail: str = "",
     ) -> ProtocolRejoinableConsumer:
         """Close the wedged consumer and start a replacement.
 
         Returns the replacement on success, or the original handle when the
-        replacement could not be started -- the caller keeps polling either
-        way, and the cooldown spaces out the next attempt.
+        replacement could not be started. The lost state prevents polling the
+        stopped handle and spaces out replacement attempts.
         """
         now = self._clock()
         self._last_rejoin_at = now
@@ -409,8 +477,7 @@ class ConsumerRejoinSupervisor:
 
         logger.error(
             "consumer_group_rejoin_forced topic=%s group=%s reason=%s "
-            "silent_for=%.1fs backlog=%d -- the consumer held its group and "
-            "stopped fetching while the partition leaders were answering; "
+            "silent_for=%.1fs backlog=%d -- the consumer failed or stalled; "
             "closing and rejoining from committed offsets (OMN-18640)",
             self._topic,
             self._group_id,
@@ -424,25 +491,34 @@ class ConsumerRejoinSupervisor:
             },
         )
 
-        try:
-            await consumer.stop()
-        except Exception as stop_error:  # noqa: BLE001 — boundary: a wedged client may also fail to close
-            logger.warning(
-                "consumer_group_rejoin_stop_failed topic=%s group=%s error=%s",
-                self._topic,
-                self._group_id,
-                stop_error,
-                exc_info=True,
-            )
+        if not self._consumer_lost:
+            try:
+                await consumer.stop()
+            except Exception as stop_error:  # noqa: BLE001 — boundary: a wedged client may also fail to close
+                logger.warning(
+                    "consumer_group_rejoin_stop_failed topic=%s group=%s error=%s",
+                    self._topic,
+                    self._group_id,
+                    stop_error,
+                    exc_info=True,
+                )
 
+        # From here the old handle cannot be polled, even if starting the
+        # replacement fails. Retrying must only recreate, never stop it again.
+        self._consumer_lost = True
         replacement: ProtocolRejoinableConsumer = consumer
         succeeded = False
-        failure_detail = ""
         try:
             replacement = await self._recreate_consumer()
+            self._consumer_lost = False
             succeeded = True
         except Exception as recreate_error:
-            failure_detail = f"{type(recreate_error).__name__}: {recreate_error}"[:500]
+            recreate_detail = f"{type(recreate_error).__name__}: {recreate_error}"
+            failure_detail = (
+                f"{failure_detail}; {recreate_detail}"
+                if failure_detail
+                else recreate_detail
+            )[:500]
             logger.exception(
                 "consumer_group_rejoin_failed topic=%s group=%s error=%s",
                 self._topic,
@@ -501,6 +577,7 @@ class ConsumerRejoinSupervisor:
 
 
 __all__ = [
+    "LOST_CONSUMER_RETRY_SECONDS",
     "REJOIN_HISTORY_CAPACITY",
     "ConsumerRejoinSupervisor",
     "ModelConsumerPollBatch",

@@ -427,10 +427,10 @@ async def test_a_failed_recreate_is_recorded_rather_than_swallowed() -> None:
         clock.advance(600.0)
         consumer = (await supervisor.next_batch(consumer)).consumer
 
-    assert len(supervisor.rejoin_events) == 1
-    event = supervisor.rejoin_events[0]
-    assert event.rejoin_succeeded is False
-    assert "ConnectionError" in event.failure_detail
+    events = supervisor.rejoin_events
+    assert len(events) >= 1
+    assert all(event.rejoin_succeeded is False for event in events)
+    assert "ConnectionError" in events[0].failure_detail
 
 
 @pytest.mark.asyncio

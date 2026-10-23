@@ -22,6 +22,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: "AC3: docker-compose.dev-lane.yml raises omninode-runtime's CPU limit to 2.0 while the base file keeps 1.0 and the memory limit stays 1536M -- falsifier: uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py fails at origin/dev, which has no test file"
+  - id: req-omn19513-consumer-rejoins-after-broker-restart
+    statement: "A consumer whose replacement cannot start while the broker is down is retried until it rejoins, and reports unready meanwhile."
+    acceptance:
+      - id: AC4
+        statement: "AC4: the rejoin supervisor replaces a consumer that raises on poll or whose replacement failed to start, retrying every 30 seconds, instead of polling the stopped handle -- falsifier: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart.py -q -p no:cacheprovider fails 3 of 3 at origin/dev with ConsumerStoppedError out of next_batch"
 evidence_requirements:
   - kind: tests
     description: "Render the base and dev-lane compose files and check both spool paths, their persistent mounts, and volume isolation."
@@ -41,6 +46,12 @@ evidence_requirements:
   - kind: manual
     description: "Deploy check: the dev lane overlay the lane deploys from carries the CPU-cap block at this head."
     command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c \"OMN-19513: dev lane's omninode-runtime at the base 1.0 CPU cap\" | grep -qx 1"
+  - kind: tests
+    description: "Replays the 2026-10-23T05:27Z broker segfault: the replacement consumer is refused twice and then served; the supervisor must deliver records from it and report readiness only once flow resumes."
+    command: "uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart.py tests/unit/event_bus/test_consumer_sync_readiness_omn18640.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: the supervisor source at this head carries the lost-consumer retry constant."
+    command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/consumer_rejoin_supervisor.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'LOST_CONSUMER_RETRY_SECONDS: Final' | grep -qx 1"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -92,3 +103,19 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c \"OMN-19513: dev lane's omninode-runtime at the base 1.0 CPU cap\" | grep -qx 1"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC3]
+  - id: "dod-omn19513-consumer-rejoins-after-broker-restart"
+    description: "The rejoin supervisor replaces a failed consumer on a retry; the new test file fails 3 of 3 against origin/dev 2f9c75db7 with ConsumerStoppedError."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart.py tests/unit/event_bus/test_consumer_sync_readiness_omn18640.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC4]
+  - id: "dod-omn19513-deploy-consumer-rejoins-after-broker-restart"
+    description: "Deploy probe: the supervisor source at this head carries the lost-consumer retry constant; at origin/dev the grep count is 0."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/consumer_rejoin_supervisor.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'LOST_CONSUMER_RETRY_SECONDS: Final' | grep -qx 1"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC4]
