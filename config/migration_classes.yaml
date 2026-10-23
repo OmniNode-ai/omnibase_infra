@@ -201,6 +201,7 @@ migrations:
   forward/nodes/node_projection_consumer_flow/0004_grant_omninode_runtime_consumer_flow_cursor_sequence.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0005_add_node_id_ingest_index.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0006_grant_role_omnidash_consumer_flow_windows_retention.sql: expand-only
+  forward/nodes/node_projection_consumer_flow/0007_autovacuum_consumer_flow_windows.sql: forward-only # ALTER TABLE SET storage parameters (autovacuum thresholds)
   forward/nodes/node_projection_context_roi/001_create_context_roi_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CONTEXT_ROI_SCORES_RUN
   forward/nodes/node_projection_context_roi/002_add_factor_subset_hash_and_routing_source.sql: expand-only
   forward/nodes/node_projection_context_roi/003_context_roi_scores_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP

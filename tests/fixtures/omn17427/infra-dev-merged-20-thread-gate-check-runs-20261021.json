@@ -1,0 +1,422 @@
+{
+ "_provenance": {
+  "source": "onex scm pr-merged and onex scm commit-check-runs --check-name 'Hostile Review Thread Gate' / 'Hostile Reviewer (adversarial gate)' over the dev bus (node_github_repo_gateway_effect) for the 20 most recent squash merges on omnibase_infra dev (first-parent subjects of the canonical clone at 54ca4ac5f). Check-run ids, conclusions and completion times are GitHub's.",
+  "captured_utc": "2026-10-21T13:12:00Z",
+  "ticket": "OMN-17427",
+  "command": "onex scm pr-merged OmniNode-ai/omnibase_infra#<n> --bus-lane dev; onex scm commit-check-runs OmniNode-ai/omnibase_infra --head-sha <head> --check-name <name> --bus-lane dev"
+ },
+ "response": {
+  "heads": [
+   {
+    "pr": 5145,
+    "head_sha": "9944a2785d53a7e17d6636d8d5e7c159dbc20720",
+    "merged_at": "2026-10-21T10:56:37Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T09:42:18Z",
+      "id": 119151583408
+     },
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:51:36Z",
+      "id": 119129662693
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T09:42:06Z",
+      "id": 119146294383
+     },
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:51:25Z",
+      "id": 119128351554
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5154,
+    "head_sha": "e895af928c3536fd8d593dc346b36939809fbbdc",
+    "merged_at": "2026-10-21T10:36:32Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T20:21:33Z",
+      "id": 118864717846
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T20:21:21Z",
+      "id": 118859725505
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5158,
+    "head_sha": "c735627f03287d40f493269e594e22aafab6cf2b",
+    "merged_at": "2026-10-20T18:30:23Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:43:27Z",
+      "id": 118786175434
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:43:17Z",
+      "id": 118784303949
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5160,
+    "head_sha": "e265c847d5ca36cc3a80527d115867b7e46bfba6",
+    "merged_at": "2026-10-20T19:03:52Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T18:18:17Z",
+      "id": 118803409092
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T18:18:03Z",
+      "id": 118801823828
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5184,
+    "head_sha": "5910946dea1757d26d97ea9fd6158aae1caa5e23",
+    "merged_at": "2026-10-21T09:02:27Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T21:37:36Z",
+      "id": 118901037693
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "skipped",
+      "completed_at": "2026-10-20T21:37:24Z",
+      "id": 118901092897
+     }
+    ],
+    "author_is_bot": true
+   },
+   {
+    "pr": 5186,
+    "head_sha": "4fd609607486545f1bb75a7055d3a7d91da91e19",
+    "merged_at": "2026-10-20T17:47:49Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:01:52Z",
+      "id": 118765504511
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:01:41Z",
+      "id": 118763556704
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5189,
+    "head_sha": "090fceda1074efad9d7992c7e9bc95fc2c6c6cd3",
+    "merged_at": "2026-10-20T19:58:11Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T19:10:42Z",
+      "id": 118829809242
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T19:10:28Z",
+      "id": 118826958029
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5190,
+    "head_sha": "54196c2b016f4a81c0207858de5a23b36862648a",
+    "merged_at": "2026-10-20T20:14:15Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T19:16:52Z",
+      "id": 118832920249
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T19:16:43Z",
+      "id": 118830912525
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5191,
+    "head_sha": "1d28456d783051bcd9674d21023cbee08976444f",
+    "merged_at": "2026-10-20T18:23:16Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:37:22Z",
+      "id": 118783163252
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T17:37:11Z",
+      "id": 118782040592
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5192,
+    "head_sha": "2006e05bcd4d1f73ec32f6c4233dac3c9032e013",
+    "merged_at": "2026-10-20T12:51:06Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T12:10:19Z",
+      "id": 118619003739
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T12:10:07Z",
+      "id": 118614859450
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5197,
+    "head_sha": "dc7946ea4633e6f6a65fbc71baa67abbbe3ccbfb",
+    "merged_at": "2026-10-20T19:39:46Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T18:54:29Z",
+      "id": 118821696431
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T18:54:19Z",
+      "id": 118820480143
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5198,
+    "head_sha": "cdda4fdba03a8cee739787ee0b9fc1f94ee901d6",
+    "merged_at": "2026-10-20T15:54:48Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T12:44:22Z",
+      "id": 118633772428
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "skipped",
+      "completed_at": "2026-10-20T12:44:08Z",
+      "id": 118633773095
+     }
+    ],
+    "author_is_bot": true
+   },
+   {
+    "pr": 5199,
+    "head_sha": "de053cf408059ca0019d8effd88d788f1b75d000",
+    "merged_at": "2026-10-20T15:57:48Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T15:06:32Z",
+      "id": 118705668630
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T15:06:23Z",
+      "id": 118704122209
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5200,
+    "head_sha": "94930170a0008ba2cdee1d1b490d124d1332a55c",
+    "merged_at": "2026-10-20T16:31:19Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T15:53:22Z",
+      "id": 118730752650
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T15:53:14Z",
+      "id": 118729328856
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5202,
+    "head_sha": "c707b46d3274f564fcc8734059ea58d5c32c41c8",
+    "merged_at": "2026-10-21T09:08:19Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:16:42Z",
+      "id": 119115006198
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:16:33Z",
+      "id": 119113081858
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5203,
+    "head_sha": "770c99aa4468b2ab92c983265767b5a92c879bd8",
+    "merged_at": "2026-10-21T10:42:39Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T20:41:22Z",
+      "id": 118874449707
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "skipped",
+      "completed_at": "2026-10-20T20:41:09Z",
+      "id": 118874451775
+     }
+    ],
+    "author_is_bot": true
+   },
+   {
+    "pr": 5209,
+    "head_sha": "491924a81d9bc77d46979979bdb09ede6a21ac0f",
+    "merged_at": "2026-10-20T19:35:47Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-20T18:38:06Z",
+      "id": 118813467781
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "skipped",
+      "completed_at": "2026-10-20T18:37:52Z",
+      "id": 118813468234
+     }
+    ],
+    "author_is_bot": true
+   },
+   {
+    "pr": 5213,
+    "head_sha": "c2315021bdd47e9d59e24e9c7259cc64e8e2d2d5",
+    "merged_at": "2026-10-21T08:02:22Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T07:05:31Z",
+      "id": 119087310394
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T07:05:21Z",
+      "id": 119086008239
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5217,
+    "head_sha": "c84af61dc32859cb2dde8dd6746772694b6db1a9",
+    "merged_at": "2026-10-21T09:17:09Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:35:58Z",
+      "id": 119123031489
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T08:35:45Z",
+      "id": 119118443609
+     }
+    ],
+    "author_is_bot": false
+   },
+   {
+    "pr": 5219,
+    "head_sha": "de29e2864b68c6e61c4008744868f0f081ee4881",
+    "merged_at": "2026-10-21T10:37:30Z",
+    "thread_gate_check_runs": [
+     {
+      "conclusion": "success",
+      "completed_at": "2026-10-21T00:16:22Z",
+      "id": 118962127809
+     }
+    ],
+    "reviewer_check_runs": [
+     {
+      "conclusion": "skipped",
+      "completed_at": "2026-10-21T00:15:57Z",
+      "id": 118962170613
+     }
+    ],
+    "author_is_bot": true
+   }
+  ]
+ }
+}
