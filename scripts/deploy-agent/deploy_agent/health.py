@@ -33,6 +33,7 @@ def create_health_app(
     get_unit_drift: Callable[[], dict[str, object]] | None = None,
     get_dev_lane_drift: Callable[[], dict[str, object]] | None = None,
     get_dev_tag_heartbeat: Callable[[], dict[str, object]] | None = None,
+    get_branch_installs: Callable[[], dict[str, object]] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -52,6 +53,7 @@ def create_health_app(
     app["get_unit_drift"] = get_unit_drift
     app["get_dev_lane_drift"] = get_dev_lane_drift
     app["get_dev_tag_heartbeat"] = get_dev_tag_heartbeat
+    app["get_branch_installs"] = get_branch_installs
 
     app.router.add_get("/health", _health_handler)
     app.router.add_get("/unit-drift", _unit_drift_handler)
@@ -61,6 +63,11 @@ def create_health_app(
     # OMN-19998: the latest heartbeat against each tag-followed repository's
     # newest dev tag, keyed by repository.
     app.router.add_get("/dev-tag-heartbeat", _dev_tag_heartbeat_handler)
+    # OMN-17427: the dev-lane branch installs the agent re-applies after every
+    # recreate, and the last readback of each file against its sha256. Read by
+    # the host drift observer for the running-vs-merged alarm; carries no file
+    # content and no credential.
+    app.router.add_get("/branch-installs", _branch_installs_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
     # OMN-18144. What is ahead of a command, and how fast this agent has been
     # draining it. The post-merge lab-pass guard reads this to bound its wait
@@ -121,6 +128,14 @@ async def _dev_tag_heartbeat_handler(request: web.Request) -> web.Response:
     if getter is None:
         return web.json_response({"heartbeat": None, "reason": INDETERMINATE_REASON})
     return web.json_response({"heartbeat": getter()})
+
+
+async def _branch_installs_handler(request: web.Request) -> web.Response:
+    """The declared dev-lane branch installs and their last readback (OMN-17427)."""
+    getter = request.app["get_branch_installs"]
+    if getter is None:
+        return web.json_response({"installs": None, "reason": INDETERMINATE_REASON})
+    return web.json_response(getter())
 
 
 async def _health_handler(request: web.Request) -> web.Response:
