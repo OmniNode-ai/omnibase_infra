@@ -367,3 +367,85 @@ class TestQuorumSplit:
         )
         assert payload_agreed is not None
         assert payload_agreed["event"] == "REQUEST_CHANGES"
+
+
+class TestPublishOmn17427:
+    """File-level findings must not ride in the create-review comments array.
+
+    Live: every reviewed omnibase_infra dev PR merged 2026-10-19..21 logged
+    ``review POST failed (422): ... 0.subjectType (Field is not defined on
+    DraftPullRequestReviewComment)`` and demoted all findings to the review
+    body, so the thread gate never had a thread to read.
+    """
+
+    BASE = "https://api.example.invalid/repos/o/r"
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "event": "REQUEST_CHANGES",
+            "body": "summary",
+            "comments": [
+                {"path": "a.py", "body": "line finding", "line": 3, "side": "RIGHT"},
+                {"path": "b.py", "body": "file finding", "subject_type": "file"},
+            ],
+        }
+
+    def _http_error(self) -> Exception:
+        import email.message
+        import io
+        import urllib.error
+
+        return urllib.error.HTTPError(
+            "u", 422, "Unprocessable", email.message.Message(), io.BytesIO(b"{}")
+        )
+
+    def test_review_carries_line_comments_only_and_file_findings_post_alone(
+        self,
+    ) -> None:
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        def api(method: str, url: str, token: str, body: dict[str, Any]) -> None:
+            calls.append((url, body))
+
+        code = poster.publish(
+            self._payload(),
+            base=self.BASE,
+            pr_number=7,
+            token="t",
+            head_sha="h" * 40,
+            api=api,
+        )
+        assert code == 0
+        review_url, review = calls[0]
+        assert review_url.endswith("/pulls/7/reviews")
+        assert all("subject_type" not in c for c in review["comments"])
+        assert [c["path"] for c in review["comments"]] == ["a.py"]
+        file_url, file_comment = calls[1]
+        assert file_url.endswith("/pulls/7/comments")
+        assert file_comment == {
+            "body": "file finding",
+            "path": "b.py",
+            "subject_type": "file",
+            "commit_id": "h" * 40,
+        }
+
+    def test_a_rejected_file_comment_is_demoted_not_lost(self) -> None:
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        def api(method: str, url: str, token: str, body: dict[str, Any]) -> None:
+            calls.append((url, body))
+            if url.endswith("/comments"):
+                raise self._http_error()
+
+        code = poster.publish(
+            self._payload(),
+            base=self.BASE,
+            pr_number=7,
+            token="t",
+            head_sha="h" * 40,
+            api=api,
+        )
+        assert code == 0
+        demoted_url, demoted = calls[-1]
+        assert demoted_url.endswith("/pulls/7/reviews")
+        assert "file finding" in demoted["body"]

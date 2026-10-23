@@ -98,11 +98,12 @@ So an instance may declare ``flags.max_dev_lag_minutes`` in the routing table
 (``ModelLaneFlags.max_dev_lag``). The agent records when it first saw the lane
 behind a followed repository's dev head (:func:`next_behind_since`); once that
 is as old as the bound the lane is OVERDUE, and :func:`decide` no longer
-refuses it for the idle period (``recently_active``), an unreadable probe
-schedule or a probe window. A probe graded against code older than the code
-being delivered is the failure FreshAtProbe names; past the declared bound, the
-lane's freshness wins. Every other bound holds: no job in flight, the FROZEN
-flag, the load gate, and one converge per head. And the lag is loud:
+waits out the idle period (``recently_active``) or an unreadable probe schedule.
+It still never starts inside a reserved window of the guarded M4 probes C15
+(the chain canary) and C16. OMN-19175: deploys inside those windows made C16
+and the chain canary reach their terminals after their probe budgets. Every
+other bound holds: no job in flight, the FROZEN flag, the load gate, and one
+converge per head. And the lag is loud:
 :func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
 serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
 
@@ -201,7 +202,8 @@ PROBE_MARGIN: Final = timedelta(minutes=10)
 #: is still running when the probe starts.
 CONVERGE_CEILING: Final = timedelta(minutes=30)
 
-#: The probes that grade .201 and bind staging delivery.
+#: The guarded M4 probes: C15 (the chain canary) and C16. Their reserved
+#: windows always refuse a converge, even overdue (OMN-19175).
 GUARDED_PROBES: Final = frozenset({"C15", "C16"})
 
 #: The repositories whose dev heads an idle instance follows, in the order the
@@ -304,8 +306,10 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
         )
     if inputs.job_active:
         return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
-    # OMN-21146: past the declared bound the idle wait and the probe windows
-    # no longer hold the lane back; each overridden refusal is named.
+    # OMN-21146: past the bound the lane no longer waits out the idle period
+    # or an unreadable schedule; each overridden refusal is named. Reserved
+    # C15/C16 windows still refuse (OMN-19175: deploys inside them made C16
+    # and the chain canary reach their terminals after their probe budgets).
     overdue = inputs.overdue()
     overridden: list[str] = []
     idle = inputs.now - inputs.last_activity
@@ -323,9 +327,7 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
             )
         overridden.append(inputs.windows_error)
     if inputs.probe_blocker is not None:
-        if not overdue:
-            return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
-        overridden.append(inputs.probe_blocker)
+        return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
     if inputs.head_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.HEAD_UNREADABLE,

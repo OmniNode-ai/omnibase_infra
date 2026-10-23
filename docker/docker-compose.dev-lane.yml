@@ -585,7 +585,7 @@ services:
   # built with no credentials at all -- does not. The IAM leg stays a staging
   # concern.
   redpanda-scram-user:
-    image: redpandadata/redpanda:v24.2.7
+    image: redpandadata/redpanda:v24.3.18
     container_name: omnibase-infra-redpanda-scram-user
     entrypoint: ["/bin/sh", "-c"]
     environment:
@@ -690,7 +690,7 @@ services:
   # are AWS_MSK_IAM over SASL_SSL. The mechanism differs; the failure mode
   # pinned -- a client built with no credentials at all -- does not.
   redpanda-sasl-enable:
-    image: redpandadata/redpanda:v24.2.7
+    image: redpandadata/redpanda:v24.3.18
     container_name: omnibase-infra-redpanda-sasl-enable
     entrypoint: ["/bin/sh", "-c"]
     environment:
@@ -883,6 +883,17 @@ services:
       timeout: 10s
       retries: 5
       start_period: 1800s
+    # OMN-19513: dev lane's omninode-runtime at the base 1.0 CPU cap,
+    # measured on the dev lane host on 2026-10-22: 99 of 201 CFS periods throttled
+    # over 20 s at 0.92 CPU used; the host has 32 cores and was ~30% idle
+    # (about 9.6 cores). The claude_hook_events projection consumer lag
+    # was 68852 records. Only this lane raises the cap; the base x-runtime-base
+    # anchor in docker-compose.infra.yml stays at 1.0 for every other lane.
+    # Memory is unchanged; Compose merges resource mappings by key.
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
     labels: !override
       - "com.omninode.service=runtime-main"
       - "com.omninode.layer=runtime"
