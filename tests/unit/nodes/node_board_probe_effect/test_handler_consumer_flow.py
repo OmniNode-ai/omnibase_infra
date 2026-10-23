@@ -221,3 +221,35 @@ def test_full_final_page_requires_measured_end_proof(proven: bool) -> None:
     )
     if not proven:
         assert result.reasons == tuple(recorded.failures)
+
+
+def test_node_and_script_pair_validation_errors_over_the_same_window() -> None:
+    """OMN-17427: the node's collection and the producer script must agree on
+    how far a boundary line may sit behind its validation error."""
+    from omnibase_infra.nodes.node_board_probe_effect.handlers import (
+        _consumer_flow_collection as collection,
+    )
+    from omnibase_infra.nodes.node_board_probe_effect.handlers import (
+        _consumer_flow_constants as constants,
+    )
+
+    assert constants.PAIRING_LOOKAHEAD == script.PAIRING_LOOKAHEAD >= 1000
+    seam = (
+        (
+            Path(__file__).resolve().parents[4]
+            / "tests/fixtures/omn19812/runtime_seam_probe_prefixed.captured.txt"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    busy = "2026-10-22 11:56:10 [INFO] omnibase_infra.runtime.service_kernel: Dispatch started"
+    spread: list[str] = []
+    for ln in seam:
+        spread.append(ln)
+        if script.VALIDATION_ERROR_RE.search(ln):
+            spread.extend([busy] * 171)
+    assert collection.natural_validation_errors(
+        spread
+    ) == script.natural_validation_errors(spread)
+    total, own, natural = collection.natural_validation_errors(spread)
+    assert total > 0 and own == total and natural == 0
