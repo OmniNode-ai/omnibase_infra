@@ -531,6 +531,11 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-issuer-overlay-coverage
+    statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
+    acceptance:
+      - id: AC526601
+        statement: 'AC526601: lab_principal_issuer.py check --overlay FILE --ledger FILE exits 1 and names each principal issued in the lane that the overlay does not declare for its login, exits 0 when every issued principal is declared or the ledger is absent, ignores other lanes and grants-applied rows, never prints a login, and exits 2 for --ledger without --overlay -- falsifier: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"'
   - id: req-omn17427-branch-install-record
     statement: "A fix installed into a dev-lane container from its branch is declared in a record the deploy agent keeps (repository, PR, branch head, services, each file's container path and sha256, an expiry at most seven days out), and the registrar refuses any lane but dev, a compose project that names prod or stability, a path outside /app, an expiry in the past or too far out, and a source whose hash is not the one the registrar was shown."
     acceptance:
@@ -2511,6 +2516,22 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC172
+  - id: dod-omn17427-ac526601-issuer-overlay-coverage
+    description: Regression tests fail at the merge base, where check has no --ledger, and pass at the head; they cover a fully declared ledger, an undeclared issued machine, a login that differs from the overlay row, another lane, an absent ledger and --ledger without --overlay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "check_with_a_ledger or check_refuses_a_ledger"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
+  - id: dod-omn17427-ac526601-overlay-coverage-deploy
+    description: Hosted-runner deploy check runs the issuer's check command over synthetic overlay and ledger files, and the compose file the issuer is recreated from still parses. No Docker daemon, broker, overlay checkout or credential is required; the one lane-manifest test, which reads the CI overlay checkout, is deselected.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/ci/test_principal_issuer_dev_lane_network_omn20232.py -q --deselect tests/ci/test_principal_issuer_dev_lane_network_omn20232.py::test_manifest_issuer_and_dev_networks_match_dev_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC526601]
   - id: dod-omn-17427-ac184-branch-install-record
     description: "The branch install record refuses what is not a dev-lane /app file with a bounded expiry and the shown hash. Fails at the merge base, which has no branch install handler."
     source: manual
