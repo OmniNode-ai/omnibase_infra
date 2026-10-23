@@ -438,6 +438,49 @@ def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path, ref: str) -> None:
         resolver.resolve_pin(mutable)
 
 
+def test_the_base_pins_commit_sha_is_read_as_the_predecessor(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292 RED on omnibase_infra#5311: dev's pin is still a commit sha.
+
+    The forward-only guard resolves the BASE revision's pin through
+    ``--pin-file``. That pin was committed under the base's rules, which wrote
+    a sha, so refusing it failed the guard on the PR that moves to tags. The
+    predecessor read returns the sha; the committed pin stays tag-only.
+    """
+    resolver = _resolver_module()
+    sha = "c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
+    base_pin = tmp_path / "base-pin.yaml"
+    base_pin.write_text(
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {sha}\n",
+        encoding="utf-8",
+    )
+    assert resolver.resolve_pin(base_pin, predecessor=True) == sha
+    with pytest.raises(ValueError, match="release tag"):
+        resolver.resolve_pin(base_pin)
+
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [sys.executable, str(_RESOLVER), "--pin-file", str(base_pin)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == sha
+    assert not output.exists()
+
+    branch_pin = tmp_path / "branch-pin.yaml"
+    branch_pin.write_text(
+        "repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: dev\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="release tag"):
+        resolver.resolve_pin(branch_pin, predecessor=True)
+
+
 def test_the_resolver_publishes_the_tag_as_the_ref_output(
     tmp_path: Path,
 ) -> None:

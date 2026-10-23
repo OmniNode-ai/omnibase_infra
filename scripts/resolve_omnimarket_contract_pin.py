@@ -38,6 +38,11 @@ EXPECTED_REPOSITORY = "OmniNode-ai/omnimarket"
 # merges. The per-merge ``dev-<UTC>-<sha12>`` tags do not match: they move with
 # every merge, which is the coupling this pin removes.
 _RELEASE_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+# The pin a PR moves AWAY from was committed under the base's own rules, and
+# before OMN-17292 those rules wrote a commit sha. The forward-only proof only
+# needs the commit that predecessor names, so it may read a sha there; the pin
+# this run derives from is still a release tag and nothing else.
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # STDLIB ONLY -- deliberately, and load-bearing. In .github/workflows/ci.yml this
 # script runs as bare `python3` inside `Application Database Domain Enforcement
@@ -70,13 +75,17 @@ def _parse_pin_fields(text: str) -> dict[str, str]:
     return fields
 
 
-def resolve_pin(pin_path: Path = PIN_PATH) -> str:
+def resolve_pin(pin_path: Path = PIN_PATH, *, predecessor: bool = False) -> str:
     """Return the pinned omnimarket release tag, or raise ``ValueError``.
 
     Fails closed on anything that is not a ``vX.Y.Z`` release tag. A branch, a
     per-merge dev tag or a commit sha here would either reintroduce the
     moving-input coupling this pin exists to remove or be a pin written by hand
     or by a bot, so it is rejected rather than resolved.
+
+    With ``predecessor=True`` (the base revision's pin, read only to prove the
+    advance is forward-only) a 40-hex commit sha is also returned: that value
+    was committed under the base's rules and names an immutable commit.
     """
     if not pin_path.is_file():
         raise ValueError(f"missing omnimarket contract pin file: {pin_path}")
@@ -90,6 +99,8 @@ def resolve_pin(pin_path: Path = PIN_PATH) -> str:
         )
 
     ref = fields.get("omnimarket_contract_ref")
+    if ref is not None and predecessor and _COMMIT_SHA_RE.fullmatch(ref):
+        return ref
     if ref is None or not _RELEASE_TAG_RE.fullmatch(ref):
         raise ValueError(
             f"omnimarket_contract_ref must be an omnimarket release tag (vX.Y.Z), "
@@ -109,13 +120,14 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Pin file to read (default: the committed one). CI passes the base "
             "revision's copy here to read the pin a PR is moving away from, so "
-            "both sides of a forward-only proof use this same validated parser."
+            "both sides of a forward-only proof use this same validated parser. "
+            "Any file other than the committed pin is read as that predecessor."
         ),
     )
     args = parser.parse_args(argv)
 
     try:
-        ref = resolve_pin(args.pin_file)
+        ref = resolve_pin(args.pin_file, predecessor=args.pin_file != PIN_PATH)
     except (OSError, ValueError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
