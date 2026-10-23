@@ -29,8 +29,8 @@ requirements:
   - id: req-omn20867-lane-act-switch-passthrough
     statement: The runtime services that merge the shared runtime environment pass the six per-lane act switches of the landing orchestrator and CI-red triage through value-less, so a host value that is unset stays unset in the container and a host value that is set reaches it verbatim.
     acceptance:
-      - id: AC3
-        statement: 'AC3: x-runtime-passthrough-env names the six act switches with no value, no switch is interpolated, and every service that merges x-runtime-env also merges it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k RuntimeLaneActSwitchPassthrough'
+      - id: AC8
+        statement: 'AC8: x-runtime-passthrough-env names the six act switches with no value, no switch is interpolated, and every service that merges x-runtime-env also merges it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k RuntimeLaneActSwitchPassthrough'
   - id: req-omn20867-pr-status-poller
     statement: With the tick on, the GitHub PR poller publishes only PR status events to onex.evt.github.pr-status.v1, and a tick that polls nothing publishes nothing.
     acceptance:
@@ -39,8 +39,8 @@ requirements:
   - id: req-omn20867-lane-mirror-deploy-step
     statement: After the runtime phase is verified, the deploy agent of a dev-fenced process with a deployment overlay clone starts the lane-mirror forwarders the overlay enables, on the lane runtime image, and reports per forwarder whether it is ready without changing the deploy verdict, and an instance that routes omnibase_infra rebuilds to another instance follows the omnibase_infra dev head.
     acceptance:
-      - id: AC5
-        statement: 'AC5: handle_lane_mirror returns a typed no-op for an absent overlay, an absent directory, a lane network no vars file names and a vars file enabling no profile, starts each enabled profile with the lane runtime image id, reports a failed receipt for an unhealthy, exited or wrong-image forwarder, a refused compose up and a missing credential map, never changes the deploy verdict, runs only on a dev-fenced agent with a clone, and idle converge follows the omnibase_infra dev head on an instance that routes omnibase_infra elsewhere -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly'
+      - id: AC9
+        statement: 'AC9: handle_lane_mirror returns a typed no-op for an absent overlay, an absent directory, a lane network no vars file names and a vars file enabling no profile, starts each enabled profile with the lane runtime image id, reports a failed receipt for an unhealthy, exited or wrong-image forwarder, a refused compose up and a missing credential map, never changes the deploy verdict, runs only on a dev-fenced agent with a clone, and idle converge follows the omnibase_infra dev head on an instance that routes omnibase_infra elsewhere -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly'
   - id: req-omn20867-dispatch-parity-oracle
     statement: The committed dispatch-parity oracle matches what the harness generates from the installed contract corpus, ignoring only the volatile header fields, so the dispatch-parity gate passes for a pull request that touches a node contract (the lane mirror topic sets of this ticket among them).
     acceptance:
@@ -150,7 +150,7 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_runtime_env_anchor.py -q -p no:randomly -k RuntimeLaneActSwitchPassthrough
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC3
+      - AC8
   - id: dod-omn20867-lane-act-switch-deploy-probe
     description: Deploy probe. docker/docker-compose.infra.yml at the checked-out commit declares the x-runtime-passthrough-env anchor, the file the deploy agent renders for the runtime services; the probe reads it from GitHub at that commit and exits nonzero on a tree without the anchor. The dev-lane readout after the deploy agent rolls it is the six switch names in the environment of the omninode-runtime container, each unset on a lane that sets none.
     source: manual
@@ -166,7 +166,7 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC5
+      - AC9
   - id: dod-omn20867-lane-mirror-deploy-probe
     description: Deploy probe. The deploy agent module at the checked-out commit carries the lane-mirror handler this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the dev lane agent rolls to this commit is the lane_mirror field of the terminal rebuild-completed event reporting capacity-a ready.
     source: manual

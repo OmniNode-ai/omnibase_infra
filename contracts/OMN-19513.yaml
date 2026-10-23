@@ -12,13 +12,35 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: The base compose x-runtime-base anchor and the omninode-runtime, runtime-effects and runtime-worker catalog manifests declare ulimits.nofile soft and hard 65535 -- falsifier: uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py fails at origin/dev, which declares none"
+  - id: req-omn19513-emit-spool-on-volume
+    statement: "The dev runtime and effects services keep owed-event spools on their own persistent data volumes."
+    acceptance:
+      - id: AC2
+        statement: "AC2: The rendered dev-lane omninode-runtime and runtime-effects services set ONEX_EMIT_EFFECT_SPOOL_DIR under /app/data, mount a named volume there, and use distinct data volumes so no other service drains the same spool -- falsifier: uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider fails with the merge-base dev-lane overlay."
+  - id: req-omn19513-dev-lane-runtime-cpu-cap
+    statement: "The dev lane's main runtime has CPU headroom to keep the claude hook-events projection current."
+    acceptance:
+      - id: AC3
+        statement: "AC3: docker-compose.dev-lane.yml raises omninode-runtime's CPU limit to 2.0 while the base file keeps 1.0 and the memory limit stays 1536M -- falsifier: uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py fails at origin/dev, which has no test file"
 evidence_requirements:
+  - kind: tests
+    description: "Render the base and dev-lane compose files and check both spool paths, their persistent mounts, and volume isolation."
+    command: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: a hosted runner renders the dev deployment configuration and refuses a spool outside either service's own named data volume; this checks configuration, not a live deployment."
+    command: "deploy: uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
   - kind: tests
     description: "Every service built from docker/Dockerfile.runtime in the base compose file, and the three runtime catalog manifests, declare nofile soft >= 65535."
     command: "uv run pytest tests/ci/test_runtime_nofile_ulimit_omn19513.py -q -p no:cacheprovider"
   - kind: manual
     description: "Deploy check: the compose file the dev lane deploys from carries the raised limit at this head."
     command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'OMN-19513: the container default is 1024 open files' | grep -qx 1"
+  - kind: tests
+    description: "The dev lane overlay merges omninode-runtime limits to cpus 2.0 with memory 1536M, the base keeps 1.0, and the overlay sets no cap on runtime-effects or runtime-worker."
+    command: "uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: the dev lane overlay the lane deploys from carries the CPU-cap block at this head."
+    command: "deploy: gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c \"OMN-19513: dev lane's omninode-runtime at the base 1.0 CPU cap\" | grep -qx 1"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -39,3 +61,34 @@ dod_evidence:
       - check_type: "command"
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'OMN-19513: the container default is 1024 open files' | grep -qx 1"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19513-emit-spool-on-volume"
+    description: "The rendered dev deployment puts both owed-event spools under distinct named data volumes. The merge-base overlay fails the per-service spool assertions."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC2]
+  - id: "dod-omn19513-deploy-emit-spool-on-volume"
+    description: "Hosted-runner deploy configuration check: render the actual dev compose stack and assert spool persistence and isolation without contacting a live lane."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19513-dev-lane-cpu-cap"
+    description: "The dev lane overlay raises omninode-runtime's CPU limit to 2.0; the test file does not exist at origin/dev."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC3]
+  - id: "dod-omn19513-deploy-dev-lane-cpu-cap"
+    description: "Deploy probe: the dev lane overlay carries the CPU-cap comment block at this head; at origin/dev the grep count is 0."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c \"OMN-19513: dev lane's omninode-runtime at the base 1.0 CPU cap\" | grep -qx 1"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC3]
