@@ -862,6 +862,16 @@ services:
       # state: no prune overlay and no archive directory. DLQ replay replays one
       # source record once (OMN-20589). Only the main role carries the switch.
       ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
+      #
+      # OMN-19513: node_event_emit_effect spools owed events to
+      # ONEX_EMIT_EFFECT_SPOOL_DIR, else $XDG_RUNTIME_DIR, else /tmp. Neither was
+      # set, so the spool sat in the container's /tmp and a recreate dropped
+      # every event it still owed (2026-10-22T01:25:39Z: 10 of 15 disposition
+      # records never reached delegation_dispositions). This path is on the
+      # service's own /app/data volume (base file), so it survives a recreate
+      # and no other container drains it. Scoped to this overlay for the same
+      # reason as the poll interval above: prod overlays the same base.
+      ONEX_EMIT_EFFECT_SPOOL_DIR: /app/data/.onex_state/event-emit-effect-spool
     healthcheck:
       test:
         - CMD
@@ -880,6 +890,15 @@ services:
   runtime-effects:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
+      # OMN-19513: node_event_emit_effect spools owed events to
+      # ONEX_EMIT_EFFECT_SPOOL_DIR, else $XDG_RUNTIME_DIR, else /tmp. Neither was
+      # set, so the spool sat in the container's /tmp and a recreate dropped
+      # every event it still owed (2026-10-22T01:25:39Z: 10 of 15 disposition
+      # records never reached delegation_dispositions). This path is on the
+      # service's own /app/data volume (base file), so it survives a recreate
+      # and no other container drains it. Scoped to this overlay for the same
+      # reason as the poll interval above: prod overlays the same base.
+      ONEX_EMIT_EFFECT_SPOOL_DIR: /app/data/.onex_state/event-emit-effect-spool
       # OMN-20159: node_projection_read_effect runs here and reads through its
       # own read binding (omnimarket#3364); without it the /skill edge refuses
       # every read with projection_binding_unconfigured. Deliberately NOT the
