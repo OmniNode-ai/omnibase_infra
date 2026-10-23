@@ -570,6 +570,11 @@ requirements:
         statement: Each of the three scale factors is positive and at most 0.05.
       - id: AC527403
         statement: The application migration ledger declares node_projection_consumer_flow migration 0007 exactly once under its node migration identity.
+  - id: req-omn17427-delegation-lab-job-runtime-grants
+    statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
+    acceptance:
+      - id: AC189
+        statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2660,3 +2665,12 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
+  - id: dod-omn17427-ac189-delegation-lab-job-runtime-grants
+    description: Every supported profile grants the runtime role both delegation execution tables and the vendored migration matches the source sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC189

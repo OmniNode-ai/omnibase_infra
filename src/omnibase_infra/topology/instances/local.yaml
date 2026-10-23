@@ -85,6 +85,8 @@ databases:
               - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - delegation_lab_job_outbox
+              - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
