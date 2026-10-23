@@ -629,38 +629,28 @@ set -euo pipefail
 INSPECT_EXIT={0 if container_exists else 1}
 MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
 COMPOSE_PROJECT=lane-a
+CALLS="$(mktemp)"
 declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
-LANE_COMPOSE_FILE_ARGS=(-f base.yml -f lane-a.yml)
 log() {{ :; }}
 err() {{ :; }}
 docker() {{
     case "$1" in
         ps) [[ "$INSPECT_EXIT" -eq 0 ]] && printf 'c0ffee\\n' || true ;;
         logs) printf '%s\\n' "$MAIN_LOG" ;;
-        *) printf '%s\\n' "$@" ;;
+        stop | rm) printf '%s\\n' "$@" >> "$CALLS" ;;
+        *) return 9 ;;
     esac
 }}
 """
     result = subprocess.run(
-        ["bash", "-c", script + cleanup], capture_output=True, text=True, check=True
+        ["bash", "-c", script + cleanup + 'cat "$CALLS"; rm -f "$CALLS"\n'],
+        capture_output=True,
+        text=True,
+        check=True,
     )
-    expected = [
-        "compose",
-        "-p",
-        "lane-a",
-        "-f",
-        "base.yml",
-        "-f",
-        "lane-a.yml",
-        "--profile",
-        "folded-effects",
-        "rm",
-        "-s",
-        "-f",
-        "runtime-effects",
-    ]
-    assert result.stdout.splitlines() == (expected if retires else [])
-    assert "-v" not in result.stdout.splitlines()
+    calls = result.stdout.splitlines()
+    assert calls == (["stop", "c0ffee", "rm", "c0ffee"] if retires else [])
+    assert "-v" not in calls
 
 
 @pytest.mark.unit

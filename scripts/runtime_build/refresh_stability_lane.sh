@@ -841,20 +841,21 @@ if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     # with -v: its volumes stay.
     # The container is found by its compose labels, so no container name is
     # restated here.
-    retired_effects="$(docker ps -aq \
+    mapfile -t retired_effects < <(docker ps -aq \
         --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
-        --filter "label=com.docker.compose.service=runtime-effects")"
-    if [[ -n "${retired_effects}" ]]; then
+        --filter "label=com.docker.compose.service=runtime-effects")
+    if [[ "${#retired_effects[@]}" -gt 0 ]]; then
         # grep reads the whole log (no -q): under pipefail an early grep exit
         # would SIGPIPE docker logs and read as "not found".
         if docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep "Auto-wiring folded roles" >/dev/null; then
-            log "retiring the runtime-effects container ${retired_effects}: main attached the folded roles"
-            docker compose -p "${COMPOSE_PROJECT}" \
-                "${LANE_COMPOSE_FILE_ARGS[@]}" \
-                --profile folded-effects \
-                rm -s -f runtime-effects
+            log "retiring the runtime-effects container ${retired_effects[*]}: main attached the folded roles"
+            # By container id, not `compose rm`: the service is opt-in under the
+            # folded-effects profile, and that profile alone does not resolve
+            # (runtime-effects depends on omninode-runtime). No -v: volumes stay.
+            docker stop "${retired_effects[@]}" >/dev/null
+            docker rm "${retired_effects[@]}" >/dev/null
         else
-            err "main runtime did not log its folded roles; runtime-effects container ${retired_effects} left running"
+            err "main runtime did not log its folded roles; runtime-effects container ${retired_effects[*]} left running"
         fi
     fi
     # Prune old preflight tags (keep last 3) -- bounded local rollback history.
