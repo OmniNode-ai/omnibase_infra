@@ -8,11 +8,11 @@ interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn21099-ac1-compaction-reply-read-grants
-    statement: "The derived developer-principal grants carry READ and DESCRIBE on the three compaction reply topics and the receipt-mode-client. group prefix, and no WRITE on any of them."
+    statement: "The derived developer-principal grants carry READ and DESCRIBE on the three compaction reply topics and the receipt-mode-client. group prefix, and no WRITE on any of them; WRITE and DESCRIBE on the compaction request topic only."
     acceptance:
       - id: AC1
         statement: |-
-          AC1: the derived developer-principal grants carry READ and DESCRIBE on exactly onex.cmd.omniintelligence.context-compaction-package.v1, onex.evt.omnimarket.context-compaction-prepared.v1, onex.evt.omnimarket.context-compaction-fallback.v1 and the group prefix receipt-mode-client., no WRITE on any of them and none on the compaction command topic -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies, which fails at the merge base where the bindings declare none of them
+          AC1: the derived developer-principal grants carry READ and DESCRIBE on exactly onex.cmd.omniintelligence.context-compaction-package.v1, onex.evt.omnimarket.context-compaction-prepared.v1, onex.evt.omnimarket.context-compaction-fallback.v1 and the group prefix receipt-mode-client., no WRITE on any of them, and WRITE and DESCRIBE on the compaction command topic onex.cmd.omniintelligence.context-compaction-requested.v1 only -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies, which fails at the merge base where the bindings declare none of them
   - id: req-omn21099-ac2-derived-file
     statement: "The committed derived grants file is the derivation node's output for the shipped bindings."
     acceptance:

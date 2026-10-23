@@ -107,8 +107,9 @@
 # `awaited_events` topics of the binding in node_claude_code_hook_adapter_effect's
 # contract, each under a fresh group `receipt-mode-client.<12 hex>`; the prefix
 # below is that group's whole grant. The grant is READ and DESCRIBE on the three
-# reply topics and nothing else: no write on any of them, and no write on the
-# command topic `onex.cmd.omniintelligence.context-compaction-requested.v1`.
+# reply topics and no write on any of them; the one write is on the command topic
+# `onex.cmd.omniintelligence.context-compaction-requested.v1`, which the client
+# publishes its request to.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -176,6 +177,7 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-fallback.v1, direction: consume, consumer_group: receipt-mode-client.call}

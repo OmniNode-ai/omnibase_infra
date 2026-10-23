@@ -267,6 +267,12 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ),
     (
         "topic",
+        "onex.cmd.omniintelligence.context-compaction-requested.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
         "onex.cmd.omniintelligence.context-compaction-package.v1",
         "literal",
         ("read", "describe"),
@@ -328,7 +334,9 @@ HOOK_EDGE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tuple(
 # The compaction receipt-mode replies (OMN-21099): the Claude Code hook's `compaction`
 # binding awaits these three topics (node_claude_code_hook_adapter_effect contract,
 # `awaited_events`) through HandlerReceiptModePublishAwait, each under a fresh group
-# `receipt-mode-client.<12 hex>`. READ and DESCRIBE only.
+# `receipt-mode-client.<12 hex>`. READ and DESCRIBE only on the replies; the client
+# publishes its request to the command topic below, WRITE and DESCRIBE.
+COMPACTION_COMMAND_TOPIC = "onex.cmd.omniintelligence.context-compaction-requested.v1"
 COMPACTION_REPLY_TOPICS: tuple[str, ...] = (
     "onex.cmd.omniintelligence.context-compaction-package.v1",
     "onex.evt.omnimarket.context-compaction-prepared.v1",
@@ -656,18 +664,25 @@ def test_the_hook_edge_grants_produce_metadata_only() -> None:
         if resource_type == "TOPIC"
         and (resource_type, resource) not in mirror
         and resource not in COMPACTION_REPLY_TOPICS
+        and resource != COMPACTION_COMMAND_TOPIC
     )
 
 
 def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix() -> (
     None
 ):
-    """The receipt-mode client may read and describe its replies, never write them."""
+    """The receipt-mode client reads its replies, never writes them, and writes its request."""
     rows = derive(shipped_bindings())
     compaction = {
         (resource_type, resource, operation)
         for _, resource_type, resource, _, operation in rows
-        if "context-compaction" in resource or resource.startswith("receipt-mode")
+        if ("context-compaction" in resource and resource != COMPACTION_COMMAND_TOPIC)
+        or resource.startswith("receipt-mode")
+    }
+    compaction_command = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if resource == COMPACTION_COMMAND_TOPIC
     }
     assert compaction == {
         (resource_type, resource, operation)
@@ -676,4 +691,8 @@ def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix(
             ("GROUP", "receipt-mode-client."),
         )
         for operation in ("READ", "DESCRIBE")
+    }
+    assert compaction_command == {
+        ("TOPIC", COMPACTION_COMMAND_TOPIC, "WRITE"),
+        ("TOPIC", COMPACTION_COMMAND_TOPIC, "DESCRIBE"),
     }

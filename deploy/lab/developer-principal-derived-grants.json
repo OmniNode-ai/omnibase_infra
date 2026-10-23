@@ -151,6 +151,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.delegate-skill.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
