@@ -13,6 +13,11 @@ requirements:
         statement: 'AC1: every contracts/*.yaml loads through load_yaml_mapping_no_duplicates with no duplicate mapping key -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads'
       - id: AC2
         statement: 'AC2: the strict loader refuses a mapping that repeats a key, so a passing AC1 is not vacuous -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k refuses_a_duplicate_key'
+  - id: req-scan-all-product-contracts
+    statement: Every product repository's dev contracts are scanned with the strict loader and each duplicate is listed before a repo bumps its omnimarket pin.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: Every contracts/\*.yaml on origin/dev of the nine product repos is scanned with the strict loader and each duplicate found is listed by repo, file, line and key in the PR body, so no repo meets the new refusal unannounced when it bumps its omnimarket pin -- falsifier: the scan, rerun from the canonical clones on a lab host and recorded on the PR body Lab: line, names a duplicate the list omits'
 evidence_requirements:
   - kind: tests
     description: Every contract in contracts/ loads through the strict loader.
@@ -43,3 +48,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-contracts-strict-load-ac3
+    description: "AC3, this repository's part of the scan: every contracts/*.yaml in omnibase_infra loads through load_yaml_mapping_no_duplicates with no duplicate mapping key. The strict-load repair merged in 32f44592ef3612cb0603b0ee09b5da7173944a7f (#4844). The scan of all nine product repositories is item dod-omn20945-ac3-duplicates-scanned in omnimarket's contracts/OMN-20945.yaml; this item does not run it."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

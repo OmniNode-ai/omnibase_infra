@@ -1,0 +1,1 @@
+Live-contact exception: this commit merges origin/dev and restores the BASE_REF env and --base-ref argument of the CI Summary step that the earlier merge 2d454e11 dropped, so ci.yml matches dev again apart from the omnimarket pin refs; no CI tooling behaviour is new.
