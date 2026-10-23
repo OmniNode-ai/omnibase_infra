@@ -79,6 +79,10 @@ services:
     ports: !override
       - "127.0.0.1:62436:5432"
   redpanda:
+    # OMN-17427: this lane declares its own broker image. The dev lane moved
+    # to v24.3.18, and a broker upgrade is one-way on its data volume, so a
+    # dev pin move must never reach this broker by inheritance.
+    image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-sim-202-redpanda
     command: !override
       - redpanda
@@ -110,6 +114,7 @@ services:
       - "127.0.0.1:62092:19092"
       - "127.0.0.1:62644:9644"
   redpanda-partition-cap:
+    image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-sim-202-redpanda-partition-cap
   valkey:
     container_name: omnibase-infra-sim-202-valkey
