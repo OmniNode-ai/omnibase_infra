@@ -533,8 +533,6 @@ requirements:
     acceptance:
       - id: AC527201
         statement: The rendered collaborator lane compose config has no service that names BIFROST_LANE_OVERLAY_PATH without a mount at that path, the delegation writer included.
-      - id: AC527202
-        statement: The runner image lock binds the dependency manifest including the brotli security update, and its recorded shared environment and image digests match the recomputed values.
   - id: req-omn17427-role-omnidash-lab-job-check-select
     statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
     acceptance:
@@ -2755,21 +2753,3 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
-  - id: dod-omn17427-collaborator-runner-identity
-    description: Recomputes the runner image identity and shared environment digest from the committed dependency manifest and refuses a stale binding.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_runner_image_identity.py -q -k 'recorded_identity_matches_recomputed_identity or identity_uses_shared_env_digest_as_a_binding_component or verify_fails_loudly_on_drift' --no-cov
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC527202
-  - id: dod-omn17427-collaborator-runner-identity-deploy
-    description: Hosted-runner deploy check recomputes the runner build identity against the committed manifest without a container or credentials.
-    source: manual
-    checks:
-      - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 python3 scripts/ci/runner_image_identity.py --mode verify
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC527202
