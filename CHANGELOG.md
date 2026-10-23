@@ -1,3 +1,30 @@
+## v0.38.76 (2026-10-22)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.76 by the scheduled release train.
+- 18 release-relevant commit(s) merged since v0.38.75.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.75
+- fix: vendor reconciled savings populations and row choice (#5201)
+- feat: one runtime carries the effects, worker and projection-writer nodes when a lane folds their roles (#5213)
+- fix: the runtime kernel raises its open-file soft limit to the hard limit before boot (#5190)
+- : carry local live-contact exceptions under .github (#5165)
+- : Rebase PR OmniNode-ai/omnibase_infra#5176 onto origin/dev (#5176)
+- fix: cap onex delegate rebind wait at half of --timeout (#5168)
+- feat: vendor generation_events 0063, an unpriced run's cost is null (#5166)
+- fix: a failed dev-lane cloud migration one-shot fails the bash deploy loudly after the runtime deploys (#5172)
+- chore: advance omnimarket contract pin to 505b04c6933a (#5164)
+- fix: the Bifrost render refuses a placement the routing ladder does not hold (#5151)
+- fix: in-memory delegate runs stamp the install tenant, not the lab one (#5147)
+- fix: the delegate rebind wait bound exceeds the longest measured window (#5136)
+- fix: raise when DLQ write unconfirmed so the offset rewinds (#5133)
+- fix: chain canary counts a deploy it waited out before firing (#5125)
+- fix: pin omnibase-spi 0.23.7 so omnimarket's spi floor resolves from PyPI (#5108)
+- chore(deps): bump omnibase-core to 0.47.48 (#5110)
+- chore: retire the remaining live change-control reads (#5118)
+- feat: vendor the local_environment projection migrations ahead of omnimarket's node (#5067)
+
 ## v0.38.75 (2026-10-18)
 
 ### Release

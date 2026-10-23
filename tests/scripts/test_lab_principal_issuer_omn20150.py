@@ -1350,6 +1350,97 @@ def test_check_validates_the_overlay_and_refuses_a_bad_one(
     assert lpi.main(["check", "--grants", str(GRANTS), "--overlay", str(bad)]) == 2
 
 
+def _issued(ledger_path: Path, row: dict[str, str], *, lane: str = "dev") -> None:
+    lpi.Ledger(ledger_path).append(
+        {
+            "at": "2026-10-01T08:47:12+00:00",
+            "login": row["login"],
+            "device": row["device"],
+            "principal": row["principal"],
+            "lane": lane,
+            "action": "created",
+            "grants_sha256": "0" * 64,
+        }
+    )
+
+
+def _check_coverage(overlay_path: Path, ledger_path: Path) -> int:
+    return lpi.main(
+        [
+            "check",
+            "--grants",
+            str(GRANTS),
+            "--overlay",
+            str(overlay_path),
+            "--ledger",
+            str(ledger_path),
+        ]
+    )
+
+
+def test_check_with_a_ledger_passes_when_the_overlay_declares_every_issued_machine(
+    overlay_path: Path, ledger_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _issued(ledger_path, OVERLAY_ROW)
+    lpi.Ledger(ledger_path).append(
+        {
+            "principal": OVERLAY_ROW["principal"],
+            "lane": "dev",
+            "action": "grants-applied",
+        }
+    )
+    assert _check_coverage(overlay_path, ledger_path) == 0
+    out = capsys.readouterr().out
+    assert "issued=1 undeclared=0" in out
+
+
+def test_check_with_a_ledger_names_each_issued_machine_the_overlay_does_not_declare(
+    overlay_path: Path, ledger_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Serving under this overlay would refuse to rotate a machine it already issued."""
+    lane_login = {
+        "principal": "dev-dev-person-lab-host",
+        "login": LOGIN,
+        "device": "lab-host",
+    }
+    _issued(ledger_path, OVERLAY_ROW)
+    _issued(ledger_path, lane_login)
+    _issued(ledger_path, lane_login)
+    assert _check_coverage(overlay_path, ledger_path) == 1
+    captured = capsys.readouterr()
+    assert "issued=2 undeclared=1" in captured.out
+    assert captured.err.splitlines() == [
+        "UNDECLARED dev-dev-person-lab-host: issued by this issuer, absent from the "
+        "developer.principal overlay; serve --overlay would refuse to rotate it"
+    ]
+    assert LOGIN not in captured.out + captured.err
+
+
+def test_check_with_a_ledger_holds_the_login_to_the_overlay_row(
+    overlay_path: Path, ledger_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _issued(ledger_path, {**OVERLAY_ROW, "login": "someone@omninode.ai"})
+    assert _check_coverage(overlay_path, ledger_path) == 1
+    assert f"UNDECLARED {OVERLAY_ROW['principal']}" in capsys.readouterr().err
+
+
+def test_check_with_a_ledger_ignores_another_lane_and_an_absent_ledger(
+    overlay_path: Path, ledger_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _check_coverage(overlay_path, ledger_path) == 0
+    assert "issued=0 undeclared=0" in capsys.readouterr().out
+    _issued(ledger_path, {**SECOND_ROW, "principal": "dev-other"}, lane="prod")
+    assert _check_coverage(overlay_path, ledger_path) == 0
+
+
+def test_check_refuses_a_ledger_without_an_overlay(
+    ledger_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = lpi.main(["check", "--grants", str(GRANTS), "--ledger", str(ledger_path)])
+    assert code == 2
+    assert "--ledger needs --overlay" in capsys.readouterr().err
+
+
 def test_apply_grants_with_an_overlay_grants_exactly_the_derived_rows_to_its_principals(
     apply_broker: FakeBroker,
     declaration: lpi.Declaration,
