@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry d25b2beef687a10dce54ce5f745eee6b57943997 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - id: req-omn17292-dashboard-owner-lane
+    statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
+    acceptance:
+      - id: AC2
+        statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry d25b2beef687a10dce54ce5f745eee6b57943997.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -28,3 +36,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn-17292-ac2-dashboard-owner-lane
+    description: The lane table generator declares the dashboard-owner lane's port and boundary rows; the merge base has neither.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
