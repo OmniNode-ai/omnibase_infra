@@ -23,6 +23,9 @@ from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_g
 from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_bindings import (
     ModelBrokerGrantBindings,
 )
+from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_grant_derivation import (
+    ModelBrokerGrantDerivation,
+)
 from omnibase_infra.nodes.node_broker_grant_derive_compute.models.model_broker_group_prefix import (
     ModelBrokerGroupPrefix,
 )
@@ -524,6 +527,13 @@ def test_the_dod_closeout_grants_are_declared_and_nothing_wider() -> None:
 
 
 def test_committed_derived_grants_are_the_nodes_output() -> None:
+    committed = ModelBrokerGrantDerivation.model_validate_json(DERIVED.read_text())
+    # Equality with the bindings alone also accepts a stale pair of files. Check
+    # the shipped permissions independently before comparing the serialization.
+    assert {
+        (g.broker, g.resource_type, g.resource, g.pattern, g.operation)
+        for g in committed.grants
+    } == typed_rows()
     derivation = HandlerBrokerGrantDerive().handle(shipped_bindings())
     assert DERIVED.read_text() == derivation.model_dump_json(indent=2) + "\n", (
         "developer-principal-derived-grants.json is not the node's output; regenerate: "
