@@ -101,6 +101,14 @@
 # stay a separate, consented grant. A class whose fan-out names an ungranted topic is
 # dead-lettered by the drainer after its first failures, so the machine keeps
 # publishing the rest.
+# COMPACTION RECEIPT-MODE REPLIES (OMN-21099): the Claude Code hook's `compaction`
+# binding publishes the compaction command and awaits its reply, through
+# HandlerReceiptModePublishAwait (OMN-21341). That client subscribes to the three
+# `awaited_events` topics of the binding in node_claude_code_hook_adapter_effect's
+# contract, each under a fresh group `receipt-mode-client.<12 hex>`; the prefix
+# below is that group's whole grant. The grant is READ and DESCRIBE on the three
+# reply topics and nothing else: no write on any of them, and no write on the
+# command topic `onex.cmd.omniintelligence.context-compaction-requested.v1`.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -168,6 +176,9 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-fallback.v1, direction: consume, consumer_group: receipt-mode-client.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -176,5 +187,6 @@ group_prefixes:
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
   - {broker: dev, prefix: local.rr.morning_phase.}
   - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
+  - {broker: dev, prefix: receipt-mode-client.}
 described_groups:
   - {broker: dev, group: "*"}

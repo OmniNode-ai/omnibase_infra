@@ -108,6 +108,20 @@
     },
     {
       "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "receipt-mode-client.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "receipt-mode-client.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
       "operation": "DESCRIBE",
@@ -118,6 +132,20 @@
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-package.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-package.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {
@@ -692,6 +720,34 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omniintelligence.llm-call-completed.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-fallback.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-fallback.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-prepared.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-prepared.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {
