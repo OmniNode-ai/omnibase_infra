@@ -28,6 +28,7 @@ from tests.helpers.lane_overlay_fixtures import (
     lane_overlay_mounts,
     load_compose,
 )
+from tests.unit.infra.test_stability_test_runtime_lane import OVERLAY_FILE
 
 pytestmark = pytest.mark.unit
 
@@ -47,6 +48,8 @@ def _lane_mount_services(lane: str) -> set[str]:
     volumes of main, effects and worker only; its tenant projection writer
     inherits the base file's bind (OMN-17101).
     """
+    if lane == OVERLAY_FILE.stem.partition(".")[2]:
+        return {"omninode-runtime"} | _WORKER_SERVICES
     if lane in {"infra", "prepr"} or lane.startswith(("dev-", "stability")):
         return _RUNTIME_SERVICES | _WORKER_SERVICES
     if lane == "prod":
@@ -85,8 +88,9 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 
 def test_all_lane_compose_recipes_are_covered() -> None:
+    # OMN-21288: runtime-effects is folded into omninode-runtime on this lane.
     assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
-        [2] * 4 + [3] + [4] * 6
+        [2] * 4 + [3] * 2 + [4] * 5
     )
     assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 
@@ -100,6 +104,10 @@ def test_every_lane_compose_file_mounts_its_overlay_from_the_private_directory(
     compose_name: str, services: set[str]
 ) -> None:
     path = DOCKER / compose_name
+    if path == OVERLAY_FILE:
+        assert load_compose(path)["services"]["runtime-effects"]["profiles"] == [
+            "folded-into-runtime"
+        ]
     assert lane_overlay_mounts(path) == {
         service: [LANE_OVERLAY_MOUNT] for service in services
     }

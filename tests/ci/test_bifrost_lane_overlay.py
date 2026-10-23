@@ -142,13 +142,18 @@ def test_dev_runtime_anchor_pins_the_overlay_it_mounts() -> None:
 
 
 def test_stability_lane_mounts_the_overlay_at_the_pinned_path() -> None:
-    """All four runtime services, including the carrier, bind the shared path."""
-    runtime_services = _RUNTIME_SERVICES | {"tenant-projection-writer"}
+    """All three runtime services, including the carrier, bind the shared path."""
+    runtime_services = {
+        "omninode-runtime",
+        "runtime-worker",
+        "tenant-projection-writer",
+    }
     assert lane_overlay_mounts(COMPOSE_STABILITY) == {
         service: [LANE_OVERLAY_MOUNT] for service in runtime_services
     }
     base_environment = load_compose(COMPOSE_INFRA)["x-runtime-env"]
     services = load_compose(COMPOSE_STABILITY)["services"]
+    assert services["runtime-effects"]["profiles"] == ["folded-into-runtime"]
     for service in runtime_services:
         environment = {**base_environment, **services[service]["environment"]}
         assert environment["BIFROST_LANE_OVERLAY_PATH"] == LANE_OVERLAY_TARGET

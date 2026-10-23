@@ -59,5 +59,15 @@ dod_evidence:
           uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21288-stability-effects-fold
+    description: >-
+      Step 1 on this lane: the runtime policy contract folds the effects role into this lane's main runtime and the rendered policy env carries it; the lab lane overlay disables runtime-effects and gives omninode-runtime the fold, the environment entries runtime-effects had that main lacked with unchanged values, the effects health port and omnimemory-network. The fold tests are new at the merge base, and with them copied there the overlay still runs runtime-effects, so they fail. This is a step toward AC2 only; the dev stack definition is unchanged and runtime-effects stays in SEPARATE_SERVICES.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: |-
+          uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -q --no-cov -k fold
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

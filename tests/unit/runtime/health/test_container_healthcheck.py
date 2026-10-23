@@ -526,14 +526,15 @@ class TestDeploymentSeams:
             r"/usr/local/bin/onex-container-healthcheck\s*\n\s*-\s*--degraded-policy\s*\n\s*-\s*fail",
             compose,
         )
-        # FOUR since OMN-18114: the three shared kernels plus the
+        # THREE: the two shared kernels plus the
         # tenant-projection carrier, which is the SAME kernel under a different
         # RUNTIME_PROFILE and so lies in exactly the same way. A count and not a
         # `>= 3`: a service silently LEAVING strict coverage is the regression
         # this asserts against, and an inequality would not see it.
-        assert len(strict_blocks) == 4, (
-            "all four runtime-kernel containers (omninode-runtime, "
-            "runtime-effects, runtime-worker, tenant-projection-writer) must run "
+        # OMN-21288: runtime-effects is folded into omninode-runtime on this lane.
+        assert len(strict_blocks) == 3, (
+            "all three runtime-kernel containers (omninode-runtime, "
+            "runtime-worker, tenant-projection-writer) must run "
             "the strict check on the stability lane; found "
             f"{len(strict_blocks)}. Leaving one on `curl -sf` leaves the lane "
             "able to report healthy while that runtime is DEGRADED — verified "
@@ -547,10 +548,11 @@ class TestDeploymentSeams:
         ).read_text(encoding="utf-8")
 
         override_count = len(re.findall(r"^\s*labels: !override$", compose, re.M))
-        # FOUR since OMN-18114 — see the strict-check count above for why the
+        # THREE — see the strict-check count above for why the
         # carrier joins this set.
-        assert override_count == 4, (
-            "omninode-runtime, runtime-effects, runtime-worker and "
+        # OMN-21288: runtime-effects is folded into omninode-runtime on this lane.
+        assert override_count == 3, (
+            "omninode-runtime, runtime-worker and "
             "tenant-projection-writer must !override labels on the stability "
             "lane — compose appends label sequences, so the base service's "
             "autoheal=true survives a plain `labels:` block; "

@@ -205,7 +205,14 @@ class TestLaneOverlays:
         # The two prune effects on runtime-effects resolve these on every tick;
         # an opted-in lane without them dead-letters every tick (read live on
         # dev-202, 2026-10-05: KeyError 'ONEX_CONSUMER_FLOW_ARCHIVE_DIR').
-        env = _service_env(_load_compose(overlay), "runtime-effects")
+        document = _load_compose(overlay)
+        service = "runtime-effects"
+        if overlay == _ARCHIVE_ENV_OVERLAYS[1]:
+            service = "omninode-runtime"
+            assert document["services"]["runtime-effects"]["profiles"] == [
+                "folded-into-runtime"
+            ]
+        env = _service_env(document, service)
         for name in ("ONEX_DEAD_LETTER_ARCHIVE_DIR", "ONEX_CONSUMER_FLOW_ARCHIVE_DIR"):
             assert env.get(name, "").startswith("/app/data/"), name
 

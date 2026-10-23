@@ -352,6 +352,11 @@ profiles:
       main:
         runtime_id: stability-test-main
         runtime_address: runtime://omninode-pc/stability-test/main
+        # OMN-21288: one runtime container on this lane; the effects role's
+        # contracts attach in this process and the lane's compose overlay
+        # disables runtime-effects.
+        folded_profiles:
+          - effects
         capabilities:
           - market.skill-proof
           - workflow.orchestration

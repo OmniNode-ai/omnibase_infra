@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.unit.infra.test_stability_test_runtime_lane import OVERLAY_FILE
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
 REPO_ROOT_COMPOSE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
@@ -52,7 +54,14 @@ def test_non_local_runtime_lanes_set_kafka_environment(
     overlay_path = REPO_ROOT / "docker" / overlay_name
     overlay = _load_compose_yaml(overlay_path)
 
-    for service_name in RUNTIME_SERVICES:
+    runtime_services = RUNTIME_SERVICES
+    if overlay_path == OVERLAY_FILE:
+        runtime_services = ("omninode-runtime", "runtime-worker")
+        assert overlay["services"]["runtime-effects"]["profiles"] == [
+            "folded-into-runtime"
+        ]
+
+    for service_name in runtime_services:
         environment = overlay["services"][service_name]["environment"]
         assert environment["ONEX_ENVIRONMENT"] == expected_environment
         assert environment["KAFKA_ENVIRONMENT"] == expected_environment

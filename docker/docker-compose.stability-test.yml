@@ -252,6 +252,7 @@ services:
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
+      ONEX_RUNTIME_FOLDED_PROFILES: ${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
       ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
       ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
@@ -269,9 +270,21 @@ services:
       # the backup delegation lane beside the h201 dev lane, which stays off.
       # The first ticks activate every subscribing contract, including the
       # dead-letter and consumer-flow prunes (dry_run false) whose archive
-      # directories runtime-effects sets below. Main role only: one producer
+      # directories are set in this service. Main role only: one producer
       # per lane.
       ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
+      # OMN-21288: carried over unchanged from runtime-effects when the effects role was folded in.
+      CODING_AGENT_CRED_HOME: /home/omniinfra
+      ONEX_CODING_AGENT_WORKSPACE_ROOT: /home/omniinfra/agent-workspaces
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # OMN-20593: the two prune effects on this role resolve their local
+      # archive directory from these names on every runtime tick, and this lane
+      # publishes the tick (see ONEX_RUNTIME_SCHEDULER_ENABLED above). Unset, both raise
+      # KeyError per tick and dead-letter it (read live on a lab lane 2026-10-05, OMN-20590).
+      # The directories live on this service's runtime_data volume; the sink
+      # creates them owner-only on first write.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
       # for this lane's live-proof, sourced from the ledgered contract value
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
@@ -279,6 +292,10 @@ services:
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
+      - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
+    networks:
+      - omnibase-infra-network
+      - omnimemory-network
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
@@ -327,98 +344,15 @@ services:
       - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/main"
       - "com.omninode.runtime.id=stability-test-main"
   runtime-effects:
+    # OMN-21288: folded into omninode-runtime (folded_profiles: [effects] in
+    # contracts/services/runtime_policy.contract.yaml). Its environment
+    # entries were carried over unchanged; its effects_logs and effects_data
+    # volumes are left declared and are not deleted. The lane-qualified name
+    # stays: handler_runtime_deploy.sh still names runtime-effects explicitly,
+    # which starts a profile-disabled service, and the base name is the dev
+    # lane's container.
     container_name: omninode-stability-test-runtime-effects
-    restart: unless-stopped
-    depends_on:
-      migration-gate:
-        condition: service_healthy
-    environment:
-      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
-      ONEX_RUNTIME_LANE: "stability-test"
-      !!merge <<: *stability_test_strict_wiring_env
-      OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
-      OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
-      ONEX_ENVIRONMENT: stability-test
-      KAFKA_ENVIRONMENT: stability-test
-      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
-      ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS:?runtime policy contract must set STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS}
-      ONEX_STATE_ROOT: /app/data/.onex_state_stability_test
-      ONEX_STATE_DIR: /app/data/.onex_state_stability_test
-      ONEX_BOX_ID: omninode-pc
-      ONEX_RUNTIME_ID: stability-test-effects
-      ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/effects
-      ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES}
-      ONEX_GROUP_ID: onex-stability-test-runtime-effects
-      ONEX_INFRA_HOST: ${ONEX_INFRA_HOST:?ONEX_INFRA_HOST required for stability session health probes}
-      ONEX_INFRA_USER: ${ONEX_INFRA_USER:?ONEX_INFRA_USER required for stability session health probes}
-      OMNI_HOME: ${OMNI_HOME:?OMNI_HOME required for stability session health probes}
-      SSH_STRICT_HOST_KEY_CHECKING: ${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}
-      KAFKA_INSTANCE_ID: stability-test-effects
-      KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
-      BIFROST_VERIFY_ENDPOINTS: ${STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_BIFROST_VERIFY_ENDPOINTS}
-      ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
-      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
-      OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
-      # OMN-20593: the two prune effects on this role resolve their local
-      # archive directory from these names on every runtime tick, and this lane
-      # publishes the tick (see omninode-runtime above). Unset, both raise
-      # KeyError per tick and dead-letter it (read live on dev-202 2026-10-05,
-      # OMN-20590). The directories live on this role's own effects_data
-      # volume; the sink creates them owner-only on first write.
-      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
-      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
-      # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
-      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
-      ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
-    ports: !override
-      - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
-    volumes: !override
-      - effects_logs:/app/logs
-      - effects_data:/app/data
-      - *lane-overlay-mount
-      - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
-      - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
-    # OMN-15217: strict semantic healthcheck — this lane's green is cited as
-    # stability-proof for prod promotion (OMN-13418), so it must not be able to
-    # report healthy while the runtime reports DEGRADED. Verified mask on
-    # 2026-07-27T12:58Z: `Up 3 hours (healthy)` alongside
-    # `Runtime health check: status=DEGRADED contracts=296 errors=4`.
-    #
-    # --degraded-policy fail flips Docker health when the runtime's own monitor
-    # reports DEGRADED/CRITICAL. Timings are inherited from the base service
-    # (interval 30s / timeout 10s / retries 5 / start_period 1800s) and restated
-    # here so the flap budget is readable at the strict call site: the monitor's
-    # first verdict lands ~one RUNTIME_HEALTH_CHECK_INTERVAL (300s) after boot
-    # and an absent verdict passes, so startup cannot flap on it.
-    #
-    # Fail-closed on image skew is intentional: if the container runs an image
-    # built before this check existed, the interpreter exits non-zero and the
-    # container reads unhealthy. A stability lane whose image predates the
-    # honest check must not be citable as proof.
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - /usr/local/bin/onex-container-healthcheck
-        - --degraded-policy
-        - fail
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 1800s
-    # OMN-15217: autoheal is deliberately NOT enabled on this lane's runtime
-    # containers. Compose appends label sequences, so the base service's
-    # `autoheal=true` would survive this block without `!override`. With the
-    # strict healthcheck above, "unhealthy" now means "semantically degraded",
-    # and semantic degradation is usually restart-immune — four contracts that
-    # fail to import will fail to import again — so leaving autoheal armed would
-    # convert an honest signal into a restart loop and destroy the forensic
-    # state this lane exists to preserve. Restore by removing `!override`.
-    labels: !override
-      - "com.omninode.lane=stability-test"
-      - "com.omninode.ticket=OMN-10281"
-      - "com.omninode.runtime.address=runtime://omninode-pc/stability-test/effects"
-      - "com.omninode.runtime.id=stability-test-effects"
+    profiles: !override ["folded-into-runtime"]
   projection-api:
     container_name: omnimarket-stability-test-projection-api
     restart: unless-stopped

@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_LANES
+from tests.unit.infra.test_stability_test_runtime_lane import OVERLAY_FILE
 
 pytestmark = pytest.mark.unit
 
@@ -107,7 +108,7 @@ STACKS: dict[str, _Stack] = {
     "stability-test": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.stability-test.yml"),
         lane="stability-test",
-        lane_naming_services=_LANE_NAMING_SERVICES,
+        lane_naming_services=frozenset({"omninode-runtime"}),
     ),
     "judge": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.judge.yml"),
@@ -215,6 +216,9 @@ def _merged_lane_scoped_environments(stack: _Stack) -> dict[str, dict[str, str]]
         services = _load(compose_file).get("services") or {}
         for name, service in services.items():
             merged.setdefault(str(name), {}).update(_service_environment(service))
+    if stack.files[-1] == OVERLAY_FILE.name:
+        assert services["runtime-effects"]["profiles"] == ["folded-into-runtime"]
+        del merged["runtime-effects"]
     return {
         name: env
         for name, env in merged.items()
