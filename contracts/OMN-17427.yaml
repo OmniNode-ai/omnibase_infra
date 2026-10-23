@@ -575,7 +575,15 @@ requirements:
     acceptance:
       - id: AC189
         statement: 'AC189: the C28 script and the board-probe node search 5,000 lines for an error''s applied-topic boundary line, an error whose probe boundary sits 63 or 171 lines behind is the probe''s, and an unprefixed error stays natural -- falsifier: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py -q fails at the merge base, where the window is 60 lines'
+  - id: req-omn17427-dev-broker-restart-alarm
+    statement: The dev host system alert reports a dev-lane broker restart-policy restart and a dev broker running below its declared 12G memory.
+    acceptance:
+      - id: AC1742720266
+        statement: 'A restart-policy restart of omnibase-infra-redpanda reads CRITICAL for the hold window (two confirmation ticks), a recreate does not, and a running --memory below 12G reads WARNING -- falsifier: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q'
 evidence_requirements:
+  - kind: tests
+    description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
+    command: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
@@ -2674,3 +2682,12 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
+  - id: dod-omn17427-dev-broker-restart-alarm
+    description: The dev broker restart and memory rows of the system alert, driven through their seams on a hosted runner; does not claim the deployed reporter has been updated on the host.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1742720266

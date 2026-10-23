@@ -399,6 +399,7 @@ def _run(
             # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
             # drives the check through its fetch seam against recorded payloads.
             "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
+            "OMNINODE_ALERT_DEV_BROKER_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1867,6 +1868,7 @@ def _run_alert(
             # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
             # drives the check through its fetch seam against recorded payloads.
             "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
+            "OMNINODE_ALERT_DEV_BROKER_CHECK_ENABLED": "0",
         }
     )
     if extra_env:
@@ -1981,6 +1983,7 @@ class _AlertTicker:
                 # tests/scripts/test_postgres_backup_freshness_row_omn18944.py, which
                 # drives the check through its fetch seam against recorded payloads.
                 "OMNINODE_BACKUP_GATE_CHECK_ENABLED": "0",
+                "OMNINODE_ALERT_DEV_BROKER_CHECK_ENABLED": "0",
             }
         )
         env.update(self.extra_env)
