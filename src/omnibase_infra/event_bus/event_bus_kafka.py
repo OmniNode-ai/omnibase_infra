@@ -3786,11 +3786,13 @@ class EventBusKafka(
         A task is restarted when its subscription is still registered and it
         is either DEAD (``done()`` while the bus runs) or PARKED (alive, with
         no poll started or finished for longer than
-        ``effective_consume_task_parked_after_seconds`` -- before aiokafka's
-        own ``max_poll_interval_ms`` makes the member leave its group). The
-        consumer is rebuilt in the same group from committed offsets and a
-        new loop is started. Each restart is a typed rejoin event, and the
-        rejoin cooldown bounds how often one group is restarted.
+        ``effective_consume_task_parked_after_seconds``, which may come after
+        aiokafka's own ``max_poll_interval_ms`` has made the member leave its
+        group). The consumer is rebuilt in the same group from committed
+        offsets and a new loop is started, so the group regains a member
+        whether or not the eviction already happened. Each restart is a typed
+        rejoin event, and the rejoin cooldown bounds how often one group is
+        restarted.
         """
         parked_after = self._config.effective_consume_task_parked_after_seconds
         for consumer_key in list(self._group_consumer_tasks):

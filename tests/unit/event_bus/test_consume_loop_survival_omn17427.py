@@ -605,3 +605,19 @@ async def test_readiness_reports_a_topic_dead_when_any_of_its_groups_is_dead() -
         alive.cancel()
         with pytest.raises(asyncio.CancelledError):
             await alive
+
+
+def test_the_parked_bound_is_the_serial_batch_budget_plus_one_poll() -> None:
+    """The bound never cuts a batch the serial loop may still run.
+
+    It is derived from the serial batch budget and the poll timeout alone; no
+    separate fraction can shift it below the budget or leave it inert.
+    """
+    config = _config(max_poll_interval_ms=300_000, consumer_poll_timeout_ms=5_000)
+    assert config.effective_consume_task_parked_after_seconds == pytest.approx(
+        config.serial_batch_poll_budget_seconds + 5.0
+    )
+    assert config.effective_consume_task_parked_after_seconds == pytest.approx(290.0)
+    assert (
+        "consume_task_parked_poll_fraction" not in ModelKafkaEventBusConfig.model_fields
+    )

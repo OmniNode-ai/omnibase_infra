@@ -498,21 +498,12 @@ class ModelKafkaEventBusConfig(BaseModel):
             "Seconds between consume-task watchdog sweeps. Each sweep restarts "
             "a consume task that has ended, or whose last poll is older than "
             "effective_consume_task_parked_after_seconds, while its "
-            "subscription is still registered."
+            "subscription is still registered. Detection can therefore land "
+            "after max_poll_interval_ms has evicted the member; the restart "
+            "replaces the consumer, which rejoins the group either way."
         ),
         gt=0.0,
         le=300.0,
-    )
-    consume_task_parked_poll_fraction: float = Field(
-        default=0.9,
-        description=(
-            "Share of max_poll_interval_ms a consume loop may go without "
-            "polling before the watchdog treats it as parked. The bound "
-            "actually applied is effective_consume_task_parked_after_seconds, "
-            "which never cuts a batch the serial loop is still allowed to run."
-        ),
-        gt=0.0,
-        lt=1.0,
     )
 
     # Per-dispatch deadline (OMN-19355). The serial consume loop awaits each
@@ -1169,18 +1160,23 @@ class ModelKafkaEventBusConfig(BaseModel):
     def effective_consume_task_parked_after_seconds(self) -> float:
         """Seconds without a poll after which a consume loop is parked (OMN-17427).
 
-        ``consume_task_parked_poll_fraction`` of ``max_poll_interval_ms``, but
-        never below the serial batch poll budget plus one poll timeout. The
-        serial loop may legitimately spend the whole budget on one batch
-        (OMN-19355: no record starts unless its full dispatch deadline still
-        fits, so the budget already covers the per-dispatch deadline), and the
-        poll after it may take up to its own timeout to return. A smaller bound
-        would cancel a slow dispatch the deadline was about to settle.
+        The serial batch poll budget plus one poll timeout. The serial loop may
+        legitimately spend the whole budget on one batch (OMN-19355: no record
+        starts unless its full dispatch deadline still fits, so the budget
+        already covers the per-dispatch deadline), and the poll after it may
+        take up to its own timeout to return. A smaller bound would cancel a
+        slow dispatch the deadline was about to settle.
+
+        This bound plus one ``consume_task_watchdog_interval_seconds`` sweep
+        can reach or pass ``max_poll_interval_ms`` (at the 300s default:
+        285 + 5 + 10 = 300s), so a parked member may already have left its
+        group when the watchdog acts. Recovery does not depend on beating the
+        eviction: the watchdog replaces the consumer, and the replacement
+        joins the same group from the committed offsets.
         """
-        return max(
-            self.max_poll_interval_ms / 1000.0 * self.consume_task_parked_poll_fraction,
+        return (
             self.serial_batch_poll_budget_seconds
-            + self.consumer_poll_timeout_ms / 1000.0,
+            + self.consumer_poll_timeout_ms / 1000.0
         )
 
     # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
