@@ -44,9 +44,9 @@ PRODUCERS = [
         "omnimarket-contract-pin-refresh.yml",
         "OMN-17292",
         ".github/omnimarket-contract-pin.yaml",
-        {"TARGET_PIN": "4a" * 20},
-        "omnimarket_contract_ref: " + "f" * 40 + "\n",
-        "omnimarket_contract_ref: " + "4a" * 20 + "\n",
+        {"TARGET_PIN": "dev-20261024071100-" + "4a" * 6},
+        "omnimarket_contract_ref: dev-20261023071100-" + "f" * 12 + "\n",
+        "omnimarket_contract_ref: dev-20261024071100-" + "4a" * 6 + "\n",
         id="omnimarket-pin",
     ),
 ]
@@ -98,14 +98,14 @@ def test_rendered_check_passes_at_head_and_fails_at_base(
     assert check["cwd"] == "${OMNI_HOME}/omnibase_infra"
     assert check["check_value"] == PIN_CHECK
     assert item["binds_ac"] == ["AC1"]
-    target_sha = env["TARGET_PIN"]
-    assert target_sha in item["description"]
+    target_tag = env["TARGET_PIN"]
+    assert target_tag in item["description"]
     (evidence,) = contract["evidence_requirements"]
     assert evidence["kind"] == "tests"
     assert evidence["command"] == PIN_CHECK
-    assert target_sha in evidence["description"]
+    assert target_tag in evidence["description"]
     fixture = yaml.safe_load((tmp_path / PIN_FIXTURE).read_text(encoding="utf-8"))
-    assert fixture["omnimarket_contract_ref"] == target_sha
+    assert fixture["omnimarket_contract_ref"] == target_tag
     assert re.search(TEST_SIDE, PIN_FIXTURE.as_posix())
 
     shutil.copyfile(REPO / PIN_TEST, tmp_path / PIN_TEST)
@@ -113,11 +113,11 @@ def test_rendered_check_passes_at_head_and_fails_at_base(
     inline_workflow = tmp_path / ".github/workflows/x.yml"
     inline_workflow.parent.mkdir()
 
-    def write_other_pins(sha: str) -> None:
-        sibling_pins.write_text(f"pins:\n  omnimarket: {sha}\n", encoding="utf-8")
+    def write_other_pins(ref: str) -> None:
+        sibling_pins.write_text(f"pins:\n  omnimarket: {ref}\n", encoding="utf-8")
         inline_workflow.write_text(
             "        repository: OmniNode-ai/omnimarket\n"
-            f"          ref: {sha} # .github/sibling-pins.yaml\n",
+            f"          ref: {ref} # .github/sibling-pins.yaml\n",
             encoding="utf-8",
         )
 
@@ -136,13 +136,13 @@ def test_rendered_check_passes_at_head_and_fails_at_base(
         "markers=unit: Unit tests",
         str(tmp_path / PIN_TEST),
     ]
-    write_other_pins(target_sha)
+    write_other_pins(target_tag)
     result = subprocess.run(
         argv, cwd=tmp_path, check=False, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stdout + result.stderr
     target.write_text(base, encoding="utf-8")
-    write_other_pins("f" * 40)
+    write_other_pins("dev-20261023071100-" + "f" * 12)
     result = subprocess.run(
         argv, cwd=tmp_path, check=False, capture_output=True, text=True
     )

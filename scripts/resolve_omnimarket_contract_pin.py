@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Resolve the pinned omnimarket contract SHA for the grants derivation gate.
+"""Resolve the pinned omnimarket contract tag for the grants derivation gate.
 
 OMN-17292. This replaces the OMN-15703 "live-resolve omnimarket dev HEAD" step
 in ``Application Database Domain Enforcement (OMN-15361)``.
@@ -13,9 +13,13 @@ change the verdict of an already-green omnibase_infra PR -- which, because infra
 ``dev`` enforces via the single required ``CI Summary`` umbrella (OMN-4497), is
 what let one upstream merge red every open PR in the repo at once.
 
-Freshness has not been dropped, only moved off the per-PR path: the pin is
-advanced by ``.github/workflows/omnimarket-contract-pin-refresh.yml``, which
-regenerates the grants in the same commit and opens a PR.
+The pin names an omnimarket release-train tag, ``dev-<UTC YYYYMMDDHHMMSS>-<sha12>``,
+which omnimarket's ``dev-merge-tag.yml`` creates once per dev merge and never
+moves. Freshness has not been dropped, only moved off the per-PR path: the
+nightly release train's scheduled run (``release-train-nightly.yml``) starts
+``.github/workflows/omnimarket-contract-pin-refresh.yml`` once per overnight
+run, which writes the newest omnimarket ``dev-*`` tag here, regenerates the
+grants in the same commit and opens or refreshes one PR.
 """
 
 from __future__ import annotations
@@ -30,7 +34,10 @@ PIN_PATH = (
     Path(__file__).resolve().parents[1] / ".github" / "omnimarket-contract-pin.yaml"
 )
 EXPECTED_REPOSITORY = "OmniNode-ai/omnimarket"
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# The release train's tag shape, and nothing else: a branch name or a bare sha
+# is refused. The tag is immutable by its producer's contract (idempotent on the
+# sha, never re-pointed), so it is as fixed an input as a sha.
+_TAG_RE = re.compile(r"^dev-[0-9]{14}-[0-9a-f]{12}$")
 
 # STDLIB ONLY -- deliberately, and load-bearing. In .github/workflows/ci.yml this
 # script runs as bare `python3` inside `Application Database Domain Enforcement
@@ -64,11 +71,12 @@ def _parse_pin_fields(text: str) -> dict[str, str]:
 
 
 def resolve_pin(pin_path: Path = PIN_PATH) -> str:
-    """Return the pinned omnimarket commit SHA, or raise ``ValueError``.
+    """Return the pinned omnimarket release-train tag, or raise ``ValueError``.
 
-    Fails closed on anything that is not a full 40-hex commit SHA. A branch or
-    tag here would silently reintroduce the moving-input coupling this pin
-    exists to remove, so it is rejected rather than resolved.
+    Fails closed on anything that is not a ``dev-<14 digits>-<sha12>`` tag. A
+    branch here would silently reintroduce the moving-input coupling this pin
+    exists to remove, and a bare sha is what the train no longer writes, so
+    both are rejected rather than resolved.
     """
     if not pin_path.is_file():
         raise ValueError(f"missing omnimarket contract pin file: {pin_path}")
@@ -82,11 +90,12 @@ def resolve_pin(pin_path: Path = PIN_PATH) -> str:
         )
 
     ref = fields.get("omnimarket_contract_ref")
-    if ref is None or not _SHA_RE.fullmatch(ref):
+    if ref is None or not _TAG_RE.fullmatch(ref):
         raise ValueError(
-            f"omnimarket_contract_ref must be a full 40-hex commit sha, got {ref!r}. "
-            "A branch or tag would make the grants derivation depend on a moving "
-            "foreign branch tip again (OMN-17292)."
+            "omnimarket_contract_ref must be an omnimarket release-train tag "
+            f"dev-<YYYYMMDDHHMMSS>-<sha12>, got {ref!r}. A branch would make the "
+            "grants derivation depend on a moving foreign branch tip again, and "
+            "the nightly train writes tags, never shas (OMN-17292)."
         )
     return ref
 
@@ -113,12 +122,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # Only the committed pin is a step OUTPUT. Resolving some other file (the
     # base revision's copy, during the forward-only proof) must not also publish
-    # a `sha=` output, or the step that reads a base pin would advertise it as
+    # a `ref=` output, or the step that reads a base pin would advertise it as
     # though it were the ref this run derives from.
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output and args.pin_file == PIN_PATH:
         with open(github_output, "a", encoding="utf-8") as output:
-            output.write(f"sha={ref}\n")
+            output.write(f"ref={ref}\n")
     print(ref)
     return 0
 

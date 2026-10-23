@@ -412,7 +412,7 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     workflow = _CI_WORKFLOW.read_text(encoding="utf-8")
 
     resolve_step = workflow.split(
-        "- name: Resolve pinned omnimarket contract SHA",
+        "- name: Resolve pinned omnimarket contract tag",
         maxsplit=1,
     )[1].split("- name:", maxsplit=1)[0]
 
@@ -455,7 +455,7 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     )[1].split("- name:", maxsplit=1)[0]
     assert (
         "steps.resolve-omnimarket-ref.outputs.ref == 'dev' "
-        "&& steps.resolve-omnimarket-pin.outputs.sha "
+        "&& steps.resolve-omnimarket-pin.outputs.ref "
         "|| steps.resolve-omnimarket-ref.outputs.ref" in checkout_step
     ), (
         "the OMN-15703 escape hatch must be preserved: an explicit "
@@ -463,13 +463,13 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
         "co-development, and the pin is used only when no trailer resolved"
     )
 
-    # Fail-closed is preserved inside the resolver: a non-40-hex ref is
-    # rejected rather than resolved, so no mutable branch/tag can sneak back in
-    # as the derivation input.
+    # Fail-closed is preserved inside the resolver: anything but an omnimarket
+    # release-train dev-<UTC>-<sha12> tag is rejected rather than resolved, so
+    # no mutable branch can sneak back in as the derivation input.
     resolver = (_ROOT / "scripts" / "resolve_omnimarket_contract_pin.py").read_text(
         encoding="utf-8"
     )
-    assert "^[0-9a-f]{40}$" in resolver
+    assert "^dev-[0-9]{14}-[0-9a-f]{12}$" in resolver
 
 
 def test_predecessor_pins_reject_in_place_mutation() -> None:

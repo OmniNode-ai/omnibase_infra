@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
-summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+title: "The omnimarket contract pin follows the release train tag dev-20261021185121-c7cd6a481acf"
+summary: .github/omnimarket-contract-pin.yaml names an omnimarket dev-<UTC>-<sha12> release-train tag, moved once per overnight release-train run as one PR, never a per-merge sha bump.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -10,7 +10,12 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry dev-20261021185121-c7cd6a481acf -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - id: req-omn17292-train-tag
+    statement: The nightly release train is the only scheduled mover of the omnimarket contract pin; the refresh writes the newest omnimarket dev-* tag, never a sha, and keeps one PR on one fixed branch.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the pin and sibling pin name a dev-<UTC>-<sha12> tag, the refresh has no schedule of its own and only a scheduled release-train-nightly.yml run starts it, resolves the newest dev-* tag rather than a branch sha, and refreshes one PR on bot/omnimarket-contract-tag -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_pin_follows_train_tag_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -18,8 +23,11 @@ requirements:
         statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry dev-20261021185121-c7cd6a481acf.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The omnimarket contract pin follows the nightly release train's tag, one PR per overnight run.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_pin_follows_train_tag_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
@@ -29,7 +37,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry dev-20261021185121-c7cd6a481acf.
     source: manual
     checks:
       - check_type: test_passes
@@ -44,3 +52,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac3-train-tag
+    description: The omnimarket contract pin names a release-train tag and only the nightly train's scheduled run moves it, as one PR; the merge base pins a sha on a 6-hourly cron with a PR per run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_pin_follows_train_tag_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

@@ -7,14 +7,17 @@
 # PR can fix it (the omnimarket-contract-pin.yaml rationale, OMN-17292, applied
 # to every sibling).
 #
-# Each value is the sha written inline as the `ref:` of the sibling checkout, the
-# `git clone` checkout, or the `uses: ...@<sha>` in .github/workflows/*.yml.
+# Each value is the sha (omnimarket: the release-train tag) written inline as the
+# `ref:` of the sibling checkout, the `git clone` checkout, or the
+# `uses: ...@<sha>` in .github/workflows/*.yml.
 # tests/ci/test_sibling_reads_pinned_omn20331.py fails when a workflow reads a
 # sibling by branch name, by no ref, or at a sha that is not the one below.
 #
 #   omnibase_core / omnibase_compat  the commits of the uv.lock releases
 #                                    (core 0.47.31, compat 0.5.7)
-#   omnimarket                       equals .github/omnimarket-contract-pin.yaml
+#   omnimarket                       equals .github/omnimarket-contract-pin.yaml:
+#                                    an omnimarket dev-<UTC>-<sha12> tag the
+#                                    nightly release train writes, never a sha
 #   the rest                         the `dev` tip when the pin was added
 #   omniintelligence                 still read at this pin by every workflow but
 #                                    hostile-reviewer.yml, which reads its newest
@@ -26,7 +29,7 @@
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
   omnibase_compat: 65aed95fa710748654e37d5c15c5446e779fdf52
-  omnimarket: c7cd6a481acfe7e8c0821a5d5149d592efa556c0
+  omnimarket: dev-20261021185121-c7cd6a481acf
   omniintelligence: 3fcbf795087a79081c0ceeb676216bf64c5d49ae
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
   omniclaude: 3b8addff365b1a53e04106284b9275b6d5fad3c6

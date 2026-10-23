@@ -17,13 +17,22 @@
 # related, and none of which can fix it. That happened three times in 21 hours
 # (OMN-17141, OMN-16930, OMN-17290).
 #
-# Why this is NOT a return to the OMN-15701 stale-pin incident: this pin is
-# advanced automatically by .github/workflows/omnimarket-contract-pin-refresh.yml,
-# which regenerates the grants and the rendered catalogs in the same commit and
-# opens a PR. The pin can be briefly behind omnimarket `dev`; it cannot sit
-# stale silently, and scripts/ci/check_omnimarket_contract_pin_advance.py makes
-# it forward-only so a regeneration can never resurrect an older contract set
-# and delete live grants (which is exactly what OMN-15701 was).
+# What the value is: an omnimarket release-train tag,
+# dev-<UTC YYYYMMDDHHMMSS>-<sha12>, which omnimarket's dev-merge-tag.yml makes
+# once per dev merge and never moves. Never a sha: lanes, dispatch venvs and lab
+# proofs deploy from these tags, and so does this derivation.
+#
+# Who moves it: the nightly release train. Each scheduled release-train-nightly.yml
+# run starts .github/workflows/omnimarket-contract-pin-refresh.yml once; it writes the newest omnimarket dev-* tag here, regenerates the grants and
+# the rendered catalogs in the same commit, and opens or refreshes ONE PR on a
+# fixed branch. No omnimarket dev merge opens a PR here.
+#
+# Why this is NOT a return to the OMN-15701 stale-pin incident: the pin is at
+# most one overnight run behind the newest tag and cannot sit stale silently
+# (the train moves it every night and its job fails loudly when it cannot), and
+# scripts/ci/check_omnimarket_contract_pin_advance.py makes it forward-only so
+# a regeneration can never resurrect an older contract set and delete live
+# grants (which is exactly what OMN-15701 was).
 #
 # To move this by hand you must also regenerate:
 #   uv run python scripts/generate_application_database_table_grants.py \
@@ -32,4 +41,4 @@
 # An `Omnimarket-Source-Ref: <ref>` PR-body trailer still overrides this pin for
 # cross-repo co-development (OMN-15703's escape hatch, unchanged).
 repository: OmniNode-ai/omnimarket
-omnimarket_contract_ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0
+omnimarket_contract_ref: dev-20261021185121-c7cd6a481acf

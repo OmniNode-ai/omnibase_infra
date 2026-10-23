@@ -55,6 +55,7 @@ PINNED_WORKFLOWS = (
 # resolver step (omnimarket-contract-pin.yaml, OMN-17427 pin resolver, the
 # paired-PR resolver of node-migration-sync.yml) or is a sha already pinned in place.
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+DEV_TAG = re.compile(r"^dev-[0-9]{14}-[0-9a-f]{12}$")
 REPOSITORY = re.compile(r"^\s*repository: OmniNode-ai/(\w+)\s*$")
 REF = re.compile(r"^\s*ref: (\S+)")
 USES = re.compile(r"uses: OmniNode-ai/((\w+)/\.github/\S+)@(\S+)")
@@ -75,7 +76,10 @@ def _checkout_refs(text: str) -> list[tuple[int, str, str | None]]:
 
 
 def test_pins_are_full_shas_and_omnimarket_matches_contract_pin() -> None:
-    assert all(HEX40.fullmatch(v) for v in PINS.values())
+    # omnimarket is pinned at its release-train tag, which the nightly train
+    # writes (OMN-17292); every other sibling at a full sha.
+    assert DEV_TAG.fullmatch(PINS["omnimarket"]), PINS["omnimarket"]
+    assert all(HEX40.fullmatch(v) for k, v in PINS.items() if k != "omnimarket")
     contract_pin = yaml.safe_load(
         (REPO_ROOT / ".github" / "omnimarket-contract-pin.yaml").read_text()
     )["omnimarket_contract_ref"]
