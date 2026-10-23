@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19175
+title: dev-201 deploys no longer start inside the C15 and C16 probe windows
+summary: The deploy agent's idle converge (OMN-21146) started a deploy inside the C15 (chain canary) and C16 windows once dev-201 was overdue, at 15:10Z and 21:10Z over C16 and at 23:47Z over the chain canary on 2026-10-22, and those probes reached their terminals only after their time budgets. decide() now refuses an overdue lane inside a guarded C15 or C16 window, still overriding the idle wait and an unreadable schedule.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19175-probe-window-held
+    statement: An overdue dev lane never starts a converge inside a reserved C15 or C16 probe window, and keeps every other overdue override.
+    acceptance:
+      - id: AC19175001
+        statement: "AC19175001: decide() refuses PROBE_WINDOW for an overdue lane at the three recorded 2026-10-22 deploy starts (15:10Z and 21:10Z over C16, 23:47Z over the chain canary), each computed from the committed config/lab_probe_windows.yaml -- falsifier: the same test fails against the merge-base idle_converge.decide, which converges"
+      - id: AC19175002
+        statement: "AC19175002: an overdue lane outside every guarded window still converges, and still overrides the idle wait and an unreadable schedule -- falsifier: the control tests fail when the idle or schedule override is removed"
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent's decide() tests replay the three recorded 2026-10-22 deploy starts against the committed probe windows.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_probe_window_omn19175.py scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py scripts/deploy-agent/tests/unit/test_idle_converge_omn19509.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19175-ac1-overdue-refuses-probe-window
+    description: The three recorded deploy starts are refused as PROBE_WINDOW at this head; the same test fails against the merge-base decide().
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_probe_window_omn19175.py -q -k test_overdue_refuses_the_incident_probe_window
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19175001
+  - id: dod-omn19175-ac2-other-overrides-kept
+    description: An overdue lane converges outside the guarded windows and still overrides the idle wait and an unreadable schedule.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_probe_window_omn19175.py scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k "outside_every_guarded_window or idle_wait or unreadable_schedule or TestOverdueKeepsEveryOtherBound"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19175002
+  - id: dod-omn19175-deploy-probe-window-shipped
+    description: The idle converge at the merged head names the guarded-window rule for an overdue lane; the merge-base file does not.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/idle_converge.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'It still never starts inside a reserved window'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19175001
