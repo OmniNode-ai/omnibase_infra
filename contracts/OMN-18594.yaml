@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18594
+title: Releases come only from the overnight train, and sibling commit-sha pins can only fall
+summary: RULING 2026-10-23T17:13:55Z. The hourly release-train-dependency-advance.yml, which dispatched the release train for omnibase_infra outside the overnight run, is retired with its measure script, tests and incident replay. node_sibling_sha_pin_ratchet_compute fails a change in which any tracked file holds more internal-sibling commit-sha pin lines than it held at the base ref, so today's pins are the baseline and the count can only fall.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18594-no-out-of-night-release-trigger
+    statement: No workflow in omnibase_infra dispatches the release train or advances a dependency outside the overnight run.
+    acceptance:
+      - id: AC18594001
+        statement: "AC18594001: release-train-dependency-advance.yml and scripts/ci/release_dependency_advance.py are absent at this head -- falsifier: either file exists at this head"
+  - id: req-omn18594-sha-pins-only-fall
+    statement: A change that adds an internal-sibling commit-sha pin fails CI; unchanged, moved and removed pins pass.
+    acceptance:
+      - id: AC18594002
+        statement: "AC18594002: the ratchet fails a new pin, a pin in a new file and a pin moved to another file, and passes unchanged, moved and removed pins -- falsifier: test_sibling_sha_pin_ratchet_node.py fails"
+      - id: AC18594003
+        statement: "AC18594003: ci.yml runs the ratchet against the PR or merge-group base -- falsifier: ci.yml at this head does not name runtime_sibling_sha_pin_ratchet"
+evidence_requirements:
+  - kind: tests
+    description: The ratchet node's unit and end-to-end tests pass.
+    command: uv run pytest tests/ci/test_sibling_sha_pin_ratchet_node.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn18594-ac1-advance-retired
+    description: The hourly dependency-advance workflow and its script are gone at this head.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: test ! -e .github/workflows/release-train-dependency-advance.yml && test ! -e scripts/ci/release_dependency_advance.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18594001
+  - id: dod-omn18594-ac2-ratchet-tests
+    description: The ratchet refuses an added pin and admits unchanged, moved and removed pins.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_sibling_sha_pin_ratchet_node.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18594002
+  - id: dod-omn18594-ac3-ci-wired
+    description: ci.yml runs the ratchet module.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -c runtime_sibling_sha_pin_ratchet .github/workflows/ci.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC18594003
