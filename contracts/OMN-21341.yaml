@@ -39,7 +39,7 @@ dod_evidence:
       - check_type: command
         check_value: |-
           set -euo pipefail;
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'class HandlerReceiptModePublishAwait'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c 'class HandlerReceiptModePublishAwait'
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/handlers/test_receipt_mode_exchange_omn21341.py -q -m 'not kafka'
