@@ -97,7 +97,14 @@ BOUNDARY_RE: Final[re.Pattern[str]] = re.compile(
     r"topic=" + re.escape(APPLIED_TOPIC) + r"\b.*?correlation_id=(?P<cid>[0-9a-f-]{36})"
 )
 #: How far after a validation error its boundary line may sit in the same log.
-PAIRING_LOOKAHEAD: Final[int] = 60
+#: Counted in lines, so it has to cover the runtime's log volume, not just the
+#: handful of lines the seam itself writes. On the lab dev lane on 2026-10-22
+#: the runtime logged about 6,000 lines a minute and the probe's own boundary
+#: line sat 63 and 171 lines after its validation error; at 60 both read as
+#: natural and C28 went red on the probe's own injection (OMN-17427). The
+#: search still stops at the first applied-topic boundary line, so a natural
+#: error pairs with its own boundary first and is never excused by a later one.
+PAIRING_LOOKAHEAD: Final[int] = 5000
 PROBE_CID_PREFIX: Final[str] = "c28c28c2-c28c-"
 
 # ---- clause 2 ---------------------------------------------------------------
