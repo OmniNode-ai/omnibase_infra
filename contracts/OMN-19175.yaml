@@ -32,11 +32,11 @@ dod_evidence:
     binds_ac:
       - AC19175001
   - id: dod-omn19175-ac2-other-overrides-kept
-    description: An overdue lane converges outside the guarded windows and still overrides the idle wait and an unreadable schedule.
+    description: An overdue lane converges outside the guarded windows and still overrides the idle wait and an unreadable schedule, while a guarded window is no longer among its overrides; that last assertion fails against the merge-base decide(), which overrides the window too.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_probe_window_omn19175.py scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k "outside_every_guarded_window or idle_wait or unreadable_schedule or TestOverdueKeepsEveryOtherBound"
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_deploy_probe_window_omn19175.py scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k "outside_every_guarded_window or idle_wait or unreadable_schedule or but_not_a_guarded_window or TestOverdueKeepsEveryOtherBound"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC19175002

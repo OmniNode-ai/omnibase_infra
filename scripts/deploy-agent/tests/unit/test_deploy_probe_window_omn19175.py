@@ -111,3 +111,18 @@ def test_overdue_still_overrides_the_idle_wait(clear_minute: datetime) -> None:
 def test_overdue_still_overrides_an_unreadable_schedule(clear_minute: datetime) -> None:
     decision = decide(_inputs(clear_minute, windows_error="unreadable"))
     assert decision.verdict is EnumIdleConvergeVerdict.CONVERGE
+
+
+def test_overdue_overrides_idle_and_schedule_but_not_a_guarded_window(
+    clear_minute: datetime,
+) -> None:
+    held = {"last_activity": clear_minute, "windows_error": "unreadable"}
+
+    inside = decide(_inputs(clear_minute, probe_blocker="C16 run", **held))
+    assert inside.verdict is EnumIdleConvergeVerdict.PROBE_WINDOW
+    assert inside.detail == "C16 run"
+
+    outside = decide(_inputs(clear_minute, **held))
+    assert outside.verdict is EnumIdleConvergeVerdict.CONVERGE
+    idle_wait = f"idle 0s of {int(IDLE_AFTER.total_seconds())}s"
+    assert outside.detail.endswith(f"overriding {idle_wait}; unreadable")
