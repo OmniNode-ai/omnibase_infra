@@ -121,11 +121,16 @@ def test_the_thread_gate_accepts_the_real_pr1604_threads_that_wedged_omn16823() 
     assert len(threads) == 3, "PR #1604 carried exactly 3 review threads"
 
     gate = _load_module("check_hostile_review_threads")
-    blocking, outdated = gate.classify_threads(threads)
+
+    def no_fix_check(sha: str, cited: object) -> tuple[bool, str]:
+        raise AssertionError("no hostile-reviewer thread here carries a fixed-in")
+
+    blocking, cleared = gate.classify_threads(threads, no_fix_check)
 
     # None of PR #1604's threads are hostile-reviewer threads: they are
     # structurally out of this gate's scope regardless of resolution state
-    # or concession prose. blocking == [] is the verdict the OMN-16823-era
-    # gate could not produce.
+    # or concession prose (OMN-17427's disposition rule reads marker threads
+    # only, so their replies are never parsed). blocking == [] is the verdict
+    # the OMN-16823-era gate could not produce.
     assert blocking == []
-    assert outdated == []
+    assert cleared == []

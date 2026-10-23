@@ -831,7 +831,44 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # all reported this context successful before merge. Recorded rows and
     # failure/skip/absence controls live in test_hook_push_rehearsal_caller_omn17427.py.
     "hook-push-rehearsal / rehearse",
+    # OMN-17427 (operator RULING 2026-10-21T13:00:04Z: "put it on Dev and then
+    # we can do a override if necessary but that requires a human"). The
+    # hostile-reviewer finding gate (hostile-reviewer.yml, re-run on every
+    # thread reply by hostile-review-thread-gate.yml): on a PR into dev every
+    # hostile-reviewer thread needs a reply `fixed-in <sha>` whose commit
+    # touched the cited lines, or `rejected: <reason>`. With no thread at all
+    # it passes, so a reviewer that was skipped, degraded or down never holds
+    # a merge. Asserted on PRs into dev ONLY: scoped_to_base() drops
+    # DEV_BASE_ONLY_CONTEXTS on any other base, so a PR into main is not held.
+    #
+    # Admission, measured 2026-10-21 through onex scm on the bus: the 20 most
+    # recent merged dev PRs (#5145..#5219) all carried this context at their
+    # head, 20/20 present and 20/20 `success`, including the 5 bot PRs the
+    # reviewer skips (#5184, #5198, #5203, #5209, #5219). Before this entry a
+    # red thread gate was caught only by the default-deny sweep, and only when
+    # CI Summary polled after the gate had posted; an absent or still-running
+    # gate was read by nothing. Placed at the tail and admitted under
+    # POST_FIXTURE_WINDOW_CONTEXTS for the reason the `Governed helper
+    # primitive gate` entry states.
+    "Hostile Review Thread Gate",
 )
+
+# OMN-17427: members of EXPECTED_EXTERNAL_CONTEXTS asserted only on a pull
+# request into `dev` (see the entry above). A subset, never an addition: every
+# name here must also be in EXPECTED_EXTERNAL_CONTEXTS.
+DEV_BASE_ONLY_CONTEXTS: frozenset[str] = frozenset({"Hostile Review Thread Gate"})
+
+
+def scoped_to_base(contexts: tuple[str, ...], base_ref: str) -> tuple[str, ...]:
+    """Drop :data:`DEV_BASE_ONLY_CONTEXTS` unless the PR targets ``dev``.
+
+    An unknown (empty) base keeps them, so a missing argument enforces.
+    """
+
+    if base_ref in ("dev", ""):
+        return contexts
+    return tuple(c for c in contexts if c not in DEV_BASE_ONLY_CONTEXTS)
+
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
 # closed, and therefore absent from the merge-time check-run fixtures replayed
@@ -853,6 +890,10 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-17427: admitted 2026-10-21 on a 20/20 present-and-green record
+        # over merged dev heads #5145..#5219, read through onex scm; no
+        # fixture window covering it is captured yet.
+        "Hostile Review Thread Gate",
         # OMN-20413: October rehearsal rows postdate the July/August fixtures.
         # Its separate sixteen-PR admission replay retains the recorded rows.
         "hook-push-rehearsal / rehearse",
@@ -2998,6 +3039,13 @@ def main(argv: list[str] | None = None) -> int:
         "enforces rather than silently skips.",
     )
     parser.add_argument(
+        "--base-ref",
+        default="dev",
+        help="The pull request's base branch. Only a PR into 'dev' asserts "
+        "DEV_BASE_ONLY_CONTEXTS (OMN-17427). Defaults to 'dev' so a "
+        "FORGOTTEN argument enforces rather than silently skips.",
+    )
+    parser.add_argument(
         "--workflow-runs-file",
         default=None,
         help="Path to the head SHA's actions/runs JSON, used ONLY to resolve "
@@ -3039,6 +3087,8 @@ def main(argv: list[str] | None = None) -> int:
     external_contexts = (
         EXPECTED_EXTERNAL_CONTEXTS if args.event_name == "pull_request" else ()
     )
+    # OMN-17427: the Hostile Review Thread Gate holds PRs into dev only.
+    external_contexts = scoped_to_base(external_contexts, args.base_ref)
     code, report = evaluate(
         jobs,
         run_attempt=args.run_attempt,
