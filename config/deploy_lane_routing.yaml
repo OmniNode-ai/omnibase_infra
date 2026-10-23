@@ -160,6 +160,18 @@ instances:
   dev-200:
     hostnames: [stickybeatz-studio]
     consumer_group: onex-deploy-agent-dev-200
+    # OMN-17427: the operator ruled this lane's full 25-container stack (its
+    # own Redpanda, Postgres, Valkey, migrations and projection writers) a
+    # defect for a satellite lab host on 2026-10-20. The runtime-only
+    # lab-tenant replacement cannot run yet: a tenant bus login cannot create
+    # the topics its runtime needs (create_topics error 29), which OMN-20530
+    # settles. Until then the freeze stops idle restore, idle converge and
+    # every routed rebuild from recreating the full stack. No route names this
+    # instance, so nothing waits on it. Lift it with the tenant overlay.
+    flags:
+      freeze:
+        until: "2026-11-20T00:00:00Z"
+        reason: "full dev stack on a satellite host; runtime-only lab tenant waits on OMN-20530"
     lane:
       compose_overlay: docker/docker-compose.dev-200.yml
       compose_project: omnibase-infra-dev-200

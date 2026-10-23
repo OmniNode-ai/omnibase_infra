@@ -1,0 +1,102 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-18475"
+title: "The dev deploy agent drops operator env store values until a hand restart, no tool sets the migrate image pin, and a forward-migration retry races a removal in progress"
+summary: "Three defects of the compose dev deploy agent. (1) The agent read the operator env store only when the launcher started it, so ESTIMATOR_FERNET_KEY and an ONEX_CLOUD_MIGRATE_IMAGE change were dropped by every recreate until a hand restart; executor.operator_store_overlay now re-reads the whole store whenever its identity changes, decoded by the launcher's own bash source and without the unit-owned names. (2) No tool set ONEX_CLOUD_MIGRATE_IMAGE; HandlerDevLanePin reads or sets a registered dev pin, refuses any lane but dev and any prod key, and never changes a pin without a ledger row. (3) A forward-migration recreate retry ran while dockerd was still removing the leftover of the timed-out first attempt and failed with 'removal ... is already in progress', leaving Dead and Created containers; run_compose_recreate now waits for the removal, removes Dead and Created leftovers, retries once on that error, and settles after a failing attempt."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn18475-env-store-per-change"
+    statement: |-
+      A value added to or changed in the operator env store reaches the dev deploy agent's next compose command with no agent restart, decoded exactly as the launcher decodes it, and never overrides a name the unit owns.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: after the store gains ESTIMATOR_FERNET_KEY and a new ONEX_CLOUD_MIGRATE_IMAGE, the next _compose_env carries both; DEPLOY_AGENT_ENV_PROTECTED names keep the unit's values; the overlay equals what deploy-agent-launch.sh gives a fresh start, including an ANSI-C quoted value -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_operator_env_reread_omn18475.py -q
+  - id: "req-omn18475-dev-pin-command"
+    statement: |-
+      A typed command reads or sets a dev-lane image pin, refuses prod, and records a ledger row for every change.
+    acceptance:
+      - id: "AC2"
+        statement: |-
+          AC2: set writes exactly one line with a backup and a STATUS ledger row, restores the store when the row is refused, refuses a lane other than dev, a PROD_ key, an unregistered key, a floating or malformed reference and a non-resident image, and no registered pin is rendered by a governed lane's compose file -- falsifier: uv run pytest tests/unit/handlers/test_handler_dev_lane_pin_omn18475.py -q
+  - id: "req-omn18475-removal-race"
+    statement: |-
+      A compose recreate retry never starts while dockerd is still removing a container of the same service, and a failing recreate leaves no Dead or Created container behind.
+    acceptance:
+      - id: "AC3"
+        statement: |-
+          AC3: the replay of job 77dcfaf4 (first attempt times out, the leftover's removal outlives its 60 s client bound) retries only after the removal finishes and succeeds; an attempt that meets a removal in progress is settled and retried; a failing attempt removes the service's Dead and Created containers; forward-migration runs twice back to back without the race -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_removal_race_omn18475.py -q
+evidence_requirements:
+  - kind: "tests"
+    description: "Unit tests for each of the three fixes, plus the OMN-18572 and OMN-20864 suites the change touches."
+    command: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_operator_env_reread_omn18475.py scripts/deploy-agent/tests/unit/test_forward_migration_removal_race_omn18475.py scripts/deploy-agent/tests/unit/test_onex_api_lab_delivery_omn18572.py scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn18475-ac1-env-store-per-change"
+    description: "The operator env store's current values reach the next compose command; unit-owned names stay the unit's; the decode equals the launcher's. Fails at the merge base, which re-read ONEX_API_IMAGE only."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_operator_env_reread_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn18475-ac2-dev-pin-command"
+    description: "The dev lane pin handler sets one registered pin with a backup and a ledger row, restores on a refused row, and refuses prod. Fails at the merge base, which has no such handler."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/handlers/test_handler_dev_lane_pin_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn18475-ac3-removal-race"
+    description: "The 77dcfaf4 replay retries after the removal finishes and leaves no Dead or Created container. Fails at the merge base, whose retry meets the removal in progress."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_forward_migration_removal_race_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-omn18475-cli-executor-integration"
+    description: "The CLI replaces a real store in a separate process; the same executor reads the new pin into its next child environment, preserves unit-owned values and shell quoting, and reads the original pin after ledger refusal restores the store. Local Docker and ledger executables keep the check runnable on a hosted runner."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/test_dev_lane_pin_env_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1", "AC2"]
+  - id: "dod-omn18475-cli-executor-deploy-check"
+    description: "Hosted-runner deploy check: read back the executor's child environment after an out-of-process pin update and after a refused ledger append. Requires no shared daemon, host credentials or production service."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/test_dev_lane_pin_env_omn18475.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1", "AC2"]
+  - id: "dod-omn18475-deploy-probe-env-store"
+    description: "Deploy probe: the deploy agent's executor at this commit applies the operator store overlay in _compose_env (AC1)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F 'env.update(operator_store_overlay())' >/dev/null"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn18475-deploy-probe-dev-pin"
+    description: "Deploy probe: the dev lane pin handler at this commit refuses any lane but dev (AC2)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_lane_pin.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F 'if request.lane != DEV_LANE:' >/dev/null"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn18475-deploy-probe-removal-race"
+    description: "Deploy probe: the deploy agent's executor at this commit settles a recreate's services before its retry (AC3)."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -F 'def settle_service_containers(' >/dev/null"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
