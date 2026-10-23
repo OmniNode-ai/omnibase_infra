@@ -17,6 +17,7 @@ they describe the lab, so they are checked where the lab's manifest lives.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -101,3 +102,10 @@ def _lab_census_path(name: str) -> Path:
 #: loud.
 LAB_MANIFEST = _lab_census_path("lane-manifest.yaml")
 LAB_SNAPSHOT = _lab_census_path("census-snapshot.json")
+
+
+def lanes_declared_on_host(manifest: dict[str, Any], host_id: str) -> list[str]:
+    """Every lane the manifest declares for ``host_id``, sorted."""
+    return sorted(
+        name for name, spec in manifest["lanes"].items() if host_id in spec["hosts"]
+    )

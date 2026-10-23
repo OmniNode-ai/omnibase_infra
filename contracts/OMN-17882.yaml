@@ -1,0 +1,72 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17882
+title: "Vendor the tenant-keyed daily savings series migration"
+summary: >-
+  Deliver migration 099 byte-for-byte from omnimarket PR 4273 with its exact tenant ledger row and forward-only class. Runtime view and runner behavior, reader coverage, and post-deploy checks are proved by the source contract and follow-up evidence in omnimarket PR 4273; this contract covers the infrastructure delivery half only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-tenant-day-series
+    statement: "Convert the tenant/day savings-series exposure to a bus-backed keyed view without changing the prior columns, their order, grants, or tenant boundary."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: Each savings exposure whose precondition above is discharged declares `bus_backed: true` with `key_columns`, and the savings runner publishes a keyed snapshot for it on every successful apply. An exposure whose precondition is NOT discharged stays `false` and the reason is named in the contract.
+      - id: AC2
+        statement: |-
+          AC2: Red-first golden-chain test: a delegation terminal event applied through the runner produces a snapshot delta on each flipped topic, and `SnapshotCache` serves the row back.
+      - id: AC3
+        statement: |-
+          AC3: Reader-end coverage per OMN-17199 stays green (a bus-backed exposure with no rendering consumer must fail CI).
+      - id: AC4
+        statement: "AC4: GET /health on the dev lane lists the flipped topics in `bus_backed_topics`; the count moves."
+      - id: AC5
+        statement: "AC5: The RENDERED savings surface shows measured numbers rather than a pending state. A curl of a JSON route is not the proof."
+      - id: AC6
+        statement: |-
+          AC6: The fields OMN-17340's view needs are carried: counterfactual / baseline / model routing / token usage. Previously measured 2026-09-04 (`cumulative_counterfactual_baseline_usd`, `baseline_cost_usd`, `local_pct`/`cheap_pct`/`prem_pct`, `tokens_total`/`prompt_tokens`/`completion_tokens`), so this is a re-confirmation, not new exposure work.
+  - id: req-lane-boundary-declared-lanes
+    statement: "The host lane boundary tests accept every lane the lab manifest declares for that host, read from the manifest."
+    acceptance:
+      - id: AC7
+        statement: "AC7: the host's lane set is read from the lab manifest -- falsifier: pytest over a neutral manifest"
+evidence_requirements:
+  - kind: tests
+    description: "Verify migration 099 is delivered byte-for-byte with its exact ledger identity and forward-only class; source behavior is tested in omnimarket PR 4273."
+    command: "uv run --frozen pytest tests/unit/migrations/test_omn17882_savings_series_vendored.py -q"
+  - kind: tests
+    description: "The manifest reader behind the host boundary tests, over a neutral manifest."
+    command: "uv run --frozen pytest tests/ci/test_lane_boundary_declared_lanes_omn17882.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn17882-vendor-delivery
+    description: >-
+      Verifies that the infrastructure migration matches the tested source bytes, has the exact tenant ledger row, and is forward-only. This is delivery evidence only; runtime behavior, reader coverage, and post-deploy outcomes are covered by omnimarket PR 4273.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/migrations/test_omn17882_savings_series_vendored.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: command
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && uv run --frozen python scripts/validation/check_migration_class.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC1, AC2, AC3, AC4, AC5, AC6]
+  - id: dod-omn17882-lane-boundary-declared-lanes
+    description: >-
+      Runs the reader the host boundary tests use to take the host's lanes from the lab manifest, over a neutral manifest with an extra lane. The merge base lacks the reader, so the check fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_lane_boundary_declared_lanes_omn17882.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC7]
+context:
+  vendor_provenance:
+    repository: OmniNode-ai/omnimarket
+    source_commit: 3920c95791cfd3e5499728d7395925fa489c9656
+    pull_request: 4273
+    scope: "delivery only; source behavior is verified by omnimarket PR 4273"

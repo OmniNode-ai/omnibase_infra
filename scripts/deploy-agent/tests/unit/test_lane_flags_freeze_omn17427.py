@@ -24,9 +24,12 @@ from deploy_agent.events import (
 from deploy_agent.idle_converge import (
     IDLE_AFTER,
     EnumIdleConvergeVerdict,
+    EnumIdleRestoreVerdict,
     EnumRuntimePresence,
     ModelIdleConvergeInputs,
+    ModelIdleRestoreInputs,
     decide,
+    decide_restore,
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import (
@@ -254,13 +257,65 @@ def test_instance_without_flags_has_no_freeze(tmp_path: Path) -> None:
     assert flags.frozen_reason(NOW) is None
 
 
+SATELLITE_FREEZE_TICKET = "OMN-20530"
+SATELLITE_MERGED_BY = datetime(2026, 10, 21, tzinfo=UTC)
+
+
+def _committed_flags() -> dict[str, ModelLaneFlags]:
+    text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
+    return parse_lane_flags(text)
+
+
+def _satellite_instances() -> list[str]:
+    """The committed instances frozen until the runtime-only tenant overlay."""
+    return [
+        name
+        for name, flags in _committed_flags().items()
+        if SATELLITE_FREEZE_TICKET in (flags.frozen_reason(SATELLITE_MERGED_BY) or "")
+    ]
+
+
 def test_committed_dev_lanes_carry_no_freeze() -> None:
     # The operator lifted the dev-201 Tech Week freeze on 2026-10-06 (RULINGs
-    # 07:55:26Z and 14:16:08Z), so no committed dev instance is frozen.
-    for instance in ("dev-201", "dev-202", "dev-200"):
+    # 07:55:26Z and 14:16:08Z), so neither full dev lane is frozen. Only the
+    # satellite instance is, and the default instance is never it.
+    satellites = _satellite_instances()
+    table = load_routing_table(REPO_ROOT)
+    assert table.default_instance not in satellites
+    for instance in table.instances:
+        if instance in satellites:
+            continue
         other_flags = lane_flags_for_instance(REPO_ROOT, instance)
         assert other_flags.frozen_reason(NOW) is None
         assert other_flags.frozen_reason(UNTIL) is None
+
+
+def test_committed_satellite_lane_is_frozen_so_its_full_stack_is_not_recreated() -> (
+    None
+):
+    # The operator ruled the full 25-container dev stack on a satellite host a
+    # defect (2026-10-20). Its runtime-only lab-tenant replacement waits on
+    # OMN-20530, so the agent must not restore, converge or rebuild the full
+    # stack. Exactly one committed instance carries the freeze.
+    satellites = _satellite_instances()
+    assert len(satellites) == 1
+    flags = lane_flags_for_instance(REPO_ROOT, satellites[0])
+    assert flags.freeze is not None
+    assert flags.freeze.until == datetime(2026, 11, 20, tzinfo=UTC)
+    reason = flags.frozen_reason(SATELLITE_MERGED_BY)
+    assert reason is not None
+    decision = decide_restore(
+        ModelIdleRestoreInputs(
+            now=SATELLITE_MERGED_BY,
+            presence=EnumRuntimePresence.DOWN,
+            presence_detail="the runtime container is exited",
+            job_active=False,
+            last_activity=SATELLITE_MERGED_BY - timedelta(days=1),
+            last_attempt=None,
+            frozen_reason=reason,
+        )
+    )
+    assert decision.verdict is EnumIdleRestoreVerdict.FROZEN
 
 
 class _FakeExecutor:

@@ -178,7 +178,7 @@ jobs:
       # creating a new one, so the fleet converges on ONE persistent,
       # always-registered builder per driver instead of leaking one per job.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.4.1
         with:
           driver: docker-container
           name: onex-shared-buildkit
@@ -331,7 +331,7 @@ jobs:
           echo "Docker daemon accessible"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.4.1
         with:
           driver: docker
 

@@ -69,6 +69,13 @@ repos:
         files: ^(\.github/workflows/|tests/ci/test_anthropic_key_prefix_workflows_omn20967\.py$|\.pre-commit-config\.yaml$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: body-reading-workflows-trigger-on-edit
+        name: A workflow that reads the PR body fires on edited (OMN-17427)
+        entry: uv run --frozen pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q -n 0 --no-cov
+        language: system
+        files: ^(\.github/workflows/|tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427\.py$|\.pre-commit-config\.yaml$)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: mirror-source-consume-only
         name: Mirror source consume-only regression (OMN-20867)
         entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
@@ -577,6 +584,30 @@ repos:
         language: system
         pass_filenames: false
         files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
+        stages: [pre-commit]
+      - id: deploy-agent-health-convergence
+        require_serial: true
+        name: Deploy-agent health convergence (OMN-17427)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
+        language: system
+        pass_filenames: false
+        files: ^scripts/(deploy-agent/(deploy_agent/(executor|compose_budget)\.py|tests/unit/(test_verify_convergence_omn17427|conftest)\.py)|runtime_build/runtime_health_wait\.sh)$
+        stages: [pre-commit]
+      - id: dev-lane-branch-installs-handler
+        require_serial: true
+        name: Dev-lane branch installs handler (OMN-17427)
+        entry: uv run pytest tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(handlers/handler_dev_lane_branch_install|models/model_dev_lane_branch_install[a-z_]*|enums/enum_dev_lane_branch_install[a-z_]*)\.py|tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427\.py)$
+        stages: [pre-commit]
+      - id: deploy-agent-branch-installs
+        require_serial: true
+        name: Deploy-agent branch installs (OMN-17427)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_branch_installs_agent_omn17427.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/deploy-agent/(deploy_agent/(agent|health)\.py|tests/unit/(test_branch_installs_agent_omn17427|conftest)\.py)|src/omnibase_infra/handlers/handler_dev_lane_branch_install\.py)$
         stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
