@@ -1169,6 +1169,105 @@ wire_pypi_cache() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# OMN-17427 -- runner TMPDIR reaper and headroom warning (fail-open, bounded)
+# ---------------------------------------------------------------------------
+#
+# THE INCIDENT. On 2026-10-21 one lab host's CI runners' TMPDIR (a per-runner
+# bind mount on the host's scratch disk, see the compose file of that runner
+# pool) held over 120,000 test sandboxes that no job ever removed, about 1.7
+# million inodes per runner. The scratch disk reached 100 percent of its inodes
+# at 77 percent of its bytes; every job that wrote a temp file failed with
+# ENOSPC and a private repository's main branch went red, which stopped its
+# merge queue for five hours. Nothing warned, because the admission gate below reads bytes, on the
+# workspace mount, and nothing removes what a job leaves in TMPDIR: the runner
+# cleans _work/_temp per job, never TMPDIR.
+#
+# THE REAP. One runner runs one job at a time and each runner has a TMPDIR of
+# its own, so before a job nothing in it belongs to a running job. Entries older
+# than RUNNER_TMP_REAP_MINUTES are removed anyway (the age is a margin for a
+# process a previous job left behind), pytest-of-* is left to pytest's own
+# three-run retention, and only entries owned by this user are touched. The reap
+# shares the hook's one wall-clock budget (OMN-18802) and has its own smaller
+# bound, so a backlog is worked down over several jobs and never costs a job
+# more than RUNNER_TMP_REAP_SECONDS. A TMPDIR that is not a dedicated one (/tmp,
+# where the image bakes omni-ci-bin, /, a home directory) is never reaped.
+#
+# THE WARNING. Byte and inode use of the TMPDIR mount at or past
+# RUNNER_TMP_WARN_PCT (85, the same advisory line as
+# scripts/disk-watermark-check.sh, which alarms on the bus hourly for the
+# runner scratch disk)
+# is a ::warning annotation on the job, naming the runner and both numbers.
+_C4_TMP_DIR="${RUNNER_TMP_REAP_DIR:-${TMPDIR:-}}"
+_C4_TMP_REAP_MINUTES="${RUNNER_TMP_REAP_MINUTES:-60}"
+_C4_TMP_REAP_SECONDS="${RUNNER_TMP_REAP_SECONDS:-15}"
+_C4_TMP_WARN_PCT="${RUNNER_TMP_WARN_PCT:-85}"
+
+# Echo the use percentage df reports for a mount, from the column the header names
+# (GNU: Capacity/Use%/IUse%, BSD: %iused), or nothing when it cannot be read.
+_c4_df_pct() {
+    local flag="$1" mount="$2" bound
+    bound="$(_c2_budget_timeout "${_C4_TMP_REAP_SECONDS}")" || return 0
+    timeout "${bound}" df "${flag}" "${mount}" 2>/dev/null | awk '
+        NR==1 { for (i = 1; i <= NF; i++) if ($i ~ /^(Capacity|Use%|IUse%|%iused)$/) col = i; next }
+        NR==2 && col { v = $col; gsub(/%/, "", v); print v }' || true
+}
+
+runner_tmp_reap() {
+    local dir="${_C4_TMP_DIR}" real home_real bound
+    if [[ -z "${dir}" || ! -d "${dir}" ]]; then
+        return 0
+    fi
+    real="$(realpath -m -- "${dir}")" || return 0
+    home_real="$(realpath -m -- "${HOME:-/}")" || return 0
+    case "${real}" in
+        / | /tmp | /var/tmp | /scratch | /home | /home/runner | "${home_real}")
+            echo "[runner-tmp] ${real} is not a dedicated runner TMPDIR; not reaping."
+            return 0
+            ;;
+    esac
+    if ! bound="$(_c2_budget_timeout "${_C4_TMP_REAP_SECONDS}")"; then
+        echo "[runner-tmp] hook budget spent; reap of ${real} skipped this job."
+        return 0
+    fi
+    # Counting a large backlog is part of the same bound as deleting it.
+    timeout "${bound}" bash -c '
+        set -o pipefail
+        dir=$1 minutes=$2 bound=$3
+        before=$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d " ") || before="?"
+        find "$dir" -mindepth 1 -maxdepth 1 -user "$(id -u)" \
+            \( -type d -o -type f -o -type l \) -mmin "+$minutes" ! -name "pytest-of-*" \
+            -exec rm -rf --one-file-system -- {} + 2>/dev/null || true
+        after=$(find "$dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d " ") || after="?"
+        if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]]; then
+            echo "[runner-tmp] reaped $(( before - after )) of $before entries older than $minutes min in $dir (bound ${bound}s)."
+        fi
+    ' _ "${real}" "${_C4_TMP_REAP_MINUTES}" "${bound}" || true
+    return 0
+}
+
+runner_tmp_headroom() {
+    local dir="${_C4_TMP_DIR}" bytes inodes runner="${RUNNER_NAME:-unknown}"
+    if [[ -z "${dir}" || ! -d "${dir}" ]]; then
+        return 0
+    fi
+    bytes="$(_c4_df_pct -Pk "${dir}")"
+    inodes="$(_c4_df_pct -Pi "${dir}")"
+    [[ "${bytes}" =~ ^[0-9]+$ ]] || bytes=""
+    [[ "${inodes}" =~ ^[0-9]+$ ]] || inodes=""
+    if [[ -z "${bytes}" || -z "${inodes}" ]]; then
+        echo "[runner-tmp] TMPDIR ${dir} headroom unreadable: bytes ${bytes:-unknown}%, inodes ${inodes:-unknown}%."
+    fi
+    if [[ -n "${bytes}" && "${bytes}" -ge "${_C4_TMP_WARN_PCT}" ]] \
+        || [[ -n "${inodes}" && "${inodes}" -ge "${_C4_TMP_WARN_PCT}" ]]; then
+        echo "::warning title=RUNNER-TMP-HEADROOM::Runner '${runner}' TMPDIR ${dir}: bytes ${bytes:-unknown}% used, inodes ${inodes:-unknown}% used (warn at ${_C4_TMP_WARN_PCT}%). At 100% of either, every write fails with ENOSPC. The reaper removes entries older than ${_C4_TMP_REAP_MINUTES} min before each job; past that, find what fills it (OMN-17427)."
+    fi
+    return 0
+}
+
+runner_tmp_reap || true
+runner_tmp_headroom || true
+
 # OMN-16363 -- disk-admission gate runs FIRST, before every other step in this
 # hook (including wire_pypi_cache and the workspace reset below). This is the
 # one call site in this file that is allowed to fail the job: every other
