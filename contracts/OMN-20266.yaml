@@ -49,6 +49,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k 'memory or digest or thresholds'
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_omninode_system_slack_report.py -q -k dev_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
   - id: dod-omn20266-deploy-probe

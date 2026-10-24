@@ -24,13 +24,11 @@ FUNCTION_NAME = "check_dev_broker"
 STARTED_AT = "2026-10-23T08:06:32.496581573Z"
 
 
-def _function_source() -> str:
+def _function_source(name: str = FUNCTION_NAME) -> str:
     """The function as it stands in the deployed script, not a copy of it."""
     text = REPORT_SCRIPT.read_text(encoding="utf-8")
-    match = re.search(
-        rf"^{FUNCTION_NAME}\(\) \{{.*?^\}}$", text, re.MULTILINE | re.DOTALL
-    )
-    assert match, f"{FUNCTION_NAME} is no longer defined in {REPORT_SCRIPT}"
+    match = re.search(rf"^{name}\(\) \{{.*?^\}}$", text, re.MULTILINE | re.DOTALL)
+    assert match, f"{name} is no longer defined in {REPORT_SCRIPT}"
     return match.group(0)
 
 
@@ -188,7 +186,7 @@ def test_running_memory_is_compared_to_floor(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("payload", ["", " \n"])
+@pytest.mark.parametrize("payload", ["", " \n", "\n\n", "\t", " \t\r\n "])
 def test_empty_inspect_is_one_critical_row(tmp_path: Path, payload: str) -> None:
     rows = _run(tmp_path, payload)
     assert list(rows) == ["dev-broker-restart"]
@@ -207,8 +205,10 @@ def test_failed_inspect_discards_even_partial_output(tmp_path: Path) -> None:
         env={"OMNINODE_DEV_BROKER_INSPECT_CMD": f"bash {failing}"},
     )
     assert list(rows) == ["dev-broker-restart"]
-    assert rows["dev-broker-restart"][0] == "CRITICAL"
-    assert "could not inspect" in rows["dev-broker-restart"][1]
+    assert rows["dev-broker-restart"] == (
+        "CRITICAL",
+        "could not inspect omnibase-infra-redpanda; dev broker state unknown",
+    )
 
 
 @pytest.mark.unit
@@ -262,10 +262,16 @@ def test_old_fractional_start_does_not_extend_restart_hold(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
-def test_thresholds_and_container_are_env_overridable(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("memory_arg", "expected"),
+    [("--memory 6143M", "WARNING"), ("--memory 6144M", "OK"), ("--memory 6145M", "OK")],
+)
+def test_thresholds_and_container_are_env_overridable(
+    tmp_path: Path, memory_arg: str, expected: str
+) -> None:
     rows = _run(
         tmp_path,
-        _payload(),
+        _payload(memory_arg=memory_arg),
         env={
             "OMNINODE_ALERT_DEV_BROKER_CONTAINER": "custom-broker",
             "OMNINODE_ALERT_DEV_BROKER_RESTART_HOLD_SECONDS": "600",
@@ -273,18 +279,83 @@ def test_thresholds_and_container_are_env_overridable(tmp_path: Path) -> None:
         },
     )
     assert rows["dev-broker-restart"][0] == "OK"
-    assert rows["dev-broker-memory"][0] == "OK"
+    assert rows["dev-broker-memory"][0] == expected
     assert "custom-broker" in rows["dev-broker-memory"][1]
+    assert "floor 6144 MB" in rows["dev-broker-memory"][1]
 
 
 @pytest.mark.unit
-def test_broker_rows_have_a_digest_section_and_reach_active_issues() -> None:
-    text = REPORT_SCRIPT.read_text(encoding="utf-8")
-    digest = re.search(r"^format_digest\(\) \{.*?^\}$", text, re.MULTILINE | re.DOTALL)
-    assert digest
-    assert "*Dev broker*\n$broker_lines\n" in digest[0]
-    assert '$1=="broker" {printf' in digest[0]
-    assert '$1=="census" || $1=="broker") && ($2=="WARNING"' in digest[0]
+@pytest.mark.parametrize(
+    ("restarts", "memory_arg", "critical_count", "warning_count"),
+    [(12, "--memory 6G", 1, 1), (0, "--memory 12G", 0, 0)],
+)
+def test_broker_rows_have_a_digest_section_and_reach_active_issues(
+    tmp_path: Path,
+    restarts: int,
+    memory_arg: str,
+    critical_count: int,
+    warning_count: int,
+) -> None:
+    rows = _run(tmp_path, _payload(restarts=restarts, memory_arg=memory_arg))
+    snapshot = "\n".join(
+        f"broker|{status}|{key}|{detail}" for key, (status, detail) in rows.items()
+    )
+    completed = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            _function_source("format_digest")
+            + f"\nsnapshot={shlex.quote(snapshot)}\n"
+            + f"host=lab-test\ncritical_count={critical_count}\nwarning_count={warning_count}\n"
+            + "format_digest 'Broker test digest'\n",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    assert completed.returncode == 0, completed.stderr
+    broker_section, active_issues = completed.stdout.split("*Dev broker*\n", 1)[
+        1
+    ].split("*Active issues*\n", 1)
+    for key, (status, detail) in rows.items():
+        assert f"- `{key}`: {detail} ({status})\n" in broker_section
+        if status in {"CRITICAL", "WARNING"}:
+            assert f"- {status} `{key}`: {detail}\n" in active_issues
+        else:
+            assert key not in active_issues
+    if not critical_count and not warning_count:
+        assert active_issues == "- No active warning/critical checks\n"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("now", ["2026-10-23T08:20:00Z", "2026-10-23T09:06:32Z"])
+def test_bsd_date_fallback_parses_fractional_start(tmp_path: Path, now: str) -> None:
+    date = tmp_path / "date"
+    calls = tmp_path / "date-calls.txt"
+    date.write_text(
+        "#!/bin/bash\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
+        "if [[ \"$*\" == '-u -d '* ]]; then exit 1; fi\n"
+        "if [[ \"$*\" == '-u -j -f %Y-%m-%dT%H:%M:%SZ 2026-10-23T08:06:32Z +%s' ]]; then\n"
+        f"  printf '%s\\n' {_epoch('2026-10-23T08:06:32Z')}\n"
+        "else exit 1; fi\n",
+        encoding="utf-8",
+    )
+    date.chmod(0o755)
+    rows = _run(
+        tmp_path, _payload(), now=now, env={"PATH": f"{tmp_path}:/usr/bin:/bin"}
+    )
+    assert rows["dev-broker-restart"][0] == (
+        "CRITICAL" if now == "2026-10-23T08:20:00Z" else "OK"
+    )
+    assert calls.read_text().splitlines() == [
+        "-u -d 2026-10-23T08:06:32Z +%s",
+        "-u -j -f %Y-%m-%dT%H:%M:%SZ 2026-10-23T08:06:32Z +%s",
+    ]
 
 
 @pytest.mark.unit

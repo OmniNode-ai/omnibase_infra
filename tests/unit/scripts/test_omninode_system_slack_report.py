@@ -2011,6 +2011,57 @@ class _AlertTicker:
         return log_text, fresh
 
 
+@pytest.mark.parametrize("restarts", [0, 12])
+def test_dev_broker_restart_reaches_slack_after_confirmation(
+    tmp_path: Path, lane_ports: dict[str, str], restarts: int
+) -> None:
+    """A broker restart alone pages on tick two; a fresh recreate stays quiet."""
+    bin_dir = _make_stub_bin(
+        tmp_path,
+        http=_all_green_http(lane_ports),
+        docker_state={"containers": [], "dangling": []},
+    )
+    inspect = tmp_path / "broker-inspect.txt"
+    inspect.write_text(
+        f'{restarts}|2026-10-23T08:06:32.496581573Z|running|["redpanda", "--memory 12G"]\n'
+    )
+    ticker = _AlertTicker(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={
+            "OMNINODE_ALERT_DEV_BROKER_CHECK_ENABLED": "1",
+            "OMNINODE_DEV_BROKER_INSPECT_CMD": f"cat {inspect}",
+            "OMNINODE_ALERT_DEV_BROKER_NOW_EPOCH": str(
+                int(datetime(2026, 10, 23, 8, 20, tzinfo=UTC).timestamp())
+            ),
+        },
+    )
+    _, posts = ticker.tick()
+    assert posts == []
+    ticker.extra_env["OMNINODE_ALERT_DEV_BROKER_NOW_EPOCH"] = str(
+        int(datetime(2026, 10, 23, 8, 35, tzinfo=UTC).timestamp())
+    )
+    _, posts = ticker.tick()
+    if restarts:
+        assert len(posts) == 1
+        assert "Issues: *1 critical*, *0 warning*" in posts[0]
+        broker, issues = (
+            posts[0].split("*Dev broker*\n", 1)[1].split("*Active issues*\n", 1)
+        )
+        assert "`dev-broker-restart`" in broker
+        assert "RestartCount=12" in broker
+        assert "CRITICAL `dev-broker-restart`" in issues
+        assert "broker|dev-broker-restart\tCRITICAL\t2\t0\t1\t" in _alert_state(
+            tmp_path
+        )
+    else:
+        assert posts == []
+        assert _alert_state(tmp_path).strip() == ""
+    _, posts = ticker.tick()
+    assert posts == []
+
+
 def test_alert_mode_pages_when_a_runtime_lane_is_down(
     tmp_path: Path, lane_ports: dict[str, str]
 ) -> None:
