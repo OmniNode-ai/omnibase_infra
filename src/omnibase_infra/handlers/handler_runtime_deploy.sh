@@ -2563,6 +2563,16 @@ sync_files() {
         "${repo_root}/workspace/sibling-vcs-provenance.json" \
         "${deploy_target}/workspace/sibling-vcs-provenance.json"
 
+    # Carry the delegation routing ladder Dockerfile.runtime COPYs
+    # (workspace/routing_tiers.yaml, OMN-21279). The image installs no omnimarket,
+    # so the ladder reaches it through the build context: release mode ships the
+    # committed empty-ladder placeholder; workspace mode ships the ladder
+    # stage_workspace.sh copied from the staged omnimarket sibling.
+    log_cmd "rsync -a workspace/routing_tiers.yaml -> deployed"
+    rsync -a \
+        "${repo_root}/workspace/routing_tiers.yaml" \
+        "${deploy_target}/workspace/routing_tiers.yaml"
+
     # 6. Migration scripts (bind-mounted by docker-compose.infra.yml) plus the
     # Keycloak realm reconciler docker/Dockerfile.runtime COPYs into the image
     # (scripts/seed-keycloak-clients.py, OMN-16026). This include-list is the

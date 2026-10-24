@@ -42,6 +42,7 @@ _PLACEHOLDER_CONTENTS = {
     "workspace/sibling-vcs-provenance.json": (
         '{\n  "siblings": {},\n  "_note": "placeholder"\n}\n'
     ),
+    "workspace/routing_tiers.yaml": "tiers: []\n",
 }
 
 

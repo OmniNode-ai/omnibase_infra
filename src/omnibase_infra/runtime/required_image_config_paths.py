@@ -106,9 +106,11 @@ REQUIRED_IMAGE_CONFIG_PATHS: tuple[ModelRequiredImageConfigPath, ...] = (
         ),
         why_required=(
             "The delegation routing reducer fails closed when the tiers file the "
-            "pin names does not exist. Baked from the installed omnimarket package "
-            "to a stable path so the pin never embeds a python3.X site-packages "
-            "directory that a base-image Python bump silently invalidates."
+            "pin names does not exist. Baked from the build context's "
+            "workspace/routing_tiers.yaml (staged from the omnimarket sibling in "
+            "workspace mode) to a stable path so the pin never embeds a python3.X "
+            "site-packages directory that a base-image Python bump silently "
+            "invalidates."
         ),
         ticket="OMN-15645",
     ),
