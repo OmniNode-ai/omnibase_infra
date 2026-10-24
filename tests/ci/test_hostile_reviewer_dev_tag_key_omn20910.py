@@ -1,15 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The Hostile Reviewer reads omniintelligence by its newest dev tag and passes the Claude key (OMN-20910).
+"""The Hostile Reviewer reads omniintelligence by its newest dev tag (OMN-20910).
 
 Operator ruling 2026-10-18: lab consumers read tags, not pins. omniintelligence
 tags every dev merge ``dev-<UTC>-<sha12>``, so the review tooling is resolved at
 run time from ``refs/tags/dev-*`` and logged; a branch tip stays refused
-(OMN-20331). The Claude API voters' key is the org Actions secret
-``HOSTILE_REVIEW_ANTHROPIC_API_KEY``, handed to the review step alone. The
-voter code reads the variable its overlay entry names in ``api_key_env`` (and
-``ANTHROPIC_API_KEY`` when none is named), and never substitutes another
-variable for it.
+(OMN-20331). No Claude provider key is passed from an Actions secret. The
+Claude API voter reaches the review gateway through the dogfood tenant by
+reference (OMN-20974, OMN-21350).
 
 The clone step is executed against a fake ``git`` rather than text-matched, so
 the tag selection is the one the workflow runs.
@@ -35,8 +33,6 @@ _WORKFLOW = (
     / "workflows"
     / "hostile-reviewer.yml"
 )
-_KEY_EXPR = "${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}"
-_KEY_ENV_NAMES = ("ANTHROPIC_API_KEY", "REVIEW_ANTHROPIC_API_KEY")
 _NEWEST = "dev-20261018085529-fe44102f0bf5"
 _LS_REMOTE = "".join(
     f"{sha * 40}\trefs/tags/{name}\n"
@@ -133,33 +129,21 @@ def test_clone_step_never_reads_a_branch_tip_or_a_pin() -> None:
     assert re.search(r"--branch\s+(dev|main)\b", "git clone --branch dev url dir")
 
 
-def test_claude_key_reaches_only_the_review_step() -> None:
-    holders = [
-        s["name"]
-        for s in _steps()
-        if "HOSTILE_REVIEW_ANTHROPIC_API_KEY" in yaml.safe_dump(s)
-    ]
-    assert holders == ["Run adversarial review"]
-    env = _step("Run adversarial review")["env"]
-    for name in _KEY_ENV_NAMES:
-        assert env[name] == _KEY_EXPR
-    # Positive control: the preflight holds the other secret and not this one.
-    preflight = _step("Preflight — probe review endpoint reachability")["env"]
-    assert "LOCAL_LLM_SHARED_SECRET" in preflight
-    assert not set(_KEY_ENV_NAMES) & set(preflight)
+def test_claude_key_reaches_no_workflow_step() -> None:
+    for step in _steps():
+        dumped = yaml.safe_dump(step)
+        assert "HOSTILE_REVIEW_ANTHROPIC_API_KEY" not in dumped
+        assert not re.search(r"(?m)^\s*(REVIEW_)?ANTHROPIC_API_KEY:", dumped)
+    # Positive control: the review step still holds the lab voters' secret.
+    assert "LOCAL_LLM_SHARED_SECRET" in _step("Run adversarial review")["env"]
 
 
-def test_key_is_a_secret_expression_never_a_literal() -> None:
+def test_no_secret_expression_or_literal_key_in_workflow() -> None:
     text = _WORKFLOW.read_text(encoding="utf-8")
     assert not re.search(r"sk-ant-[A-Za-z0-9_-]+", text)
-    lines = [
-        ln
-        for ln in text.splitlines()
-        if re.match(r"\s+(REVIEW_)?ANTHROPIC_API_KEY:", ln)
-    ]
-    assert len(lines) == len(_KEY_ENV_NAMES)
-    for line in lines:
-        assert line.strip().endswith(_KEY_EXPR), line
+    assert not any(
+        re.match(r"\s+(REVIEW_)?ANTHROPIC_API_KEY:", line) for line in text.splitlines()
+    )
 
 
 def test_dev_tag_and_key_tests_run_as_ci_step_and_hook() -> None:

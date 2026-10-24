@@ -1,0 +1,1 @@
+Live-contact exception: the change only removes two credential env lines and their comments from the review step and adds a static scan test; it adds no request, endpoint or call path, so no new contact surface exists to record.
