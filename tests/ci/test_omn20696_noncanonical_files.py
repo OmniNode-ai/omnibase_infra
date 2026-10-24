@@ -91,4 +91,14 @@ def test_the_recorded_manifest_is_what_git_holds_for_the_commit() -> None:
         for status, path, _old in repo.changed_paths(parent, CHANGE_COMMIT)
     }
     assert recorded == set(CHANGE_MANIFEST)
-    assert check(repo, CHANGE_COMMIT, parent) == []
+    # The criterion is a property of the change: a file the parent tree already
+    # held is not the change's. A newer classifier (core 0.47.55, OMN-21332:
+    # every shell script) refuses files the parent already carried, so judge
+    # only the findings the commit adds over its parent's own tree.
+    inherited = {(f.path, f.rule) for f in check(repo, parent, None)}
+    added = [
+        f
+        for f in check(repo, CHANGE_COMMIT, parent)
+        if (f.path, f.rule) not in inherited
+    ]
+    assert added == []
