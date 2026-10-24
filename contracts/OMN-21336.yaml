@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21336
 title: Vendor the compaction receipts migrations and their interim grant ahead of the omnimarket writer node
 summary: >-
-  Vendors node_projection_compaction_receipts/0000 and 0001 byte for byte from omnimarket#4347, which declares the relation and its cursor sequence in omnimarket's ownership manifest. Adds checksum-bound ledger rows and migration classes, one interim grant declaration for compaction_receipts (named in the OMN-18863 expiry module), and the regenerated topology instances and rendered catalogs. This is the infrastructure deployment half of OMN-21336; the writer node follows in omnimarket once this repository's dev-merge tag carries it.
+  Holds node_projection_compaction_receipts/0000 and 0001 as interim vendored files (omnimarket#4347 declares the relation and its cursor sequence in omnimarket's ownership manifest but dropped the SQL before merging), digest-pinned until the omnimarket writer node carries them. Adds checksum-bound ledger rows and migration classes, one interim grant declaration for compaction_receipts (named in the OMN-18863 expiry module), and the regenerated topology instances and rendered catalogs. This is the infrastructure deployment half of OMN-21336; the writer node follows in omnimarket once this repository's dev-merge tag carries it.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -13,7 +13,7 @@ requirements:
     acceptance:
       - id: AC1
         statement: >-
-          AC1: compaction_receipts/0000 and 0001 match the measured omnimarket bytes, ledger checksums and classes without a FORCE fence, and the interim declaration grants read_write under role compaction_receipts -- falsifier: the vendor unit test fails any assertion.
+          AC1: compaction_receipts/0000 and 0001 match their pinned digests and live-hash ledger checksums in a well-formed ledger, with their classes without a FORCE fence, and the interim declaration grants read_write under role compaction_receipts -- falsifier: the vendor unit test fails any assertion.
   - id: req-omn21336-live-apply
     statement: >-
       The receipts chain applies to an ephemeral PostgreSQL database, reapplies without changing a populated row, delivers the declared column types, and gives omninode_runtime exactly SELECT, INSERT and UPDATE on the table and USAGE on the cursor sequence.
