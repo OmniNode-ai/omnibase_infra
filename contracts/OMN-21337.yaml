@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21337
+title: Dev runtime consumers rejoin their groups after a broker restart instead of failing on the coordinator until a hand restart
+summary: The rejoin supervisor rebuilds a consumer whose group coordinator stays unavailable past a bounded time while the partition leaders answer, bounds its own offset probes, and raises one alarm naming the group and the broker when the rebuild does not restore the coordinator. The decision is a pure handler routed by node_consumer_coordinator_rejoin_compute. The pull request body carries the crash report for the 2026-10-23 broker abort.
+is_seam_ticket: false
+interface_change: false
+requirements:
+  - id: req-omn21337
+    statement: A runtime consumer recovers its consumer group after a broker restart without a container restart, and alarms once when it cannot.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a runtime consumer whose group coordinator stays unavailable past a bounded time after the broker is healthy again rebuilds its consumer and rejoins, without a container restart -- falsifier: uv run pytest tests -q -k consumer_rejoins_after_broker_restart'
+      - id: AC2
+        statement: 'AC2: on the dev lane, restarting the broker leaves `onex scm run-list OmniNode-ai/omnimarket --branch dev --bus-lane dev` answering within its timeout within five minutes, with no hand restart -- falsifier: the scm verb returns no_terminal more than five minutes after a broker restart on the dev lane'
+      - id: AC3
+        statement: 'AC3: a consumer that cannot rejoin raises one alarm naming the group and the broker, instead of logging coordinator errors every two seconds -- falsifier: uv run pytest tests -q -k consumer_rejoin_failure_alarms_once'
+      - id: AC4
+        statement: 'AC4: the 12:03:41Z broker abort has a crash report (the broker log, version and the request in flight) attached to this ticket, and a version bump or config change if the report names one -- falsifier: no crash report attached'
+evidence_requirements:
+  - kind: tests
+    description: The broker-restart replay tests, the alarm tests and the handler tests pass.
+    command: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart_omn21337.py tests/unit/handlers/test_handler_consumer_coordinator_rejoin_omn21337.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-21337-ac1
+    description: An idle consumer whose coordinator is lost, and a consumer whose position waits on the coordinator, are rebuilt after the bound once the leaders answer; neither is rebuilt while the leaders are unreachable, and a healthy idle consumer is never rebuilt.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart_omn21337.py -q -k consumer_rejoins_after_broker_restart
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-21337-ac2
+    description: At the shipped config bounds, a consumer whose first rebuild fails still rejoins within 300 s of the broker answering again. The live dev-lane broker restart is pending; the lane's compose guard refused a lane restart of omnibase-infra-redpanda.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart_omn21337.py -q -k within_five_minutes_at_shipped_bounds
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-21337-ac3
+    description: Thirty minutes of failed rebuilds raise exactly one alarm naming the group and the broker, and repeated aiokafka coordinator errors are dropped while it is active.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart_omn21337.py -q -k consumer_rejoin_failure_alarms_once
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-21337-ac4
+    description: The crash report committed at docs/incidents/OMN-21337/broker-abort-crash-report.json (also carried in the pull request body) names the broker version, the broker log lines and the request in flight (ListGroups, group_state_to_kafka_name), and records that it names no version bump or config change; the orchestrator attaches it to the ticket.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          python3 - <<'PY'
+          import json
+          r = json.load(open('docs/incidents/OMN-21337/broker-abort-crash-report.json'))
+          assert r['broker']['image'] == 'redpandadata/redpanda:v24.3.18'
+          assert any('Aborting on shard 0.' in line for line in r['broker_log'])
+          assert r['request_in_flight']['api'] == 'ListGroups'
+          assert 'kafka::group_state_to_kafka_name' in r['request_in_flight']['backtrace'][0]
+          assert r['version_bump_or_config_change']['named'] is False
+          PY
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-deploy
+    description: Deploy-scope readback, bound to no criterion; the coordinator rejoin handler is present in the repository at the evaluated checkout revision.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_consumer_coordinator_rejoin.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerConsumerCoordinatorRejoin' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

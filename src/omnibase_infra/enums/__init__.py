@@ -21,6 +21,7 @@ Exports:
     EnumCircuitState: Circuit breaker states (CLOSED, OPEN, HALF_OPEN)
     EnumConfirmationEventType: Registration confirmation event types
     EnumConfirmationState: Durability confirmation tri-state (CONFIRMED, UNCONFIRMED, UNKNOWN)
+    EnumConsumerCoordinatorRejoinReason: Coordinator rejoin decision reasons
     EnumConsumerGroupPurpose: Consumer group purpose (CONSUME, INTROSPECTION, REPLAY, AUDIT, BACKFILL)
     EnumContextSectionCategory: Semantic categories for static context sections (CONFIG, RULES, TOPOLOGY, etc.)
     EnumContractCheckType: Runtime contract check types (REGISTRATION, SUBSCRIPTION, PUBLICATION, etc.)
@@ -86,6 +87,9 @@ from omnibase_infra.enums.enum_circuit_state import EnumCircuitState
 from omnibase_infra.enums.enum_cloud_ledger_verdict import EnumCloudLedgerVerdict
 from omnibase_infra.enums.enum_confirmation_event_type import EnumConfirmationEventType
 from omnibase_infra.enums.enum_confirmation_state import EnumConfirmationState
+from omnibase_infra.enums.enum_consumer_coordinator_rejoin_reason import (
+    EnumConsumerCoordinatorRejoinReason,
+)
 from omnibase_infra.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_context_section_category import (
     EnumContextSectionCategory,
@@ -174,6 +178,7 @@ __all__: list[str] = [
     "EnumCheckpointPhase",
     "EnumCircuitState",
     "EnumConfirmationEventType",
+    "EnumConsumerCoordinatorRejoinReason",
     "EnumConsumerGroupPurpose",
     "EnumContextSectionCategory",
     "EnumContractCheckType",
