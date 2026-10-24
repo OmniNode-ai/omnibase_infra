@@ -24,7 +24,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = _ROOT / ".github" / "workflows"
 
 _PROVIDERS = (
+    "AI21",
     "ANTHROPIC",
+    "AZURE",
     "BEDROCK",
     "CEREBRAS",
     "CLAUDE",
@@ -33,6 +35,7 @@ _PROVIDERS = (
     "FIREWORKS",
     "GEMINI",
     "GLM",
+    "GOOGLE",
     "GROQ",
     "HF",
     "HUGGINGFACE",
@@ -40,28 +43,36 @@ _PROVIDERS = (
     "MISTRAL",
     "MOONSHOT",
     "NVIDIA",
+    "OLLAMA",
     "OPENAI",
     "OPENROUTER",
     "PERPLEXITY",
     "QWEN",
     "REPLICATE",
+    "SAMBANOVA",
     "TOGETHER",
+    "VERTEX",
     "VOYAGE",
     "XAI",
     "ZAI",
 )
+# GitHub expression context names are case-insensitive, so every pattern is too.
 _SECRET_REF = re.compile(
     r"secrets\s*\.\s*([A-Za-z0-9_]+)|secrets\s*\[\s*'([^']+)'\s*\]"
-    r'|secrets\s*\[\s*"([^"]+)"\s*\]'
+    r'|secrets\s*\[\s*"([^"]+)"\s*\]',
+    re.IGNORECASE,
 )
 _OPAQUE_SECRET_READ = re.compile(
-    r"\b(?i:toJSON)\s*\(\s*secrets\s*\)"
-    r"|\bsecrets\s*\[\s*[^\s'\"\]][^\]]*\]"
+    r"\btoJSON\s*\(\s*secrets\s*\)|\bsecrets\s*\[\s*[^\s'\"\]][^\]]*\]",
+    re.IGNORECASE,
 )
+_CREDENTIAL = r"(?:KEY|TOKEN|SECRET|CREDENTIAL|AUTH|PASSWORD)"
+# A provider token delimited by underscores, or run straight into a credential
+# word (OPENAIKEY).
 _PROVIDER_KEY_NAME = re.compile(
-    rf"(?:^|_)(?:{'|'.join(_PROVIDERS)})(?:_|$)", re.IGNORECASE
+    rf"(?:^|_)(?:{'|'.join(_PROVIDERS)})(?:_|$|(?={_CREDENTIAL}))", re.IGNORECASE
 )
-_CREDENTIAL_WORD = re.compile(r"(?:KEY|TOKEN|SECRET)", re.IGNORECASE)
+_CREDENTIAL_WORD = re.compile(_CREDENTIAL, re.IGNORECASE)
 
 
 def provider_key_secrets(text: str) -> list[str]:
@@ -104,6 +115,37 @@ def test_the_detector_flags_a_planted_provider_key_reference() -> None:
         "ANTHROPIC_API_KEY",
         "CLAUDE_API_KEY",
     ]
+
+
+def test_the_detector_ignores_the_case_of_the_secrets_context() -> None:
+    planted = (
+        "${{ Secrets.ANTHROPIC_API_KEY }}\n"
+        "${{ SECRETS['OPENAI_API_KEY'] }}\n"
+        "${{ TOJSON(Secrets) }}\n"
+        "${{ SECRETS[matrix.name] }}\n"
+    )
+    assert provider_key_secrets(planted) == ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+    assert opaque_secret_reads(planted) == ["TOJSON(Secrets)", "SECRETS[matrix.name]"]
+
+
+def test_the_detector_flags_other_credential_words_and_providers() -> None:
+    planted = "".join(
+        f"${{{{ secrets.{name} }}}}\n"
+        for name in (
+            "ANTHROPIC_CREDENTIALS",
+            "OPENAI_AUTH",
+            "OPENAIKEY",
+            "GOOGLE_API_KEY",
+            "AZURE_OPENAI_KEY",
+            "VERTEX_SA_SECRET",
+            "SAMBANOVA_API_KEY",
+            "AI21_TOKEN",
+            "OLLAMA_PASSWORD",
+        )
+    )
+    assert len(provider_key_secrets(planted)) == 9
+    # A credential-free provider-named value is not a key.
+    assert provider_key_secrets("${{ secrets.OPENAI_BASE_URL }}") == []
 
 
 def test_the_detector_flags_a_hidden_secret_name() -> None:

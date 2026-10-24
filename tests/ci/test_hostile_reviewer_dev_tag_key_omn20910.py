@@ -157,7 +157,17 @@ def test_no_secret_expression_or_literal_key_in_workflow() -> None:
         re.IGNORECASE,
     )
     assert not secret_reference.search(text)
-    assert secret_reference.search('${{ secrets["HOSTILE_REVIEW_ANTHROPIC_API_KEY"] }}')
+    # Positive controls: every reference form and key name the workflow used.
+    for planted in (
+        "${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}",
+        "${{ secrets . REVIEW_ANTHROPIC_API_KEY }}",
+        "${{ Secrets.ANTHROPIC_API_KEY }}",
+        "${{ secrets['HOSTILE_REVIEW_ANTHROPIC_API_KEY'] }}",
+        '${{ secrets["HOSTILE_REVIEW_ANTHROPIC_API_KEY"] }}',
+        '${{ SECRETS[ "CLAUDE_API_KEY" ] }}',
+    ):
+        assert secret_reference.search(planted), planted
+    assert not secret_reference.search("${{ secrets.LOCAL_LLM_SHARED_SECRET }}")
 
 
 def test_dev_tag_and_key_tests_run_as_ci_step_and_hook() -> None:
