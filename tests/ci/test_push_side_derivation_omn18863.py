@@ -168,7 +168,7 @@ class TestTheWiringIsPresentAndConditioned:
             )
         )
         assert step.get("if") == "steps.resolve-omnimarket-ref.outputs.ref != 'dev'"
-        assert step["with"]["ref"] == "${{ steps.resolve-omnimarket-pin.outputs.sha }}"
+        assert step["with"]["ref"] == "${{ steps.resolve-omnimarket-pin.outputs.ref }}"
 
     def test_the_pin_resolution_is_unconditional(self) -> None:
         """The trailered path needs the pin sha too, so it cannot be gated.
@@ -194,7 +194,7 @@ class TestTheWiringIsPresentAndConditioned:
         )
         assert step["with"]["ref"] == (
             "${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' "
-            "&& steps.resolve-omnimarket-pin.outputs.sha "
+            "&& steps.resolve-omnimarket-pin.outputs.ref "
             "|| steps.resolve-omnimarket-ref.outputs.ref }}"
         )
 

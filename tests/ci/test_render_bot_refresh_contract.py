@@ -44,9 +44,9 @@ PRODUCERS = [
         "omnimarket-contract-pin-refresh.yml",
         "OMN-17292",
         ".github/omnimarket-contract-pin.yaml",
-        {"TARGET_PIN": "4a" * 20},
-        "omnimarket_contract_ref: " + "f" * 40 + "\n",
-        "omnimarket_contract_ref: " + "4a" * 20 + "\n",
+        {"TARGET_PIN": "v0.4.320"},
+        "omnimarket_contract_ref: v0.4.319\n",
+        "omnimarket_contract_ref: v0.4.320\n",
         id="omnimarket-pin",
     ),
 ]
@@ -142,7 +142,7 @@ def test_rendered_check_passes_at_head_and_fails_at_base(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     target.write_text(base, encoding="utf-8")
-    write_other_pins("f" * 40)
+    write_other_pins("v0.4.319")
     result = subprocess.run(
         argv, cwd=tmp_path, check=False, capture_output=True, text=True
     )

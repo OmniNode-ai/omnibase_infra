@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
+title: "The omnimarket contract pin advances to v0.4.319"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,26 +10,42 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry v0.4.319 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
       - id: AC2
         statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+  - id: req-omn17292-predecessor-sha
+    statement: The forward-only guard reads the base revision's commit-sha pin as the predecessor while the committed pin stays a release tag.
+    acceptance:
+      - id: AC3
+        statement: "AC3: the resolver returns a base pin's commit sha for the predecessor read and still refuses a sha or a branch as the committed pin -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
+  - id: req-omn17292-local-environment-bridge
+    statement: Retiring the local_environment interim declaration keeps its vendored migrations and the shipped tenant_projection_writer grant.
+    acceptance:
+      - id: AC4
+        statement: "AC4: no supplemental declaration carries local_environment, its three vendored migrations remain, and every shipped topology instance grants tenant_projection_writer exactly SELECT, INSERT, UPDATE on public.local_environment -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry v0.4.319.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+  - kind: tests
+    description: The resolver reads the base pin's commit sha as the predecessor and keeps the committed pin tag-only.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
+  - kind: tests
+    description: The local_environment bridge is retired with its migrations and shipped grants intact.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry v0.4.319.
     source: manual
     checks:
       - check_type: test_passes
@@ -44,3 +60,19 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac3-predecessor-sha
+    description: The resolver reads the base pin's commit sha as the predecessor and keeps the committed pin tag-only; the dispatch head refused the sha.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k predecessor"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn-17292-ac4-local-environment-bridge
+    description: The local_environment bridge is retired with its migrations and shipped grants intact; the merge base still carries the bridge.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_local_environment_bridge_retired_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

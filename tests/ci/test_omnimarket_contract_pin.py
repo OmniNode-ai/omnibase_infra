@@ -19,10 +19,11 @@ The fix splits the two assertions the gate had fused:
 * **internal consistency** — the checked-in grants are exactly the derivation of
   the contract set this repo has pinned. Deterministic, a pure function of
   committed state, and therefore still a hard per-PR gate.
-* **freshness** — the pinned contract set is current with omnimarket ``dev``.
-  A property of a *pair* of repos, not of any infra PR. It moves to a scheduled
-  bot that opens a regeneration PR, so drift lands as an actionable PR instead of
-  an org-wide ambush.
+* **freshness** — the pinned contract set is current with omnimarket's newest
+  release. A property of a *pair* of repos, not of any infra PR. It moves to a
+  scheduled bot that follows the release train's tag and opens a regeneration PR
+  once per new release, so drift lands as an actionable PR instead of an org-wide
+  ambush and no PR is opened per omnimarket merge.
 
 These tests pin that split down. They fail against the live-resolve
 implementation.
@@ -58,7 +59,10 @@ _RESOLVER = _ROOT / "scripts" / "resolve_omnimarket_contract_pin.py"
 _ADVANCE_GUARD = _ROOT / "scripts" / "ci" / "check_omnimarket_contract_pin_advance.py"
 
 _GATE_JOB = "application-database-domain-enforcement"
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# OMN-17292: the pin is an omnimarket RELEASE tag, written by the release train's
+# overnight run and by nothing else. Never a commit sha, never a branch, never a
+# per-merge ``dev-<UTC>-<sha12>`` tag.
+_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def _gate_job_text() -> str:
@@ -163,15 +167,16 @@ def test_pre_setup_steps_run_on_stdlib_only() -> None:
         )
 
 
-def test_pin_file_declares_an_immutable_commit_sha() -> None:
-    """A mutable ref (branch/tag) as the pin would reintroduce the coupling."""
+def test_pin_file_declares_a_release_tag() -> None:
+    """The pin is a release tag, which the train writes; a branch or a sha is not."""
     assert _PIN_FILE.is_file(), f"missing contract pin file: {_PIN_FILE}"
     document = _pin_document()
 
     ref = document["omnimarket_contract_ref"]
-    assert isinstance(ref, str) and _SHA_RE.fullmatch(ref), (
-        f"omnimarket_contract_ref must be a full 40-hex commit sha, got {ref!r}; "
-        "a branch name would make the derivation non-deterministic again"
+    assert isinstance(ref, str) and _TAG_RE.fullmatch(ref), (
+        f"omnimarket_contract_ref must be an omnimarket release tag (vX.Y.Z), got "
+        f"{ref!r}; a branch name would make the derivation non-deterministic "
+        "again and a commit sha is a pin written by hand or by a bot"
     )
     assert document["repository"] == "OmniNode-ai/omnimarket"
 
@@ -180,7 +185,7 @@ def test_pin_resolution_is_offline_and_deterministic() -> None:
     """The resolver must be a pure function of committed state.
 
     No token, no network, no ``GITHUB_EVENT_PATH`` dependence — running it twice
-    in an empty environment must yield the pinned sha both times. This is what
+    in an empty environment must yield the pinned tag both times. This is what
     makes an unrelated PR's verdict immune to an omnimarket merge.
     """
     assert _RESOLVER.is_file(), f"missing resolver: {_RESOLVER}"
@@ -389,31 +394,109 @@ def test_omnimarket_dev_moving_past_the_pin_does_not_move_the_derivation_input(
     )
 
     # And the answer tracks the FILE, not omnimarket dev. Pointed at a pin file
-    # naming the older commit in that same capture, the resolver returns the
-    # older commit -- even though dev has demonstrably moved past it. Under
+    # naming an older release, the resolver returns the older release -- even
+    # though dev has demonstrably moved past it. Under
     # live-resolve there was no such file to consult and no way to hold still.
     older = _pin_document()
-    older["omnimarket_contract_ref"] = payload["base_commit"]["sha"]
+    older["omnimarket_contract_ref"] = "v0.4.1"
     older_pin = tmp_path / "older-pin.yaml"
     older_pin.write_text(yaml.safe_dump(older), encoding="utf-8")
-    assert resolver.resolve_pin(older_pin) == payload["base_commit"]["sha"]
+    assert resolver.resolve_pin(older_pin) == "v0.4.1"
 
 
-def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "dev",
+        "main",
+        "latest",
+        # A commit sha is a pin written by hand or by a bot (OMN-17292 ruling).
+        "c7cd6a481acfe7e8c0821a5d5149d592efa556c0",
+        # A per-merge tag moves with every omnimarket merge; only a release does not.
+        "dev-20261023163920-e00c6bc53cc8",
+        "v0.4",
+        "v0.4.319-rc1",
+        "0.4.319",
+    ],
+)
+def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path, ref: str) -> None:
     """Discriminator for the false_red case above.
 
     A resolver that returned whatever it found would satisfy the accept proof
     while quietly permitting a branch name back into the derivation input,
-    which is the coupling this ticket removes. It must fail closed instead.
+    which is the coupling this ticket removes. It must fail closed instead, and
+    it must refuse a sha and a per-merge dev tag as well: the only value the
+    release train writes is an omnimarket release tag.
     """
     resolver = _resolver_module()
     mutable = tmp_path / "pin.yaml"
     mutable.write_text(
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {ref}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="release tag"):
+        resolver.resolve_pin(mutable)
+
+
+def test_the_base_pins_commit_sha_is_read_as_the_predecessor(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292 RED on omnibase_infra#5311: dev's pin is still a commit sha.
+
+    The forward-only guard resolves the BASE revision's pin through
+    ``--pin-file``. That pin was committed under the base's rules, which wrote
+    a sha, so refusing it failed the guard on the PR that moves to tags. The
+    predecessor read returns the sha; the committed pin stays tag-only.
+    """
+    resolver = _resolver_module()
+    sha = "c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
+    base_pin = tmp_path / "base-pin.yaml"
+    base_pin.write_text(
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {sha}\n",
+        encoding="utf-8",
+    )
+    assert resolver.resolve_pin(base_pin, predecessor=True) == sha
+    with pytest.raises(ValueError, match="release tag"):
+        resolver.resolve_pin(base_pin)
+
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [sys.executable, str(_RESOLVER), "--pin-file", str(base_pin)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == sha
+    assert not output.exists()
+
+    branch_pin = tmp_path / "branch-pin.yaml"
+    branch_pin.write_text(
         "repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: dev\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="40-hex"):
-        resolver.resolve_pin(mutable)
+    with pytest.raises(ValueError, match="release tag"):
+        resolver.resolve_pin(branch_pin, predecessor=True)
+
+
+def test_the_resolver_publishes_the_tag_as_the_ref_output(
+    tmp_path: Path,
+) -> None:
+    """The ci.yml steps read ``outputs.ref``: a tag is not a sha."""
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [sys.executable, str(_RESOLVER)],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+    )
+    ref = completed.stdout.strip()
+    assert _TAG_RE.fullmatch(ref)
+    assert output.read_text(encoding="utf-8") == f"ref={ref}\n"
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +543,55 @@ def test_refresh_bot_enforces_forward_only_advance() -> None:
     body = _REFRESH_WORKFLOW.read_text(encoding="utf-8")
     assert "check_omnimarket_contract_pin_advance.py" in body, (
         "the bot must run the forward-only guard before opening its PR"
+    )
+
+
+def _refresh_cron_expressions() -> list[str]:
+    document = yaml.safe_load(_REFRESH_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = document.get("on", document.get(True))
+    return [entry["cron"] for entry in triggers["schedule"]]
+
+
+def test_refresh_bot_runs_once_a_day_after_the_overnight_train() -> None:
+    """OMN-17292: a pin PR per omnimarket merge cost CI on every head.
+
+    The release train cuts at 07:11 UTC (release-train-nightly.yml) and a
+    release is created at no other time. The bot therefore runs once a day, after
+    that window, and a run with no new release opens nothing.
+    """
+    (cron,) = _refresh_cron_expressions()
+    minute, hour, day, month, weekday = cron.split()
+    assert minute.isdigit() and hour.isdigit(), (
+        f"cron {cron!r} fires more than once a day; the pin follows a nightly "
+        "release, not every omnimarket merge"
+    )
+    assert (day, month, weekday) == ("*", "*", "*")
+    train = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "release-train-nightly.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    train_cron = (train.get("on", train.get(True)))["schedule"][0]["cron"]
+    train_minute, train_hour = (int(part) for part in train_cron.split()[:2])
+    assert (int(hour), int(minute)) > (train_hour, train_minute)
+
+
+def test_refresh_bot_follows_the_release_tag_and_never_writes_a_sha() -> None:
+    """OMN-17292 ruling: tags, not commit shas; a release, not every merge."""
+    body = _REFRESH_WORKFLOW.read_text(encoding="utf-8")
+    # Target: the newest omnimarket release tag, never a branch tip.
+    assert "matching-refs/tags/v" in body
+    assert "commits/${target_ref}" not in body, "the bot must not resolve a branch tip"
+    # The pin file and the sibling pin are rewritten as release tags, never as shas.
+    assert r'r"^omnimarket_contract_ref: v[0-9]+\.[0-9]+\.[0-9]+$"' in body
+    assert r'r"^  omnimarket: (v[0-9]+\.[0-9]+\.[0-9]+)$"' in body
+    assert "omnimarket_contract_ref: [0-9a-f]{40}" not in body
+    assert "omnimarket: ([0-9a-f]{40})" not in body
+    # One PR per release: a branch named for the tag, and the bot stops when it exists.
+    assert 'BRANCH="bot/omnimarket-contract-pin-${TARGET_PIN}"' in body
+    assert "git ls-remote --exit-code --heads origin" in body
+    assert "date -u +%Y%m%d%H%M%S" not in body, (
+        "a timestamped branch opens a PR per run"
     )
 
 
@@ -656,7 +788,7 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
     base_sha = run("rev-parse", "HEAD").stdout.strip()
 
     # HEAD: the pin file is introduced.
-    head_pin = "fd3e66c71ccfd4f7383904baa19e5bd700993a05"
+    head_pin = "v0.4.319"
     (repo / ".github" / "omnimarket-contract-pin.yaml").write_text(
         f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {head_pin}\n",
         encoding="utf-8",
