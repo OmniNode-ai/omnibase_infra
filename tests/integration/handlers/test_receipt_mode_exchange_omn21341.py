@@ -9,6 +9,7 @@ import asyncio
 import importlib
 import json
 import os
+from contextlib import AsyncExitStack
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ from omnibase_infra.handlers.handler_receipt_mode_publish_await import (
 )
 from omnibase_infra.models.model_receipt_mode_event import ModelReceiptModeEvent
 from tests.helpers.service_env import require_service_env
+from tests.helpers.util_kafka import KafkaTopicManager
 
 pytestmark = pytest.mark.integration
 
@@ -46,6 +48,7 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
     invocation_id = str(uuid4())
     responder: EventBusInmemory | EventBusKafka
     client_bus: EventBusInmemory | EventBusKafka
+    topics = AsyncExitStack()
     if transport == "kafka":
         require_service_env(
             opt_in="KAFKA_INTEGRATION_TESTS",
@@ -59,6 +62,16 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
             timeout_seconds=20,
             auto_offset_reset="earliest",
         )
+        # The lane brokers run with auto_create_topics_enabled=false.
+        manager = await topics.enter_async_context(
+            KafkaTopicManager(os.environ["KAFKA_BOOTSTRAP_SERVERS"])
+        )
+        try:
+            await manager.create_topic(command_topic)
+            await manager.create_topic(reply_topic)
+        except BaseException:
+            await topics.aclose()
+            raise
         responder = EventBusKafka(config=config)
         client_bus = EventBusKafka(config=config)
     else:
@@ -91,34 +104,39 @@ async def test_adapter_loaded_handler_exchanges_correlated_receipts(
     module_name, attribute = _ADAPTER_SPEC.split(":")
     handler_type = getattr(importlib.import_module(module_name), attribute)
     assert handler_type is HandlerReceiptModePublishAwait
-    await responder.start()
-    try:
-        unsubscribe = await responder.subscribe(
-            command_topic, group_id=f"receipt-responder.{suffix}", on_message=respond
-        )
+    async with topics:
+        await responder.start()
         try:
-            events = await asyncio.to_thread(
-                handler_type(lambda: client_bus).publish_and_await,
-                topic=command_topic,
-                command_type="receipt-mode.requested",
-                payload={"invocation_id": invocation_id},
-                awaited_events=(reply_topic,),
-                deadline_ms=30000,
+            unsubscribe = await responder.subscribe(
+                command_topic,
+                group_id=f"receipt-responder.{suffix}",
+                on_message=respond,
             )
-            assert events == (
-                ModelReceiptModeEvent(topic=reply_topic, payload={"status": "ready"}),
-                ModelReceiptModeEvent(
-                    topic=reply_topic,
-                    payload={"invocation_id": invocation_id, "action": "allow"},
-                ),
-            )
-            assert len(commands) == 1
-            assert commands[0].event_type == "receipt-mode.requested"
-            assert commands[0].payload == {"invocation_id": invocation_id}
-            health = await client_bus.health_check()
-            assert health["started"] is False
-            assert not client_bus.get_consumer_groups()
+            try:
+                events = await asyncio.to_thread(
+                    handler_type(lambda: client_bus).publish_and_await,
+                    topic=command_topic,
+                    command_type="receipt-mode.requested",
+                    payload={"invocation_id": invocation_id},
+                    awaited_events=(reply_topic,),
+                    deadline_ms=30000,
+                )
+                assert events == (
+                    ModelReceiptModeEvent(
+                        topic=reply_topic, payload={"status": "ready"}
+                    ),
+                    ModelReceiptModeEvent(
+                        topic=reply_topic,
+                        payload={"invocation_id": invocation_id, "action": "allow"},
+                    ),
+                )
+                assert len(commands) == 1
+                assert commands[0].event_type == "receipt-mode.requested"
+                assert commands[0].payload == {"invocation_id": invocation_id}
+                health = await client_bus.health_check()
+                assert health["started"] is False
+                assert not client_bus.get_consumer_groups()
+            finally:
+                await unsubscribe()
         finally:
-            await unsubscribe()
-    finally:
-        await responder.close()
+            await responder.close()
