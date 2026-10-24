@@ -10,7 +10,7 @@ requirements:
     statement: No registry repository's .github/dependabot.yml declares a version-update schedule, and a ratchet in the repository that owns registry-wide CI ratchets refuses one.
     acceptance:
       - id: AC1
-        statement: 'AC1: no registry repository''s .github/dependabot.yml declares a version-update schedule (security alerts stay on) -- falsifier: uv run pytest tests/ci -k no_dependabot_version_updates, a ratchet over every registry clone''s dependabot.yml seeded with a planted schedule as positive control'
+        statement: 'AC1: no registry repository''s .github/dependabot.yml declares a version-update schedule (security alerts stay on) -- falsifier: uv run pytest tests/ci/test_no_dependabot_version_updates_omn21351.py tests/ci/test_dependabot_sibling_pins_omn17427.py, a ratchet over every registry clone''s dependabot.yml seeded with a planted schedule as positive control'
   - id: req-release-train-dependency-refresh
     statement: The release train refreshes third-party locked dependencies once per train run, in the train's own pull request, covered by the lab evidence the train already requires.
     acceptance:
@@ -19,7 +19,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The ratchet over this repository's dependabot.yml and every registry clone, with a planted schedule as positive control.
-    command: uv run --frozen pytest tests/ci -k no_dependabot_version_updates -q
+    command: uv run --frozen pytest tests/ci/test_no_dependabot_version_updates_omn21351.py tests/ci/test_dependabot_sibling_pins_omn17427.py -q
   - kind: tests
     description: The train policy declares the refresh, the step is fenced to third-party packages and runs once in the release pull request's own cut step, and the lock is runtime-affecting for the existing rebuild trigger.
     command: uv run --frozen pytest tests/scripts/test_release_train_dependency_refresh_omn21351.py tests/ci/test_release_train_dependency_refresh_live_omn21351.py -q
@@ -33,7 +33,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci -k no_dependabot_version_updates -q
+        check_value: uv run --frozen pytest tests/ci/test_no_dependabot_version_updates_omn21351.py tests/ci/test_dependabot_sibling_pins_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1

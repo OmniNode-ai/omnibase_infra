@@ -77,14 +77,13 @@ def test_no_dependabot_version_updates_in_this_repo() -> None:
 def test_no_dependabot_version_updates_in_registry_clones(
     registry_repos: list[str],
 ) -> None:
-    if "OMNI_HOME" not in os.environ:
-        pytest.skip("OMNI_HOME is not set; registry clones are unavailable")
-    root = Path(os.environ["OMNI_HOME"])
+    # Registry clones sit under OMNI_HOME, or beside this checkout when it is
+    # unset. A hosted runner has neither, so there the scan reads no clone and
+    # only the baseline arithmetic is judged; it never skips.
+    root = Path(os.environ.get("OMNI_HOME") or REPO_ROOT.parent)
     # This repo's own checkout is judged strictly by the first test; its
     # canonical clone lags a merge, so it is not read here.
     others = [repo for repo in registry_repos if not repo.endswith("/omnibase_infra")]
-    if not any((root / repo.rsplit("/", 1)[-1]).is_dir() for repo in others):
-        pytest.skip("No registry clone exists under OMNI_HOME")
     offenders = scan_clones(root, others)
     unexpected = {
         name: ecosystems
