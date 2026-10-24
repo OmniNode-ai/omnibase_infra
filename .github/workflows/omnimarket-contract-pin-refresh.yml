@@ -122,9 +122,13 @@ jobs:
                 "repos/OmniNode-ai/omnimarket/git/matching-refs/tags/v?per_page=100" \
                 --jq '.[].ref' \
               | sed 's#^refs/tags/##' \
-              | grep -E "$release_tag" \
+              | { grep -E "$release_tag" || true; } \
               | sort -V \
               | tail -n 1)"
+            if [[ -z "$target" ]]; then
+              echo "::error::omnimarket has no release tag (vX.Y.Z) to pin" >&2
+              exit 1
+            fi
           fi
           if [[ ! "$target" =~ $release_tag ]]; then
             echo "::error::omnimarket target '${target}' is not a release tag (vX.Y.Z)" >&2
@@ -137,17 +141,30 @@ jobs:
           fi
           echo "current=${current}" >> "$GITHUB_OUTPUT"
           echo "target=${target}" >> "$GITHUB_OUTPUT"
+          branch="bot/omnimarket-contract-pin-${target}"
           if [[ "$current" == "$target" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "contract pin already at ${current} - nothing to advance."
-          elif git ls-remote --exit-code --heads origin "bot/omnimarket-contract-pin-${target}" > /dev/null; then
-            # One PR per release: the branch is named for the tag, so a rerun, a
-            # dispatch or the next day's schedule finds the PR already proposed.
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::the pin advance to ${target} is already proposed on bot/omnimarket-contract-pin-${target}; nothing to open."
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "advancing contract pin ${current} -> ${target}"
+            rc=0
+            git ls-remote --exit-code --heads origin "$branch" > /dev/null || rc=$?
+            if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
+              echo "::error::could not list origin heads (git ls-remote exit ${rc})" >&2
+              exit 1
+            fi
+            if [[ "$rc" -eq 0 ]]; then
+              pr_count="$(gh pr list --head "$branch" --state all --json number --jq length)"
+              if [[ "$pr_count" -gt 0 ]]; then
+                echo "changed=false" >> "$GITHUB_OUTPUT"
+                echo "::notice::the pin advance to ${target} is already proposed on ${branch}; nothing to open."
+              else
+                echo "changed=true" >> "$GITHUB_OUTPUT"
+                echo "::notice::${branch} exists with no pull request; reopening the advance to ${target}."
+              fi
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "advancing contract pin ${current} -> ${target}"
+            fi
           fi
 
       - name: Checkout omnimarket at the target release tag
@@ -335,8 +352,8 @@ jobs:
             echo "pin moved but no derived output changed - nothing to propose."
             exit 0
           fi
-          # One branch per release tag: the resolve step stops before this point
-          # when the branch already exists, so a release is proposed once.
+          # One branch per release tag: skip releases whose branch has a PR.
+          # Reuse the branch when a failed run pushed it without a PR.
           BRANCH="bot/omnimarket-contract-pin-${TARGET_PIN}"
           # OMN-18273: commit as the App this job already authenticates as. The
           # previous "omninode-bot <bot@omninode.ai>" resolved to no GitHub
@@ -348,7 +365,7 @@ jobs:
           git commit -m "chore(OMN-17292): advance omnimarket contract pin to ${TARGET_PIN} [bot]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          git push origin "$BRANCH"
+          git push --force origin "$BRANCH"
           {
             printf '%s\n' "Automated omnimarket contract-pin advance (OMN-17292)."
             printf '\n'
