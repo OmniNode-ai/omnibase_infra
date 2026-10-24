@@ -510,6 +510,11 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-agent-commit-refused-rejoin
+    statement: The deploy agent treats a refused offset commit on every commit path (reject, skip, dedup, accept, quarantine and self-update rewind) as a group rejoin that redelivers the record, logged as commit_refused_rejoin, and never exits on it.
+    acceptance:
+      - id: AC17427525901
+        statement: 'AC17427525901: with a fake consumer whose commit raises CommitFailedError, a routed-elsewhere record returns (None, None) with no seek, lane_not_allowed and duplicate return their rejection, the accept returns the command and logs accept_commit_failed, the record and fetch quarantines and the rewind log a warning without raising, and the next poll handles the redelivered record and commits it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q'
   - id: req-omn17427-dev-broker-image
     statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
     acceptance:
@@ -592,6 +597,11 @@ requirements:
     acceptance:
       - id: AC1742720266
         statement: 'A restart-policy restart of omnibase-infra-redpanda reads CRITICAL for the hold window (two confirmation ticks), a recreate does not, and a running --memory below 12G reads WARNING -- falsifier: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q'
+  - id: req-omn17427-delegation-lab-job-runtime-grants
+    statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
+    acceptance:
+      - id: AC190
+        statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
   - id: req-omn17427-c29-failed-receipt-layer
     statement: The C29 probe grades a failed delegation receipt from the layer that carries its key and attempts, and names a provider throttle as the first reason while the verdict stays FAIL.
     acceptance:
@@ -792,6 +802,9 @@ evidence_requirements:
   - kind: tests
     description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
     command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+  - kind: tests
+    description: A fake KafkaConsumer refuses commits with CommitFailedError on every commit path of the deploy agent's consumer; no broker is contacted.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
   - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
@@ -2481,6 +2494,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac154-agent-commit-rejoin
+    description: A fake KafkaConsumer whose commit raises CommitFailedError drives the deploy agent's skip, reject, accept, quarantine and rewind commit paths; each fails at the merge base by raising and passes at the head. No broker or lab host is contacted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
+  - id: dod-omn-17427-ac154-agent-commit-rejoin-ci
+    description: Hosted-runner deploy check of the same fakes; it does not claim an install on a live lane, which is the parent lane's.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
   - id: dod-omn-17427-ac146-dev-broker-image
     description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
     source: manual
@@ -2756,6 +2787,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1742720266
+  - id: dod-omn17427-ac190-delegation-runtime-grants
+    description: Every supported profile grants the runtime role both delegation execution tables and the vendored migration matches the source sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC190
+  - id: dod-omn17427-ac190-delegation-deploy
+    description: Hosted-runner check of both delegation tables' runtime grants in every shipped topology and the vendored source migration hash; no database, container, credentials or deployed lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC190
   - id: dod-omn17427-c29-failed-receipt-layer
     description: Synthetic failed and successful C29 receipts graded by the probe's own clause graders; no container, credential, provider call or live lane.
     source: manual
