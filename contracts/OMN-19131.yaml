@@ -67,7 +67,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
-  - id: dod-omn-19131-ac3-no-terminal-sentence-before-publish
+  - id: dod-omn-19131-ac3-no-terminal-before-publish
     description: >-
       AC3 binding (2026-10-24, lane C16 closeout). The real onex delegate command, RuntimeLocal and the in-memory bus, driven with --timeout into a request model that forbids the field, exit non-zero without the sentence "no resolvable delegation terminal" on stderr or stdout; a run that did publish and lost its terminal keeps that sentence.
     source: manual
@@ -89,7 +89,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
-  - id: dod-omn-19131-ac5-forbidding-model-fails-the-dispatch
+  - id: dod-omn-19131-ac5-forbidding-model-fails
     description: >-
       AC5 binding (2026-10-24, lane C16 closeout), infra half. The installed-model half is omnimarket's tests/unit/delegation/test_omn19131_cli_timeout_payload_validates.py (omnimarket#2815), which validates the payload this repository's CLI writes for --timeout 300 against the request model resolved from omnimarket's packaged contract through RuntimeLocal._build_initial_payload; it passed on 2026-10-24 and its falsifier (field removed from the model, 1 failed with extra_forbidden) is recorded on the ticket. It cannot run from this repository, which must not depend on omnimarket. This check runs the infra half: the same dispatch with --timeout against a model that forbids the field fails before publish, and without --timeout it completes.
     source: manual
@@ -100,7 +100,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
-  - id: dod-omn-19131-ac6-captured-validation-reaches-stderr
+  - id: dod-omn-19131-ac6-validation-reaches-stderr
     description: >-
       AC6 binding (2026-10-24, lane C16 closeout). The re-measurement is a readback: on the lab, 10836 node_delegate_skill_orchestrator capture logs written 2026-09-30 to 2026-10-15 held 0 ValidationError tracebacks (item dod-omn-19131-lab-readback); on the operator's Mac on 2026-10-24, 272 such logs written after the fix merged held 0 pre-publish refusals (no _build_initial_payload or "does not validate against" line), and their 195 ValidationError tracebacks are all the post-terminal ModelMeteringSummaryRow refresh, not a pre-publish validation error. This check holds the mechanism: every location, error type and model the forced refusal's capture log names reaches stderr, and a run the model accepts logs no ValidationError.
     source: manual
