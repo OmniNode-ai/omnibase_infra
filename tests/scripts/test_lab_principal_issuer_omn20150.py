@@ -243,6 +243,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # republishes onto the lab lane, which reads none of them.
     # The Claude Code hook edge (OMN-17427) adds write on the 29 `onex.evt.omniclaude.*`
     # hook topics the operator's hook principal holds, and on no command topic.
+    # The compaction receipt-mode client (OMN-21099) adds write on its request topic only.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
@@ -265,6 +266,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnibase-infra.delegation-completed.v1",
         "onex.evt.omnibase-infra.delegation-failed.v1",
         "onex.evt.omniintelligence.llm-call-completed.v1",
+        "onex.cmd.omniintelligence.context-compaction-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
