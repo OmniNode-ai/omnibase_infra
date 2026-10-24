@@ -604,6 +604,8 @@ requirements:
     acceptance:
       - id: AC17427240101
         statement: 'AC17427240101: check_lane_census_drift.py exits 1 on the recorded omnibase_infra#5187 drift red (dev-lane oneshot_failed, census 2026-10-24T06:55:03Z) as a push, as a workflow_dispatch and with no event, and 0 with a LANE-CENSUS-DRIFT warning as a pull_request; a finding_count_mismatch still exits 1 on a pull request; the staleness workflow step does not override GITHUB_EVENT_NAME -- falsifier: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q fails at the merge base'
+      - id: AC17427240102
+        statement: 'AC17427240102: the live system reporter keeps nonzero census drift CRITICAL and lists it in Active issues even when invoked from a pull_request job; push, workflow_dispatch and unset event contexts retain that verdict -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2799,3 +2801,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427240101
+  - id: dod-omn17427-live-census-report-strict
+    description: Runs the reporter against a fresh synthetic drift snapshot in pull_request, push, workflow_dispatch and unset Actions contexts; every context must retain the CRITICAL row and actionable remedy. The pull_request case fails before the reporter clears the inherited CI event.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102
+  - id: dod-omn17427-live-census-report-deploy
+    description: Hosted-runner deploy check drives the real reporter with synthetic census inputs and local command stubs, requiring CRITICAL live drift and its Active issues entry. No Docker daemon, lane, credentials or Slack request is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102

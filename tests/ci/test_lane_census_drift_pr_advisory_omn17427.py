@@ -82,14 +82,29 @@ def test_recorded_pull_request_drift_red_is_advisory_on_pull_requests_only(
     steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
         "lane-census-staleness"
     ]["steps"]
-    step = next(
-        s for s in steps if s["name"] == "Check census-vs-manifest drift (OMN-18949)"
-    )
+    checker_steps = [
+        s for s in steps if "scripts/check_lane_census_drift.py" in s.get("run", "")
+    ]
+    assert len(checker_steps) == 1
+    step = checker_steps[0]
     assert "GITHUB_EVENT_NAME" not in (step.get("env") or {})
-    assert "uv run python scripts/check_lane_census_drift.py" in step["run"]
 
 
-@pytest.mark.parametrize(("event", "code"), [("pull_request", 0), ("push", 1), ("", 1)])
+@pytest.mark.parametrize(
+    ("event", "code"),
+    [
+        ("pull_request", 0),
+        ("push", 1),
+        ("workflow_dispatch", 1),
+        ("pull_request_target", 1),
+        ("merge_group", 1),
+        ("schedule", 1),
+        ("PULL_REQUEST", 1),
+        (" pull_request", 1),
+        ("pull_request ", 1),
+        ("", 1),
+    ],
+)
 def test_the_script_reads_the_event_from_the_actions_environment(
     event: str, code: int, tmp_path: Path
 ) -> None:
@@ -139,3 +154,78 @@ def test_pull_request_still_fails_every_other_finding(
     out = capsys.readouterr().out
     assert "[finding_count_mismatch]" in out
     assert "[nonzero_drift_count]" not in out
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push", "merge_group", ""])
+@pytest.mark.parametrize("mismatched_count", [False, True])
+def test_json_preserves_advisory_and_blocking_findings(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    event: str,
+    mismatched_count: bool,
+) -> None:
+    manifest = generator_consistent_manifest(tmp_path / "lane-manifest.yaml")
+    run = json.loads((ROOT / _FIXTURE).read_text(encoding="utf-8"))["response"]
+    path = _recorded_snapshot(run, tmp_path)
+    if mismatched_count:
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        snapshot["drift_count"] = 2
+        path.write_text(json.dumps(snapshot), encoding="utf-8")
+    argv = ["--manifest", str(manifest), "--snapshot", str(path), "--json"]
+    code = main(argv, event_name=event)
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    blocking = [f["kind"] for f in result["findings"]]
+    advisory = [f["kind"] for f in result["advisory_findings"]]
+    assert advisory == (["nonzero_drift_count"] if event == "pull_request" else [])
+    assert ("nonzero_drift_count" in blocking) == (event != "pull_request")
+    assert ("finding_count_mismatch" in blocking) == mismatched_count
+    assert code == (1 if blocking else 0)
+    assert result["snapshot_findings"] == 1
+    assert result["manifest_lanes"] > 0
+    assert result["manifest_containers"] > 0
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize(("event", "code"), [("pull_request", 0), ("push", 1)])
+def test_workflow_command_preserves_the_actions_event(
+    tmp_path: Path, event: str, code: int
+) -> None:
+    """Execute the committed shell command, including its environment scopes."""
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["lane-census-staleness"]
+    steps = [
+        s
+        for s in job["steps"]
+        if "scripts/check_lane_census_drift.py" in s.get("run", "")
+    ]
+    assert len(steps) == 1
+    step = steps[0]
+    census_dir = tmp_path / "config" / "lab" / "lane-census"
+    census_dir.mkdir(parents=True)
+    generator_consistent_manifest(census_dir / "lane-manifest.yaml")
+    run = json.loads((ROOT / _FIXTURE).read_text(encoding="utf-8"))["response"]
+    _recorded_snapshot(run, census_dir)
+    env = dict(os.environ)
+    env.update(
+        GITHUB_EVENT_NAME=event,
+        ONEX_WORKSPACE_CONFIG_ROOT=str(tmp_path),
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    env.pop("LANE_MANIFEST", None)
+    for scope in (workflow, job, step):
+        env.update(scope.get("env") or {})
+    proc = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == code, proc.stdout + proc.stderr
+    if event == "pull_request":
+        assert "::warning title=LANE-CENSUS-DRIFT::" in proc.stderr
+    else:
+        assert "[nonzero_drift_count]" in proc.stdout
