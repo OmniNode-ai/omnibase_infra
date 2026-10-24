@@ -43,5 +43,8 @@ class EnumConsumerStallReason(StrEnum):
     and the configured window has elapsed. This is the ``Empty`` group shape
     recorded on OMN-18640 as the second outage class."""
 
+    STALLED_COORDINATOR_UNAVAILABLE = "stalled_coordinator_unavailable"
+    """Leaders answer but the client has had no coordinator past the bound."""
+
 
 __all__ = ["EnumConsumerStallReason"]
