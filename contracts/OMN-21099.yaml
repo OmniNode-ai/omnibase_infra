@@ -14,11 +14,11 @@ requirements:
         statement: |-
           AC1: the derived developer-principal grants carry READ and DESCRIBE on exactly onex.cmd.omniintelligence.context-compaction-package.v1, onex.evt.omnimarket.context-compaction-prepared.v1, onex.evt.omnimarket.context-compaction-fallback.v1 and the group prefix receipt-mode-client., no WRITE on any of them, and WRITE and DESCRIBE on the compaction command topic onex.cmd.omniintelligence.context-compaction-requested.v1 only -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies, which fails at the merge base where the bindings declare none of them
   - id: req-omn21099-ac2-derived-file
-    statement: "The committed derived grants file contains the independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, and is the derivation node's output for the shipped bindings."
+    statement: "The committed derived grants file deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, and is the derivation node's output for the shipped bindings."
     acceptance:
       - id: AC2
         statement: |-
-          AC2: the committed developer-principal-derived-grants.json contains the independently expected developer permissions, including the three compaction replies and receipt-mode-client. group prefix, and equals the output of node_broker_grant_derive_compute for the shipped bindings -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
+          AC2: the committed deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the three compaction replies and receipt-mode-client. group prefix, and equals the output of node_broker_grant_derive_compute for the shipped bindings -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
 evidence_requirements:
   - kind: tests
     description: "The compaction reply rows are READ and DESCRIBE only, the committed derived grants are the node's output, and the discovery and issuer tests agree on the row count."
