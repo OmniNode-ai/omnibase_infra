@@ -634,6 +634,13 @@ requirements:
         statement: 'AC17427231001: a failed receipt whose terminal payload names the stored key and three rate_limited attempts grades customer_key PASS and names_provider FAIL with "provider throttled" first, and never reports a key from None or no routing attempt -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py -q fails at the merge base'
       - id: AC17427231002
         statement: 'AC17427231002: mixed failure classes are not called a throttle, an env-sourced key still fails customer_key, and a successful receipt still passes -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py -q'
+  - id: req-omn17427-rr-reply-consumer-lane-transport
+    statement: The request-response reply consumer authenticates with the lane transport bound for its broker, as the producer does, and falls back to the environment's Kafka auth when nothing is bound for that address.
+    acceptance:
+      - id: AC17427610001
+        statement: 'AC17427610001: with a SASL_PLAINTEXT lane transport bound for the broker of the wiring and no KAFKA_SASL_* environment, the reply AIOKafkaConsumer is built with security_protocol SASL_PLAINTEXT, sasl_mechanism SCRAM-SHA-256 and the bound username -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport fails at the merge base'
+      - id: AC17427610002
+        statement: 'AC17427610002: the wiring still passes the auth kwargs it resolves for its broker to the reply consumer (the MSK direct-client coverage) -- falsifier: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -839,6 +846,9 @@ evidence_requirements:
   - kind: tests
     description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
     command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+  - kind: tests
+    description: A fake AIOKafkaConsumer records the reply consumer's constructor kwargs under a bound SASL lane transport with the Kafka auth environment cleared; no broker is contacted.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -2927,3 +2937,31 @@ dod_evidence:
     binds_ac:
       - AC17427231001
       - AC17427231002
+  - id: dod-omn17427-rr-reply-consumer-lane-transport
+    description: Fake consumer, no broker. Fails against the merge-base, where the reply consumer reads Kafka auth from the environment only and is built with no SASL kwargs under a bound lane transport.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+  - id: dod-omn17427-rr-reply-consumer-msk-kwargs
+    description: Fake consumer, no broker. The wiring passes the auth kwargs it resolves for its broker to the reply consumer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610002
+  - id: dod-omn17427-rr-reply-consumer-lane-transport-deploy
+    description: Hosted-runner deploy check of the reply consumer's lane transport auth. Runs the focused wiring tests without a container, credential or live broker; does not claim a live broker connection.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+      - AC17427610002
