@@ -16,6 +16,16 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+  - id: req-omn17292-sustained-load-warmup
+    statement: The sustained-load benchmark measures steady state, so a one-off stall before the first measured interval cannot red Performance Microbenchmarks and Nightly Summary on dev.
+    acceptance:
+      - id: AC3
+        statement: "AC3: with a blocking 1.2s stall injected on the first publish, test_sustained_5_second_load passes because the stall lands in the discarded warm-up interval -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+  - id: req-omn17292-auto-merge-skip-draft
+    statement: The Auto-Merge workflow's Enable step returns before the arming call when the PR is a draft, so a draft's check_suite completion no longer fails the Enable Auto-Merge job red on dev.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the Enable auto-merge step reads isDraft before gh pr merge and exits 0 for a draft without calling gh pr merge, while a ready PR still reaches the arming call -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -23,6 +33,12 @@ evidence_requirements:
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+  - kind: tests
+    description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+  - kind: tests
+    description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -44,3 +60,19 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn-17292-ac3-sustained-load-warmup
+    description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval; at the merge base it lands in measured interval 1 and the variance assertion fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn-17292-ac4-auto-merge-skip-draft
+    description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR; the merge base has no draft guard.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]

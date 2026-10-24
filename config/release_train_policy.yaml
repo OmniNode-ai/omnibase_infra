@@ -47,10 +47,23 @@
 #   version bump, the release PR itself -- are excluded by subject in
 #   scripts/ci/release_train.py, because the bump edits pyproject.toml and would
 #   otherwise make the train cut an empty release every night forever.
+#
+# DEPENDENCY REFRESH (OMN-21351)
+#   The refresh happens in the release PR the cut job opens, once per train run.
+#   It moves only uv.lock, never pyproject.toml or first-party packages. Packages
+#   starting with the normalized prefixes below move only through the governed
+#   dependency cascade. Each repo declares locked or none; none requires a note.
+#   uv.lock is runtime-affecting for the existing rebuild trigger, so merging
+#   the release PR gets its own receipt under the repo's declared lab_evidence
+#   rule. For lab_evidence none repos, the covering evidence is the release PR's
+#   own required CI. A uv resolution failure keeps the unrefreshed lock and is
+#   reported; it never hides.
+dependency_refresh_first_party_prefixes: [omni, onex]
 repos:
   omnibase_infra:
     package: omnibase-infra
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, docker/migrations, pyproject.toml]
     lab_evidence: compose-dev
     lab_evidence_note: >-
@@ -74,6 +87,7 @@ repos:
   omnimarket:
     package: omnimarket
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: compose-dev-or-instance-lanes
     lab_evidence_note: >-
@@ -84,6 +98,7 @@ repos:
   omnibase_core:
     package: omnibase-core
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: none
     lab_evidence_note: >-
@@ -116,6 +131,7 @@ repos:
   omnibase_spi:
     package: omnibase-spi
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: none
     lab_evidence_note: >-
@@ -126,6 +142,7 @@ repos:
   omnimemory:
     package: omnimemory
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: none
     lab_evidence_note: >-
@@ -136,6 +153,7 @@ repos:
   omniintelligence:
     package: omniintelligence
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: none
     lab_evidence_note: >-
@@ -146,6 +164,7 @@ repos:
   omniclaude:
     package: omniclaude
     default_branch: dev
+    dependency_refresh: locked
     release_relevant_paths: [src, pyproject.toml]
     lab_evidence: none
     lab_evidence_note: >-

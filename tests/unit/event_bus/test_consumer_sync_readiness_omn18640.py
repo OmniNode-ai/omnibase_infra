@@ -61,14 +61,24 @@ POLICY = ModelConsumerRejoinPolicy(
 )
 
 
+class _Broker:
+    """Whether the broker lets a replacement consumer start."""
+
+    def __init__(self, *, down: bool) -> None:
+        self.down = down
+
+
 def _supervisor(
     clock: FakeClock,
     *,
     replacement: FakeConsumer | None = None,
     recreate_fails: bool = False,
+    broker: _Broker | None = None,
 ) -> ConsumerRejoinSupervisor:
+    broker = broker or _Broker(down=recreate_fails)
+
     async def _recreate() -> FakeConsumer:
-        if recreate_fails:
+        if broker.down:
             raise ConnectionError("replacement consumer could not start")
         return replacement or FakeConsumer(
             member_id="replacement",
@@ -321,7 +331,15 @@ async def test_flow_resuming_clears_a_failed_rejoin() -> None:
         end_offsets=WEDGED_END_OFFSETS,
         wedged=True,
     )
-    supervisor = _supervisor(clock, recreate_fails=True)
+    broker = _Broker(down=True)
+    replacement = FakeConsumer(
+        member_id="replacement",
+        position=WEDGED_POSITION,
+        end_offsets=WEDGED_END_OFFSETS,
+        wedged=False,
+        pending_records=["record"],
+    )
+    supervisor = _supervisor(clock, broker=broker, replacement=replacement)
 
     consumer: FakeConsumer = wedged
     for _ in range(12):
@@ -330,11 +348,14 @@ async def test_flow_resuming_clears_a_failed_rejoin() -> None:
         consumer = batch.consumer  # type: ignore[assignment]
     assert not supervisor.sync_status().ready
 
-    # The broker comes back and the same client starts fetching again.
-    consumer._wedged = False
-    consumer._pending = ["record"]
+    # The broker comes back: the supervisor starts a replacement (a stopped
+    # client never resumes), which fetches again.
+    broker.down = False
+    clock.advance(31.0)
+    batch = await supervisor.next_batch(consumer)
+    assert batch.consumer is replacement
     clock.advance(1.0)
-    await supervisor.next_batch(consumer)
+    await supervisor.next_batch(replacement)
 
     status = supervisor.sync_status()
     assert status.ready

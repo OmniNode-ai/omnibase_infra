@@ -349,6 +349,21 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         assert lab_job_live == lab_job_declared, lab_job_table
         assert "DELETE" not in lab_job_live, lab_job_table
 
+    # OMN-17427: delegation execution ownership and its outbox, vendored
+    # ahead of omnimarket#4277, grant exactly the runtime read/write ACL.
+    for delegation_table in ("delegation_lab_jobs", "delegation_lab_job_outbox"):
+        delegation_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == delegation_table
+        }
+        assert delegation_declared == {"SELECT", "INSERT", "UPDATE"}, delegation_table
+        delegation_live = _live_privileges(fresh_build, delegation_table, _RUNTIME)
+        assert delegation_live == delegation_declared, delegation_table
+        assert "DELETE" not in delegation_live, delegation_table
+
     # OMN-19399: the worktree reconcile projection grants exactly the runtime
     # writer's SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
     worktree_reconcile_declared = {

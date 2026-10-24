@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21335
+title: "TA.15b: claude_code_binding_install takes the rows to install as a required bindings argument"
+summary: >-
+  The claude_code_binding_install entry in src/omnibase_infra/cli/skill_mapping.yaml gains a required json arg `bindings`, mapped to the ModelBindingInstallRequest field of the same name. Before it, `onex skill claude_code_binding_install` failed request validation with "bindings Field required", so no row could be installed from the CLI. This is the omnibase_infra half of OMN-21335 AC2; the template half (AC1) and the manual session.compact row are in omnimarket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21335-install-takes-bindings
+    statement: The skill surfaces the rows to install, so a rendered session.compact row can be installed from the CLI.
+    acceptance:
+      - id: AC2
+        statement: "AC2: claude_code_binding_install on a lab host installs the rendered row and reads it back -- falsifier: `onex skill claude_code_binding_install` with the row passed as --bindings, followed by its readback, lists session.compact; without the arg the skill fails with `bindings Field required`."
+evidence_requirements:
+  - kind: tests
+    description: The skill-mapping entry test pins the bindings arg.
+    command: uv run pytest tests/unit/cli/test_cli_skill.py -k test_claude_code_binding_install_entry_resolves -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21335-ac2-bindings-arg
+    description: >-
+      The entry carries a required json `bindings` arg mapped to the payload field `bindings`. Fails at the merge base, where the entry has no such arg.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_skill.py -k test_claude_code_binding_install_entry_resolves -q --no-cov
+    binds_ac: ["AC2"]
