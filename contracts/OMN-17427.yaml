@@ -587,6 +587,13 @@ requirements:
     acceptance:
       - id: AC189
         statement: 'AC189: the C28 script and the board-probe node search 5,000 lines for an error''s applied-topic boundary line, an error whose probe boundary sits 63 or 171 lines behind is the probe''s, and an unprefixed error stays natural -- falsifier: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py -q fails at the merge base, where the window is 60 lines'
+  - id: req-omn17427-c29-failed-receipt-layer
+    statement: The C29 probe grades a failed delegation receipt from the layer that carries its key and attempts, and names a provider throttle as the first reason while the verdict stays FAIL.
+    acceptance:
+      - id: AC17427231001
+        statement: 'AC17427231001: a failed receipt whose terminal payload names the stored key and three rate_limited attempts grades customer_key PASS and names_provider FAIL with "provider throttled" first, and never reports a key from None or no routing attempt -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py -q fails at the merge base'
+      - id: AC17427231002
+        statement: 'AC17427231002: mixed failure classes are not called a throttle, an env-sourced key still fails customer_key, and a successful receipt still passes -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py -q'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -2732,3 +2739,23 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
+  - id: dod-omn17427-c29-failed-receipt-layer
+    description: Synthetic failed and successful C29 receipts graded by the probe's own clause graders; no container, credential, provider call or live lane.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py tests/ci/test_c29_probe_model_choice_omn20844.py tests/ci/test_c29_customer_byo_key_probe_omn19200.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427231001
+      - AC17427231002
+  - id: dod-omn17427-c29-failed-receipt-layer-deploy
+    description: Hosted-runner deploy check of the C29 probe's failed-receipt grading. Runs the focused probe tests without a container, credential, provider call or live lane; does not claim a live probe run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427231001
+      - AC17427231002

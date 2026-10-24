@@ -496,6 +496,23 @@ def _provider(obs: Mapping[str, Any]) -> ProviderSpec | None:
     return PROVIDERS.get(str(obs.get("provider") or ""))
 
 
+def _receipt_result(receipt: Any) -> dict[str, Any]:
+    """Failed-run receipts wrap the orchestrator payload in terminal_payload."""
+    if not isinstance(receipt, dict):
+        return {}
+    inner = receipt.get("receipt")
+    if not isinstance(inner, dict):
+        return {}
+    result = inner.get("result")
+    if not isinstance(result, dict):
+        return {}
+    if "secret_source" not in result and isinstance(
+        result.get("terminal_payload"), dict
+    ):
+        return result["terminal_payload"]
+    return result
+
+
 def _ref_names_provider(ref: str, slug: str) -> bool:
     """A reference belongs to ``slug`` in either shape the local store holds."""
     if ref.startswith("cred_"):
@@ -601,11 +618,7 @@ def grade_customer_key(
             clause.reasons.append(
                 f"references for a provider other than {spec.slug!r} are registered: {foreign}"
             )
-    result = (
-        receipt.get("receipt", {}).get("result", {})
-        if isinstance(receipt, dict)
-        else {}
-    )
+    result = _receipt_result(receipt)
     source = result.get("secret_source")
     used_ref = result.get("secret_ref")
     clause.evidence["receipt_secret_source"] = source
@@ -637,6 +650,7 @@ def grade_names_provider(
     keyed = steps.get("keyed") or {}
     files = obs.get("run_files") or {}
     clause.evidence["keyed_returncode"] = keyed.get("returncode")
+    clause.evidence["provider_throttled"] = False
     if keyed.get("returncode") != 0:
         clause.reasons.append(
             f"the keyed delegation exited {keyed.get('returncode')}, not 0"
@@ -649,7 +663,23 @@ def grade_names_provider(
             clause.evidence["keyed_refusal"] = refusal
             clause.reasons.append(f"the keyed delegation was refused: {refusal}")
         return clause
-    result = receipt.get("receipt", {}).get("result", {}) or {}
+    result = _receipt_result(receipt)
+    attempts = result.get("attempts") or receipt.get("attempts") or []
+    # A provider 429 on every attempt is the provider's limit: say so first, so
+    # the record does not read as a key or routing regression. It still fails.
+    if (
+        receipt.get("status") != "success"
+        and attempts
+        and all(a.get("failure_class") == "rate_limited" for a in attempts)
+    ):
+        backends = ", ".join(sorted({str(a.get("backend_id")) for a in attempts}))
+        clause.reasons.insert(
+            0,
+            f"provider throttled: all {len(attempts)} attempts on {backends} "
+            "answered 429 (rate_limited), a provider limit rather than a key or "
+            "routing regression",
+        )
+        clause.evidence["provider_throttled"] = True
     backend_id = receipt.get("backend_id")
     endpoint = receipt.get("endpoint")
     model = receipt.get("model")
@@ -697,9 +727,17 @@ def grade_names_provider(
         clause.reasons.append(
             f"receipt model {model!r} is not the chosen model {chosen!r}"
         )
-    attempts = result.get("attempts") or []
     clause.evidence["attempts"] = [
-        {k: a.get(k) for k in ("tier", "backend_id", "model_id", "acceptance_decision")}
+        {
+            k: a.get(k)
+            for k in (
+                "tier",
+                "backend_id",
+                "model_id",
+                "acceptance_decision",
+                "failure_class",
+            )
+        }
         for a in attempts
     ]
     if not attempts:
