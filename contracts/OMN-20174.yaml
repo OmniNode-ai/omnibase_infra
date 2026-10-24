@@ -1,55 +1,37 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20174
-title: Bump the locked Brotli dependency to 1.2.1
-summary: Bind the Brotli security update and regenerated runner image identity to checks at this PR head, including a container runtime round trip using hash-verified artifacts from uv.lock.
+title: Bump the locked brotli, filelock and virtualenv to their fixed versions
+summary: Bind the brotli, filelock and virtualenv security updates and regenerated runner image identity to checks at this PR head, including a container readback using hash-verified artifacts from uv.lock.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-brotli-lockfile-update
-    statement: The lockfile CVE update pins Brotli 1.2.1, preserves the runner image dependency binding, and runs the fixed package in a container.
+  - id: req-lockfile-cve-bump
+    statement: The lockfile CVE update locks fixed brotli, filelock and virtualenv versions, preserves the runner image dependency binding, and runs the fixed brotli package in a container.
     acceptance:
       - id: AC1
-        statement: uv.lock resolves exactly one Brotli package at 1.2.1 from PyPI with hashed source and wheel artifacts.
+        statement: uv.lock resolves exactly one each of brotli, filelock and virtualenv at or above 1.2.1, 4.2.1 and 21.14.13 from PyPI with sha256-hashed artifacts.
       - id: AC2
-        statement: The committed runner image identity verifies against the dependency manifest at this head.
+        statement: The committed runner image identity verifies against the dependency manifest at this head, which locks the fixed virtualenv.
       - id: AC3
         statement: A Python 3.12 container installs the hash-verified locked Brotli package, reads version 1.2.1, and round trips empty, binary, and Unicode payloads through compression and decompression.
 evidence_requirements:
   - kind: tests
-    description: Verify the locked package, runner image identity, and container runtime behavior with the bound commands below.
-    command: python3 scripts/ci/runner_image_identity.py --mode verify
+    description: Verify the fixed locked packages and runner image identity against the real dependency manifest.
+    command: uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-brotli-fixed-lock
+  - id: dod-lockfile-fixed-versions
     description: Read the actual lockfile and refuse the old version, duplicate resolutions, non-PyPI sources, or unhashed artifacts.
     source: manual
     binds_ac:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/ci/test_brotli_lock_omn20174.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: |
-          python3 - <<'PY'
-          import pathlib
-          import tomllib
-          packages = tomllib.loads(pathlib.Path('uv.lock').read_text())['package']
-          matches = [p for p in packages if p['name'] == 'brotli']
-          assert len(matches) == 1, matches
-          package = matches[0]
-          assert package['version'] == '1.2.1', package['version']
-          assert package['source'] == {'registry': 'https://pypi.org/simple'}
-          assert package['wheels']
-          for artifact in [package['sdist'], *package['wheels']]:
-              assert artifact['hash'].startswith('sha256:')
-              assert artifact['url'].startswith('https://files.pythonhosted.org/')
-          print('OMN-20174 locked Brotli 1.2.1 artifacts verified')
-          PY
+        check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q -k test_fixed_versions_locked"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-runner-image-dependency-binding
     description: Recompute the runner image identity against this checkout's manifest and compare with the committed lock.
@@ -57,8 +39,8 @@ dod_evidence:
     binds_ac:
       - AC2
     checks:
-      - check_type: command
-        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q -k test_runner_image_identity_binds_fixed_lock"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-brotli-container-deploy-readback
     description: Run a disposable Python container on the hosted runner, install only Brotli using the checkout's locked artifact hashes, and read its imported version and compression behavior. No private endpoints, lane containers, or credentials are required.
