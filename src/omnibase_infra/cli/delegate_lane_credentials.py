@@ -42,6 +42,7 @@ ONE CASE IS DELIBERATELY NOT A FALLBACK
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -56,6 +57,7 @@ __all__ = [
     "ENV_SASL_PASSWORD",
     "ENV_SASL_USERNAME",
     "DelegateLaneCredentialError",
+    "resolve_lane_binding",
     "resolve_lane_client_transport_for",
     "sasl_refusal_remediation",
 ]
@@ -173,6 +175,37 @@ def resolve_lane_client_transport_for(
         "listener."
     )
     raise DelegateLaneCredentialError(message)
+
+
+def resolve_lane_binding(
+    lane: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[ModelDelegateLaneSelection, ModelLaneClientTransport | None]:
+    """Resolve ``lane`` and its client transport from a process environment.
+
+    OMN-21341: a hook adapter loads the receipt-mode handler with no arguments,
+    so the workspace root (``OMNIBASE_PATH``, then ``OMNI_HOME``) and the lane
+    credential come from the environment. This CLI-layer function reads it,
+    defaulting to the process environment, so the handler takes only an
+    injected mapping.
+
+    Raises:
+        DelegateLaneSelectionError: no workspace root, or the declaration does
+            not bind ``lane`` to a usable broker.
+        DelegateLaneCredentialError: the lane's credential does not resolve.
+    """
+    from omnibase_infra.cli.delegate_lane import resolve_lane_selection_at
+
+    source = os.environ if environ is None else environ
+    workspace = source.get("OMNIBASE_PATH") or source.get("OMNI_HOME")
+    selection = resolve_lane_selection_at(lane, Path(workspace) if workspace else None)
+    transport = resolve_lane_client_transport_for(
+        lane_target=selection,
+        onex_home=Path.home() / ".onex",
+        environ=source,
+    )
+    return selection, transport
 
 
 def sasl_refusal_remediation(*, lane: str | None) -> str:

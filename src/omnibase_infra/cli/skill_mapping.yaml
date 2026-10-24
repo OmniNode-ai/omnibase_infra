@@ -901,14 +901,16 @@ skills:
   # settings. The wire models live in omnibase_core (moved there by this
   # ticket so this mapping names a shared model, not a node-package reach-in
   # the node-boundary gate refuses). The request's `bindings`
-  # (ModelClientBinding objects) is constructed by the capability/render
-  # pipeline rather than the CLI, so the surfaced args are the host paths and
-  # knobs the caller resolves; every arg maps onto a ModelBindingInstallRequest
-  # field (extra="forbid").
+  # (ModelClientBinding objects) is a JSON list the caller supplies, read from
+  # the adapter contract's client_bindings.claude_code.bindings (OMN-21335: the
+  # first row, session.compact for the manual trigger); the other args are the
+  # host paths and knobs the caller resolves; every arg maps onto a
+  # ModelBindingInstallRequest field (extra="forbid").
   - skill_name: claude_code_binding_install
     node_name: node_claude_code_binding_install_effect
     result_model: omnibase_core.models.claude_code_binding.ModelBindingInstallResult
     args:
+      - {name: bindings, payload_field: bindings, arg_type: json, required: true}
       - {name: mods-dir, payload_field: mods_dir, arg_type: string, required: true}
       - {name: settings-path, payload_field: settings_path, arg_type: string, required: true}
       - {name: max-mode, payload_field: max_mode, arg_type: string}

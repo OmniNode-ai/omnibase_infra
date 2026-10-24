@@ -68,6 +68,7 @@ __all__ = [
     "resolve_lane_target",
     "resolve_lane_declaration_path",
     "resolve_lane_selection",
+    "resolve_lane_selection_at",
 ]
 
 #: Where the lane -> broker declaration sits inside the workspace config root
@@ -178,6 +179,39 @@ def resolve_lane_selection(
         transport = load_lane_transport(declaration, lane)
     except ValueError as exc:
         message = f"--lane {lane!r} is not usable: {exc}"
+        raise DelegateLaneSelectionError(message) from exc
+
+    return ModelDelegateLaneSelection(
+        lane=transport.lane,
+        bootstrap_servers=transport.bootstrap_servers,
+        security_protocol=transport.security_protocol,
+        sasl_mechanism=transport.sasl_mechanism,
+        declared_in=declaration,
+    )
+
+
+def resolve_lane_selection_at(
+    lane: str, workspace_root: Path | None
+) -> ModelDelegateLaneSelection:
+    """``resolve_lane_selection`` for a caller holding a workspace root positionally.
+
+    OMN-21341: the receipt-mode publish-and-await handler resolves its lane
+    from the workspace root the hook process carries. The reads are the same:
+    locate the declaration, then ``load_lane_transport``.
+
+    Raises:
+        DelegateLaneSelectionError: the declaration is unreachable, or it does
+            not bind ``lane`` to a usable broker.
+    """
+    from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+        load_lane_transport,
+    )
+
+    declaration = resolve_lane_declaration_path(workspace_root)
+    try:
+        transport = load_lane_transport(declaration, lane)
+    except ValueError as exc:
+        message = f"lane {lane!r} is not usable: {exc}"
         raise DelegateLaneSelectionError(message) from exc
 
     return ModelDelegateLaneSelection(

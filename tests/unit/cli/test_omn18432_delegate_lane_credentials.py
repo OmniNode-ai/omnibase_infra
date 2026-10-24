@@ -29,15 +29,23 @@ exported.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
+from omnibase_infra.cli import delegate_lane, delegate_lane_credentials
+from omnibase_infra.cli.delegate_lane import (
+    DelegateLaneSelectionError,
+    resolve_lane_selection_at,
+)
 from omnibase_infra.cli.delegate_lane_credentials import (
     DelegateLaneCredentialError,
+    resolve_lane_binding,
     resolve_lane_client_transport_for,
 )
 from omnibase_infra.cli.model_delegate_lane_selection import ModelDelegateLaneSelection
 from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
+from omnibase_infra.nodes.node_chain_canary_effect import lane_transport
 
 pytestmark = pytest.mark.unit
 
@@ -61,6 +69,60 @@ def _plaintext_lane() -> ModelDelegateLaneSelection:
         security_protocol="PLAINTEXT",
         declared_in=_DECLARED_IN,
     )
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected_workspace"),
+    [
+        (
+            {"OMNIBASE_PATH": "preferred-workspace", "OMNI_HOME": "other-workspace"},
+            Path("preferred-workspace"),
+        ),
+        ({"OMNI_HOME": "other-workspace"}, Path("other-workspace")),
+        ({}, None),
+    ],
+)
+def test_lane_binding_uses_workspace_from_injected_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    environ: dict[str, str],
+    expected_workspace: Path | None,
+) -> None:
+    monkeypatch.setenv("OMNIBASE_PATH", "ambient-workspace")
+    monkeypatch.setenv("OMNI_HOME", "ambient-home")
+    selection = _plaintext_lane()
+    resolve = Mock(return_value=selection)
+    credentials = Mock(return_value=None)
+    monkeypatch.setattr(delegate_lane, "resolve_lane_selection_at", resolve)
+    monkeypatch.setattr(
+        delegate_lane_credentials, "resolve_lane_client_transport_for", credentials
+    )
+
+    assert resolve_lane_binding("lab", environ=environ) == (selection, None)
+
+    resolve.assert_called_once_with("lab", expected_workspace)
+    credentials.assert_called_once_with(
+        lane_target=selection, onex_home=Path.home() / ".onex", environ=environ
+    )
+
+
+def test_lane_selection_wraps_unusable_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    declaration = tmp_path / "lanes.yaml"
+    resolve = Mock(return_value=declaration)
+    error = ValueError("invalid lane transport")
+    load = Mock(side_effect=error)
+    monkeypatch.setattr(delegate_lane, "resolve_lane_declaration_path", resolve)
+    monkeypatch.setattr(lane_transport, "load_lane_transport", load)
+
+    with pytest.raises(DelegateLaneSelectionError) as caught:
+        resolve_lane_selection_at("dev", tmp_path)
+
+    assert str(caught.value).startswith("lane 'dev' is not usable:")
+    assert caught.value.__cause__ is error
+    resolve.assert_called_once_with(tmp_path)
+    load.assert_called_once_with(declaration, "dev")
 
 
 def test_no_lane_selected_binds_nothing(tmp_path: Path) -> None:
