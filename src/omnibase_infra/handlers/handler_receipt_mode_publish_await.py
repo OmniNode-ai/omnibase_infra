@@ -156,7 +156,7 @@ class HandlerReceiptModePublishAwait:
                 return
             correlated = str(incoming.get("correlation_id")) == str(correlation_id)
             echoed = (
-                "invocation_id" in payload
+                invocation_id is not None
                 and "invocation_id" in reply
                 and reply.get("invocation_id") == invocation_id
             )

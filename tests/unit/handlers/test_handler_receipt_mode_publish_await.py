@@ -214,7 +214,7 @@ def test_absent_invocation_does_not_correlate_unrelated_action(
     bus = EventBusInmemory()
 
     async def responder(message: ModelEventMessage) -> None:
-        await _reply(bus, ACTION_TOPIC, str(uuid4()), {"action": "allow"})
+        await _reply(bus, ACTION_TOPIC, str(uuid4()), {**payload, "action": "allow"})
 
     _respond(bus, responder)
     assert _call(bus, payload=payload, deadline_ms=200) == ()
