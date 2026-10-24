@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21217"
+title: "Vendor the hosted credential ordered-model migration"
+summary: >-
+  T5 deployment component of AC1: carry the routing overlay's ordered models and version migration byte for byte, with its exact tenant ledger binding and forward-only classification. This identity check does not prove runtime PostgreSQL CAS, a lane application, T6 routing or T7 dashboard management.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-hosted-ordered-model-deployment"
+    statement: "The deployment artifact must carry the same schema migration as the hosted credential writer."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          A hosted credential created with two models projects them in the order given, and two replaces carrying the same expected_version apply one and refuse the other. This repository proves only the migration delivery component; the writer's real PostgreSQL tests and serving-lane application remain separate required evidence.
+evidence_requirements:
+  - kind: "tests"
+    description: "Exact migration source bytes, unique tenant ledger binding and forward-only classification."
+    command: "uv run pytest tests/unit/migrations/test_omn21217_ordered_models_vendor.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn21217-t5-ordered-model-migration-vendor"
+    description: "AC1 deployment identity only: missing or altered migration, wrong ledger binding or wrong classification fails."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn21217_ordered_models_vendor.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

@@ -137,6 +137,7 @@ migrations:
   forward/nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql: forward-only # ALTER TABLE ADD CONSTRAINT DELEGATION_ROUTING_TENANT_OVERLAY_PROVIDER_TOKEN
   forward/nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql: forward-only # UPDATE
   forward/nodes/node_delegation_routing_reducer/0006_grant_app_dashboard_overlay.sql: expand-only
+  forward/nodes/node_delegation_routing_reducer/0007_add_credential_ordered_models.sql: forward-only # UPDATE backfill; ADD CONSTRAINT
   forward/nodes/node_deployment_evidence_reducer/0001_create_deployment_evidence_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT DEPLOYMENT_EVIDENCE_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT DEPLOYMENT
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
