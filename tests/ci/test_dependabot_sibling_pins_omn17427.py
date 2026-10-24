@@ -1,75 +1,52 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-17427 / OMN-20331: Dependabot ignores sibling workflow and action pins.
+"""OMN-17427 / OMN-21351: no Dependabot run can move a workflow or action pin.
 
-OmniNode-ai sibling pins move only in PRs passing the gates that read the new
-sha; third-party actions retain their Dependabot updates.
+OMN-21351 deleted .github/dependabot.yml, so no ecosystem has a version-update
+schedule: neither OmniNode-ai sibling pins nor third-party action pins are
+proposed by Dependabot any more. Both move only in a deliberate PR that passes
+the gates reading the new sha. Every sibling ``uses:`` is pinned to a full
+commit sha, so no tag or branch can float underneath it either.
 
-Falsifier: delete the OmniNode-ai/* ignore from .github/dependabot.yml and
-test_github_actions_updates_ignore_sibling_pins fails.
+Falsifier: restore a dependabot.yml, or pin any OmniNode-ai ``uses:`` to a tag
+or branch, and a test here fails.
 """
 
 from __future__ import annotations
 
-import fnmatch
 import re
 from pathlib import Path
-from typing import cast
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SIBLING_USES = re.compile(r"uses:\s*(OmniNode-ai/[^@\s]+)@(\S+)")
 
 
-def _github_actions_ignores() -> list[dict[str, object]]:
-    updates: list[dict[str, object]] = yaml.safe_load(
-        (REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
-    )["updates"]
-    update = next(
-        entry for entry in updates if entry["package-ecosystem"] == "github-actions"
-    )
-    return cast("list[dict[str, object]]", update.get("ignore", []))
-
-
-def test_github_actions_updates_ignore_sibling_pins() -> None:
-    ignores = [
-        entry
-        for entry in _github_actions_ignores()
-        if entry["dependency-name"] == "OmniNode-ai/*"
-    ]
-    assert ignores, "github-actions updates must ignore OmniNode-ai/*"
-    assert all(
-        "versions" not in entry and "update-types" not in entry for entry in ignores
-    )
-
-
-def test_every_sibling_uses_is_covered_by_the_ignore() -> None:
-    pattern = next(
-        entry["dependency-name"]
-        for entry in _github_actions_ignores()
-        if entry["dependency-name"] == "OmniNode-ai/*"
-    )
-    assert isinstance(pattern, str)
+def _sibling_uses() -> dict[str, set[str]]:
     files = [
         *(REPO_ROOT / ".github" / "workflows").glob("*.yml"),
         *(REPO_ROOT / ".github" / "actions").glob("**/action.yml"),
     ]
-    names = {
-        match.group(1)
-        for path in files
-        for match in re.finditer(
-            r"uses:\s*(OmniNode-ai/[^@\s]+)@", path.read_text(encoding="utf-8")
-        )
+    uses: dict[str, set[str]] = {}
+    for path in files:
+        for match in SIBLING_USES.finditer(path.read_text(encoding="utf-8")):
+            uses.setdefault(match.group(1), set()).add(match.group(2))
+    return uses
+
+
+def test_no_dependabot_configuration() -> None:
+    assert not (REPO_ROOT / ".github" / "dependabot.yml").exists()
+    assert not (REPO_ROOT / ".github" / "dependabot.yaml").exists()
+
+
+def test_every_sibling_uses_is_pinned_to_a_full_sha() -> None:
+    uses = _sibling_uses()
+    assert uses, "expected sibling workflow or action uses"
+    floating = {
+        name: sorted(ref for ref in refs if not re.fullmatch(r"[0-9a-f]{40}", ref))
+        for name, refs in uses.items()
     }
-    assert names, "expected sibling workflow or action uses"
-    assert all(fnmatch.fnmatchcase(name, pattern) for name in names)
-
-
-def test_third_party_actions_still_update() -> None:
-    for entry in _github_actions_ignores():
-        pattern = entry["dependency-name"]
-        assert isinstance(pattern, str)
-        assert not fnmatch.fnmatchcase("actions/setup-node", pattern), pattern
+    assert not {name: refs for name, refs in floating.items() if refs}
