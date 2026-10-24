@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21371
+title: "Collaborator lane overlay writer: test_lane_overlay_dir_resolution fails in the merge queue and stalls omnibase_infra landing"
+summary: >-
+  omnibase_infra#5272 adds the lane overlay mount to projection-delegation-writer in the collaborator lane compose file. The lane overlay table in tests/unit/docker/test_lane_overlay_dir_resolution.py still listed only that lane's two runtimes, so the parametrized mount test failed in merge-queue Splits 1/15 and 6/15. The table now lists the delegation writer for a two-runtime recipe that defines it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21371-lane-overlay-table
+    statement: >-
+      The lane overlay mount table names every collaborator lane service that lists the lane overlay bind, the delegation writer included, so test_lane_overlay_dir_resolution passes at the PR head in every split.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: test_lane_overlay_dir_resolution passes at the PR's new head in the same splits the merge queue runs -- falsifier: uv run pytest tests -q -k test_lane_overlay_dir_resolution on a lab host, and the merge queue run for the new head.
+      - id: AC2
+        statement: >-
+          AC2: omnibase_infra#5272 lands without another merge-queue failure on that test -- falsifier: uv run pytest tests -q -k lane_overlay and the PR's merged state read with gh api repos/OmniNode-ai/omnibase_infra/pulls/5272 --jq .merged.
+evidence_requirements:
+  - kind: tests
+    description: The lane overlay mount table matches the services every lane compose file binds the overlay on.
+    command: uv run --frozen pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21371-ac1-lane-overlay-table
+    description: >-
+      Every lane compose file mounts its overlay on exactly the services the table names; the collaborator lane case fails at the merge base, whose compose has no writer mount.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21371-ac2-lane-overlay-selection
+    description: >-
+      The lane_overlay selection over the unit table test and the collaborator lane render test passes; the merged state is read after landing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_lane_overlay_dir_resolution.py tests/integration/infra/test_lakshman_compose_render.py -q -n 0 -p no:cacheprovider -k lane_overlay
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21371-deploy-writer-overlay
+    description: >-
+      Post-deploy probe: the collaborator lane's delegation writer container has the lane overlay file at the path its environment names. Hosted CI has no lane container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omnimarket-lakshman-projection-delegation-writer test -f /app/config/delegation/lane.bifrost.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
