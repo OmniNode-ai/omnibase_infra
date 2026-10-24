@@ -1,0 +1,1 @@
+Live-contact exception: the change adds one runner label (arch-amd64) to the runs-on fallback of the hostile-review job and a comment, plus a static test of that label set; it adds no request, endpoint or call path, so no new contact surface exists to record.
