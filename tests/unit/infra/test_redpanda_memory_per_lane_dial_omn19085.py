@@ -205,10 +205,12 @@ def test_stability_test_dial_is_12g_by_default_and_needs_no_env_edit() -> None:
 
 
 def _partition_cap_profile_memory(compose_path: Path) -> str:
+    services = _load_compose(compose_path)["services"]
+    assert "redpanda-partition-cap" in services, (
+        f"the profile service that logs the broker's memory is missing from {compose_path}"
+    )
     return str(
-        _load_compose(compose_path)["services"]["redpanda-partition-cap"][
-            "environment"
-        ]["REDPANDA_PROFILE_MEMORY"]
+        services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
     )
 
 
@@ -223,8 +225,13 @@ def test_dev_broker_takes_the_staged_8g_step() -> None:
     swap. The judge broker serves 1537 partitions on 2G. The broker command and
     the profile service that logs it must carry the same default, or the
     profile's logged memory would disagree with the running broker.
+    The broker's own 8G default is pinned by
+    test_dev_lane_reads_its_own_memory_dial, so this test pins only that the
+    profile service carries the same value.
     """
     infra = _DOCKER_DIR / "docker-compose.infra.yml"
 
-    assert _memory_arg(infra) == "${DEV_REDPANDA_MEMORY:-8G}"
-    assert _partition_cap_profile_memory(infra) == "${DEV_REDPANDA_MEMORY:-8G}"
+    assert _partition_cap_profile_memory(infra) == _memory_arg(infra), (
+        "the profile service's logged memory disagrees with the running "
+        "broker's reservation"
+    )
