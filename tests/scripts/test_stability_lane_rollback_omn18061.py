@@ -605,52 +605,44 @@ def test_folded_lane_verifier_checks_only_the_remaining_core_services() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("container_exists", "main_logged_fold", "retires"),
-    [(False, True, False), (True, False, False), (True, True, True)],
-)
-def test_retired_effects_cleanup_runs_on_pass_only_and_keeps_volumes(
-    container_exists: bool, main_logged_fold: bool, retires: bool
+@pytest.mark.parametrize("container_exists", [False, True])
+@pytest.mark.parametrize("main_logged_fold", [False, True])
+def test_folded_effects_verification_runs_on_pass_without_retiring(
+    container_exists: bool, main_logged_fold: bool
 ) -> None:
-    """OMN-21288: the old effects container is retired only on a PASS refresh,
-    only after main logged its folded roles, and never with ``-v``.
-
-    Runs the block with a fake ``docker`` function, never a daemon.
-    """
+    """PASS verifies folded roles and retirement without changing the result."""
     text = REFRESH_STABILITY.read_text()
-    start = text.index("    # OMN-21288: the main runtime carries the effects role")
-    cleanup = text[start : text.index("    # Prune old preflight tags", start)]
-    # Inside the SUCCESS branch: a failed refresh that rolls main back to an
-    # image predating the fold keeps the old effects container.
+    start = text.index("    # OMN-21288: the deploy handler retires effects")
+    verification = text[start : text.index("    # Prune old preflight tags", start)]
     success = text.index('    RESULT="SUCCESS"')
     assert success < start < text.index("elif [[", success)
     script = f"""
 set -euo pipefail
-INSPECT_EXIT={0 if container_exists else 1}
+CONTAINER_EXISTS={str(container_exists).lower()}
 MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
 COMPOSE_PROJECT=lane-a
-CALLS="$(mktemp)"
+RESULT=SUCCESS
 declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
-log() {{ :; }}
-err() {{ :; }}
+err() {{ printf 'ERR: %s\\n' "$*"; }}
 docker() {{
     case "$1" in
-        ps) [[ "$INSPECT_EXIT" -eq 0 ]] && printf 'c0ffee\\n' || true ;;
+        ps) if "$CONTAINER_EXISTS"; then printf 'c0ffee\\n'; fi ;;
         logs) printf '%s\\n' "$MAIN_LOG" ;;
-        stop | rm) printf '%s\\n' "$@" >> "$CALLS" ;;
         *) return 9 ;;
     esac
 }}
 """
     result = subprocess.run(
-        ["bash", "-c", script + cleanup + 'cat "$CALLS"; rm -f "$CALLS"\n'],
+        ["bash", "-c", script + verification + 'printf "RESULT=%s\\n" "$RESULT"'],
         capture_output=True,
         text=True,
         check=True,
     )
-    calls = result.stdout.splitlines()
-    assert calls == (["stop", "c0ffee", "rm", "c0ffee"] if retires else [])
-    assert "-v" not in calls
+    assert ("did not attach its folded roles" in result.stdout) is not main_logged_fold
+    assert (
+        "runtime-effects containers still exist" in result.stdout
+    ) is container_exists
+    assert "RESULT=SUCCESS" in result.stdout
 
 
 @pytest.mark.unit

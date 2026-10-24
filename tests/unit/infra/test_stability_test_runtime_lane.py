@@ -280,10 +280,11 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
         "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
     ]
     assert services["omninode-runtime"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
+        "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085",
+        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085",
     ]
     assert policy_env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
-    # OMN-21288: the effects port stays reserved on the retained opt-in service.
+    # OMN-21288: main publishes the effects port; the old service stays opt-in.
     assert services["runtime-effects"]["profiles"] == ["folded-effects"]
     assert services["runtime-effects"]["ports"] == [
         "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
@@ -638,3 +639,16 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
         assert "stability-test" in concrete_name, volume_name
 
     assert len(concrete_names) == len(set(concrete_names))
+
+
+@pytest.mark.unit
+def test_stability_lane_main_carries_effects_environment_and_networks() -> None:
+    main = _load_overlay()["services"]["omninode-runtime"]
+    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
+        "/home/omniinfra/agent-workspaces"
+    )
+    assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
+        "redpanda:9092"
+    )
+    assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}

@@ -121,7 +121,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "postgres": {"15436"},
     "redpanda": {"39092", "39093", "29644"},
     "valkey": {"26379"},
-    "omninode-runtime": {"18085"},
+    "omninode-runtime": {"18085", "18086"},
     "runtime-worker": set(),
     "projection-api": {"13002"},
     "forward-migration": set(),
@@ -770,9 +770,24 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
         "omnibase-infra-stability-test-network"
     )
     assert rendered_config["networks"]["omnibase-infra-network"]["driver"] == "bridge"
-    # OMN-21288: the gated effects service was this profile's last user of
-    # omnimemory-network, so Compose omits the unused network from this render.
-    assert "omnimemory-network" not in rendered_config["networks"]
+    # OMN-21288: main joins the lane's memory network the effects role used.
+    lane_network = rendered_config["networks"]["omnibase-infra-network"]["name"]
+    assert rendered_config["networks"]["omnimemory-network"]["name"] == (
+        lane_network.removesuffix("-network") + "-omnimemory-network"
+    )
+    main = services["omninode-runtime"]
+    assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}
+    assert main["environment"]["CODING_AGENT_CRED_HOME"] == "/home/omniinfra"
+    assert main["environment"]["ONEX_CODING_AGENT_WORKSPACE_ROOT"] == (
+        "/home/omniinfra/agent-workspaces"
+    )
+    assert main["environment"]["OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS"] == (
+        "redpanda:9092"
+    )
+    assert {port["target"] for port in main["ports"]} == {8085}
+    assert load_compose(REPO_ROOT / COMPOSE_FILES[1])["services"]["runtime-effects"][
+        "profiles"
+    ] == ["folded-effects"]
 
     rendered_container_names = {
         service_config["container_name"]

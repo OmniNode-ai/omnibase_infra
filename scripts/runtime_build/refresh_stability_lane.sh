@@ -832,31 +832,17 @@ log "  build provenance failing      : [${DECISION_PROVENANCE}]"
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     RESULT="SUCCESS"
     log "=== SUCCESS: health-gate PASS, ancestry OK ==="
-    # OMN-21288: the main runtime carries the effects role (folded_profiles in
-    # the runtime policy contract), so the separate effects container from
-    # before the fold is retired here, on the PASS path only. A failed refresh
-    # rolls main back to an image that may predate the fold mechanism; the old
-    # effects container is left running for exactly that case. It is retired
-    # only once main has logged that it attached the folded roles, and never
-    # with -v: its volumes stay.
-    # The container is found by its compose labels, so no container name is
-    # restated here.
-    mapfile -t retired_effects < <(docker ps -aq \
+    # OMN-21288: the deploy handler retires effects before main is recreated.
+    # grep reads the whole log (no -q): under pipefail an early grep exit
+    # would SIGPIPE docker logs and read as "not found".
+    if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep "Auto-wiring folded roles" >/dev/null; then
+        err "main runtime did not attach its folded roles"
+    fi
+    remaining_effects="$(docker ps -aq \
         --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
-        --filter "label=com.docker.compose.service=runtime-effects")
-    if [[ "${#retired_effects[@]}" -gt 0 ]]; then
-        # grep reads the whole log (no -q): under pipefail an early grep exit
-        # would SIGPIPE docker logs and read as "not found".
-        if docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep "Auto-wiring folded roles" >/dev/null; then
-            log "retiring the runtime-effects container ${retired_effects[*]}: main attached the folded roles"
-            # By container id, not `compose rm`: the service is opt-in under the
-            # folded-effects profile, and that profile alone does not resolve
-            # (runtime-effects depends on omninode-runtime). No -v: volumes stay.
-            docker stop "${retired_effects[@]}" >/dev/null
-            docker rm "${retired_effects[@]}" >/dev/null
-        else
-            err "main runtime did not log its folded roles; runtime-effects container ${retired_effects[*]} left running"
-        fi
+        --filter "label=com.docker.compose.service=runtime-effects")"
+    if [[ -n "${remaining_effects}" ]]; then
+        err "runtime-effects containers still exist after folded deploy: ${remaining_effects}"
     fi
     # Prune old preflight tags (keep last 3) -- bounded local rollback history.
     # Over the full anchored set (OMN-18061), or the writers accumulate tags

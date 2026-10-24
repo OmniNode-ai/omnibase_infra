@@ -211,6 +211,7 @@ def _run_readback(
             _extract_array("DEV_LANE_CLOUD_DB_SERVICES"),
             "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
             _extract_function("exclude_cloud_database_services"),
+            _extract_function("resolve_lane_folded_services"),
             _extract_function("resolve_lane_runtime_services"),
             # OMN-18656: readback_deployed_ref() now partitions by the repo
             # that BUILT each image before asserting its ref, so its new
