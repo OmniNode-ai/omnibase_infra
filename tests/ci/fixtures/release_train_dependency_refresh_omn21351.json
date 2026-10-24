@@ -1,0 +1,1079 @@
+{
+ "_provenance": {
+  "captured_utc": "2026-10-24T01:14:41Z",
+  "source": "uv lock --upgrade-package run by scripts/ci/release_train.py refresh_locked_dependencies over this repository's own pyproject.toml and uv.lock at dev 95ada3399, real uv against the package index",
+  "uv_lock_sha256_before": "eb4eea27d67b154cd47c79f5cab52c23fe2a77a7493000f6a10e50c5c736a7c9"
+ },
+ "argv_head": [
+  "uv",
+  "lock"
+ ],
+ "exit_code": 0,
+ "first_party_registry_packages": [
+  "omnibase-compat",
+  "omnibase-core",
+  "omnibase-spi"
+ ],
+ "moves": [
+  {
+   "from": "0.3.26",
+   "name": "a2a-sdk",
+   "to": "1.2.3"
+  },
+  {
+   "from": "3.1.16",
+   "name": "aenum",
+   "to": "3.1.17"
+  },
+  {
+   "from": "23.2.1",
+   "name": "aiofiles",
+   "to": "25.1.0"
+  },
+  {
+   "from": "2.6.1",
+   "name": "aiohappyeyeballs",
+   "to": "2.7.1"
+  },
+  {
+   "from": "0.13.0",
+   "name": "aiokafka",
+   "to": "0.14.0"
+  },
+  {
+   "from": "0.0.4",
+   "name": "annotated-doc",
+   "to": "0.0.5"
+  },
+  {
+   "from": "0.7.0",
+   "name": "annotated-types",
+   "to": "0.8.0"
+  },
+  {
+   "from": "4.14.2",
+   "name": "anyio",
+   "to": "4.15.1"
+  },
+  {
+   "from": "3.11.1",
+   "name": "asgiref",
+   "to": "3.13.0"
+  },
+  {
+   "from": "0.31.0",
+   "name": "asyncpg",
+   "to": "0.32.0"
+  },
+  {
+   "from": "25.4.0",
+   "name": "attrs",
+   "to": "26.1.0"
+  },
+  {
+   "from": "0.23.1",
+   "name": "bidict",
+   "to": "0.24.1"
+  },
+  {
+   "from": "1.0.8",
+   "name": "blake3",
+   "to": "1.0.11"
+  },
+  {
+   "from": "1.42.50",
+   "name": "boto3",
+   "to": "1.43.118"
+  },
+  {
+   "from": "1.42.50",
+   "name": "botocore",
+   "to": "1.43.118"
+  },
+  {
+   "from": "1.2.0",
+   "name": "brotli",
+   "to": "1.2.1"
+  },
+  {
+   "from": "2026.10.19",
+   "name": "certifi",
+   "to": "2026.10.23"
+  },
+  {
+   "from": "2.0.0",
+   "name": "cffi",
+   "to": "2.1.1"
+  },
+  {
+   "from": "3.4.4",
+   "name": "charset-normalizer",
+   "to": "3.5.2"
+  },
+  {
+   "from": "8.4.2",
+   "name": "click",
+   "to": "8.5.0"
+  },
+  {
+   "from": "1.7.1",
+   "name": "configargparse",
+   "to": "1.8.0"
+  },
+  {
+   "from": "2.13.0",
+   "name": "confluent-kafka",
+   "to": "2.16.0"
+  },
+  {
+   "from": "7.13.4",
+   "name": "coverage",
+   "to": "7.17.0"
+  },
+  {
+   "from": "2.12.1",
+   "name": "cramjam",
+   "to": "2.14.0"
+  },
+  {
+   "from": "50.0.0",
+   "name": "cryptography",
+   "to": "50.0.2"
+  },
+  {
+   "from": "1.3.1",
+   "name": "deprecated",
+   "to": "3.0.0"
+  },
+  {
+   "from": "2.8.0",
+   "name": "dnspython",
+   "to": "2.9.0"
+  },
+  {
+   "from": "7.1.0",
+   "name": "docker",
+   "to": "7.2.0"
+  },
+  {
+   "from": "0.136.3",
+   "name": "fastapi",
+   "to": "0.143.5"
+  },
+  {
+   "from": "3.32.7",
+   "name": "filelock",
+   "to": "4.2.4"
+  },
+  {
+   "from": "6.0.2",
+   "name": "flask-cors",
+   "to": "6.0.5"
+  },
+  {
+   "from": "25.9.1",
+   "name": "gevent",
+   "to": "26.9.0"
+  },
+  {
+   "from": "2.3.7",
+   "name": "geventhttpclient",
+   "to": "2.6.1"
+  },
+  {
+   "from": "2.30.3",
+   "name": "google-api-core",
+   "to": "2.43.0"
+  },
+  {
+   "from": "2.49.2",
+   "name": "google-auth",
+   "to": "2.62.0"
+  },
+  {
+   "from": "1.72.0",
+   "name": "googleapis-common-protos",
+   "to": "1.76.0"
+  },
+  {
+   "from": "3.3.1",
+   "name": "greenlet",
+   "to": "3.5.6"
+  },
+  {
+   "from": "1.78.0",
+   "name": "grpcio",
+   "to": "1.84.1"
+  },
+  {
+   "from": "1.32.0",
+   "name": "hatchling",
+   "to": "1.32.4"
+  },
+  {
+   "from": "6.151.6",
+   "name": "hypothesis",
+   "to": "6.170.9"
+  },
+  {
+   "from": "2.6.16",
+   "name": "identify",
+   "to": "2.6.20"
+  },
+  {
+   "from": "3.15",
+   "name": "idna",
+   "to": "3.20"
+  },
+  {
+   "from": "1.0.15",
+   "name": "infisicalsdk",
+   "to": "1.0.18"
+  },
+  {
+   "from": "2.3.0",
+   "name": "iniconfig",
+   "to": "2.3.1"
+  },
+  {
+   "from": "2.3.2",
+   "name": "kafka-python",
+   "to": "3.0.11"
+  },
+  {
+   "from": "0.8.0",
+   "name": "librt",
+   "to": "0.16.0"
+  },
+  {
+   "from": "2.0.3",
+   "name": "linkify-it-py",
+   "to": "2.2.0"
+  },
+  {
+   "from": "2.43.3",
+   "name": "locust",
+   "to": "2.47.0"
+  },
+  {
+   "from": "4.0.0",
+   "name": "markdown-it-py",
+   "to": "4.2.0"
+  },
+  {
+   "from": "3.0.3",
+   "name": "markupsafe",
+   "to": "3.0.4"
+  },
+  {
+   "from": "1.30.0",
+   "name": "mcp",
+   "to": "2.3.0"
+  },
+  {
+   "from": "0.5.0",
+   "name": "mdit-py-plugins",
+   "to": "0.6.1"
+  },
+  {
+   "from": "1.2.1",
+   "name": "msgpack",
+   "to": "1.2.3"
+  },
+  {
+   "from": "6.9.1",
+   "name": "multidict",
+   "to": "7.1.0"
+  },
+  {
+   "from": "1.19.1",
+   "name": "mypy",
+   "to": "2.4.0"
+  },
+  {
+   "from": "5.28.3",
+   "name": "neo4j",
+   "to": "6.4.1"
+  },
+  {
+   "from": "1.10.0",
+   "name": "nodeenv",
+   "to": "1.11.0"
+  },
+  {
+   "from": "2.4.2",
+   "name": "numpy",
+   "to": "2.5.4"
+  },
+  {
+   "from": "1.40.0",
+   "name": "opentelemetry-api",
+   "to": "1.44.0"
+  },
+  {
+   "from": "1.40.0",
+   "name": "opentelemetry-exporter-otlp-proto-common",
+   "to": "1.44.0"
+  },
+  {
+   "from": "1.40.0",
+   "name": "opentelemetry-exporter-otlp-proto-http",
+   "to": "1.44.0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-aiohttp-client",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-asgi",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-asyncpg",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-fastapi",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-kafka-python",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-instrumentation-redis",
+   "to": "0.65b0"
+  },
+  {
+   "from": "1.40.0",
+   "name": "opentelemetry-proto",
+   "to": "1.44.0"
+  },
+  {
+   "from": "1.40.0",
+   "name": "opentelemetry-sdk",
+   "to": "1.44.0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-semantic-conventions",
+   "to": "0.65b0"
+  },
+  {
+   "from": "0.61b0",
+   "name": "opentelemetry-util-http",
+   "to": "0.65b0"
+  },
+  {
+   "from": "1.0.4",
+   "name": "pathspec",
+   "to": "1.1.1"
+  },
+  {
+   "from": "4.9.1",
+   "name": "platformdirs",
+   "to": "4.13.5"
+  },
+  {
+   "from": "1.6.0",
+   "name": "pluggy",
+   "to": "1.7.0"
+  },
+  {
+   "from": "3.2.0",
+   "name": "portalocker",
+   "to": "4.4.1"
+  },
+  {
+   "from": "4.5.1",
+   "name": "pre-commit",
+   "to": "4.7.0"
+  },
+  {
+   "from": "0.19.0",
+   "name": "prometheus-client",
+   "to": "0.26.0"
+  },
+  {
+   "from": "0.4.1",
+   "name": "propcache",
+   "to": "0.5.4"
+  },
+  {
+   "from": "1.27.2",
+   "name": "proto-plus",
+   "to": "1.29.0"
+  },
+  {
+   "from": "5.29.6",
+   "name": "protobuf",
+   "to": "7.36.2"
+  },
+  {
+   "from": "2.9.12",
+   "name": "psycopg2-binary",
+   "to": "2.9.13"
+  },
+  {
+   "from": "3.0",
+   "name": "pycparser",
+   "to": "3.12"
+  },
+  {
+   "from": "2.13.4",
+   "name": "pydantic",
+   "to": "2.14.1"
+  },
+  {
+   "from": "2.46.4",
+   "name": "pydantic-core",
+   "to": "2.50.1"
+  },
+  {
+   "from": "2.14.2",
+   "name": "pydantic-settings",
+   "to": "2.16.1"
+  },
+  {
+   "from": "9.0.3",
+   "name": "pytest",
+   "to": "9.1.1"
+  },
+  {
+   "from": "1.3.0",
+   "name": "pytest-asyncio",
+   "to": "1.4.0"
+  },
+  {
+   "from": "6.3.0",
+   "name": "pytest-cov",
+   "to": "7.1.0"
+  },
+  {
+   "from": "1.1.5",
+   "name": "pytest-httpserver",
+   "to": "1.2.0"
+  },
+  {
+   "from": "3.15.1",
+   "name": "pytest-mock",
+   "to": "3.17.0"
+  },
+  {
+   "from": "1.6.1",
+   "name": "python-discovery",
+   "to": "1.6.4"
+  },
+  {
+   "from": "1.2.2",
+   "name": "python-dotenv",
+   "to": "1.2.4"
+  },
+  {
+   "from": "4.13.2",
+   "name": "python-engineio",
+   "to": "4.14.0"
+  },
+  {
+   "from": "0.0.31",
+   "name": "python-multipart",
+   "to": "0.0.32"
+  },
+  {
+   "from": "5.16.2",
+   "name": "python-socketio",
+   "to": "5.17.0"
+  },
+  {
+   "from": "2025.2",
+   "name": "pytz",
+   "to": "2026.5"
+  },
+  {
+   "from": "311",
+   "name": "pywin32",
+   "to": "312"
+  },
+  {
+   "from": "27.1.0",
+   "name": "pyzmq",
+   "to": "27.2.0"
+  },
+  {
+   "from": "1.17.1",
+   "name": "qdrant-client",
+   "to": "1.20.0"
+  },
+  {
+   "from": "8.0.0",
+   "name": "redis",
+   "to": "8.1.0"
+  },
+  {
+   "from": "2.33.0",
+   "name": "requests",
+   "to": "2.34.2"
+  },
+  {
+   "from": "1.0.6",
+   "name": "rfc3161-client",
+   "to": "1.0.9"
+  },
+  {
+   "from": "13.9.4",
+   "name": "rich",
+   "to": "15.0.0"
+  },
+  {
+   "from": "0.30.0",
+   "name": "rpds-py",
+   "to": "2026.9.1"
+  },
+  {
+   "from": "0.14.14",
+   "name": "ruff",
+   "to": "0.17.2"
+  },
+  {
+   "from": "0.16.0",
+   "name": "s3transfer",
+   "to": "0.19.3"
+  },
+  {
+   "from": "1.3.1",
+   "name": "securesystemslib",
+   "to": "1.6.0"
+  },
+  {
+   "from": "4.5.0",
+   "name": "sigstore",
+   "to": "4.5.1"
+  },
+  {
+   "from": "0.1.9",
+   "name": "slowapi",
+   "to": "0.1.10"
+  },
+  {
+   "from": "3.2.0",
+   "name": "sse-starlette",
+   "to": "3.5.0"
+  },
+  {
+   "from": "1.3.1",
+   "name": "starlette",
+   "to": "1.9.0"
+  },
+  {
+   "from": "25.5.0",
+   "name": "structlog",
+   "to": "26.1.0"
+  },
+  {
+   "from": "9.1.4",
+   "name": "tenacity",
+   "to": "9.2.1"
+  },
+  {
+   "from": "4.14.1",
+   "name": "testcontainers",
+   "to": "4.15.0"
+  },
+  {
+   "from": "0.89.1",
+   "name": "textual",
+   "to": "8.2.8"
+  },
+  {
+   "from": "0.15.1",
+   "name": "tomlkit",
+   "to": "0.15.2"
+  },
+  {
+   "from": "0.25.2",
+   "name": "tree-sitter",
+   "to": "0.26.0"
+  },
+  {
+   "from": "2026.6.1.19",
+   "name": "trove-classifiers",
+   "to": "2026.9.21.13"
+  },
+  {
+   "from": "7.0.0",
+   "name": "tuf",
+   "to": "7.0.1"
+  },
+  {
+   "from": "23.2.0.20240623",
+   "name": "types-aiofiles",
+   "to": "25.1.0.20260518"
+  },
+  {
+   "from": "6.0.12.20250915",
+   "name": "types-pyyaml",
+   "to": "6.0.12.20260906"
+  },
+  {
+   "from": "2.32.4.20260107",
+   "name": "types-requests",
+   "to": "2.33.0.20261006"
+  },
+  {
+   "from": "4.15.0",
+   "name": "typing-extensions",
+   "to": "4.16.0"
+  },
+  {
+   "from": "0.4.2",
+   "name": "typing-inspection",
+   "to": "0.4.4"
+  },
+  {
+   "from": "0.53.0",
+   "name": "uvicorn",
+   "to": "0.54.0"
+  },
+  {
+   "from": "21.14.12",
+   "name": "virtualenv",
+   "to": "21.14.13"
+  },
+  {
+   "from": "5.0.3",
+   "name": "watchdog",
+   "to": "6.0.0"
+  },
+  {
+   "from": "1.9.0",
+   "name": "websocket-client",
+   "to": "1.9.2"
+  },
+  {
+   "from": "1.17.3",
+   "name": "wrapt",
+   "to": "2.5.1"
+  },
+  {
+   "from": "6.1",
+   "name": "zope-event",
+   "to": "6.2"
+  },
+  {
+   "from": "8.2",
+   "name": "zope-interface",
+   "to": "8.7"
+  }
+ ],
+ "root_entry": {
+  "name": "omnibase-infra",
+  "version_after": "0.38.77",
+  "version_before": "0.38.77"
+ },
+ "stderr": "Using CPython 3.14.7\nResolved 204 packages in 1.03s\nUpdated a2a-sdk v0.3.26 -> v1.2.3\nUpdated aenum v3.1.16 -> v3.1.17\nUpdated aiofiles v23.2.1 -> v25.1.0\nUpdated aiohappyeyeballs v2.6.1 -> v2.7.1\nUpdated aiokafka v0.13.0 -> v0.14.0\nAdded aiologic v0.17.1\nUpdated annotated-doc v0.0.4 -> v0.0.5\nUpdated annotated-types v0.7.0 -> v0.8.0\nUpdated anyio v4.14.2 -> v4.15.1\nUpdated asgiref v3.11.1 -> v3.13.0\nAdded ast-serialize v0.13.1\nUpdated asyncpg v0.31.0 -> v0.32.0\nUpdated attrs v25.4.0 -> v26.1.0\nUpdated bidict v0.23.1 -> v0.24.1\nUpdated blake3 v1.0.8 -> v1.0.11\nUpdated boto3 v1.42.50 -> v1.43.118\nUpdated botocore v1.42.50 -> v1.43.118\nUpdated brotli v1.2.0 -> v1.2.1\nUpdated certifi v2026.10.19 -> v2026.10.23\nUpdated cffi v2.0.0 -> v2.1.1\nUpdated charset-normalizer v3.4.4 -> v3.5.2\nUpdated click v8.4.2 -> v8.5.0\nUpdated configargparse v1.7.1 -> v1.8.0\nUpdated confluent-kafka v2.13.0 -> v2.16.0\nUpdated coverage v7.13.4 -> v7.17.0\nUpdated cramjam v2.12.1 -> v2.14.0\nUpdated cryptography v50.0.0 -> v50.0.2\nAdded culsans v0.11.0\nUpdated deprecated v1.3.1 -> v3.0.0\nUpdated dnspython v2.8.0 -> v2.9.0\nUpdated docker v7.1.0 -> v7.2.0\nUpdated fastapi v0.136.3 -> v0.143.5\nUpdated filelock v3.32.7 -> v4.2.4\nUpdated flask-cors v6.0.2 -> v6.0.5\nUpdated gevent v25.9.1 -> v26.9.0\nUpdated geventhttpclient v2.3.7 -> v2.6.1\nUpdated google-api-core v2.30.3 -> v2.43.0\nUpdated google-auth v2.49.2 -> v2.62.0\nUpdated googleapis-common-protos v1.72.0 -> v1.76.0\nUpdated greenlet v3.3.1 -> v3.5.6\nUpdated grpcio v1.78.0 -> v1.84.1\nUpdated hatchling v1.32.0 -> v1.32.4\nAdded httpcore2 v2.16.0\nRemoved httpx-sse v0.4.3\nAdded httpx2 v2.16.0\nAdded httpx2-jsfetch v1.0\nUpdated hypothesis v6.151.6 -> v6.170.9\nUpdated identify v2.6.16 -> v2.6.20\nUpdated idna v3.15 -> v3.20\nRemoved importlib-metadata v8.4.0\nUpdated infisicalsdk v1.0.15 -> v1.0.18\nUpdated iniconfig v2.3.0 -> v2.3.1\nAdded json-rpc v1.15.0\nUpdated kafka-python v2.3.2 -> v3.0.11\nUpdated librt v0.8.0 -> v0.16.0\nUpdated linkify-it-py v2.0.3 -> v2.2.0\nUpdated locust v2.43.3 -> v2.47.0\nUpdated markdown-it-py v4.0.0 -> v4.2.0\nUpdated markupsafe v3.0.3 -> v3.0.4\nUpdated mcp v1.30.0 -> v2.3.0\nAdded mcp-types v2.3.0\nUpdated mdit-py-plugins v0.5.0 -> v0.6.1\nUpdated msgpack v1.2.1 -> v1.2.3\nUpdated multidict v6.9.1 -> v7.1.0\nUpdated mypy v1.19.1 -> v2.4.0\nUpdated neo4j v5.28.3 -> v6.4.1\nUpdated nodeenv v1.10.0 -> v1.11.0\nUpdated numpy v2.4.2 -> v2.5.4\nUpdated opentelemetry-api v1.40.0 -> v1.44.0\nUpdated opentelemetry-exporter-otlp-proto-common v1.40.0 -> v1.44.0\nUpdated opentelemetry-exporter-otlp-proto-http v1.40.0 -> v1.44.0\nUpdated opentelemetry-instrumentation v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-aiohttp-client v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-asgi v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-asyncpg v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-fastapi v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-kafka-python v0.61b0 -> v0.65b0\nUpdated opentelemetry-instrumentation-redis v0.61b0 -> v0.65b0\nUpdated opentelemetry-proto v1.40.0 -> v1.44.0\nUpdated opentelemetry-sdk v1.40.0 -> v1.44.0\nUpdated opentelemetry-semantic-conventions v0.61b0 -> v0.65b0\nUpdated opentelemetry-util-http v0.61b0 -> v0.65b0\nUpdated pathspec v1.0.4 -> v1.1.1\nUpdated platformdirs v4.9.1 -> v4.13.5\nUpdated pluggy v1.6.0 -> v1.7.0\nUpdated portalocker v3.2.0 -> v4.4.1\nUpdated pre-commit v4.5.1 -> v4.7.0\nUpdated prometheus-client v0.19.0 -> v0.26.0\nUpdated propcache v0.4.1 -> v0.5.4\nUpdated proto-plus v1.27.2 -> v1.29.0\nUpdated protobuf v5.29.6 -> v7.36.2\nUpdated psycopg2-binary v2.9.12 -> v2.9.13\nUpdated pycparser v3.0 -> v3.12\nUpdated pydantic v2.13.4 -> v2.14.1\nUpdated pydantic-core v2.46.4 -> v2.50.1\nUpdated pydantic-settings v2.14.2 -> v2.16.1\nRemoved pyopenssl v26.4.0\nUpdated pytest v9.0.3 -> v9.1.1\nUpdated pytest-asyncio v1.3.0 -> v1.4.0\nUpdated pytest-cov v6.3.0 -> v7.1.0\nUpdated pytest-httpserver v1.1.5 -> v1.2.0\nUpdated pytest-mock v3.15.1 -> v3.17.0\nUpdated python-discovery v1.6.1 -> v1.6.4\nUpdated python-dotenv v1.2.2 -> v1.2.4\nUpdated python-engineio v4.13.2 -> v4.14.0\nUpdated python-multipart v0.0.31 -> v0.0.32\nUpdated python-socketio v5.16.2 -> v5.17.0\nUpdated pytz v2025.2 -> v2026.5\nUpdated pywin32 v311 -> v312\nUpdated pyzmq v27.1.0 -> v27.2.0\nUpdated qdrant-client v1.17.1 -> v1.20.0\nUpdated redis v8.0.0 -> v8.1.0\nUpdated requests v2.33.0 -> v2.34.2\nUpdated rfc3161-client v1.0.6 -> v1.0.9\nUpdated rich v13.9.4 -> v15.0.0\nUpdated rpds-py v0.30.0 -> v2026.9.1\nUpdated ruff v0.14.14 -> v0.17.2\nUpdated s3transfer v0.16.0 -> v0.19.3\nUpdated securesystemslib v1.3.1 -> v1.6.0\nUpdated sigstore v4.5.0 -> v4.5.1\nUpdated slowapi v0.1.9 -> v0.1.10\nAdded sniffio v1.3.1\nUpdated sse-starlette v3.2.0 -> v3.5.0\nUpdated starlette v1.3.1 -> v1.9.0\nUpdated structlog v25.5.0 -> v26.1.0\nUpdated tenacity v9.1.4 -> v9.2.1\nUpdated testcontainers v4.14.1 -> v4.15.0\nUpdated textual v0.89.1 -> v8.2.8\nUpdated tomlkit v0.15.1 -> v0.15.2\nUpdated tree-sitter v0.25.2 -> v0.26.0\nUpdated trove-classifiers v2026.6.1.19 -> v2026.9.21.13\nAdded truststore v0.10.5\nUpdated tuf v7.0.0 -> v7.0.1\nUpdated types-aiofiles v23.2.0.20240623 -> v25.1.0.20260518\nUpdated types-pyyaml v6.0.12.20250915 -> v6.0.12.20260906\nUpdated types-requests v2.32.4.20260107 -> v2.33.0.20261006\nUpdated typing-extensions v4.15.0 -> v4.16.0\nUpdated typing-inspection v0.4.2 -> v0.4.4\nRemoved uc-micro-py v1.0.3\nUpdated uvicorn v0.53.0 -> v0.54.0\nUpdated virtualenv v21.14.12 -> v21.14.13\nUpdated watchdog v5.0.3 -> v6.0.0\nUpdated websocket-client v1.9.0 -> v1.9.2\nUpdated wrapt v1.17.3 -> v2.5.1\nRemoved zipp v3.23.0\nUpdated zope-event v6.1 -> v6.2\nUpdated zope-interface v8.2 -> v8.7\n",
+ "upgrade_packages": [
+  "a2a-sdk",
+  "aenum",
+  "aiofiles",
+  "aiohappyeyeballs",
+  "aiohttp",
+  "aiokafka",
+  "aiosignal",
+  "annotated-doc",
+  "annotated-types",
+  "anyio",
+  "asgiref",
+  "async-timeout",
+  "asyncpg",
+  "attrs",
+  "aws-msk-iam-sasl-signer-python",
+  "bidict",
+  "blake3",
+  "blinker",
+  "boto3",
+  "botocore",
+  "brotli",
+  "cachebox",
+  "certifi",
+  "cffi",
+  "cfgv",
+  "charset-normalizer",
+  "circuitbreaker",
+  "click",
+  "colorama",
+  "configargparse",
+  "confluent-kafka",
+  "coverage",
+  "cramjam",
+  "cryptography",
+  "deepdiff",
+  "dependency-injector",
+  "deprecated",
+  "distlib",
+  "dnspython",
+  "docker",
+  "email-validator",
+  "execnet",
+  "fastapi",
+  "filelock",
+  "flask",
+  "flask-cors",
+  "flask-login",
+  "frozenlist",
+  "gevent",
+  "geventhttpclient",
+  "google-api-core",
+  "google-auth",
+  "googleapis-common-protos",
+  "greenlet",
+  "grpcio",
+  "h11",
+  "h2",
+  "hatchling",
+  "hpack",
+  "httpcore",
+  "httpx",
+  "httpx-sse",
+  "hyperframe",
+  "hypothesis",
+  "id",
+  "identify",
+  "idna",
+  "importlib-metadata",
+  "infisicalsdk",
+  "iniconfig",
+  "itsdangerous",
+  "jinja2",
+  "jmespath",
+  "jsonschema",
+  "jsonschema-specifications",
+  "kafka-python",
+  "librt",
+  "limits",
+  "linkify-it-py",
+  "locust",
+  "markdown-it-py",
+  "markupsafe",
+  "mcp",
+  "mdit-py-plugins",
+  "mdurl",
+  "msgpack",
+  "multidict",
+  "mypy",
+  "mypy-extensions",
+  "neo4j",
+  "nodeenv",
+  "numpy",
+  "opentelemetry-api",
+  "opentelemetry-exporter-otlp-proto-common",
+  "opentelemetry-exporter-otlp-proto-http",
+  "opentelemetry-instrumentation",
+  "opentelemetry-instrumentation-aiohttp-client",
+  "opentelemetry-instrumentation-asgi",
+  "opentelemetry-instrumentation-asyncpg",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-kafka-python",
+  "opentelemetry-instrumentation-redis",
+  "opentelemetry-proto",
+  "opentelemetry-sdk",
+  "opentelemetry-semantic-conventions",
+  "opentelemetry-util-http",
+  "orderly-set",
+  "packaging",
+  "pathspec",
+  "platformdirs",
+  "pluggy",
+  "portalocker",
+  "pre-commit",
+  "prometheus-client",
+  "propcache",
+  "proto-plus",
+  "protobuf",
+  "psutil",
+  "psycopg2-binary",
+  "pyasn1",
+  "pyasn1-modules",
+  "pycparser",
+  "pydantic",
+  "pydantic-core",
+  "pydantic-settings",
+  "pygments",
+  "pyjwt",
+  "pyopenssl",
+  "pytest",
+  "pytest-asyncio",
+  "pytest-cov",
+  "pytest-httpserver",
+  "pytest-mock",
+  "pytest-split",
+  "pytest-timeout",
+  "pytest-xdist",
+  "python-dateutil",
+  "python-discovery",
+  "python-dotenv",
+  "python-engineio",
+  "python-multipart",
+  "python-socketio",
+  "pytz",
+  "pywin32",
+  "pyyaml",
+  "pyzmq",
+  "qdrant-client",
+  "redis",
+  "referencing",
+  "requests",
+  "rfc3161-client",
+  "rfc8785",
+  "rich",
+  "rpds-py",
+  "ruamel-yaml",
+  "ruff",
+  "s3transfer",
+  "securesystemslib",
+  "sigstore",
+  "sigstore-models",
+  "sigstore-rekor-types",
+  "simple-websocket",
+  "six",
+  "slowapi",
+  "sortedcontainers",
+  "sqlparse",
+  "sse-starlette",
+  "starlette",
+  "structlog",
+  "tenacity",
+  "testcontainers",
+  "textual",
+  "tomlkit",
+  "tree-sitter",
+  "tree-sitter-python",
+  "trove-classifiers",
+  "tuf",
+  "types-aiofiles",
+  "types-pyyaml",
+  "types-requests",
+  "typing-extensions",
+  "typing-inspection",
+  "uc-micro-py",
+  "urllib3",
+  "uvicorn",
+  "virtualenv",
+  "watchdog",
+  "websocket-client",
+  "werkzeug",
+  "wrapt",
+  "wsproto",
+  "yarl",
+  "zipp",
+  "zope-event",
+  "zope-interface"
+ ],
+ "versions_before": {
+  "a2a-sdk": "0.3.26",
+  "aenum": "3.1.16",
+  "aiofiles": "23.2.1",
+  "aiohappyeyeballs": "2.6.1",
+  "aiohttp": "3.14.5",
+  "aiokafka": "0.13.0",
+  "aiosignal": "1.4.0",
+  "annotated-doc": "0.0.4",
+  "annotated-types": "0.7.0",
+  "anyio": "4.14.2",
+  "asgiref": "3.11.1",
+  "async-timeout": "5.0.1",
+  "asyncpg": "0.31.0",
+  "attrs": "25.4.0",
+  "aws-msk-iam-sasl-signer-python": "1.0.2",
+  "bidict": "0.23.1",
+  "blake3": "1.0.8",
+  "blinker": "1.9.0",
+  "boto3": "1.42.50",
+  "botocore": "1.42.50",
+  "brotli": "1.2.0",
+  "cachebox": "5.2.3",
+  "certifi": "2026.10.19",
+  "cffi": "2.0.0",
+  "cfgv": "3.5.0",
+  "charset-normalizer": "3.4.4",
+  "circuitbreaker": "2.1.3",
+  "click": "8.4.2",
+  "colorama": "0.4.6",
+  "configargparse": "1.7.1",
+  "confluent-kafka": "2.13.0",
+  "coverage": "7.13.4",
+  "cramjam": "2.12.1",
+  "cryptography": "50.0.0",
+  "deepdiff": "9.1.0",
+  "dependency-injector": "4.49.1",
+  "deprecated": "1.3.1",
+  "distlib": "0.4.4",
+  "dnspython": "2.8.0",
+  "docker": "7.1.0",
+  "email-validator": "2.3.0",
+  "execnet": "2.1.2",
+  "fastapi": "0.136.3",
+  "filelock": "3.32.7",
+  "flask": "3.1.3",
+  "flask-cors": "6.0.2",
+  "flask-login": "0.6.3",
+  "frozenlist": "1.8.0",
+  "gevent": "25.9.1",
+  "geventhttpclient": "2.3.7",
+  "google-api-core": "2.30.3",
+  "google-auth": "2.49.2",
+  "googleapis-common-protos": "1.72.0",
+  "greenlet": "3.3.1",
+  "grpcio": "1.78.0",
+  "h11": "0.16.0",
+  "h2": "4.4.1",
+  "hatchling": "1.32.0",
+  "hpack": "4.2.0",
+  "httpcore": "1.0.9",
+  "httpx": "0.28.1",
+  "httpx-sse": "0.4.3",
+  "hyperframe": "6.1.0",
+  "hypothesis": "6.151.6",
+  "id": "1.6.1",
+  "identify": "2.6.16",
+  "idna": "3.15",
+  "importlib-metadata": "8.4.0",
+  "infisicalsdk": "1.0.15",
+  "iniconfig": "2.3.0",
+  "itsdangerous": "2.2.0",
+  "jinja2": "3.1.6",
+  "jmespath": "1.1.0",
+  "jsonschema": "4.26.0",
+  "jsonschema-specifications": "2025.9.1",
+  "kafka-python": "2.3.2",
+  "librt": "0.8.0",
+  "limits": "5.8.0",
+  "linkify-it-py": "2.0.3",
+  "locust": "2.43.3",
+  "markdown-it-py": "4.0.0",
+  "markupsafe": "3.0.3",
+  "mcp": "1.30.0",
+  "mdit-py-plugins": "0.5.0",
+  "mdurl": "0.1.2",
+  "msgpack": "1.2.1",
+  "multidict": "6.9.1",
+  "mypy": "1.19.1",
+  "mypy-extensions": "1.1.0",
+  "neo4j": "5.28.3",
+  "nodeenv": "1.10.0",
+  "numpy": "2.4.2",
+  "opentelemetry-api": "1.40.0",
+  "opentelemetry-exporter-otlp-proto-common": "1.40.0",
+  "opentelemetry-exporter-otlp-proto-http": "1.40.0",
+  "opentelemetry-instrumentation": "0.61b0",
+  "opentelemetry-instrumentation-aiohttp-client": "0.61b0",
+  "opentelemetry-instrumentation-asgi": "0.61b0",
+  "opentelemetry-instrumentation-asyncpg": "0.61b0",
+  "opentelemetry-instrumentation-fastapi": "0.61b0",
+  "opentelemetry-instrumentation-kafka-python": "0.61b0",
+  "opentelemetry-instrumentation-redis": "0.61b0",
+  "opentelemetry-proto": "1.40.0",
+  "opentelemetry-sdk": "1.40.0",
+  "opentelemetry-semantic-conventions": "0.61b0",
+  "opentelemetry-util-http": "0.61b0",
+  "orderly-set": "5.5.0",
+  "packaging": "26.3",
+  "pathspec": "1.0.4",
+  "platformdirs": "4.9.1",
+  "pluggy": "1.6.0",
+  "portalocker": "3.2.0",
+  "pre-commit": "4.5.1",
+  "prometheus-client": "0.19.0",
+  "propcache": "0.4.1",
+  "proto-plus": "1.27.2",
+  "protobuf": "5.29.6",
+  "psutil": "7.2.2",
+  "psycopg2-binary": "2.9.12",
+  "pyasn1": "0.6.4",
+  "pyasn1-modules": "0.4.2",
+  "pycparser": "3.0",
+  "pydantic": "2.13.4",
+  "pydantic-core": "2.46.4",
+  "pydantic-settings": "2.14.2",
+  "pygments": "2.21.0",
+  "pyjwt": "2.15.1",
+  "pyopenssl": "26.4.0",
+  "pytest": "9.0.3",
+  "pytest-asyncio": "1.3.0",
+  "pytest-cov": "6.3.0",
+  "pytest-httpserver": "1.1.5",
+  "pytest-mock": "3.15.1",
+  "pytest-split": "0.11.0",
+  "pytest-timeout": "2.4.0",
+  "pytest-xdist": "3.8.0",
+  "python-dateutil": "2.9.0.post0",
+  "python-discovery": "1.6.1",
+  "python-dotenv": "1.2.2",
+  "python-engineio": "4.13.2",
+  "python-multipart": "0.0.31",
+  "python-socketio": "5.16.2",
+  "pytz": "2025.2",
+  "pywin32": "311",
+  "pyyaml": "6.0.3",
+  "pyzmq": "27.1.0",
+  "qdrant-client": "1.17.1",
+  "redis": "8.0.0",
+  "referencing": "0.37.0",
+  "requests": "2.33.0",
+  "rfc3161-client": "1.0.6",
+  "rfc8785": "0.1.4",
+  "rich": "13.9.4",
+  "rpds-py": "0.30.0",
+  "ruamel-yaml": "0.19.1",
+  "ruff": "0.14.14",
+  "s3transfer": "0.16.0",
+  "securesystemslib": "1.3.1",
+  "sigstore": "4.5.0",
+  "sigstore-models": "0.0.6",
+  "sigstore-rekor-types": "0.0.18",
+  "simple-websocket": "1.1.0",
+  "six": "1.17.0",
+  "slowapi": "0.1.9",
+  "sortedcontainers": "2.4.0",
+  "sqlparse": "0.6.0",
+  "sse-starlette": "3.2.0",
+  "starlette": "1.3.1",
+  "structlog": "25.5.0",
+  "tenacity": "9.1.4",
+  "testcontainers": "4.14.1",
+  "textual": "0.89.1",
+  "tomlkit": "0.15.1",
+  "tree-sitter": "0.25.2",
+  "tree-sitter-python": "0.25.0",
+  "trove-classifiers": "2026.6.1.19",
+  "tuf": "7.0.0",
+  "types-aiofiles": "23.2.0.20240623",
+  "types-pyyaml": "6.0.12.20250915",
+  "types-requests": "2.32.4.20260107",
+  "typing-extensions": "4.15.0",
+  "typing-inspection": "0.4.2",
+  "uc-micro-py": "1.0.3",
+  "urllib3": "2.8.0",
+  "uvicorn": "0.53.0",
+  "virtualenv": "21.14.12",
+  "watchdog": "5.0.3",
+  "websocket-client": "1.9.0",
+  "werkzeug": "3.1.9",
+  "wrapt": "1.17.3",
+  "wsproto": "1.3.2",
+  "yarl": "1.25.1",
+  "zipp": "3.23.0",
+  "zope-event": "6.1",
+  "zope-interface": "8.2"
+ }
+}

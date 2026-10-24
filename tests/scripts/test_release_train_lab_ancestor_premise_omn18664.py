@@ -102,6 +102,9 @@ def _policy(**overrides: Any) -> Any:
         "lab_evidence_note": "the compose dev lane on the lab host",
         "mode": rt.EnumTrainMode.CUT,
         "mode_note": "",
+        "dependency_refresh": rt.EnumDependencyRefresh.LOCKED,
+        "dependency_refresh_note": "",
+        "first_party_lock_prefixes": ("omni", "onex"),
     }
     fields.update(overrides)
     return rt.ModelRepoReleasePolicy(**fields)
