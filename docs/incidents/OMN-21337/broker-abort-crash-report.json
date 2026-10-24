@@ -1,0 +1,96 @@
+{
+  "ticket": "OMN-21337",
+  "criterion": "AC4",
+  "title": "Dev broker abort, 2026-10-23T12:03:53Z",
+  "source": "OmniNode-ai/omnibase_infra#5304 pull request body, crash report section",
+  "summary": "The dev-lane broker aborted during a Kafka ListGroups request. The broker threw an exception while converting a consumer group's internal state to its Kafka state name, the exception was not caught, and std::terminate aborted shard 0 (the only shard, --smp 1), which took the whole broker down. Docker restarted the container under the unless-stopped restart policy and the broker came back.",
+  "broker": {
+    "container": "omnibase-infra-redpanda",
+    "lane": "dev lane",
+    "image": "redpandadata/redpanda:v24.3.18",
+    "image_digest": "sha256:5c6bdbaf30c97de1ebc2ad417b7d02e0bdb5bf88e243bd3079d74bfde9c7754f",
+    "rpk_version": "v24.3.18",
+    "git_ref": "7107539486",
+    "build_date": "2025-07-16T14:04:31Z",
+    "binary_build_id": "91c44864ecc23071be9ca68874c810cfd7a3c1be",
+    "flags": "--mode dev-container --smp 1 --memory 12G --default-log-level=warn --set topic_partitions_per_shard=7000",
+    "restart_policy": "unless-stopped",
+    "oom_killed": false
+  },
+  "timeline_utc": [
+    [
+      "2026-10-23T11:53:17Z",
+      "Container created (the move to v24.3.18, commit ae8294344)"
+    ],
+    [
+      "2026-10-23T11:53:48Z",
+      "Redpanda logged \"Starting redpanda...\""
+    ],
+    [
+      "12:01:43Z, 12:02:37Z",
+      "Repeated WARN topic_already_exists for onex.evt.omnibase-infra.gateway-canary.v1; routine, not the request that aborted"
+    ],
+    [
+      "12:03:41.375Z",
+      "Last log line before the abort (same warning)"
+    ],
+    [
+      "12:03:53.855Z",
+      "\"libc++abi: terminating\", then \"Aborting on shard 0.\" with a backtrace"
+    ],
+    [
+      "12:03:53.866Z",
+      "\"Segmentation fault: si_code: 128\" and \"Segmentation fault on shard 0.\", same backtrace frames"
+    ],
+    [
+      "12:04:18Z",
+      "Docker started the container again (restart policy, no automation)"
+    ],
+    [
+      "12:04:22Z",
+      "\"Starting redpanda...\""
+    ]
+  ],
+  "abort_time_note": "The earlier ledger diagnosis gave 12:03:41Z as the abort time. The broker's own log puts the abort at 12:03:53Z; 12:03:41Z is the last line before it.",
+  "broker_log": [
+    "2026-10-23T12:03:41.375786242Z WARN  2026-10-23 12:03:41,375 [shard 0:main] kafka - create_topics.cc:185 - Failed to create topic(s) {{kafka/onex.evt.omnibase-infra.gateway-canary.v1}} error_code observed: cluster::errc::topic_already_exists",
+    "2026-10-23T12:03:53.855619788Z libc++abi: terminating",
+    "2026-10-23T12:03:53.865531929Z Aborting on shard 0.",
+    "2026-10-23T12:03:53.866169479Z Segmentation fault: si_code: 128, ip: 000073fb8e45c9a5",
+    "2026-10-23T12:03:53.870432807Z Segmentation fault on shard 0.",
+    "2026-10-23T12:04:22.354805950Z Starting redpanda..."
+  ],
+  "request_in_flight": {
+    "api": "ListGroups",
+    "api_key": 16,
+    "handler_versions": "0 to 4",
+    "backtrace_note": "Frames resolved against the binary's dynamic symbol table, nearest preceding symbol; the binary has no debug info, so frames 0, 1 and the seastar reactor frames resolve only to unrelated nearest symbols and are omitted. Frames between the abort handler and group_state_to_kafka_name are libc++abi (std::terminate after an uncaught exception).",
+    "backtrace": [
+      "0x4955710 kafka::group_state_to_kafka_name(kafka::group_state) +0xd0",
+      "0x4a6244c kafka::group_manager::list_groups(kafka::group_manager::list_groups_filter_data const&) const +0x43c",
+      "0x4bf7b04 kafka::group_router::list_groups(kafka::group_manager::list_groups_filter_data) +0x8b4",
+      "0x4cba2a7 kafka::handler_template<kafka::list_groups_api, 0, 4, ...>::handle +0x8e7",
+      "0x4e87db4 kafka::handler_base<false>::handle(kafka::request_context&&, seastar::smp_service_group) const",
+      "0x4f34296 kafka::process_request(kafka::request_context&&, seastar::smp_service_group, kafka::session_resources const&)",
+      "0x4ecf0f5 kafka::connection_context::client_protocol_state::process_request(...)",
+      "0x4ecb032 kafka::connection_context::dispatch_method_once(kafka::request_header, unsigned long)"
+    ],
+    "repository_clients_sending_list_groups": [
+      "backends/backend_probe.py: ListGroups v4 with states_filter [\"Stable\"] (OMN-20646)",
+      "services/service_runtime_health_monitor.py: lists groups through the confluent AdminClient",
+      "topics/managed_staging_topic_checker.py and migration/adapter_kafka_admin_lag.py: list groups through aiokafka's admin client"
+    ],
+    "sending_client": "unverified: the broker log at warn level does not record which client sent the request at 12:03:53Z"
+  },
+  "upstream_search": "A web search found no Redpanda issue or release note for an abort in group_state_to_kafka_name. No fixed version is known.",
+  "version_bump_or_config_change": {
+    "named": false,
+    "reason": "No version is known to fix it, and no broker setting is known to avoid it.",
+    "follow_ups_pending_not_filed": [
+      "report the symbolized backtrace upstream",
+      "measure whether the ListGroups v4 states filter from backend_probe.py reproduces it on a copy of the dev broker"
+    ]
+  },
+  "prior_restarts_note": "The 2026-10-22 night restarts were on the previous v24.2.7 container, which crash-looped on a startup assert (shard_balancer.cc:102); that is a different fault, recorded on commit ae8294344.",
+  "method": "docker logs omnibase-infra-redpanda --timestamps around 12:02:30Z to 12:04:40Z. The binary /opt/redpanda/libexec/redpanda was copied out of the container and frames were resolved with nm -D against it (PIE, addresses are offsets)."
+}
