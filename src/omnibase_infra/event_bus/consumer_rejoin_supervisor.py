@@ -277,6 +277,15 @@ class ConsumerRejoinSupervisor:
         self._rejoin_count: int = 0
         self._last_rejoin_failed: bool = False
 
+        # --- poll liveness (OMN-17427) -----------------------------------
+        # When the consume loop last started or finished a poll. Everything
+        # above is measured INSIDE a poll, so a loop that stopped polling left
+        # it frozen at its last value: on 2026-10-22 a group sat Empty with 0
+        # members while ``consumer_sync`` replayed a green evaluation from
+        # before its loop stopped. This is the one reading that ages on its
+        # own, and the consume-task watchdog and :meth:`sync_status` read it.
+        self._last_poll_at: float = clock()
+
     @property
     def rejoin_events(self) -> tuple[ModelConsumerGroupRejoinEvent, ...]:
         """Typed rejoin records, oldest first, for a readiness dimension.
@@ -370,6 +379,27 @@ class ConsumerRejoinSupervisor:
         """
         now = self._clock()
         measurement = self._latest_measurement
+        since_poll = max(0.0, now - self._last_poll_at)
+        if since_poll >= self._policy.sync_unready_seconds:
+            # OMN-17427: nothing has polled for the whole readiness window, so
+            # the last evaluation describes a loop that is no longer running.
+            # Report the group as stalled from its last poll instead.
+            return ModelConsumerSyncStatus(
+                topic=self._topic,
+                consumer_group=self._group_id,
+                evaluated=True,
+                reason=EnumConsumerStallReason.CONSUME_TASK_PARKED,
+                backlog_records=measurement.backlog_records if measurement else 0,
+                seconds_since_last_record=max(0.0, now - self._last_record_at),
+                stalled_seconds=since_poll,
+                assigned_partitions=(
+                    measurement.assigned_partitions if measurement else 0
+                ),
+                broker_reachable=measurement.broker_reachable if measurement else True,
+                rejoin_count=self._rejoin_count,
+                last_rejoin_failed=self._last_rejoin_failed,
+                unready_after_seconds=self._policy.sync_unready_seconds,
+            )
         return ModelConsumerSyncStatus(
             topic=self._topic,
             consumer_group=self._group_id,
@@ -391,6 +421,79 @@ class ConsumerRejoinSupervisor:
             rejoin_count=self._rejoin_count,
             last_rejoin_failed=self._last_rejoin_failed,
             unready_after_seconds=self._policy.sync_unready_seconds,
+        )
+
+    async def supervise_consume_task(
+        self,
+        *,
+        task_done: bool,
+        parked_after_seconds: float,
+        restart: Callable[
+            [EnumConsumerStallReason, float], Awaitable[tuple[bool, str]]
+        ],
+    ) -> None:
+        """Restart this group's consume task when it is dead or parked (OMN-17427).
+
+        The consume-task watchdog's one entry point. The task is DEAD when
+        ``task_done``, and PARKED when no poll started or finished for longer
+        than ``parked_after_seconds``; a poll is bounded by ``poll_timeout_ms``
+        and a rejoin inside it by its own timeouts, so a poll in progress is
+        not mistaken for a loop that stopped.
+
+        One cooldown governs every remedy -- a rejoin ordered by the stall
+        detector and a restart ordered here -- so a fault that survives either
+        degrades to periodic retries, never a tight loop. ``restart`` replaces
+        the task and returns whether the consumer rebuild succeeded and its
+        failure detail. The restart is recorded exactly like a stall-ordered
+        rejoin: same typed event, same bounded history, same sink, and the
+        same cooldown clock.
+        """
+        now = self._clock()
+        idle_seconds = max(0.0, now - self._last_poll_at)
+        if task_done:
+            reason = EnumConsumerStallReason.CONSUME_TASK_DEAD
+        elif idle_seconds > parked_after_seconds:
+            reason = EnumConsumerStallReason.CONSUME_TASK_PARKED
+        else:
+            return
+        since_rejoin = self._since_last_rejoin(now)
+        if (
+            since_rejoin is not None
+            and since_rejoin < self._policy.rejoin_cooldown_seconds
+        ):
+            logger.debug(
+                "consume_task_restart_deferred topic=%s group=%s reason=%s -- "
+                "inside the rejoin cooldown",
+                self._topic,
+                self._group_id,
+                reason.value,
+            )
+            return
+
+        succeeded, failure_detail = await restart(reason, idle_seconds)
+        # ``restart`` starts the new loop last and returns without yielding,
+        # so it has not polled yet. Restart the poll clock so this watchdog
+        # does not read the dead loop's silence as the new one's, and the
+        # stall window so the detector gives the replacement a full window.
+        restarted_at = self._clock()
+        self._last_poll_at = restarted_at
+        self._last_record_at = restarted_at
+        self._consecutive_stalls = 0
+        self._last_rejoin_at = restarted_at
+        self._rejoin_count += 1
+        self._last_rejoin_failed = not succeeded
+        measurement = self._latest_measurement
+        await self._append_event(
+            ModelConsumerGroupRejoinEvent(
+                topic=self._topic,
+                consumer_group=self._group_id,
+                reason=reason,
+                stalled_seconds=idle_seconds,
+                backlog_records=measurement.backlog_records if measurement else 0,
+                consecutive_stalls=1,
+                rejoin_succeeded=succeeded,
+                failure_detail=failure_detail[:500],
+            )
         )
 
     def _note_evaluation(self, reason: EnumConsumerStallReason, now: float) -> None:
@@ -434,6 +537,7 @@ class ConsumerRejoinSupervisor:
             The records fetched (possibly empty), the consumer handle to use
             for the next call, and the stall verdict when one was evaluated.
         """
+        self._last_poll_at = self._clock()
         if self._consumer_lost:
             since_rejoin = self._since_last_rejoin(self._clock())
             if since_rejoin is not None and since_rejoin < LOST_CONSUMER_RETRY_SECONDS:
@@ -457,6 +561,8 @@ class ConsumerRejoinSupervisor:
             return await self._recover_lost_consumer(
                 consumer, failure_detail=failure_detail
             )
+        finally:
+            self._last_poll_at = self._clock()
         if records:
             self._last_record_at = self._clock()
             self._consecutive_stalls = 0
@@ -887,16 +993,21 @@ class ConsumerRejoinSupervisor:
         failure_detail: str,
     ) -> None:
         """Append the typed event and hand it to the optional sink."""
-        event = ModelConsumerGroupRejoinEvent(
-            topic=self._topic,
-            consumer_group=self._group_id,
-            reason=verdict.reason,
-            stalled_seconds=observation.seconds_since_last_record,
-            backlog_records=observation.backlog_records,
-            consecutive_stalls=verdict.required_consecutive_stalls,
-            rejoin_succeeded=succeeded,
-            failure_detail=failure_detail,
+        await self._append_event(
+            ModelConsumerGroupRejoinEvent(
+                topic=self._topic,
+                consumer_group=self._group_id,
+                reason=verdict.reason,
+                stalled_seconds=observation.seconds_since_last_record,
+                backlog_records=observation.backlog_records,
+                consecutive_stalls=verdict.required_consecutive_stalls,
+                rejoin_succeeded=succeeded,
+                failure_detail=failure_detail,
+            )
         )
+
+    async def _append_event(self, event: ModelConsumerGroupRejoinEvent) -> None:
+        """Append one typed event to the bounded history and the sink."""
         self._rejoin_events.append(event)
         if len(self._rejoin_events) > REJOIN_HISTORY_CAPACITY:
             del self._rejoin_events[
