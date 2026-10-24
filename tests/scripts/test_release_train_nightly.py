@@ -98,6 +98,9 @@ def _policy(**overrides: Any) -> Any:
         "lab_evidence_note": "the compose dev lane on the lab host",
         "mode": rt.EnumTrainMode.CUT,
         "mode_note": "",
+        "dependency_refresh": rt.EnumDependencyRefresh.LOCKED,
+        "dependency_refresh_note": "",
+        "first_party_lock_prefixes": ("omni", "onex"),
     }
     fields.update(overrides)
     return rt.ModelRepoReleasePolicy(**fields)
@@ -748,10 +751,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnibase_infra:\n"
             "    package: omnibase-infra\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src, pyproject.toml]\n"
             "    lab_evidence: compose-dev\n"
             "    lab_evidence_note: the compose dev lane\n"
@@ -768,10 +773,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnimemory:\n"
             "    package: omnimemory\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src]\n"
             "    lab_evidence: none\n"
             "    lab_evidence_note: ''\n"
@@ -787,10 +794,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnimemory:\n"
             "    package: omnimemory\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src]\n"
             "    lab_evidence: compose-dev\n"
             "    lab_evidence_note: the compose dev lane\n"
@@ -1896,10 +1905,12 @@ class TestPathsDownstreamReposCloneByTagAreReleaseRelevant:
     def _write(tmp_path: Path, consumed: str) -> Path:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnibase_core:\n"
             "    package: omnibase-core\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src, pyproject.toml]\n"
             "    lab_evidence: none\n"
             "    lab_evidence_note: no lab lane\n"
