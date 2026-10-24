@@ -758,6 +758,7 @@ node_setup_local_provision_effect = "omnibase_infra.nodes.node_setup_local_provi
 node_setup_orchestrator = "omnibase_infra.nodes.node_setup_orchestrator"
 node_setup_preflight_effect = "omnibase_infra.nodes.node_setup_preflight_effect"
 node_setup_validate_effect = "omnibase_infra.nodes.node_setup_validate_effect"
+node_sibling_sha_pin_ratchet_compute = "omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute"
 node_slack_alerter_effect = "omnibase_infra.nodes.node_slack_alerter_effect"
 node_sync_revert_watchdog_effect = "omnibase_infra.nodes.node_sync_revert_watchdog_effect"
 node_ticket_contract_compose_effect = "omnibase_infra.nodes.node_ticket_contract_compose_effect"
