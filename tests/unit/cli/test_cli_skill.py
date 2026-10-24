@@ -1826,6 +1826,12 @@ def test_claude_code_binding_install_entry_resolves() -> None:
     assert entry.result_model == (
         "omnibase_core.models.claude_code_binding.ModelBindingInstallResult"
     )
+    # OMN-21335: the rows to install ride in as a required JSON list; without the
+    # arg the request failed validation with "bindings Field required".
+    bindings_arg = next(a for a in entry.args if a.name == "bindings")
+    assert bindings_arg.payload_field == "bindings"
+    assert bindings_arg.arg_type is EnumSkillArgType.JSON
+    assert bindings_arg.required is True
 
     # The catalog leg runs wherever the sibling omnimarket checkout is
     # resolvable (CI wires OMNIMARKET_SRC for the catalog job; the whole-table
