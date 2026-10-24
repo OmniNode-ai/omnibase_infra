@@ -20,6 +20,12 @@ answer independently of the group coordinator. A consumer that is behind and
 not moving, for long enough, with the brokers answering, is closed, recreated
 and rejoined from its committed offsets.
 
+OMN-21337 also bounds coordinator loss for caught-up consumers (gap A),
+whose retained assignment otherwise looks idle forever. Leader and position
+probes have a deadline (gap B): a position waiting for the missing coordinator
+cannot block evaluation. Failed recovery raises one typed alarm per episode
+and gates repetitive aiokafka coordinator errors until recovery.
+
 **What is deliberately bounded.** A rejoin is ordered only after N consecutive
 confirmations and never more often than the cooldown, so a fault that survives
 recreation degrades to periodic retries rather than a recreate loop. Both
@@ -34,25 +40,36 @@ offsets, which is at-least-once exactly as before.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
 
+from aiokafka.errors import KafkaError
 from aiokafka.structs import TopicPartition
 
 from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
     evaluate_consumer_stall,
 )
+from omnibase_infra.handlers.handler_consumer_coordinator_rejoin import (
+    HandlerConsumerCoordinatorRejoin,
+)
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
+)
+from omnibase_infra.models.health.model_consumer_coordinator_rejoin_request import (
+    ModelConsumerCoordinatorRejoinRequest,
 )
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
 )
 from omnibase_infra.models.health.model_consumer_poll_observation import (
     ModelConsumerPollObservation,
+)
+from omnibase_infra.models.health.model_consumer_rejoin_alarm import (
+    ModelConsumerRejoinAlarm,
 )
 from omnibase_infra.models.health.model_consumer_stall_verdict import (
     ModelConsumerStallVerdict,
@@ -82,9 +99,61 @@ _STALL_SIGNATURES: Final[frozenset[EnumConsumerStallReason]] = frozenset(
     {
         EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING,
         EnumConsumerStallReason.STALLED_NO_ASSIGNMENT,
+        EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE,
         EnumConsumerStallReason.NOT_STALLED_WITHIN_COOLDOWN,
     }
 )
+
+
+class CoordinatorErrorLogGate(logging.Filter):
+    """Suppress repetitive coordinator errors while recovery alarms are active."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._active: dict[object, int] = {}
+
+    def activate(self, key: object) -> None:
+        """Acquire one alarm reference for a supervisor key."""
+        self._active[key] = self._active.get(key, 0) + 1
+
+    def deactivate(self, key: object) -> None:
+        """Release one reference without affecting other active supervisors."""
+        count = self._active.get(key, 0)
+        if count <= 1:
+            self._active.pop(key, None)
+        else:
+            self._active[key] = count - 1
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Pass unrelated messages and all messages outside alarmed episodes."""
+        return not (
+            self._active
+            and record.name.startswith("aiokafka")
+            and any(
+                fragment in record.getMessage()
+                for fragment in (
+                    "Group Coordinator Request failed",
+                    "GroupCoordinatorNotAvailable",
+                    "is either not started or not valid",
+                )
+            )
+        )
+
+
+COORDINATOR_ERROR_LOG_GATE = CoordinatorErrorLogGate()
+
+
+def read_coordinator_known(consumer: object) -> bool | None:
+    """Read aiokafka 0.13's GroupCoordinator.coordinator_id.
+
+    A source pin test holds the coordinator_dead assignment to None. Unknown
+    consumer shapes return None so private API drift never orders a rebuild.
+    Coordinator id zero is valid and must not be tested for truthiness.
+    """
+    coordinator = getattr(consumer, "_coordinator", None)
+    if coordinator is None or not hasattr(coordinator, "coordinator_id"):
+        return None
+    return coordinator.coordinator_id is not None
 
 
 class ModelConsumerPollBatch:
@@ -131,6 +200,12 @@ class ConsumerRejoinSupervisor:
         emit_event: Callable[[ModelConsumerGroupRejoinEvent], Awaitable[None]]
         | None = None,
         clock: Callable[[], float] = time.monotonic,
+        broker: str = "",
+        kafka_group_id: str = "",
+        coordinator_unavailable_seconds: float = 60.0,
+        coordinator_rejoin_cooldown_seconds: float = 60.0,
+        probe_timeout_seconds: float = 10.0,
+        emit_alarm: Callable[[ModelConsumerRejoinAlarm], Awaitable[None]] | None = None,
     ) -> None:
         """Initialise the supervisor.
 
@@ -145,8 +220,13 @@ class ConsumerRejoinSupervisor:
             emit_event: Optional sink for the typed rejoin event. Emission
                 failure is tolerated; it must never take down the consumer it
                 is reporting on.
-            clock: Monotonic clock, injectable so the replay test can drive
-                97 minutes of wedge without waiting for them.
+            clock: Monotonic clock, injectable for incident replays.
+            broker: Sanitized bootstrap servers for alarms.
+            kafka_group_id: Effective Kafka group id; defaults to group_id.
+            coordinator_unavailable_seconds: Bound on reachable coordinator loss.
+            coordinator_rejoin_cooldown_seconds: Minimum time between coordinator rebuilds.
+            probe_timeout_seconds: Deadline for leader and position probes.
+            emit_alarm: Optional best-effort sink for the episode's typed alarm.
         """
         self._topic = topic
         self._group_id = group_id
@@ -155,6 +235,20 @@ class ConsumerRejoinSupervisor:
         self._recreate_consumer = recreate_consumer
         self._emit_event = emit_event
         self._clock = clock
+        self._broker = broker
+        self._kafka_group_id = kafka_group_id or group_id
+        self._coordinator_unavailable_seconds = coordinator_unavailable_seconds
+        self._coordinator_rejoin_cooldown_seconds = coordinator_rejoin_cooldown_seconds
+        self._probe_timeout_seconds = probe_timeout_seconds
+        self._emit_alarm = emit_alarm
+        self._coordinator_lost_at: float | None = None
+        self._coordinator_broker_reachable = True
+        self._position_probe_timed_out = False
+        self._failed_rejoins = 0
+        self._episode_rejoin_pending = False
+        self._alarm_raised = False
+        self._alarm_key = object()
+        self._alarms: list[ModelConsumerRejoinAlarm] = []
 
         self._last_record_at: float = clock()
         self._last_rejoin_at: float | None = None
@@ -186,6 +280,77 @@ class ConsumerRejoinSupervisor:
         failure mode this ticket is about, one layer up.
         """
         return tuple(self._rejoin_events)
+
+    @property
+    def alarms(self) -> tuple[ModelConsumerRejoinAlarm, ...]:
+        """Bounded typed alarm history, oldest first."""
+        return tuple(self._alarms)
+
+    @property
+    def alarm_active(self) -> bool:
+        """Whether this recovery episode has an active alarm."""
+        return self._alarm_raised
+
+    def end_episode(self, *, recovered: bool = True) -> None:
+        """Clear recovery accounting and release this supervisor's log-gate reference.
+
+        Internally called with ``recovered=True`` only after evidence of
+        recovery. The bus calls it with ``recovered=False`` when it discards
+        the supervisor mid-episode: nothing is logged as recovered, but the
+        reference must still go, or the discarded key keeps the process-wide
+        gate active for good.
+        """
+        if self._alarm_raised:
+            COORDINATOR_ERROR_LOG_GATE.deactivate(self._alarm_key)
+            if recovered:
+                logger.info(
+                    "consumer_group_rejoin_recovered topic=%s group=%s broker=%s",
+                    self._topic,
+                    self._kafka_group_id,
+                    self._broker,
+                )
+        self._coordinator_lost_at = None
+        self._coordinator_broker_reachable = True
+        self._position_probe_timed_out = False
+        self._failed_rejoins = 0
+        self._episode_rejoin_pending = False
+        self._alarm_raised = False
+
+    async def _raise_alarm(self, message: str, reason: str, unavailable: float) -> None:
+        """Retain and emit the episode's one alarm, best-effort."""
+        if self._alarm_raised or self._failed_rejoins < 1:
+            return
+        self._alarm_raised = True
+        coordinator_logger = logging.getLogger("aiokafka.consumer.group_coordinator")
+        if COORDINATOR_ERROR_LOG_GATE not in coordinator_logger.filters:
+            coordinator_logger.addFilter(COORDINATOR_ERROR_LOG_GATE)
+        COORDINATOR_ERROR_LOG_GATE.activate(self._alarm_key)
+        logger.error(
+            "consumer_group_rejoin_alarm %s",
+            message,
+            extra={
+                "topic": self._topic,
+                "group_id": self._kafka_group_id,
+                "broker": self._broker,
+            },
+        )
+        alarm = ModelConsumerRejoinAlarm(
+            topic=self._topic,
+            consumer_group=self._kafka_group_id,
+            broker=self._broker,
+            reason=reason,
+            coordinator_unavailable_seconds=unavailable,
+            failed_rejoins=self._failed_rejoins,
+            message=message,
+        )
+        self._alarms.append(alarm)
+        del self._alarms[:-REJOIN_HISTORY_CAPACITY]
+        if self._emit_alarm is not None:
+            try:
+                await self._emit_alarm(alarm)
+            except (OSError, RuntimeError, KafkaError):
+                # Emission is best-effort; the alarm is already logged and retained.
+                logger.debug("consumer_group_rejoin_alarm_emit_failed", exc_info=True)
 
     def sync_status(self) -> ModelConsumerSyncStatus:
         """Report whether this group is in sync, for the readiness dimension.
@@ -244,6 +409,7 @@ class ConsumerRejoinSupervisor:
 
     def _note_flow(self) -> None:
         """Records moved. That is the only unambiguous proof of sync."""
+        self.end_episode()
         self._stall_started_at = None
         self._last_rejoin_failed = False
         self._evaluated = True
@@ -273,7 +439,29 @@ class ConsumerRejoinSupervisor:
                 verdict=None,
             )
 
-        verdict, observation = await self._evaluate(consumer)
+        # Coordinator loss can wedge even an assigned, caught-up consumer.
+        # A prior position timeout remains evidence until a position resolves.
+        observation = None
+        if (
+            self._position_probe_timed_out
+            and read_coordinator_known(consumer) is not False
+        ):
+            observation = await self._observe(
+                consumer, max(0.0, self._clock() - self._last_record_at), self._clock()
+            )
+        evaluation = await self._evaluate_coordinator(consumer, observation)
+        if evaluation is None:
+            verdict, observation = await self._evaluate(consumer)
+            if self._position_probe_timed_out:
+                evaluation = await self._evaluate_coordinator(consumer, observation)
+            elif read_coordinator_known(consumer) is not False and verdict.reason in {
+                EnumConsumerStallReason.NOT_STALLED_IDLE,
+                EnumConsumerStallReason.NOT_STALLED_PROGRESSING,
+            }:
+                self.end_episode()
+            if evaluation is None:
+                evaluation = (verdict, observation)
+        verdict, observation = evaluation
         if not verdict.should_rejoin:
             return ModelConsumerPollBatch(
                 records={},
@@ -288,6 +476,113 @@ class ConsumerRejoinSupervisor:
             consumer=replacement,
             rejoined=replacement is not consumer,
             verdict=verdict,
+        )
+
+    async def _evaluate_coordinator(
+        self,
+        consumer: ProtocolRejoinableConsumer,
+        observation: ModelConsumerPollObservation | None = None,
+    ) -> tuple[ModelConsumerStallVerdict, ModelConsumerPollObservation] | None:
+        """Measure coordinator loss and route the pure recovery decision."""
+        known = (
+            read_coordinator_known(consumer) is not False
+            and not self._position_probe_timed_out
+        )
+        now = self._clock()
+        reachable = self._coordinator_broker_reachable
+        if known:
+            self._coordinator_lost_at = None
+            reachable = True
+        elif observation is not None:
+            reachable = observation.broker_reachable
+        elif not reachable or (
+            self._coordinator_lost_at is not None
+            and now - self._coordinator_lost_at >= self._coordinator_unavailable_seconds
+        ):
+            assignment = consumer.assignment()
+            try:
+                async with asyncio.timeout(self._probe_timeout_seconds):
+                    if assignment:
+                        await consumer.end_offsets(list(assignment))
+                reachable = True
+            except (OSError, KafkaError):
+                # TimeoutError is an OSError: a leader probe past its deadline
+                # is evidence that the broker is unreachable, not a crash.
+                reachable = False
+        if known or not reachable:
+            self._coordinator_lost_at = None
+        elif self._coordinator_lost_at is None:
+            self._coordinator_lost_at = now
+        self._coordinator_broker_reachable = reachable
+        unavailable = (
+            0.0
+            if self._coordinator_lost_at is None
+            else max(0.0, now - self._coordinator_lost_at)
+        )
+        request = self._coordinator_request(known, reachable, unavailable, now)
+        handler = HandlerConsumerCoordinatorRejoin()
+        decision = handler.handle(request)
+        if decision.rejoin and self._episode_rejoin_pending:
+            # A started replacement that needs another rebuild did not restore
+            # its coordinator. Count it once, just like a failed start.
+            self._failed_rejoins += 1
+            self._episode_rejoin_pending = False
+            decision = handler.handle(
+                request.model_copy(update={"failed_rejoins": self._failed_rejoins})
+            )
+        if decision.alarm:
+            await self._raise_alarm(
+                decision.alarm_message, decision.reason.value, unavailable
+            )
+        if known:
+            return None
+        reason = (
+            EnumConsumerStallReason.NOT_STALLED_BROKER_UNREACHABLE
+            if not reachable
+            else EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE
+            if unavailable >= self._coordinator_unavailable_seconds
+            else EnumConsumerStallReason.NOT_STALLED_PROGRESSING
+        )
+        verdict = ModelConsumerStallVerdict(
+            reason=reason,
+            consecutive_stalls=int(decision.rejoin),
+            required_consecutive_stalls=1,
+        )
+        if observation is None:
+            observation = ModelConsumerPollObservation(
+                topic=self._topic,
+                consumer_group=self._group_id,
+                seconds_since_last_record=max(0.0, now - self._last_record_at),
+                assigned_partitions=len(consumer.assignment()),
+                broker_reachable=reachable,
+                backlog_records=0,
+                seconds_since_last_rejoin=self._since_last_rejoin(now),
+            )
+        if unavailable >= self._coordinator_unavailable_seconds or not reachable:
+            self._latest_measurement = observation
+        self._note_evaluation(reason, now)
+        return verdict, observation
+
+    def _coordinator_request(
+        self,
+        known: bool,
+        reachable: bool,
+        unavailable: float,
+        now: float,
+    ) -> ModelConsumerCoordinatorRejoinRequest:
+        """Snapshot measured episode state for the pure handler."""
+        return ModelConsumerCoordinatorRejoinRequest(
+            topic=self._topic,
+            consumer_group=self._kafka_group_id,
+            broker=self._broker,
+            coordinator_known=known,
+            broker_reachable=reachable,
+            coordinator_unavailable_seconds=unavailable,
+            seconds_since_last_rejoin=self._since_last_rejoin(now),
+            failed_rejoins=self._failed_rejoins,
+            alarm_raised=self._alarm_raised,
+            unavailable_bound_seconds=self._coordinator_unavailable_seconds,
+            rejoin_cooldown_seconds=self._coordinator_rejoin_cooldown_seconds,
         )
 
     async def _evaluate(
@@ -331,6 +626,7 @@ class ConsumerRejoinSupervisor:
         now: float,
     ) -> ModelConsumerPollObservation:
         """Probe leaders for end offsets and compute the backlog."""
+        self._position_probe_timed_out = False
         assignment = consumer.assignment()
         if not assignment:
             # No assignment to probe. Reachability is asserted True so the
@@ -347,9 +643,23 @@ class ConsumerRejoinSupervisor:
                 seconds_since_last_rejoin=self._since_last_rejoin(now),
             )
 
+        leaders_answered = False
         try:
-            end_offsets = await consumer.end_offsets(list(assignment))
-            positions = {tp: await consumer.position(tp) for tp in assignment}
+            async with asyncio.timeout(self._probe_timeout_seconds):
+                end_offsets = await consumer.end_offsets(list(assignment))
+                leaders_answered = True
+                positions = {tp: await consumer.position(tp) for tp in assignment}
+        except TimeoutError:
+            self._position_probe_timed_out = leaders_answered
+            return ModelConsumerPollObservation(
+                topic=self._topic,
+                consumer_group=self._group_id,
+                seconds_since_last_record=silent_for,
+                assigned_partitions=len(assignment),
+                broker_reachable=leaders_answered,
+                backlog_records=0,
+                seconds_since_last_rejoin=self._since_last_rejoin(now),
+            )
         except Exception as probe_error:  # noqa: BLE001 — boundary: an unreachable probe is a verdict, not a crash
             logger.debug(
                 "consumer_stall_probe_failed topic=%s group=%s error=%s",
@@ -441,7 +751,11 @@ class ConsumerRejoinSupervisor:
         try:
             replacement = await self._recreate_consumer()
             succeeded = True
+            self._episode_rejoin_pending = True
+            self._position_probe_timed_out = False
         except Exception as recreate_error:
+            self._failed_rejoins += 1
+            self._episode_rejoin_pending = False
             failure_detail = f"{type(recreate_error).__name__}: {recreate_error}"[:500]
             logger.exception(
                 "consumer_group_rejoin_failed topic=%s group=%s error=%s",
@@ -450,6 +764,33 @@ class ConsumerRejoinSupervisor:
                 recreate_error,
             )
 
+        if not succeeded and not self._alarm_raised:
+            unavailable = (
+                0.0
+                if self._coordinator_lost_at is None
+                else max(0.0, self._clock() - self._coordinator_lost_at)
+            )
+            if (
+                verdict.reason
+                is EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE
+            ):
+                decision = HandlerConsumerCoordinatorRejoin().handle(
+                    self._coordinator_request(False, True, unavailable, self._clock())
+                )
+                await self._raise_alarm(
+                    decision.alarm_message, decision.reason.value, unavailable
+                )
+            else:
+                # Backlog/no-assignment recovery can fail with a known
+                # coordinator. Report the failure without inventing its cause.
+                await self._raise_alarm(
+                    f"consumer group {self._kafka_group_id} cannot rejoin broker "
+                    f"{self._broker}: the replacement consumer failed to start after "
+                    f"{self._failed_rejoins} rejoin attempt(s) (topic {self._topic}, "
+                    f"reason {verdict.reason.value})",
+                    verdict.reason.value,
+                    unavailable,
+                )
         self._rejoin_count += 1
         # A failed rejoin is held until flow RESUMES, not until the next
         # evaluation looks calmer: the rejoin below resets _last_record_at on
@@ -502,6 +843,9 @@ class ConsumerRejoinSupervisor:
 
 __all__ = [
     "REJOIN_HISTORY_CAPACITY",
+    "COORDINATOR_ERROR_LOG_GATE",
+    "CoordinatorErrorLogGate",
+    "read_coordinator_known",
     "ConsumerRejoinSupervisor",
     "ModelConsumerPollBatch",
 ]
