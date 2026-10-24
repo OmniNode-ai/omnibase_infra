@@ -11,22 +11,27 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: the pin is a strict release tag; the resolver refuses a sha, a branch, a dev merge tag and a prerelease; the only writer is the train follower, triggered by the scheduled train run and never by a schedule or push of its own -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_sibling_reads_pinned_omn20331.py tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-      - id: AC2
-        statement: "AC2: omnimarket dev moving past the pinned release does not move the derivation input, and the follower selects the newest strict release tag by numeric order, ignoring dev merge tags and prereleases -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
-      - id: AC3
-        statement: "AC3: staleness is bounded by one train cycle and every move stays forward-only; the legacy sha base bootstraps once and a tag-form base cannot skip a failed forward proof -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
-      - id: AC4
-        statement: "AC4: OMN-17156 stays the upstream ordering gate and this keeps infra's verdict a function of committed state, stated in the follower's header -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
+      - id: AC5
+        statement: "AC5: omnimarket dev moving past the pinned release does not move the derivation input, and the follower selects the newest strict release tag by numeric order, ignoring dev merge tags and prereleases -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
+      - id: AC6
+        statement: "AC6: staleness is bounded by one train cycle and every move stays forward-only; the legacy sha base bootstraps once and a tag-form base cannot skip a failed forward proof -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
+      - id: AC7
+        statement: "AC7: OMN-17156 stays the upstream ordering gate and this keeps infra's verdict a function of committed state, stated in the follower's header -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
-      - id: AC5
-        statement: "AC5: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
+      - id: AC2
+        statement: "AC2: the generator's port map marks the dashboard-owner lane's ports undeclared, its boundary rules the lane out as a proof lane and as a stability/prod grant source, and undeclared_lanes reports nothing for a manifest that declares it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
   - id: req-omn17292-sustained-load-warmup
     statement: The sustained-load benchmark measures steady state, so a one-off stall before the first measured interval cannot red Performance Microbenchmarks and Nightly Summary on dev.
     acceptance:
-      - id: AC6
-        statement: "AC6: with a blocking 1.2s stall injected on the first publish, test_sustained_5_second_load passes because the stall lands in the discarded warm-up interval -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+      - id: AC3
+        statement: "AC3: with a blocking 1.2s stall injected on the first publish, test_sustained_5_second_load passes because the stall lands in the discarded warm-up interval -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+  - id: req-omn17292-auto-merge-skip-draft
+    statement: The Auto-Merge workflow's Enable step returns before the arming call when the PR is a draft, so a draft's check_suite completion no longer fails the Enable Auto-Merge job red on dev.
+    acceptance:
+      - id: AC4
+        statement: "AC4: the Enable auto-merge step reads isDraft before gh pr merge and exits 0 for a draft without calling gh pr merge, while a ready PR still reaches the arming call -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The pin, the sibling pin and every inline omnimarket ref carry the release tag v0.4.319, and the resolver refuses any other ref shape.
@@ -40,6 +45,9 @@ evidence_requirements:
   - kind: tests
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
+  - kind: tests
+    description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -60,7 +68,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
+    binds_ac: [AC5]
   - id: dod-omn-17292-train-tag-ac3
     description: The forward-only guard bootstraps once from the legacy sha pin and runs for every tag-form base.
     source: manual
@@ -68,7 +76,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC3]
+    binds_ac: [AC6]
   - id: dod-omn-17292-train-tag-ac4
     description: The follower's header names OMN-17156 as the upstream ordering gate and the one-train-cycle staleness budget.
     source: manual
@@ -76,7 +84,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC4]
+    binds_ac: [AC7]
   - id: dod-omn-17292-ac1
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry the release tag v0.4.319.
     source: manual
@@ -92,7 +100,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC5]
+    binds_ac: [AC2]
   - id: dod-omn-17292-ac3-sustained-load-warmup
     description: A first-publish stall lands in the sustained-load benchmark's discarded warm-up interval; at the merge base it lands in measured interval 1 and the variance assertion fails.
     source: manual
@@ -100,7 +108,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/performance/event_bus/test_event_bus_load_cold_stall_omn17292.py -m performance -n 0 -p no:randomly -q"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC6]
+    binds_ac: [AC3]
+  - id: dod-omn-17292-ac4-auto-merge-skip-draft
+    description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR; the merge base has no draft guard.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
   - id: dod-omn-17292-train-tag-deploy-check
     description: Hosted-runner deploy check executes the train follower tag selection and pin writer against local repositories, refusing invalid refs and backwards moves without credentials or a live deployment.
     source: manual
@@ -108,4 +124,4 @@ dod_evidence:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC1, AC2, AC3, AC4]
+    binds_ac: [AC1, AC5, AC6, AC7]

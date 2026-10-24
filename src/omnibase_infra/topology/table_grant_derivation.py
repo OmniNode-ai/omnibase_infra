@@ -374,6 +374,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # the entries above: the expiry module went red on the pin-advance pull
     # request naming it, and the deletion rode that pull request.
     #
+    # OMN-17427: durable delegation execution ownership and its outbox,
+    # vendored infra-first ahead of omnimarket#4277. Both carry the source
+    # contract's read_write access and table-name role. Removable once the
+    # pin advances past that pull request; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_lab_jobs",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+            "0000_delegation_lab_job_execution.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_lab_jobs",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+                "0000_delegation_lab_job_execution.sql"
+            ),
+            access="read_write",
+            role="delegation_lab_jobs",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_lab_job_outbox",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+            "0000_delegation_lab_job_execution.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_lab_job_outbox",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+                "0000_delegation_lab_job_execution.sql"
+            ),
+            access="read_write",
+            role="delegation_lab_job_outbox",
+        ),
+    ),
+    #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access

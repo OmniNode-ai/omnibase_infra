@@ -67,6 +67,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_query_client.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_query_client.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.omnimemory.memory_lifecycle_probe.consume.v1.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -215,6 +229,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -915,6 +943,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.work-ledger-append-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-query-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-query-completed.v1",
       "operation": "READ",
       "pattern": "LITERAL"
     },
