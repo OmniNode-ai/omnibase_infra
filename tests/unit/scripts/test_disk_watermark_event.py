@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for the disk-watermark bus event builder (OMN-13008, schema 2.0.0 OMN-17872)."""
+"""Tests for the disk-watermark bus event builder (OMN-13008, schema 2.0.0 OMN-17872, 2.1.0 OMN-17427)."""
 
 from __future__ import annotations
 
@@ -54,7 +54,8 @@ class TestDiskWatermarkEvent:
         assert ev["used_pct"] == 87
         assert ev["topic"] == TOPIC
         assert ev["event_type"] == "disk-watermark"
-        assert ev["schema_version"] == "2.0.0"
+        assert ev["schema_version"] == "2.1.0"
+        assert ev["inode_used_pct"] is None
         assert ev["emitted_at"] == NOW.isoformat()
 
     def test_critical_event_shape(self) -> None:
