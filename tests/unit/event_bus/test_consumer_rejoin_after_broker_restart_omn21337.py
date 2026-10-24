@@ -240,6 +240,8 @@ async def test_consumer_rejoins_after_broker_restart_when_position_waits_on_coor
         batch = await h.poll()
         if batch.rejoined:
             break
+    # The loop must end on the rejoin poll, not by running out of polls.
+    assert batch.rejoined
     assert h.recreates == 1
     assert batch.consumer is h.replacement
 
