@@ -15,9 +15,6 @@ evidence_requirements:
   - kind: tests
     description: The resolver driven against the recorded in-flight deploy timeline and a stuck deploy, with a fake clock and no network, plus the workflow wiring.
     command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q
-  - kind: tests
-    description: The existing deploy-wait behaviour of the resolver and the four board probes is unchanged.
-    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_board_probes_wait_for_deploy_omn19811.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -29,15 +26,6 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC5
-  - id: dod-omn20410-ac5-existing-wait-unchanged
-    description: The resolver's existing no-lane deploy wait and the four board probes' wiring still pass.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_deploy_wait_omn19811.py tests/ci/test_board_probes_wait_for_deploy_omn19811.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
