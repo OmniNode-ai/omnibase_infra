@@ -7,6 +7,8 @@ tenant route, resolved by reference at the effect boundary, never from a
 GitHub Actions secret. This ratchet scans ``.github/workflows`` for secret
 references whose name is a provider's key. A secret for a non-provider service
 (for example a ticket-system key) is not a provider key and is left alone.
+The scan also refuses a secret read whose name is hidden (toJSON(secrets),
+a computed index).
 """
 
 from __future__ import annotations
@@ -23,22 +25,38 @@ _WORKFLOWS = _ROOT / ".github" / "workflows"
 
 _PROVIDERS = (
     "ANTHROPIC",
+    "BEDROCK",
+    "CEREBRAS",
+    "CLAUDE",
     "COHERE",
     "DEEPSEEK",
     "FIREWORKS",
     "GEMINI",
     "GLM",
     "GROQ",
+    "HF",
+    "HUGGINGFACE",
+    "KIMI",
     "MISTRAL",
+    "MOONSHOT",
+    "NVIDIA",
     "OPENAI",
     "OPENROUTER",
     "PERPLEXITY",
+    "QWEN",
+    "REPLICATE",
     "TOGETHER",
+    "VOYAGE",
     "XAI",
     "ZAI",
 )
 _SECRET_REF = re.compile(
     r"secrets\s*\.\s*([A-Za-z0-9_]+)|secrets\s*\[\s*'([^']+)'\s*\]"
+    r'|secrets\s*\[\s*"([^"]+)"\s*\]'
+)
+_OPAQUE_SECRET_READ = re.compile(
+    r"\b(?i:toJSON)\s*\(\s*secrets\s*\)"
+    r"|\bsecrets\s*\[\s*[^\s'\"\]][^\]]*\]"
 )
 _PROVIDER_KEY_NAME = re.compile(
     rf"(?:^|_)(?:{'|'.join(_PROVIDERS)})(?:_|$)", re.IGNORECASE
@@ -50,10 +68,26 @@ def provider_key_secrets(text: str) -> list[str]:
     """Names of the provider key secrets a workflow's text references."""
     found: list[str] = []
     for match in _SECRET_REF.finditer(text):
-        name = match.group(1) or match.group(2)
+        name = match.group(1) or match.group(2) or match.group(3)
         if _PROVIDER_KEY_NAME.search(name) and _CREDENTIAL_WORD.search(name):
             found.append(name)
     return found
+
+
+def opaque_secret_reads(text: str) -> list[str]:
+    """Secret reads whose names cannot be checked for a provider key."""
+    return [match.group(0) for match in _OPAQUE_SECRET_READ.finditer(text)]
+
+
+def _scanned_files() -> list[Path]:
+    return sorted(
+        {
+            *_WORKFLOWS.glob("*.yml"),
+            *_WORKFLOWS.glob("*.yaml"),
+            *_WORKFLOWS.parent.rglob("action.yml"),
+            *_WORKFLOWS.parent.rglob("action.yaml"),
+        }
+    )
 
 
 def test_the_detector_flags_a_planted_provider_key_reference() -> None:
@@ -63,11 +97,25 @@ def test_the_detector_flags_a_planted_provider_key_reference() -> None:
         "  RUNG_EVAL_CLOUD_OPENROUTER_API_KEY: "
         "${{ secrets.RUNG_EVAL_CLOUD_OPENROUTER_API_KEY }}\n"
         "  OTHER: ${{ secrets['ANTHROPIC_API_KEY'] }}\n"
+        '  THIRD: ${{ secrets["CLAUDE_API_KEY"] }}\n'
     )
     assert provider_key_secrets(planted) == [
         "RUNG_EVAL_CLOUD_OPENROUTER_API_KEY",
         "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
     ]
+
+
+def test_the_detector_flags_a_hidden_secret_name() -> None:
+    planted = (
+        "${{ toJSON(secrets) }}\n${{ secrets[format('{0}_API_KEY', matrix.p)] }}\n"
+    )
+    assert opaque_secret_reads(planted) == [
+        "toJSON(secrets)",
+        "secrets[format('{0}_API_KEY', matrix.p)]",
+    ]
+    assert opaque_secret_reads("    secrets: inherit\n") == []
+    assert opaque_secret_reads("${{ secrets['LINEAR_API_KEY'] }}") == []
 
 
 def test_the_detector_leaves_a_non_provider_secret_alone() -> None:
@@ -79,24 +127,19 @@ def test_the_detector_leaves_a_non_provider_secret_alone() -> None:
 
 def test_workflows_are_scanned() -> None:
     """Zero-hit control: the scan reads real files, so an empty result means clean."""
-    assert sorted(
-        (
-            *_WORKFLOWS.glob("*.y*ml"),
-            *_WORKFLOWS.parent.glob("actions/**/action.y*ml"),
-        )
-    ), "no workflow or action files found to scan"
+    scanned = {path.relative_to(_ROOT) for path in _scanned_files()}
+    assert Path(".github/workflows/hostile-reviewer.yml") in scanned
+    assert Path(".github/actions/setup-python-uv/action.yml") in scanned
 
 
 def test_no_provider_key_in_workflows() -> None:
     offenders = {
         str(path.relative_to(_ROOT)): names
-        for path in sorted(
-            (
-                *_WORKFLOWS.glob("*.y*ml"),
-                *_WORKFLOWS.parent.glob("actions/**/action.y*ml"),
-            )
+        for path in _scanned_files()
+        if (
+            names := provider_key_secrets(text := path.read_text(encoding="utf-8"))
+            + opaque_secret_reads(text)
         )
-        if (names := provider_key_secrets(path.read_text(encoding="utf-8")))
     }
     assert offenders == {}, (
         "a workflow references a provider key secret; a team key is read by "

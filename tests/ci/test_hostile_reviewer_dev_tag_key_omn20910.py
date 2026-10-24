@@ -33,6 +33,7 @@ _WORKFLOW = (
     / "workflows"
     / "hostile-reviewer.yml"
 )
+_CLAUDE_KEY = re.compile(r"\b(?:HOSTILE_REVIEW_|REVIEW_)?ANTHROPIC_API_KEY\b")
 _NEWEST = "dev-20261018085529-fe44102f0bf5"
 _LS_REMOTE = "".join(
     f"{sha * 40}\trefs/tags/{name}\n"
@@ -52,6 +53,11 @@ case "$1" in
   -C) echo "$@" >> "$FAKE_LOG"; [ "$3" = rev-parse ] && echo 0123456789abcdef0123456789abcdef01234567; true ;;
 esac
 """
+
+
+def _claude_key_mentions(text: str) -> list[str]:
+    """Every place a Claude provider key name appears in the text."""
+    return _CLAUDE_KEY.findall(text)
 
 
 def _steps() -> list[dict[str, Any]]:
@@ -130,10 +136,14 @@ def test_clone_step_never_reads_a_branch_tip_or_a_pin() -> None:
 
 
 def test_claude_key_reaches_no_workflow_step() -> None:
-    for step in _steps():
-        dumped = yaml.safe_dump(step)
-        assert "HOSTILE_REVIEW_ANTHROPIC_API_KEY" not in dumped
-        assert not re.search(r"(?m)^\s*(REVIEW_)?ANTHROPIC_API_KEY:", dumped)
+    assert _claude_key_mentions(_WORKFLOW.read_text(encoding="utf-8")) == []
+    for planted in (
+        '"ANTHROPIC_API_KEY": x\n',
+        "export REVIEW_ANTHROPIC_API_KEY=abc\n",
+        "env:\n  ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}\n",
+    ):
+        assert _claude_key_mentions(planted)
+    assert _claude_key_mentions("LOCAL_LLM_SHARED_SECRET: x\n") == []
     # Positive control: the review step still holds the lab voters' secret.
     assert "LOCAL_LLM_SHARED_SECRET" in _step("Run adversarial review")["env"]
 
@@ -141,9 +151,13 @@ def test_claude_key_reaches_no_workflow_step() -> None:
 def test_no_secret_expression_or_literal_key_in_workflow() -> None:
     text = _WORKFLOW.read_text(encoding="utf-8")
     assert not re.search(r"sk-ant-[A-Za-z0-9_-]+", text)
-    assert not any(
-        re.match(r"\s+(REVIEW_)?ANTHROPIC_API_KEY:", line) for line in text.splitlines()
+    secret_reference = re.compile(
+        r"\bsecrets\s*(?:\.\s*[A-Za-z0-9_]*(?:ANTHROPIC|CLAUDE)[A-Za-z0-9_]*"
+        r"|\[\s*['\"][^'\"\]]*(?:ANTHROPIC|CLAUDE)[^'\"\]]*['\"]\s*\])",
+        re.IGNORECASE,
     )
+    assert not secret_reference.search(text)
+    assert secret_reference.search('${{ secrets["HOSTILE_REVIEW_ANTHROPIC_API_KEY"] }}')
 
 
 def test_dev_tag_and_key_tests_run_as_ci_step_and_hook() -> None:
