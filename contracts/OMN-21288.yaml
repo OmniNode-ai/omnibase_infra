@@ -91,5 +91,19 @@ dod_evidence:
           uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py scripts/deploy-agent/tests/unit/test_executor_folded_effects_digest_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn21288-deploy-folded-services
+    description: >-
+      Hosted-runner artifact probe of the deployed handler: read the evaluated checkout's commit of handler_runtime_deploy.sh from GitHub and require resolve_lane_folded_services, the function that keeps a folded service from being started, then run its focused deploy-handler tests. The function is new on this branch, so the probe fails at the merge base. This does not claim a lab rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          set -euo pipefail;
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_runtime_deploy.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c '^resolve_lane_folded_services() {'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
