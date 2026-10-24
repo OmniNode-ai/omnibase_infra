@@ -53,7 +53,14 @@ class HandlerConsumerCoordinatorRejoin:
             and reason is not reasons.COORDINATOR_KNOWN
         )
         message = ""
-        if alarm:
+        if alarm and reason is reasons.BROKER_UNREACHABLE:
+            # The leaders did not answer: name reachability, not the coordinator.
+            message = (
+                f"consumer group {request.consumer_group} cannot rejoin: broker {request.broker} "
+                f"is unreachable after {request.failed_rejoins} rejoin attempt(s) "
+                f"(topic {request.topic})"
+            )
+        elif alarm:
             message = (
                 f"consumer group {request.consumer_group} cannot rejoin: broker {request.broker} "
                 f"has answered for {request.coordinator_unavailable_seconds:g}s but the group "

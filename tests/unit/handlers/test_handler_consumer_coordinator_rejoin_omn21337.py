@@ -126,9 +126,15 @@ def test_coordinator_rejoin_decision(
             request.consumer_group,
             request.broker,
             str(failed),
-            f"{seconds:g}",
         ):
             assert value in decision.alarm_message
+        if reachable:
+            assert f"has answered for {seconds:g}s" in decision.alarm_message
+        else:
+            # An unreachable broker never answered: the text must not say it did.
+            assert "is unreachable" in decision.alarm_message
+            assert "has answered" not in decision.alarm_message
+            assert "coordinator" not in decision.alarm_message
     assert handler.handle(request) == decision
     assert handler.handler_type is EnumHandlerType.COMPUTE_HANDLER
     assert handler.handler_category is EnumHandlerTypeCategory.COMPUTE

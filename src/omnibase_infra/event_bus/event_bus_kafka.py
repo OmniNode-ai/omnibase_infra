@@ -1175,6 +1175,8 @@ class EventBusKafka(
             self._group_consumers.clear()
             # OMN-18640: the supervisors hold per-group stall state that is
             # meaningless once the consumers are gone.
+            for supervisor in self._rejoin_supervisors.values():
+                supervisor.end_episode(recovered=False)
             self._rejoin_supervisors.clear()
 
         for consumer in consumers_to_close:
@@ -2819,7 +2821,9 @@ class EventBusKafka(
                     pass
 
             consumer = self._group_consumers.pop(consumer_key, None)
-            self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            supervisor = self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            if supervisor is not None:
+                supervisor.end_episode(recovered=False)
             if consumer is not None:
                 try:
                     await consumer.stop()

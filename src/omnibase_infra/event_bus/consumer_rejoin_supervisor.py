@@ -291,16 +291,24 @@ class ConsumerRejoinSupervisor:
         """Whether this recovery episode has an active alarm."""
         return self._alarm_raised
 
-    def _end_episode(self) -> None:
-        """Clear recovery accounting only after evidence of recovery."""
+    def end_episode(self, *, recovered: bool = True) -> None:
+        """Clear recovery accounting and release this supervisor's log-gate reference.
+
+        Internally called with ``recovered=True`` only after evidence of
+        recovery. The bus calls it with ``recovered=False`` when it discards
+        the supervisor mid-episode: nothing is logged as recovered, but the
+        reference must still go, or the discarded key keeps the process-wide
+        gate active for good.
+        """
         if self._alarm_raised:
             COORDINATOR_ERROR_LOG_GATE.deactivate(self._alarm_key)
-            logger.info(
-                "consumer_group_rejoin_recovered topic=%s group=%s broker=%s",
-                self._topic,
-                self._kafka_group_id,
-                self._broker,
-            )
+            if recovered:
+                logger.info(
+                    "consumer_group_rejoin_recovered topic=%s group=%s broker=%s",
+                    self._topic,
+                    self._kafka_group_id,
+                    self._broker,
+                )
         self._coordinator_lost_at = None
         self._coordinator_broker_reachable = True
         self._position_probe_timed_out = False
@@ -401,7 +409,7 @@ class ConsumerRejoinSupervisor:
 
     def _note_flow(self) -> None:
         """Records moved. That is the only unambiguous proof of sync."""
-        self._end_episode()
+        self.end_episode()
         self._stall_started_at = None
         self._last_rejoin_failed = False
         self._evaluated = True
@@ -450,7 +458,7 @@ class ConsumerRejoinSupervisor:
                 EnumConsumerStallReason.NOT_STALLED_IDLE,
                 EnumConsumerStallReason.NOT_STALLED_PROGRESSING,
             }:
-                self._end_episode()
+                self.end_episode()
             if evaluation is None:
                 evaluation = (verdict, observation)
         verdict, observation = evaluation

@@ -364,6 +364,62 @@ async def test_consumer_rejoin_failure_alarms_once_per_episode_and_rearms_after_
         await h.poll()
 
 
+@pytest.mark.asyncio
+async def test_discarded_supervisor_releases_its_log_gate_reference() -> None:
+    h = Harness(fail=True)
+    for _ in range(
+        polls_for(COORDINATOR_UNAVAILABLE_SECONDS) + POLICY.required_consecutive_stalls
+    ):
+        await h.poll()
+    assert h.supervisor.alarm_active
+    key = h.supervisor._alarm_key
+    assert key in COORDINATOR_ERROR_LOG_GATE._active
+    # Unsubscribe or close drops the supervisor mid-episode, before any recovery.
+    h.supervisor.end_episode(recovered=False)
+    assert key not in COORDINATOR_ERROR_LOG_GATE._active
+    assert not h.supervisor.alarm_active
+    h.supervisor.end_episode(recovered=False)
+    assert key not in COORDINATOR_ERROR_LOG_GATE._active
+
+
+@pytest.mark.asyncio
+async def test_bus_releases_log_gate_when_it_stops_an_alarmed_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+    from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
+        ModelKafkaEventBusConfig,
+    )
+
+    config = ModelKafkaEventBusConfig(
+        bootstrap_servers="broker:9092", environment="test"
+    )
+    bus = EventBusKafka(config=config)
+    clock = FakeClock()
+    monkeypatch.setattr(
+        bus,
+        "_rebuild_consumer_for_rejoin",
+        AsyncMock(side_effect=ConnectionError("rebuild failed")),
+    )
+    supervisor = bus._rejoin_supervisor_for(TOPIC, GROUP)
+    supervisor._clock = clock
+    consumer = FakeConsumer(
+        member_id="bus-original", position=10, end_offsets=(10,), wedged=True
+    )
+    # Cover the configured loss bound plus the first observation poll.
+    for _ in range(polls_for(config.consumer_coordinator_unavailable_seconds) + 1):
+        clock.advance(POLL_SECONDS)
+        await asyncio.wait_for(supervisor.next_batch(consumer), timeout=5)
+    assert supervisor.alarm_active
+    key = supervisor._alarm_key
+    assert key in COORDINATOR_ERROR_LOG_GATE._active
+    await bus._stop_consumer_for_topic(TOPIC, GROUP)
+    assert (TOPIC, GROUP) not in bus._rejoin_supervisors
+    assert key not in COORDINATOR_ERROR_LOG_GATE._active
+
+
 def test_read_coordinator_known_pins_aiokafka_group_coordinator() -> None:
     from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
         read_coordinator_known,
