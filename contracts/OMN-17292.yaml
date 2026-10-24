@@ -26,6 +26,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: the Enable auto-merge step reads isDraft before gh pr merge and exits 0 for a draft without calling gh pr merge, while a ready PR still reaches the arming call -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+  - id: req-omn17292-hostile-reviewer-lan-label
+    statement: The Hostile Reviewer job's trusted fallback runner set requires arch-amd64, a label the LAN amd64 action pools carry and the off-LAN h203-light runners do not, so the job cannot land where the review voters are unreachable.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the hostile-review job's runs-on falls back to [self-hosted, omnibase-ci, arch-amd64], and that label set is not a subset of the h203-light runners' labels -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -39,6 +44,9 @@ evidence_requirements:
   - kind: tests
     description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+  - kind: tests
+    description: The hostile-review job's trusted fallback requires arch-amd64, which the h203-light runners lack.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -76,3 +84,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn-17292-ac5-hostile-reviewer-lan-label
+    description: The hostile-review job's trusted fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
