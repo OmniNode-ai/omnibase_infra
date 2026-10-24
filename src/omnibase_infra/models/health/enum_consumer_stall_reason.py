@@ -47,5 +47,8 @@ class EnumConsumerStallReason(StrEnum):
     """The consumer raised on poll or its replacement could not be started,
     so no live consumer holds the group."""
 
+    STALLED_COORDINATOR_UNAVAILABLE = "stalled_coordinator_unavailable"
+    """Leaders answer but the client has had no coordinator past the bound."""
+
 
 __all__ = ["EnumConsumerStallReason"]
