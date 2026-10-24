@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.topology.application_database import SUPPORTED_TOPOLOGY_PROFILES
+
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -130,3 +132,35 @@ def test_the_table_they_alter_exists_before_them_in_runner_order() -> None:
         r"CREATE TABLE IF NOT EXISTS tenant_inference_credentials\s*\(",
         _statements(_CREATE),
     )
+
+
+@pytest.mark.parametrize("filename", sorted(_VENDORED))
+@pytest.mark.parametrize("profile", sorted(SUPPORTED_TOPOLOGY_PROFILES))
+def test_migrations_pass_the_application_database_sql_gate(
+    filename: str, profile: str
+) -> None:
+    from omnibase_infra.topology.application_database import load_topology_profile
+    from omnibase_infra.validation.application_database_domain_enforcement import (
+        lint_application_database_sql,
+    )
+
+    sql = (_VENDOR / filename).read_text(encoding="utf-8")
+    violations = lint_application_database_sql(sql, load_topology_profile(profile))
+    assert violations == (), f"{profile}/{filename}: {violations}"
+
+
+def test_the_sql_gate_is_live_positive_control() -> None:
+    from omnibase_infra.topology.application_database import load_topology_profile
+    from omnibase_infra.validation.application_database_domain_enforcement import (
+        lint_application_database_sql,
+    )
+
+    sql = (_VENDOR / "0008_tenant_credentials_workspace_id.sql").read_text(
+        encoding="utf-8"
+    )
+    broken = sql.replace(
+        "ALTER TABLE tenant_inference_credentials",
+        "ALTER TABLE tenant.tenant_inference_credentials",
+    )
+    assert broken != sql
+    assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
