@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20410
+title: "The C16 receipt-identity probe waits out an in-flight dev deploy before it submits"
+summary: The C16 lane resolution waits, with a bound, while the dev lane's deploy agent reads busy even when the gateway answers; a deploy that outlasts the bound fails the job with a named reason and no delegation is submitted.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20410-c16-deploy-wait
+    statement: The C16 probe does not submit its two delegations while the dev lane's deploy agent reports a deploy in flight, and an unfinished deploy fails the job with a named reason.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: with the recorded in-flight dev deploy and an answering gateway the resolver waits for the agent to read idle and then resolves, a deploy that never finishes inside the bound exits 1 naming the busy agent and the budget, and C16 is the only probe that opts in -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The resolver driven against the recorded in-flight deploy timeline and a stuck deploy, with a fake clock and no network, plus the workflow wiring.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20410-ac5-c16-deploy-wait
+    description: AC5 tests drive the resolver against the in-flight deploy timeline and a stuck deploy; they fail at the merge base, where the resolver does not wait for a busy agent once a lane answers.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_resolve_lab_lane_wait_while_busy_omn20410.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
