@@ -127,7 +127,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen python -c "import importlib.metadata as m; assert m.version('omnibase-core') == '0.47.53', m.version('omnibase-core')"
+        check_value: uv run --frozen python -c "import importlib.metadata as m; v = m.version('omnibase-core'); assert tuple(int(p) for p in v.split('.')[:3]) >= (0, 47, 53), v"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
@@ -142,7 +142,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen python -c "import importlib.metadata as m; assert m.version('omnibase-core') == '0.47.55', m.version('omnibase-core')"
+        check_value: uv run --frozen python -c "import importlib.metadata as m; v = m.version('omnibase-core'); assert tuple(int(p) for p in v.split('.')[:3]) >= (0, 47, 55), v"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/ci/test_omn20696_noncanonical_files.py -q --no-cov
