@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Static checks for the OMN-10281 stability-test runtime lane."""
+"""Static checks for this runtime lane and its folded effects role."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from scripts.render_runtime_policy_env import load_contract, render_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
@@ -30,7 +32,9 @@ RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 # must agree with this constant, or the assertions below fail.
 STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 
-RUNTIME_SERVICES = ("omninode-runtime", "runtime-effects", "runtime-worker")
+FOLDED_PROFILE = "folded-into-runtime"
+
+RUNTIME_SERVICES = ("omninode-runtime", "runtime-worker")
 RUNTIME_ADDRESS_PREFIX = "runtime://omninode-pc/stability-test/"
 OUT_OF_LANE_SERVICES = {
     "agent-actions-consumer",
@@ -103,6 +107,7 @@ def _load_overlay() -> dict[str, Any]:
     overlay_text = OVERLAY_FILE.read_text(encoding="utf-8")
     overlay = yaml.load(overlay_text, Loader=_TestSafeLoader)  # noqa: S506
     assert isinstance(overlay, dict)
+    assert overlay["services"]["runtime-effects"]["profiles"] == [FOLDED_PROFILE]
     return overlay
 
 
@@ -234,7 +239,6 @@ def test_stability_lane_runtime_services_have_unique_addresses() -> None:
     runtime_ids: list[str] = []
     capability_keys = {
         "omninode-runtime": "STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES",
-        "runtime-effects": "STABILITY_TEST_RUNTIME_EFFECTS_CAPABILITIES",
         "runtime-worker": "STABILITY_TEST_RUNTIME_WORKER_CAPABILITIES",
     }
 
@@ -280,12 +284,10 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
         "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
     ]
     assert services["omninode-runtime"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
+        "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085",
+        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085",
     ]
     assert policy_env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
-    assert services["runtime-effects"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
-    ]
     assert policy_env["STABILITY_TEST_RUNTIME_EFFECTS_PORT"] == "18086"
 
 
@@ -437,10 +439,6 @@ def test_stability_lane_explicitly_leaves_omnimemory_inactive() -> None:
         "omninode-runtime": (
             "STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED",
             "STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST",
-        ),
-        "runtime-effects": (
-            "STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED",
-            "STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST",
         ),
         "runtime-worker": (
             "STABILITY_TEST_RUNTIME_WORKER_OMNIMEMORY_ENABLED",
@@ -636,3 +634,84 @@ def test_stability_lane_volumes_do_not_reuse_production_names() -> None:
         assert "stability-test" in concrete_name, volume_name
 
     assert len(concrete_names) == len(set(concrete_names))
+
+
+@pytest.mark.unit
+def test_only_main_renders_folded_effects() -> None:
+    env = render_env(load_contract())
+    folded = {
+        key: value for key, value in env.items() if key.endswith("_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    assert list(folded.values()) == ["effects"]
+    (key,) = folded
+    assert key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    environment = _load_overlay()["services"]["omninode-runtime"]["environment"]
+    assert environment["ONEX_RUNTIME_FOLDED_PROFILES"] == (
+        f"${{{key}:?runtime policy contract must set {key}}}"
+    )
+
+
+@pytest.mark.unit
+def test_committed_policy_env_contains_folded_effects() -> None:
+    rendered = render_env(load_contract())
+    folded = {
+        key: value
+        for key, value in rendered.items()
+        if key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    (key,) = folded
+    assert folded[key] == "effects"
+    assert _load_runtime_policy_env()[key] == "effects"
+    environment = _load_overlay()["services"]["omninode-runtime"]["environment"]
+    assert key in environment["ONEX_RUNTIME_FOLDED_PROFILES"]
+
+
+@pytest.mark.unit
+def test_fold_disables_separate_effects_service() -> None:
+    services = _load_overlay()["services"]
+    assert services["runtime-effects"]["profiles"] == [FOLDED_PROFILE]
+
+
+@pytest.mark.unit
+def test_main_receives_fold_and_effects_environment() -> None:
+    services = _load_overlay()["services"]
+    env = services["omninode-runtime"]["environment"]
+    folded = {
+        key: value
+        for key, value in render_env(load_contract()).items()
+        if key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    (key,) = folded
+    assert folded[key] == "effects"
+    assert key in env["ONEX_RUNTIME_FOLDED_PROFILES"]
+    assert _load_runtime_policy_env()[key] == "effects"
+    carried = {
+        "CODING_AGENT_CRED_HOME": "/home/omniinfra",
+        "ONEX_CODING_AGENT_WORKSPACE_ROOT": "/home/omniinfra/agent-workspaces",
+        "OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS": "redpanda:9092",
+        "ONEX_DEAD_LETTER_ARCHIVE_DIR": "/app/data/dead-letter-archive",
+        "ONEX_CONSUMER_FLOW_ARCHIVE_DIR": "/app/data/consumer-flow-archive",
+    }
+    for key, value in carried.items():
+        assert env[key] == value
+
+
+@pytest.mark.unit
+def test_fold_keeps_both_health_ports_and_memory_network() -> None:
+    main = _load_overlay()["services"]["omninode-runtime"]
+    for key in (
+        "STABILITY_TEST_RUNTIME_MAIN_PORT",
+        "STABILITY_TEST_RUNTIME_EFFECTS_PORT",
+    ):
+        assert (
+            f"${{{key}:?runtime policy contract must set {key}}}:8085" in main["ports"]
+        )
+    assert "omnimemory-network" in main["networks"]
+
+
+@pytest.mark.unit
+def test_fold_leaves_base_infra_separate_effects_service() -> None:
+    assert "runtime-effects" in _load_base_compose()["services"]

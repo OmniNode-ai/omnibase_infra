@@ -313,11 +313,14 @@ def test_the_stability_test_main_runtime_names_its_lane() -> None:
 
     assert declared == {
         LANE_SPEAKING_SERVICE: "stability-test",
-        "runtime-effects": "stability-test",
     }, (
-        f"{overlay.name} declares {declared!r}; main and effects must declare "
+        f"{overlay.name} declares {declared!r}; the folded main/effects runtime must declare "
         f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408, OMN-19812)"
     )
+    services = yaml.safe_load(
+        overlay.read_text(encoding="utf-8").replace("!override", "")
+    )["services"]
+    assert services["runtime-effects"]["profiles"] == ["folded-into-runtime"]
     assert resolve_declared_runtime_lane({ENV_RUNTIME_LANE: "stability-test"}) == (
         "stability-test"
     )

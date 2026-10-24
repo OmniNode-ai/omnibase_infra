@@ -44,6 +44,7 @@ PROD = DOCKER_DIR / "docker-compose.prod.yml"
 JUDGE = DOCKER_DIR / "docker-compose.judge.yml"
 
 STRICT_KEY = "ONEX_WIRING_STRICT_MODE"
+FOLDED_PROFILE = "folded-into-runtime"
 
 # The runtime services that actually run the auto-wiring kernel. projection-api
 # and omninode-contract-resolver are uvicorn servers that never reach
@@ -55,7 +56,7 @@ STRICT_LANES: dict[str, tuple[Path, tuple[str, ...]]] = {
     "lakshman": (LAKSHMAN, ("omninode-runtime", "runtime-effects")),
     "stability-test": (
         STABILITY,
-        ("omninode-runtime", "runtime-effects", "runtime-worker"),
+        ("omninode-runtime", "runtime-worker"),
     ),
 }
 
@@ -98,6 +99,9 @@ def test_lab_lane_runtime_services_bind_strict_wiring(lane: str) -> None:
     path, services = STRICT_LANES[lane]
     compose = _load(path)
 
+    if path == STABILITY:
+        assert compose["services"]["runtime-effects"]["profiles"] == [FOLDED_PROFILE]
+
     for service in services:
         env = _environment(compose, service)
         assert STRICT_KEY in env, (
@@ -120,6 +124,9 @@ def test_lab_lane_strict_wiring_is_literal_not_interpolated(lane: str) -> None:
     """
     path, services = STRICT_LANES[lane]
     compose = _load(path)
+
+    if path == STABILITY:
+        assert compose["services"]["runtime-effects"]["profiles"] == [FOLDED_PROFILE]
 
     for service in services:
         raw = _environment(compose, service)[STRICT_KEY]

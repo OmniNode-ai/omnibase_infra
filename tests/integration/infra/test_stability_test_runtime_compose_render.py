@@ -33,7 +33,6 @@ COMPOSE_FILES = (
 STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
 REQUIRED_RUNTIME_SERVICES = {
     "omninode-runtime",
-    "runtime-effects",
     "runtime-worker",
 }
 _BIFROST_CONTRACT_PATH = "/app/data/delegation/bifrost_delegation.yaml"
@@ -108,6 +107,7 @@ EXPECTED_RENDERED_SERVICES = {
     *PROFILE_CARRIER_SERVICES,
 }
 OUT_OF_LANE_SERVICES = {
+    "runtime-effects",
     "agent-actions-consumer",
     "skill-lifecycle-consumer",
     "context-audit-consumer",
@@ -121,8 +121,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "postgres": {"15436"},
     "redpanda": {"39092", "39093", "29644"},
     "valkey": {"26379"},
-    "omninode-runtime": {"18085"},
-    "runtime-effects": {"18086"},
+    "omninode-runtime": {"18085", "18086"},
     "runtime-worker": set(),
     "projection-api": {"13002"},
     "forward-migration": set(),
@@ -293,6 +292,7 @@ def _docker_compose_command(*args: str) -> list[str]:
 def lane_overlay_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     overlay_dir = tmp_path / "lane-overlays"
     compose = load_compose(REPO_ROOT / COMPOSE_FILES[-1])
+    assert compose["services"]["runtime-effects"]["profiles"] == ["folded-into-runtime"]
     path = write_overlay(
         overlay_dir / f"{compose['name']}.bifrost.yaml",
         lab_overlay(lane=Path(COMPOSE_FILES[-1]).stem.partition(".")[2]),
@@ -337,6 +337,7 @@ def _compose_config_json() -> dict[str, Any]:
 
     rendered_config = json.loads(result.stdout)
     assert isinstance(rendered_config, dict)
+    assert "runtime-effects" not in rendered_config["services"]
     return cast("dict[str, Any]", rendered_config)
 
 
@@ -501,6 +502,7 @@ def test_stability_lane_catalog_generated_runtime_compose_is_valid(
     assert services_result.returncode == 0, services_result.stderr
     rendered_services = set(services_result.stdout.splitlines())
     assert EXPECTED_RENDERED_SERVICES.issubset(rendered_services)
+    assert "runtime-effects" not in rendered_services
 
 
 @pytest.mark.integration
@@ -513,9 +515,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity(
     assert services["omninode-runtime"]["container_name"] == (
         "omninode-stability-test-runtime"
     )
-    assert services["runtime-effects"]["container_name"] == (
-        "omninode-stability-test-runtime-effects"
-    )
+    assert "runtime-effects" not in services
     assert services["runtime-worker"]["container_name"] == (
         "omninode-stability-test-runtime-worker"
     )
