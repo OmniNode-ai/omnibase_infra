@@ -132,6 +132,7 @@ import argparse
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -184,6 +185,7 @@ lab_pass_receipt = _load_sibling("lab_pass_receipt")
 #: manifest keeps its version.
 post_release_dev_bump = _load_sibling("post_release_dev_bump")
 instance_receipt_lanes = _load_sibling("instance_receipt_lanes")
+check_lockfile_registry_allowlist = _load_sibling("check_lockfile_registry_allowlist")
 
 #: The runtime-change path classifier, in ``scripts/`` rather than ``scripts/ci``.
 #: The SAME module ``trigger_rebuild_on_merge.py`` reads its own patterns from,
@@ -1883,6 +1885,8 @@ def refresh_locked_dependencies(
 
     Only registry packages outside the first-party prefixes are upgrade targets.
     The root version has already been bumped and must stay at that version.
+    Resolution never runs a build backend, so no third-party code executes in
+    the release job that holds the app token.
     """
     status = EnumDependencyRefreshStatus
     if policy.dependency_refresh is EnumDependencyRefresh.NONE:
@@ -1901,14 +1905,17 @@ def refresh_locked_dependencies(
     if not packages:
         return ModelDependencyRefresh(status.UNCHANGED, "no refreshable packages", ())
 
-    argv = ["uv", "lock"]
+    argv = ["uv", "lock", "--no-build"]
     for package in packages:
         argv.extend(("--upgrade-package", package))
     if run is None:
 
         def run(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+            env = os.environ.copy()
+            env.pop("GH_TOKEN", None)
+            env.pop("GITHUB_TOKEN", None)
             return subprocess.run(
-                args, cwd=cwd, capture_output=True, text=True, check=False
+                args, cwd=cwd, capture_output=True, text=True, check=False, env=env
             )
 
     result = run(argv, clone)
@@ -1928,6 +1935,12 @@ def refresh_locked_dependencies(
         ):
             msg = "dependency refresh escaped its fence: non-refreshable or root version moved"
             raise ReleaseTrainConfigError(msg)
+        findings = check_lockfile_registry_allowlist.check_lockfile(lock)
+        if findings:
+            hosts = ", ".join(sorted({finding.host for finding in findings}))
+            raise ReleaseTrainConfigError(
+                f"dependency refresh resolved from a non-public host: {hosts}"
+            )
     except (ReleaseTrainConfigError, tomllib.TOMLDecodeError) as exc:
         lock.write_bytes(original)
         raise ReleaseTrainConfigError(str(exc)) from exc

@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The train's lock refresh replays a recorded real `uv lock` run (OMN-21351).
+"""The train's lock refresh replays a real `uv lock --no-build` run (OMN-21351).
 
-The recording is `refresh_locked_dependencies` run with the real `uv` over this
-repository's own `pyproject.toml` and `uv.lock`: exit 0, 195 upgrade targets,
+The recording is `uv lock --no-build` run by `refresh_locked_dependencies` over
+this repository's own `pyproject.toml` and `uv.lock`: exit 0, 195 upgrade targets,
 132 third-party packages moved, no first-party package and not the root entry.
-The replay rebuilds the lock from the recorded versions, answers the train's
-`uv lock` call with the recorded outcome, and requires the train to name the same
-targets and report the same moves.
+The replay rebuilds the lock from the recorded versions and covers the upgrade
+targets and version moves of packages present before and after the real run.
+Packages the real run added or removed (its "Added"/"Removed" lines) are outside
+`lock_version_moves` and are not replayed.
 """
 
 from __future__ import annotations
@@ -72,10 +73,10 @@ def test_release_train_dependency_refresh_replays_the_recorded_uv_run(
         )
     assert after != before
     (tmp_path / "uv.lock").write_text(before, encoding="utf-8")
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], Path]] = []
 
     def replay(argv: Sequence[str], cwd: Path) -> Any:
-        calls.append(list(argv))
+        calls.append((list(argv), cwd))
         (cwd / "uv.lock").write_text(after, encoding="utf-8")
         return type(
             "Completed",
@@ -92,10 +93,19 @@ def test_release_train_dependency_refresh_replays_the_recorded_uv_run(
     result = rt.refresh_locked_dependencies(tmp_path, policy, replay)
 
     assert len(calls) == 1
+    argv, cwd = calls[0]
+    assert cwd == tmp_path
     recorded_argv = cast("list[str]", recorded_response["argv_head"])
-    assert calls[0][:2] == recorded_argv
-    assert calls[0][2::2] == ["--upgrade-package"] * len(targets)
-    assert calls[0][3::2] == targets
+    head = len(recorded_argv)
+    assert argv[:head] == recorded_argv
+    assert argv[head::2] == ["--upgrade-package"] * len(targets)
+    assert argv[head + 1 :: 2] == targets
+    stderr = cast("str", recorded_response["stderr"])
+    assert len(moves) == sum(
+        line.startswith("Updated ") for line in stderr.splitlines()
+    )
+    assert len(targets) == 195
+    assert len(moves) == 132
     assert not set(first_party) & set(targets)
     assert result.status is rt.EnumDependencyRefreshStatus.REFRESHED
     assert [{"name": n, "from": a, "to": b} for n, a, b in result.moves] == moves

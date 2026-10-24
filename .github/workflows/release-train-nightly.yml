@@ -389,7 +389,9 @@ jobs:
             staged+=("${bumped_paths[@]}")
           fi
 
-          refresh=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" refresh-lock \
+          # The lock refresh runs without the app token in its environment and
+          # resolves with `uv lock --no-build`, so no build backend runs (OMN-21351).
+          refresh=$(env -u GH_TOKEN -u GITHUB_TOKEN python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" refresh-lock \
             --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
             --repo "${TARGET_REPO}" --clone .)
           dep_refresh_status=$(jq -r .status <<<"${refresh}")

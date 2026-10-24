@@ -56,7 +56,7 @@ def _lock() -> str:
         ("Alpha__Client", "2.0", 'registry = "https://pypi.org/simple"'),
         ("editable-dep", "1.0", 'editable = "../editable-dep"'),
         ("virtual-dep", "1.0", 'virtual = "../virtual-dep"'),
-        ("git-dep", "1.0", 'git = "https://example.org/dependency"'),
+        ("git-dep", "1.0", 'git = "https://github.com/example/dependency"'),
         ("path-dep", "1.0", 'path = "../path-dep"'),
     ]
     return "version = 1\n" + "".join(
@@ -177,6 +177,7 @@ def test_release_train_dependency_refresh_runs_once_with_fenced_argv(
             [
                 "uv",
                 "lock",
+                "--no-build",
                 "--upgrade-package",
                 "alpha-client",
                 "--upgrade-package",
@@ -199,6 +200,52 @@ def test_release_train_dependency_refresh_runs_once_with_fenced_argv(
         if changes
         else [],
     }
+    assert (clone / "pyproject.toml").read_bytes() == manifest
+
+
+def test_release_train_dependency_refresh_default_runner_strips_tokens(
+    clone: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "x")
+    monkeypatch.setenv("GITHUB_TOKEN", "y")
+    calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def run(args: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((list(args), kwargs["env"]))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(rt.subprocess, "run", run)
+    rt.refresh_locked_dependencies(clone, _policy())
+    assert len(calls) == 1
+    args, env = calls[0]
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert args[:3] == ["uv", "lock", "--no-build"]
+
+
+def test_release_train_dependency_refresh_non_public_host_restores_bytes(
+    clone: Path,
+) -> None:
+    original = (clone / "uv.lock").read_bytes()
+    manifest = (clone / "pyproject.toml").read_bytes()
+
+    def run(argv: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        lock = cwd / "uv.lock"
+        lock.write_text(
+            lock.read_text().replace(
+                'name = "Alpha__Client"\nversion = "2.0"\n'
+                'source = { registry = "https://pypi.org/simple" }',
+                'name = "Alpha__Client"\nversion = "2.1"\n'
+                'source = { registry = "http://mirror.internal:3141/simple" }',
+            )
+        )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with pytest.raises(
+        rt.ReleaseTrainConfigError, match=r"non-public host: mirror\.internal"
+    ):
+        rt.refresh_locked_dependencies(clone, _policy(), run)
+    assert (clone / "uv.lock").read_bytes() == original
     assert (clone / "pyproject.toml").read_bytes() == manifest
 
 
@@ -325,6 +372,14 @@ def test_release_train_dependency_refresh_cli_refusal(
     output = capsys.readouterr()
     assert not output.out
     assert "::error::" in output.err
+
+
+def test_release_train_dependency_refresh_workflow_drops_the_token() -> None:
+    lines = _WORKFLOW.read_text().splitlines()
+    refresh_lines = [line for line in lines if 'release_train.py" refresh-lock' in line]
+    assert len(refresh_lines) == 1
+    assert "refresh-lock \\" in refresh_lines[0]
+    assert "env -u GH_TOKEN -u GITHUB_TOKEN python3" in refresh_lines[0]
 
 
 def test_release_train_dependency_refresh_workflow_shape() -> None:
