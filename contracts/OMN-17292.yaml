@@ -26,6 +26,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: the Enable auto-merge step reads isDraft before gh pr merge and exits 0 for a draft without calling gh pr merge, while a ready PR still reaches the arming call -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+  - id: req-omn17292-runtime-image-cve-floors
+    statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -39,6 +44,9 @@ evidence_requirements:
   - kind: tests
     description: The Enable auto-merge step skips a draft PR before the arming call and still arms a ready PR.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
+  - kind: tests
+    description: The runtime image upgrades filelock past CVE-2026-112940 and npm's bundled undici past CVE-2026-109869.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -76,3 +84,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn-17292-ac5-runtime-image-cve-floors
+    description: The builder stage upgrades filelock to >=4.2.1 after the torch install and the npm bundle loop patches undici to 6.29.1; the merge base has no filelock upgrade and patches undici at 6.28.1.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
