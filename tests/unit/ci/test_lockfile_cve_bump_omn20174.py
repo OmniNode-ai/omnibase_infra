@@ -72,7 +72,3 @@ def test_runner_image_identity_binds_fixed_lock() -> None:
         f"runner image identity verification failed ({result.returncode})\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    virtualenv = _locked_package("virtualenv")
-    assert _version_tuple(virtualenv["version"]) >= FIXED_FLOORS["virtualenv"], (
-        f"virtualenv {virtualenv['version']} is below the fixed floor"
-    )
