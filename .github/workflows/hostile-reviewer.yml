@@ -56,10 +56,9 @@
 # through CI Summary (operator RULING 2026-10-21T13:00:04Z, OMN-17427).
 #
 # Credentials: LOCAL_LLM_SHARED_SECRET (a repo Actions secret, OMN-14176) signs
-# the lab voters' calls. HOSTILE_REVIEW_ANTHROPIC_API_KEY (an org Actions
-# secret, OMN-20910) is passed to the review step alone, as ANTHROPIC_API_KEY
-# and REVIEW_ANTHROPIC_API_KEY, for the Claude API voters an overlay declares.
-# Neither is committed or printed.
+# the lab voters' calls. The Claude API voter calls the review gateway through
+# the dogfood tenant by reference (OMN-20974, OMN-21350); no provider key is
+# passed from an Actions secret.
 #
 # Reference: OMN-8468 (W6.1 mandatory CI gate), OMN-8524 (pilot rollout),
 # OMN-14176 (model fix), OMN-17492 (lab-only roster + thread gate)
@@ -439,15 +438,6 @@ jobs:
           # voters overlay declares substitute_votes (OMN-20947).
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
-          # OMN-20910: the Claude API voters' key, for this step only. An
-          # overlay voter with provider anthropic reads the variable its own
-          # api_key_env names, and omniintelligence reads
-          # ANTHROPIC_API_KEY when none is named; it never substitutes one
-          # variable for another. The key is exported under both names so an
-          # overlay that declares either one resolves it. Unset, the value is
-          # empty and no voter reads it, so the current roster is unchanged.
-          ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
-          REVIEW_ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
           REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
         working-directory: ../omniintelligence
         run: |
