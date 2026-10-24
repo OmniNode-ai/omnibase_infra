@@ -54,6 +54,7 @@ PINNED_WORKFLOWS = (
 # A ``ref:`` that is an expression is resolved from committed state by a
 # resolver step (omnimarket-contract-pin.yaml, OMN-17427 pin resolver, the
 # paired-PR resolver of node-migration-sync.yml) or is a sha already pinned in place.
+RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^\s*repository: OmniNode-ai/(\w+)\s*$")
 REF = re.compile(r"^\s*ref: (\S+)")
@@ -75,10 +76,11 @@ def _checkout_refs(text: str) -> list[tuple[int, str, str | None]]:
 
 
 def test_pins_are_full_shas_and_omnimarket_matches_contract_pin() -> None:
-    assert all(HEX40.fullmatch(v) for v in PINS.values())
+    assert all(HEX40.fullmatch(v) for repo, v in PINS.items() if repo != "omnimarket")
+    assert RELEASE_TAG.fullmatch(PINS["omnimarket"])
     contract_pin = yaml.safe_load(
         (REPO_ROOT / ".github" / "omnimarket-contract-pin.yaml").read_text()
-    )["omnimarket_contract_ref"]
+    )["omnimarket_release_tag"]
     assert PINS["omnimarket"] == contract_pin
 
 
@@ -89,6 +91,9 @@ def test_sibling_checkout_refs_are_the_pin(name: str) -> None:
     for lineno, repo, ref in _checkout_refs(text):
         if ref is None or ref in {"dev", "main"}:
             bad.append(f"{name}:{lineno} {repo} ref={ref}")
+        elif repo == "omnimarket" and not ref.startswith("${{"):
+            if not RELEASE_TAG.fullmatch(ref) or ref != PINS["omnimarket"]:
+                bad.append(f"{name}:{lineno} {repo} ref={ref}")
         elif HEX40.fullmatch(ref):
             # a sha that predates the pin file is tolerated only when it is not a
             # branch-tip read; the migrated sites carry the pin comment
@@ -102,7 +107,14 @@ def test_migrated_sites_carry_the_declared_sha(name: str) -> None:
     for line in text.split("\n"):
         if "# .github/sibling-pins.yaml" not in line:
             continue
-        assert any(sha in line for sha in PINS.values()), f"{name}: {line.strip()}"
+        match = re.search(r"ref: (\S+) # \.github/sibling-pins\.yaml", line)
+        if match is None:
+            # Reusable workflows and shell checkouts carry the same annotation.
+            match = re.search(
+                r"(?:@|checkout --quiet )([^\s;]+)(?:; then)? # \.github/sibling-pins\.yaml",
+                line,
+            )
+        assert match and match.group(1) in PINS.values(), f"{name}: {line.strip()}"
 
 
 @pytest.mark.parametrize("name", PINNED_WORKFLOWS)

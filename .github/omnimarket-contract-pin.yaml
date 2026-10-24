@@ -1,29 +1,34 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-17292: the omnimarket contract set that omnibase_infra's application
-# database TABLE grants are derived from.
+# OMN-17292: the omnimarket release whose contract set omnibase_infra's
+# application database TABLE grants are derived from.
 #
 # `Application Database Domain Enforcement (OMN-15361)` projects the
 # `object_type: TABLE` grants in src/omnibase_infra/topology/instances/*.yaml
 # out of omnimarket node `db_io.db_tables` declarations. This file is that
-# derivation's ONLY default input.
+# derivation's ONLY default input, and .github/sibling-pins.yaml reads omnimarket
+# at the same value.
 #
-# Why a pin and not omnimarket's live `dev` tip (which is what OMN-15703
-# installed): omnibase_infra `dev` enforces through the single required
-# `CI Summary` umbrella (OMN-4497), so a live foreign branch tip as a
-# derivation input means an omnimarket merge turns the required check red on
-# every open omnibase_infra PR at once -- none of which changed anything
-# related, and none of which can fix it. That happened three times in 21 hours
+# Why not omnimarket's live `dev` tip (OMN-15703): omnibase_infra `dev` enforces
+# through the single required `CI Summary` umbrella (OMN-4497), so a moving
+# foreign branch tip as a derivation input turns the required check red on every
+# open omnibase_infra PR at once. That happened three times in 21 hours
 # (OMN-17141, OMN-16930, OMN-17290).
 #
-# Why this is NOT a return to the OMN-15701 stale-pin incident: this pin is
-# advanced automatically by .github/workflows/omnimarket-contract-pin-refresh.yml,
-# which regenerates the grants and the rendered catalogs in the same commit and
-# opens a PR. The pin can be briefly behind omnimarket `dev`; it cannot sit
-# stale silently, and scripts/ci/check_omnimarket_contract_pin_advance.py makes
-# it forward-only so a regeneration can never resurrect an older contract set
-# and delete live grants (which is exactly what OMN-15701 was).
+# Why a release tag and not a commit sha: omnimarket releases come from the
+# overnight release train, and the lab already deploys from tags. The value is a
+# strict `v<MAJOR>.<MINOR>.<PATCH>` release tag; the resolver refuses a sha, a
+# branch, a `dev-<UTC>-<sha12>` merge tag and a prerelease. Nothing writes it per
+# omnimarket dev merge: .github/workflows/omnimarket-contract-pin-refresh.yml
+# moves it to the newest release tag once per overnight train run, regenerating
+# the grants and rendered catalogs in the same commit on one refreshed PR.
+#
+# Why this is NOT a return to the OMN-15701 stale-pin incident: the value can lag
+# omnimarket by at most one train cycle, which is the budget chosen here, and
+# scripts/ci/check_omnimarket_contract_pin_advance.py keeps every move
+# forward-only, so a regeneration can never resurrect an older contract set and
+# delete live grants.
 #
 # To move this by hand you must also regenerate:
 #   uv run python scripts/generate_application_database_table_grants.py \
@@ -32,4 +37,4 @@
 # An `Omnimarket-Source-Ref: <ref>` PR-body trailer still overrides this pin for
 # cross-repo co-development (OMN-15703's escape hatch, unchanged).
 repository: OmniNode-ai/omnimarket
-omnimarket_contract_ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0
+omnimarket_release_tag: v0.4.319

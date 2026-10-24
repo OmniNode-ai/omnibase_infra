@@ -431,11 +431,11 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     # It used to read `assert "if: steps.resolve-omnimarket-ref.outputs.ref ==
     # 'dev'" in resolve_step`, on the RESOLVE step. That asserted the escape
     # hatch on the wrong step: the hatch is about which omnimarket tree the job
-    # CHECKS OUT, and the resolve step only computes a sha from a committed
+    # CHECKS OUT, and the resolve step only reads a tag from a committed
     # file. Gating the resolver was an optimisation, not the invariant.
     #
     # The resolver is now unconditional because a TRAILERED pull request needs
-    # that sha too: OMN-18863 derives a second time against the committed pin,
+    # that tag too: OMN-18863 derives a second time against the committed pin,
     # exactly as the push to dev will, so a vendoring pull request cannot merge
     # into a state its own required gate rejects one push later. Keeping the
     # old condition would have made the second derivation impossible.
@@ -445,7 +445,7 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     # resolved a ref.
     assert "if:" not in resolve_step, (
         "the pin resolver must stay unconditional: the OMN-18863 committed-pin "
-        "derivation arm reads this sha on trailered pull requests too, and "
+        "derivation arm reads this tag on trailered pull requests too, and "
         "re-gating it on ref == 'dev' silently removes that arm"
     )
 
@@ -455,7 +455,7 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
     )[1].split("- name:", maxsplit=1)[0]
     assert (
         "steps.resolve-omnimarket-ref.outputs.ref == 'dev' "
-        "&& steps.resolve-omnimarket-pin.outputs.sha "
+        "&& steps.resolve-omnimarket-pin.outputs.tag "
         "|| steps.resolve-omnimarket-ref.outputs.ref" in checkout_step
     ), (
         "the OMN-15703 escape hatch must be preserved: an explicit "
@@ -463,13 +463,12 @@ def test_omnimarket_ref_resolution_survives_fork_and_dependabot_prs() -> None:
         "co-development, and the pin is used only when no trailer resolved"
     )
 
-    # Fail-closed is preserved inside the resolver: a non-40-hex ref is
-    # rejected rather than resolved, so no mutable branch/tag can sneak back in
-    # as the derivation input.
+    # Fail-closed is preserved inside the resolver: only a strict release tag
+    # is accepted, so a sha, branch or dev merge tag cannot become the input.
     resolver = (_ROOT / "scripts" / "resolve_omnimarket_contract_pin.py").read_text(
         encoding="utf-8"
     )
-    assert "^[0-9a-f]{40}$" in resolver
+    assert r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$" in resolver
 
 
 def test_predecessor_pins_reject_in_place_mutation() -> None:
