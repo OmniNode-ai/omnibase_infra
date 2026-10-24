@@ -1218,7 +1218,9 @@ check_dev_broker() {
   started_seconds=$(sed 's/\.[0-9][0-9]*Z$/Z/' <<<"$started_at")
   started_epoch=""
   if [[ -n "$started_seconds" ]]; then
-    started_epoch=$(date -u -d "$started_seconds" +%s 2>/dev/null) || started_epoch=""
+    started_epoch=$(date -u -d "$started_seconds" +%s 2>/dev/null) \
+      || started_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started_seconds" +%s 2>/dev/null) \
+      || started_epoch=""
   fi
   if [[ -z "$started_epoch" ]]; then
     printf 'broker|CRITICAL|dev-broker-restart|%s StartedAt=%s could not be parsed\n' "$container" "$started_at"
