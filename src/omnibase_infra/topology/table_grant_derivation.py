@@ -390,6 +390,30 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
+    # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
+    # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
+    # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
+    # names access read_write, role compaction_receipts. Retired when the
+    # node_projection_compaction_receipts contract merges and the omnimarket
+    # pin advances past it; the OMN-18863 expiry module names this bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:compaction_receipts",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
+            "0000_create_compaction_receipts.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="compaction_receipts",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
+                "0000_create_compaction_receipts.sql"
+            ),
+            access="read_write",
+            role="compaction_receipts",
+        ),
+    ),
     # OMN-19988: the same infra-first window; this repo vendors
     # node_projection_local_environment/0000-0002 ahead of the omnimarket node
     # contract that declares the relation, which lands after this release (the
