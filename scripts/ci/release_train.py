@@ -132,6 +132,7 @@ import argparse
 import functools
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -184,6 +185,7 @@ lab_pass_receipt = _load_sibling("lab_pass_receipt")
 #: manifest keeps its version.
 post_release_dev_bump = _load_sibling("post_release_dev_bump")
 instance_receipt_lanes = _load_sibling("instance_receipt_lanes")
+check_lockfile_registry_allowlist = _load_sibling("check_lockfile_registry_allowlist")
 
 #: The runtime-change path classifier, in ``scripts/`` rather than ``scripts/ci``.
 #: The SAME module ``trigger_rebuild_on_merge.py`` reads its own patterns from,
@@ -304,6 +306,38 @@ class EnumTrainMode(StrEnum):
     REPORT_ONLY = "report_only"
 
 
+class EnumDependencyRefresh(StrEnum):
+    """Whether the train refreshes third-party locked dependencies."""
+
+    LOCKED = "locked"
+    NONE = "none"
+
+
+class EnumDependencyRefreshStatus(StrEnum):
+    REFRESHED = "refreshed"
+    UNCHANGED = "unchanged"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class ModelDependencyRefresh:
+    """The reported outcome of the train's one lock refresh."""
+
+    status: EnumDependencyRefreshStatus
+    detail: str
+    moves: tuple[tuple[str, str, str], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "detail": self.detail,
+            "moved_count": len(self.moves),
+            "moved": [
+                {"name": name, "from": old, "to": new} for name, old, new in self.moves
+            ],
+        }
+
+
 class EnumTrainVerdict(StrEnum):
     CUT = "CUT"
     SKIP = "SKIP"
@@ -387,6 +421,9 @@ class ModelRepoReleasePolicy:
     lab_evidence_note: str
     mode: EnumTrainMode
     mode_note: str
+    dependency_refresh: EnumDependencyRefresh
+    dependency_refresh_note: str
+    first_party_lock_prefixes: tuple[str, ...]
     consumed_paths: tuple[ModelConsumedPath, ...] = ()
 
     @property
@@ -522,16 +559,31 @@ def load_policy(path: Path) -> dict[str, ModelRepoReleasePolicy]:
         msg = f"release-train policy {path} carries no 'repos' mapping"
         raise ReleaseTrainConfigError(msg)
 
+    prefixes = raw.get("dependency_refresh_first_party_prefixes")
+    if (
+        not isinstance(prefixes, list)
+        or not prefixes
+        or any(not isinstance(p, str) or not p.strip() for p in prefixes)
+    ):
+        msg = (
+            f"{path}: must declare a non-empty "
+            "'dependency_refresh_first_party_prefixes' list of non-empty strings"
+        )
+        raise ReleaseTrainConfigError(msg)
+    first_party_prefixes = tuple(_normalized_package_name(p.strip()) for p in prefixes)
+
     policies: dict[str, ModelRepoReleasePolicy] = {}
     for repo, entry in raw["repos"].items():
-        policies[str(repo)] = _parse_entry(str(repo), entry, path)
+        policies[str(repo)] = _parse_entry(str(repo), entry, path, first_party_prefixes)
     if not policies:
         msg = f"release-train policy {path} declares no repos"
         raise ReleaseTrainConfigError(msg)
     return policies
 
 
-def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
+def _parse_entry(
+    repo: str, entry: Any, path: Path, first_party_prefixes: tuple[str, ...]
+) -> ModelRepoReleasePolicy:
     if not isinstance(entry, dict):
         msg = f"{path}: repo {repo} is not a mapping"
         raise ReleaseTrainConfigError(msg)
@@ -555,9 +607,16 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
     try:
         lab_evidence = EnumLabEvidence(_required("lab_evidence"))
         mode = EnumTrainMode(_required("mode"))
+        dependency_refresh = EnumDependencyRefresh(_required("dependency_refresh"))
     except ValueError as exc:
         msg = f"{path}: repo {repo} declares an unknown value: {exc}"
         raise ReleaseTrainConfigError(msg) from exc
+
+    refresh_note = (
+        _required("dependency_refresh_note")
+        if dependency_refresh is EnumDependencyRefresh.NONE
+        else str(entry.get("dependency_refresh_note", "") or "").strip()
+    )
 
     if (
         lab_evidence is EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
@@ -600,6 +659,9 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
         lab_evidence_note=lab_note,
         mode=mode,
         mode_note=mode_note,
+        dependency_refresh=dependency_refresh,
+        dependency_refresh_note=refresh_note,
+        first_party_lock_prefixes=first_party_prefixes,
         consumed_paths=_parse_consumed_paths(
             repo, entry.get("tag_clone_consumed_paths"), release_paths, path
         ),
@@ -1770,6 +1832,123 @@ def _normalized_package_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def refreshable_lock_packages(
+    lock_text: str, first_party_prefixes: Sequence[str]
+) -> list[str]:
+    """Registry packages outside the governed first-party dependency cascade."""
+    prefixes = tuple(_normalized_package_name(p) for p in first_party_prefixes)
+    return sorted(
+        {
+            _normalized_package_name(package["name"])
+            for package in tomllib.loads(lock_text).get("package", [])
+            if "registry" in package.get("source", {})
+            and not _normalized_package_name(package["name"]).startswith(prefixes)
+        }
+    )
+
+
+def lock_version_moves(before: str, after: str) -> list[tuple[str, str, str]]:
+    """Version changes for normalized package names present in both locks."""
+    old = {
+        _normalized_package_name(p["name"]): p["version"]
+        for p in tomllib.loads(before).get("package", [])
+        if "version" in p
+    }
+    new = {
+        _normalized_package_name(p["name"]): p["version"]
+        for p in tomllib.loads(after).get("package", [])
+        if "version" in p
+    }
+    return [
+        (name, old[name], new[name])
+        for name in sorted(old.keys() & new.keys())
+        if old[name] != new[name]
+    ]
+
+
+def _lock_root_versions(text: str) -> list[tuple[str, str]]:
+    """The checkout's local entries, independently of their registry names."""
+    return sorted(
+        (_normalized_package_name(p["name"]), p.get("version", ""))
+        for p in tomllib.loads(text).get("package", [])
+        if any(p.get("source", {}).get(key) == "." for key in ("editable", "virtual"))
+    )
+
+
+def refresh_locked_dependencies(
+    clone: Path,
+    policy: ModelRepoReleasePolicy,
+    run: Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
+    | None = None,
+) -> ModelDependencyRefresh:
+    """Refresh once inside the release checkout, preserving the lock on failure.
+
+    Only registry packages outside the first-party prefixes are upgrade targets.
+    The root version has already been bumped and must stay at that version.
+    Resolution never runs a build backend, so no third-party code executes in
+    the release job that holds the app token.
+    """
+    status = EnumDependencyRefreshStatus
+    if policy.dependency_refresh is EnumDependencyRefresh.NONE:
+        return ModelDependencyRefresh(
+            status.SKIPPED, f"policy none: {policy.dependency_refresh_note}", ()
+        )
+    lock = clone / "uv.lock"
+    if not lock.exists():
+        return ModelDependencyRefresh(status.SKIPPED, "no uv.lock", ())
+    original = lock.read_bytes()
+    before = original.decode("utf-8")
+    try:
+        packages = refreshable_lock_packages(before, policy.first_party_lock_prefixes)
+    except tomllib.TOMLDecodeError as exc:
+        raise ReleaseTrainConfigError(f"cannot read uv.lock: {exc}") from exc
+    if not packages:
+        return ModelDependencyRefresh(status.UNCHANGED, "no refreshable packages", ())
+
+    argv = ["uv", "lock", "--no-build"]
+    for package in packages:
+        argv.extend(("--upgrade-package", package))
+    if run is None:
+
+        def run(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+            env = os.environ.copy()
+            env.pop("GH_TOKEN", None)
+            env.pop("GITHUB_TOKEN", None)
+            return subprocess.run(
+                args, cwd=cwd, capture_output=True, text=True, check=False, env=env
+            )
+
+    result = run(argv, clone)
+    if result.returncode:
+        lock.write_bytes(original)
+        lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        detail = lines[-1][:200] if lines else "no stderr output"
+        return ModelDependencyRefresh(status.SKIPPED, f"uv lock failed: {detail}", ())
+
+    after = lock.read_bytes().decode("utf-8")
+    if after == before:
+        return ModelDependencyRefresh(status.UNCHANGED, "uv.lock unchanged", ())
+    try:
+        moves = lock_version_moves(before, after)
+        if any(name not in packages for name, _old, _new in moves) or (
+            _lock_root_versions(before) != _lock_root_versions(after)
+        ):
+            msg = "dependency refresh escaped its fence: non-refreshable or root version moved"
+            raise ReleaseTrainConfigError(msg)
+        findings = check_lockfile_registry_allowlist.check_lockfile(lock)
+        if findings:
+            hosts = ", ".join(sorted({finding.host for finding in findings}))
+            raise ReleaseTrainConfigError(
+                f"dependency refresh resolved from a non-public host: {hosts}"
+            )
+    except (ReleaseTrainConfigError, tomllib.TOMLDecodeError) as exc:
+        lock.write_bytes(original)
+        raise ReleaseTrainConfigError(str(exc)) from exc
+    return ModelDependencyRefresh(
+        status.REFRESHED, "third-party lock refresh completed", tuple(moves)
+    )
+
+
 def rewrite_lock_root_version(text: str, package: str, new_version: str) -> str:
     """Return a ``uv.lock`` body with only ``package``'s own entry moved.
 
@@ -2079,6 +2258,14 @@ def build_parser() -> argparse.ArgumentParser:
     bump.add_argument("--clone", type=Path, required=True)
     bump.add_argument("--version", required=True)
 
+    refresh = sub.add_parser(
+        "refresh-lock",
+        help="refresh third-party locked dependencies for the release PR",
+    )
+    refresh.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
+    refresh.add_argument("--repo", required=True)
+    refresh.add_argument("--clone", type=Path, required=True)
+
     release_pr = sub.add_parser(
         "release-pr",
         help="decide whether to open, refresh, skip or refuse the release PR",
@@ -2146,6 +2333,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         for relative in written:
             print(relative)
+        return 0
+
+    if args.command == "refresh-lock":
+        try:
+            policy = policy_for(policies, args.repo)
+            refreshed = refresh_locked_dependencies(args.clone, policy)
+        except ReleaseTrainConfigError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(refreshed.to_dict(), sort_keys=True))
         return 0
 
     if args.command == "changelog":

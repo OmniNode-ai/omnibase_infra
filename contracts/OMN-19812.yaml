@@ -28,6 +28,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: "AC6: every Dockerfile.runtime service in the infra and dev-lane compose renders declares ulimits.nofile soft >= 65536 -- falsifier: uv run pytest tests/unit/infra/test_runtime_nofile_ulimit_omn19812.py fails against the merge-base compose files"
+  - id: req-omn19812-http-refusal-cause
+    statement: The C28 unreadable verdict retains the projection server's refusal body within bounded reads.
+    acceptance:
+      - id: AC7
+        statement: "AC7: a real HTTP 503 contributes its JSON status, error and reason, or bounded printable text, to the INDETERMINATE board result and record without retrying; an empty body retains the HTTP status and a successful page is unchanged -- falsifier: the focused HTTP cause unit tests and loopback HTTP integration tests fail when refusal bodies are discarded"
 evidence_requirements:
   - kind: tests
     description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
@@ -37,6 +42,24 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn19812-ac7-http-refusal-cause
+    description: Unit coverage and a real loopback HTTP server exercise the projection refusal through urllib, collection, grading and record serialization, including the bounded read and no-retry behavior.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_lane_http_error_cause.py tests/integration/nodes/test_consumer_flow_http_error_cause_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn19812-deploy-http-refusal-cause
+    description: The C28 probe executes the checkout's lane transport. This hosted-runner loopback readback exercises that transport through the board result and JSON record; it requires neither Docker nor a private lane and does not claim a deployed service rollout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_consumer_flow_http_error_cause_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
   - id: dod-omn19812-ac1-boot-grace
     description: The focused C28 tests pass at this head; the booting-lane tests fail at the merge base with the run's own ConsumerFlowLaneUnsettledError.
     source: manual
