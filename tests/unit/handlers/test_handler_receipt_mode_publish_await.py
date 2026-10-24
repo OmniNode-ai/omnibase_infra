@@ -18,6 +18,7 @@ import pytest
 from pydantic import JsonValue, ValidationError
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.cli import delegate_lane, delegate_lane_credentials
 from omnibase_infra.cli.delegate_lane_credentials import DelegateLaneCredentialError
 from omnibase_infra.cli.model_delegate_lane_selection import ModelDelegateLaneSelection
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
@@ -312,9 +313,9 @@ def test_default_lane_binding_covers_construction_through_cleanup(
     )
     resolve = Mock(return_value=selection)
     credentials = Mock(return_value=transport)
-    monkeypatch.setattr(handler_module, "resolve_lane_selection_at", resolve)
+    monkeypatch.setattr(delegate_lane, "resolve_lane_selection_at", resolve)
     monkeypatch.setattr(
-        handler_module, "resolve_lane_client_transport_for", credentials
+        delegate_lane_credentials, "resolve_lane_client_transport_for", credentials
     )
     bus = EventBusInmemory()
     original_start = bus.start
@@ -401,11 +402,11 @@ def test_credential_refusal_becomes_runtime_error(
         declared_in=tmp_path / "lanes.yaml",
     )
     monkeypatch.setattr(
-        handler_module, "resolve_lane_selection_at", Mock(return_value=selection)
+        delegate_lane, "resolve_lane_selection_at", Mock(return_value=selection)
     )
     error = DelegateLaneCredentialError("lane credential refused")
     monkeypatch.setattr(
-        handler_module,
+        delegate_lane_credentials,
         "resolve_lane_client_transport_for",
         Mock(side_effect=error),
     )
