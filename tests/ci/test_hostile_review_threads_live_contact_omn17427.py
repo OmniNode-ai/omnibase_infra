@@ -186,10 +186,12 @@ def test_the_fixed_poster_made_threads_and_the_gate_held_them(
     ]
     assert [row["reason"] for row in rows] == ["unresolved, no disposition reply"] * 2
     assert all(row["blocking"] for row in rows)
-    # Accuracy is read per voter model from exactly these lines.
+    # Accuracy is read per voter model from exactly these lines (records from
+    # before the judge read with zero judged rejections, OMN-17427).
+    empty = dict.fromkeys(gate.ACCURACY_BUCKETS, 0)
     assert gate.accuracy(rows) == {
-        "correctness": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
-        "sonnet": {"findings": 1, "fixed": 0, "rejected": 0, "none": 1},
+        "correctness": empty | {"findings": 1, "none": 1},
+        "sonnet": empty | {"findings": 1, "none": 1},
     }
 
 
@@ -208,8 +210,12 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
         assert "Resource not accessible by integration" in line
     # The gate sends no GraphQL mutation at all any more.
     assert "mutation" not in _GATE.read_text(encoding="utf-8")
-    # The same two threads, open, with the rejected reply they carried: cleared.
-    thread = {
+    # The same two threads, open, with the rejected reply they carried. Since
+    # the review bot judges rejections (OMN-17427) that reply alone blocks; the
+    # bot's accepted verdict, under the workflow identity, clears the thread
+    # with no resolve call.
+    rejection = "rejected: the fixed-in check needs this PR's commit history"
+    thread: dict[str, Any] = {
         "id": "PRRT_kwDOPuAjtM6u01K4",
         "isResolved": False,
         "isOutdated": False,
@@ -218,8 +224,16 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
         "subjectType": "FILE",
         "comments": {
             "nodes": [
-                {"body": f"<!-- {gate.MARKER} fp=0b75b492dc2a -->\nfinding"},
-                {"body": "rejected: the fixed-in check needs this PR's commit history"},
+                {
+                    "databaseId": 4338489373,
+                    "body": f"<!-- {gate.MARKER} fp=0b75b492dc2a -->\nfinding",
+                },
+                {
+                    "databaseId": 4338600001,
+                    "body": rejection,
+                    "author": {"login": "operator-account"},
+                    "authorAssociation": "MEMBER",
+                },
             ]
         },
     }
@@ -228,5 +242,39 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
         raise AssertionError("a rejected disposition runs no fix check")
 
     blocking, cleared = gate.classify_threads([thread], no_fix_check)
+    assert cleared == []
+    assert blocking[0].judge_verdict == "unjudged"
+
+    # A verdict binds to the full SHA-256 of the rejection: one bound to a
+    # truncated 64-bit prefix is not a verdict and clears nothing.
+    digest = gate.body_digest(rejection)
+    assert len(digest) == 64
+    truncated: dict[str, Any] = {
+        "body": (
+            f"<!-- {gate.JUDGE_MARKER} rejection=4338600001 "
+            f"digest={digest[:16]} verdict=accepted "
+            "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
+        ),
+        "author": {"login": "github-actions"},
+    }
+    thread["comments"]["nodes"].append(truncated)
+    blocking, cleared = gate.classify_threads([thread], no_fix_check)
+    assert cleared == []
+    assert blocking[0].judge_verdict == "unjudged"
+    thread["comments"]["nodes"].remove(truncated)
+
+    thread["comments"]["nodes"].append(
+        {
+            "body": (
+                f"<!-- {gate.JUDGE_MARKER} rejection=4338600001 "
+                f"digest={gate.body_digest(rejection)} verdict=accepted "
+                "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
+                "**Review bot: rejection accepted**\n\n> the gate reads git history\n"
+            ),
+            "author": {"login": "github-actions"},
+        }
+    )
+    blocking, cleared = gate.classify_threads([thread], no_fix_check)
     assert blocking == []
     assert cleared[0].disposition == "rejected"
+    assert cleared[0].judge_verdict == "accepted"

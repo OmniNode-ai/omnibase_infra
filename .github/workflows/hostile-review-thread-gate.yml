@@ -3,26 +3,41 @@
 ---
 # hostile-review-thread-gate.yml (OMN-17427)
 #
-# Re-runs the "Hostile Review Thread Gate" when someone answers a finding.
+# Re-runs the "Hostile Review Thread Gate" when someone answers a finding, and
+# is where the review bot judges a rejection.
 #
 # The gate itself is the `hostile-review-thread-gate` job of
 # hostile-reviewer.yml, which runs after every review on a pull_request
 # event. It is REQUIRED on dev through CI Summary (operator RULING
 # 2026-10-21T13:00:04Z): every hostile-reviewer thread needs a reply
 # `fixed-in <sha>` (a commit of the PR that touched the cited lines) or
-# `rejected: <reason>`. Resolving a thread fires no workflow event, so the
-# reply is the trigger: this workflow runs the same script on the reply and
-# the script checks it. The script calls no checks API (hence no
-# `checks: write`): the fresh result is this job's own check-run, named
-# "Hostile Review Thread Gate", the same name as the pull_request run's job.
-# A cancelled superseded run is never a pass: CI Summary waits out a
-# `cancelled` row (CANCELLED_SUPERSESSION_GRACE_S) and fails closed after it.
-# A review the reviewer bot posts with GITHUB_TOKEN fires nothing here (GitHub
-# does not start workflows from GITHUB_TOKEN events), so this never loops on
-# its own output.
+# `rejected: <reason>` the review bot accepted. Resolving a thread fires no
+# workflow event, so the reply is the trigger: this workflow runs the same
+# script on the reply in a job of the same name, and that job's own check-run
+# is the fresh result. The script calls no Checks API (it reads review threads
+# and posts thread replies), so the job needs no `checks: write`. A reply the workflow token posts (the
+# reviewer's threads, the judge's verdicts) fires nothing here (GitHub does not
+# start workflows from GITHUB_TOKEN events), so this never loops on its own
+# output.
 #
-# This file runs no reviewer and no model; a reply on any thread (a human's or
-# another bot's) only re-reads thread state.
+# The review bot (OMN-17427, operator 2026-10-21: "No, not a bot to carry the
+# override. A bot to create the review."): a `rejected:` reply clears nothing
+# by itself, because every agent replies through the operator's own account.
+# When a rejection awaits a judgement, the gate script writes it with the
+# cited lines at the head (--pending); this job reads the CI overlay and
+# omniintelligence exactly as the reviewer job of hostile-reviewer.yml does
+# (the same steps, held identical by
+# tests/ci/test_hostile_review_judge_workflow_omn17427.py); omniintelligence's
+# `cli_review judge-rejections` asks a model that is none of the voters (the
+# judge the CI overlay declares in rejection_judge.yaml, called through the
+# reviewer's own model routing) to accept or refuse it with one sentence; and
+# the gate script posts each verdict as a reply under this job's own token
+# (--post-verdicts). The gate step honours only that identity's verdicts.
+# No override, no new credential: the model key is the reviewer's
+# HOSTILE_REVIEW_ANTHROPIC_API_KEY and the overlay read is the reviewer's
+# read-only app token. With no rejection to judge
+# (including a PR the reviewer never ran on) the judge steps are skipped and
+# nothing is installed or called.
 
 name: Hostile Review Thread Gate (on reply)
 
@@ -32,8 +47,8 @@ on:
   pull_request_review:
     types: [submitted, edited, dismissed]
 
-# Read-only: the gate reads thread state and writes nothing to the PR, so a
-# fork PR's read-only token runs it the same way.
+# Read-only by default; the one job below adds pull-requests: write for the
+# review bot's verdict replies.
 permissions:
   contents: read
   pull-requests: read
@@ -45,17 +60,241 @@ concurrency:
 jobs:
   hostile-review-thread-gate:
     name: Hostile Review Thread Gate
-    # GitHub-hosted: a public repository adds no self-hosted job (OMN-19998),
-    # and this job reads only GitHub thread state and the PR's history.
+    # GitHub-hosted: a public repository adds no self-hosted job (OMN-19998).
+    # The gate reads GitHub thread state and the PR's history; the judge
+    # reaches its model over the public API the CI overlay names.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 minutes for the gate, plus the reviewer's install and the judge's
+    # calls when a rejection awaits a judgement.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      REVIEW_VOTERS_OVERLAY: ${{ github.workspace }}/../ci-overlay/config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml
+      REVIEW_JUDGE_OVERLAY: ${{ github.workspace }}/../ci-overlay/config/onex/overlays/node_review_voters_overlay_compute/rejection_judge.yaml
     steps:
       - name: Checkout (gate script and PR history)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           filter: blob:none
+          # The write token stays out of .git/config: the install and judge
+          # steps below run third-party code beside this checkout. The scripts
+          # get the token through their step's env alone.
+          persist-credentials: false
+
+      # Stdlib only, before any install: a run with nothing to judge installs
+      # nothing and calls no model.
+      - name: Find rejections awaiting the review bot
+        id: pending
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HOSTILE_REVIEW_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          JUDGE_STATUS_PATH: ${{ runner.temp }}/hostile-review-judge-status.json
+          JUDGE_PENDING_PATH: ${{ runner.temp }}/hostile-review-pending.json
+        run: python3 scripts/ci/check_hostile_review_threads.py --pending "$JUDGE_PENDING_PATH"
+
+      # The steps from here to "Install omniintelligence dependencies" are the
+      # reviewer job's own (hostile-reviewer.yml), each gated on a pending
+      # rejection; only their `if:` differs, and "Install uv" pins its action
+      # by commit as every action in this file is.
+
+      - name: Resolve the CI overlay
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        id: ci-overlay
+        env:
+          CI_OVERLAY_REPO: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CI_OVERLAY_REPO}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::no review voters configured: OMNI_CI_OVERLAY_REPO is unset, so no CI overlay supplies config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml (review_voters_overlay.v1). The gate fails closed. To run it, put your voters in a repository of your own and set OMNI_CI_OVERLAY_REPO to its name."
+            exit 0
+          fi
+          if [[ ! "${CI_OVERLAY_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::OMNI_CI_OVERLAY_REPO must be a bare repository name, got '${CI_OVERLAY_REPO}'"
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "name=${CI_OVERLAY_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only CI overlay token
+        if: fromJSON(steps.pending.outputs.count || '0') > 0 && steps.ci-overlay.outputs.configured == 'true'
+        id: ci-overlay-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.ci-overlay.outputs.name }}
+          permission-contents: read
+
+      - name: Fetch the CI overlay
+        if: fromJSON(steps.pending.outputs.count || '0') > 0 && steps.ci-overlay.outputs.configured == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }}
+          token: ${{ steps.ci-overlay-token.outputs.token }}
+          path: .ci-overlay-checkout
+          persist-credentials: false
+          sparse-checkout: |
+            config/onex/overlays/node_review_voters_overlay_compute
+          sparse-checkout-cone-mode: false
+
+      - name: Place the CI overlay outside the workspace
+        if: fromJSON(steps.pending.outputs.count || '0') > 0 && steps.ci-overlay.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf ../ci-overlay
+          mv .ci-overlay-checkout ../ci-overlay
+          echo "CI overlay read from ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }} at $(git -C ../ci-overlay rev-parse HEAD)"
+          if [ ! -s "$REVIEW_VOTERS_OVERLAY" ]; then
+            echo "::error::the CI overlay carries no config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml; no voter can be resolved"
+            exit 1
+          fi
+
+      - name: Clone omniintelligence
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omniintelligence
+            TAG="$(git ls-remote --tags --refs \
+              https://github.com/OmniNode-ai/omniintelligence.git 'refs/tags/dev-*' \
+              | sed -n 's#^.*refs/tags/##p' \
+              | grep -E '^dev-[0-9]{14}-[0-9a-f]{12}$' | sort | tail -n 1 || true)"
+            if [ -n "$TAG" ] \
+              && git clone --filter=blob:none --no-checkout --branch "$TAG" \
+                https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
+              && git -C ../omniintelligence checkout --quiet "refs/tags/${TAG}"; then
+              echo "omniintelligence newest dev tag: ${TAG} -> $(git -C ../omniintelligence rev-parse HEAD)"
+              exit 0
+            fi
+            echo "::warning::omniintelligence newest dev tag unresolved or clone failed (attempt ${attempt}/4)"
+            sleep $((attempt * 10))
+          done
+          echo "::error::could not resolve and clone omniintelligence's newest refs/tags/dev-* tag"
+          exit 1
+
+      - name: Clone omnibase_core (omniintelligence dependency)
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omnibase_core_dep
+            if git clone --filter=blob:none --no-checkout \
+              https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep \
+              && git -C ../omnibase_core_dep checkout --quiet f43f97629182f463d233b564b19a2b27d4fc4888; then # .github/sibling-pins.yaml
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Clone omnibase_compat
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        working-directory: ${{ github.workspace }}
+        run: |
+          for attempt in {1..4}; do
+            rm -rf ../omnibase_compat
+            if git clone --filter=blob:none --no-checkout \
+              https://github.com/OmniNode-ai/omnibase_compat.git ../omnibase_compat \
+              && git -C ../omnibase_compat checkout --quiet 65aed95fa710748654e37d5c15c5446e779fdf52; then # .github/sibling-pins.yaml
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Install uv
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        working-directory: ${{ github.workspace }}
+        run: uv python install 3.12
+
+      - name: Install omniintelligence dependencies
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        # OMN-20910: the install runs before the voter preflight, because the
+        # overlay reader is imported from omniintelligence.review_pairing, whose
+        # package __init__ needs numpy. Run from a bare clone, the preflight died
+        # on ModuleNotFoundError, resolved no voter and reported DEGRADED.
+        # No continue-on-error: a failed install fails this job here, and the
+        # always() enforce and comment steps report it; nothing downstream can
+        # read a verdict from an environment that was never built.
+        id: install-omniintelligence
+        working-directory: ../omniintelligence
+        env:
+          UV_CONCURRENT_DOWNLOADS: "1"
+          UV_HTTP_TIMEOUT: "600"
+          UV_SYNC_ATTEMPTS: "5"
+          UV_SYNC_RETRY_DELAY_SECONDS: "10"
+          UV_TORCH_BACKEND: "cpu"
+        run: |
+          set -euo pipefail
+
+          attempt=1
+          until uv sync --locked --all-extras; do
+            status=$?
+            if [ "$attempt" -ge "$UV_SYNC_ATTEMPTS" ]; then
+              echo "::error::uv sync failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+
+            sleep_seconds=$((UV_SYNC_RETRY_DELAY_SECONDS * attempt))
+            echo "::warning::uv sync attempt ${attempt}/${UV_SYNC_ATTEMPTS} failed with exit ${status}; retrying in ${sleep_seconds}s"
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
+
+      # The review bot: omniintelligence's judge node, through the reviewer's
+      # own overlay loader and model call, in the environment the steps above
+      # built. Exit 1 when any rejection could not be judged; the step below
+      # still posts the verdicts it did reach.
+      - name: The review bot judges the rejections
+        if: fromJSON(steps.pending.outputs.count || '0') > 0
+        working-directory: ../omniintelligence
+        env:
+          # The reviewer's own model credentials, for this step only. A judge
+          # the overlay declares with provider anthropic reads the variable its
+          # api_key_env names; the key is exported under both names the
+          # reviewer step uses. A lab judge signs with the shared secret.
+          ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
+          REVIEW_ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
+          LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          JUDGE_PENDING_PATH: ${{ runner.temp }}/hostile-review-pending.json
+          JUDGE_RESULT_PATH: ${{ runner.temp }}/hostile-review-judgements.json
+        run: |
+          uv run python -m omniintelligence.review_pairing.cli_review judge-rejections \
+            --pending "$JUDGE_PENDING_PATH" \
+            --voters-overlay "$REVIEW_VOTERS_OVERLAY" \
+            --judge-overlay "$REVIEW_JUDGE_OVERLAY" \
+            --output "$JUDGE_RESULT_PATH"
+
+      # Under this job's token: the verdicts become the judge replies the gate
+      # reads. Runs whatever the judge did, so a judge that never ran is named.
+      - name: Post the review bot's verdicts
+        if: ${{ !cancelled() && fromJSON(steps.pending.outputs.count || '0') > 0 }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          JUDGE_STATUS_PATH: ${{ runner.temp }}/hostile-review-judge-status.json
+          JUDGE_RESULT_PATH: ${{ runner.temp }}/hostile-review-judgements.json
+        run: python3 scripts/ci/check_hostile_review_threads.py --post-verdicts "$JUDGE_RESULT_PATH"
+
+      # Runs whatever the judge did: an unjudged or refused rejection blocks
+      # here with its reason, an accepted one clears.
       - name: Check hostile-reviewer threads and their dispositions
+        if: ${{ !cancelled() }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -63,12 +302,16 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           DISPOSITION_RECORD_PATH: ${{ runner.temp }}/hostile-review-dispositions.jsonl
+          JUDGE_STATUS_PATH: ${{ runner.temp }}/hostile-review-judge-status.json
         run: python3 scripts/ci/check_hostile_review_threads.py
       - name: Upload the disposition record
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hostile-review-dispositions-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/hostile-review-dispositions.jsonl
+          path: |
+            ${{ runner.temp }}/hostile-review-dispositions.jsonl
+            ${{ runner.temp }}/hostile-review-judge-status.json
+            ${{ runner.temp }}/hostile-review-judgements.json
           if-no-files-found: ignore
           retention-days: 90
