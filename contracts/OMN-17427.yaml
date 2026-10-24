@@ -478,6 +478,21 @@ requirements:
     acceptance:
       - id: AC161
         statement: 'AC161: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+  - id: req-omn17427-consume-loop-rejoin
+    statement: While the bus runs and a subscription is registered, its consumer group has a polling member -- a consume loop survives any poll or dispatch failure, and a dead or parked consume task is restarted with a rebuilt consumer.
+    acceptance:
+      - id: AC17427526000
+        statement: 'AC17427526000: a poll raising a KafkaError or a RuntimeError once, and a batch raising once, leave the serial and concurrent loops running with the consumer rebuilt once and the later records dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"'
+      - id: AC17427526001
+        statement: 'AC17427526001: a subscriber raising CancelledError inside its own coroutine takes the handler-failure arm and the next record is dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"'
+      - id: AC17427526002
+        statement: 'AC17427526002: cancelling the loop task ends it promptly, also inside a failure backoff, and close() stops the consumer -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"'
+      - id: AC17427526003
+        statement: 'AC17427526003: the watchdog restarts a dead consume task within one interval with CONSUME_TASK_DEAD, cancels and restarts a parked one with CONSUME_TASK_PARKED, does not restart twice inside the cooldown and leaves an unsubscribed group alone -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"'
+      - id: AC17427526004
+        statement: 'AC17427526004: sync_status reports a group whose last poll is older than sync_unready_seconds as stalled with CONSUME_TASK_PARKED, and a recently polled group as before -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"'
+      - id: AC17427526005
+        statement: 'AC17427526005: get_readiness_status reports a topic dead when any one of its groups has a dead consume task -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"'
   - id: req-omn17427-satellite-lane-freeze-until-tenant
     statement: The satellite-host instance in config/deploy_lane_routing.yaml carries a freeze naming OMN-20530, so its deploy agent does not idle-restore, idle-converge or rebuild the full dev stack on that host while the runtime-only lab-tenant overlay waits on that ticket; no other committed instance carries a freeze.
     acceptance:
@@ -823,6 +838,9 @@ evidence_requirements:
   - kind: tests
     description: The lab job check store's SELECT grants to role_omnidash are issued, asserted, ledger-bound and declared.
     command: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
+  - kind: tests
+    description: Fake consumers and an injectable clock drive the real consume loop, the consume-task watchdog, the supervisor's sync status and the readiness view; no broker is contacted.
+    command: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q
   - kind: tests
     description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
     command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
@@ -2459,6 +2477,60 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC161
+  - id: dod-omn-17427-ac190-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526000
+  - id: dod-omn-17427-ac191-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526001
+  - id: dod-omn-17427-ac192-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526002
+  - id: dod-omn-17427-ac193-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526003
+  - id: dod-omn-17427-ac194-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526004
+  - id: dod-omn-17427-ac195-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526005
   - id: dod-omn-17427-ac160-satellite-freeze
     description: Unit tests over the committed routing table read the satellite instance's freeze and feed it to the idle-restore decision. Does not claim a live readback of that host's deploy agent.
     source: manual

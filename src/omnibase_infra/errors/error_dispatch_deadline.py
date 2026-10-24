@@ -65,4 +65,37 @@ class DispatchDeadlineExceededError(RuntimeHostError):
         )
 
 
-__all__ = ["DispatchDeadlineExceededError"]
+class DispatchCancelledError(RuntimeHostError):
+    """A subscriber callback ended in ``asyncio.CancelledError`` (OMN-17427).
+
+    Raised by the consume loop in place of a ``CancelledError`` that came out
+    of a subscriber's OWN dispatch while the loop itself was not being
+    cancelled. Left as a ``CancelledError`` it ended the consume task, and
+    the group lost its member once ``max_poll_interval_ms`` passed with
+    nothing polling. As this type it takes the handler-failure arms (retry,
+    DLQ) like any other handler error, and the loop polls on.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        **extra_context: object,
+    ) -> None:
+        """Initialize DispatchCancelledError.
+
+        Args:
+            message: Human-readable message naming the record and subscriber
+            context: Bundled infrastructure context
+            **extra_context: Additional context (topic, partition, offset,
+                subscription_id, ...)
+        """
+        super().__init__(
+            message=message,
+            error_code=EnumCoreErrorCode.OPERATION_FAILED,
+            context=context,
+            **extra_context,
+        )
+
+
+__all__ = ["DispatchCancelledError", "DispatchDeadlineExceededError"]
