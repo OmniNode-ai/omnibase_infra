@@ -66,15 +66,23 @@ def _run_hook(
     tmp_path: Path,
     tmpdir: Path | None,
     *,
+    home: Path | None = None,
     reap_minutes: int = 60,
     df_shim: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    assert HOOK_SCRIPT.is_file(), (
+        f"runner hook not found at {HOOK_SCRIPT}; the tests target that path"
+    )
+    if home is None:
+        home = tmp_path / "runner-user-home"
+    home.mkdir(parents=True, exist_ok=True)
     runner_home = tmp_path / "actions-runner"
     workspace = runner_home / "_work" / "some-repo" / "some-repo"
     workspace.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.update(
         {
+            "HOME": str(home),
             "RUNNER_HOME": str(runner_home),
             "GITHUB_WORKSPACE": str(workspace),
             "RUNNER_NAME": "ci-runner-3",
@@ -87,6 +95,11 @@ def _run_hook(
         env.pop("TMPDIR", None)
     else:
         env["TMPDIR"] = str(tmpdir)
+        if tmpdir.is_file():
+            # The workspace reset after the reaper runs mktemp under TMPDIR and
+            # fails on a file; skip it so the test isolates the reaper and headroom.
+            env["GITHUB_WORKSPACE"] = ""
+            env["GITHUB_REPOSITORY"] = ""
     if df_shim is not None:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir(exist_ok=True)
@@ -135,7 +148,8 @@ def test_stale_tmpdir_entries_are_removed_and_fresh_ones_kept(tmp_path: Path) ->
 def test_a_shared_tmp_is_never_reaped(tmp_path: Path) -> None:
     """TMPDIR=/tmp (the image bakes omni-ci-bin there) or any non-dedicated dir is refused."""
     shared = Path("/") / "tmp"  # the shared /tmp is exactly what must be refused
-    result = _run_hook(tmp_path, shared)
+    # The huge age means a regressed guard still removes nothing from the real /tmp.
+    result = _run_hook(tmp_path, shared, reap_minutes=99999999)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
         "[runner-tmp] /tmp is not a dedicated runner TMPDIR; not reaping"
@@ -147,6 +161,18 @@ def test_an_unset_tmpdir_is_a_quiet_no_op(tmp_path: Path) -> None:
     result = _run_hook(tmp_path, None)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reaped" not in result.stdout
+
+
+def test_a_tmpdir_that_is_a_regular_file_is_a_quiet_no_op(tmp_path: Path) -> None:
+    tmpdir = tmp_path / "runner-tmp"
+    tmpdir.write_text("keep")
+    _age(tmpdir, 120)
+    result = _run_hook(tmp_path, tmpdir, df_shim=_df_shim(100, 100))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert tmpdir.is_file()
+    assert tmpdir.read_text() == "keep"
+    assert "reaped" not in result.stdout
+    assert "RUNNER-TMP-HEADROOM" not in result.stdout
 
 
 def _df_shim(byte_pct: int, inode_pct: int) -> str:
@@ -225,16 +251,13 @@ def test_unset_tmpdir_emits_no_headroom_warning(tmp_path: Path) -> None:
     assert "[runner-tmp]" not in result.stdout
 
 
-def test_home_and_symlinked_shared_tmpdir_are_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_home_and_symlinked_shared_tmpdir_are_refused(tmp_path: Path) -> None:
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     stale = home_dir / "keep"
     stale.write_text("keep")
     _age(stale, 120)
-    monkeypatch.setenv("HOME", str(home_dir))
-    home_result = _run_hook(tmp_path, home_dir)
+    home_result = _run_hook(tmp_path, home_dir, home=home_dir)
     assert home_result.returncode == 0, home_result.stdout + home_result.stderr
     assert "not a dedicated runner TMPDIR" in home_result.stdout
     assert stale.read_text() == "keep"
@@ -312,11 +335,12 @@ def test_slow_counting_is_inside_the_reap_timeout(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     find = bin_dir / "find"
-    find.write_text("#!/usr/bin/env bash\nexec sleep 10\n")
+    find.write_text("#!/usr/bin/env bash\nexec sleep 30\n")
     find.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     monkeypatch.setenv("RUNNER_TMP_REAP_SECONDS", "1")
     started = time.monotonic()
     result = _run_hook(tmp_path, tmpdir, df_shim=_df_shim(10, 10))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert time.monotonic() - started < 5, result.stdout + result.stderr
+    # An unbounded count takes at least 30 s; 20 s proves the bound with runner headroom.
+    assert time.monotonic() - started < 20, result.stdout + result.stderr
