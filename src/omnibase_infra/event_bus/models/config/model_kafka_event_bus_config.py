@@ -438,6 +438,29 @@ class ModelKafkaEventBusConfig(BaseModel):
         ge=0.0,
         le=86_400.0,
     )
+    # OMN-21337: contract-config only; no environment overrides.
+    consumer_coordinator_unavailable_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        le=3600.0,
+        description="Seconds without a coordinator before a reachable broker's consumer is rebuilt.",
+    )
+    consumer_coordinator_rejoin_cooldown_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "Minimum seconds between bounded coordinator client rebuilds. Shorter "
+            "than the stall rejoin cooldown so the dev lane answers within five "
+            "minutes of a broker restart (OMN-21337 AC2)."
+        ),
+    )
+    consumer_stall_probe_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0.0,
+        le=300.0,
+        description="Deadline for the leader end-offset and consumer position probe.",
+    )
     consumer_sync_unready_seconds: float = Field(
         default=600.0,
         description=(
