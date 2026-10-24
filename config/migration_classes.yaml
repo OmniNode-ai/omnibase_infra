@@ -147,6 +147,7 @@ migrations:
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only
+  forward/nodes/node_llm_delegation_call_effect/0000_delegation_lab_job_execution.sql: expand-only # additive tables and runtime grants
   forward/nodes/node_llm_delegation_projection/0001_create_llm_delegation_daily_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_DELEGATION_DAILY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_LLM_DE
   forward/nodes/node_llm_delegation_projection/0002_grant_omninode_runtime_llm_delegation_daily_projection.sql: expand-only
   forward/nodes/node_log_persistence_effect/0000_create_log_entries.sql: forward-only # ALTER TABLE ALTER COLUMN; EXECUTE; ALTER TABLE ADD CONSTRAINT LOG_ENTRIES_PKEY
@@ -273,6 +274,7 @@ migrations:
   forward/nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT; UPDATE (backfill) under a transaction-scoped helper policy, dropped in the block
   forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only # DROP VIEW; CREATE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT
+  forward/nodes/node_projection_delegation/0064_delegation_events_data_source_experiment.sql: forward-only # DROP; ALTER TABLE public.delegation_events DROP CONSTRAINT IF; ALTER TABLE public.delegation_events ADD CONSTRAINT DELEGATION_EVENTS_DATA_SOURCE_CHECK (ADD CONSTRAINT class)
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -411,6 +413,7 @@ migrations:
   forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql: forward-only # Replace aggregate population and append run count
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
+  forward/nodes/node_projection_savings/100_savings_overview_token_directions.sql: forward-only # Replace the overview view and append its token directions
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_content/0002_add_session_barrier_stamps.sql: expand-only
