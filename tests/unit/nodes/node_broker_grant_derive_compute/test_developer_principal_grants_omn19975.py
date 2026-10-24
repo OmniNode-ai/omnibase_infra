@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
+from omnibase_core.event_bus.util_consumer_group import compute_consumer_group_id
 from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
 from omnibase_core.models.event_bus.model_bus_group_describe import (
     ModelBusGroupDescribe,
@@ -147,6 +149,24 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 # The laptop lane mirror (OMN-19983) writes, as the machine's issued principal, the
 # delegation topic set its overlay selects onto the dev lane.
 DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
+        "topic",
+        "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnimarket.work-ledger-query-completed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "group",
+        "local.omnimarket.work_ledger_query_client.consume.v1.",
+        "prefixed",
+        ("read", "describe"),
+    ),
     (
         "topic",
         "onex.cmd.omnimarket.pr-polish-start.v1",
@@ -712,3 +732,86 @@ def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix(
         ("TOPIC", COMPACTION_COMMAND_TOPIC, "WRITE"),
         ("TOPIC", COMPACTION_COMMAND_TOPIC, "DESCRIBE"),
     }
+
+
+def test_developer_principal_query_acl_grants_are_exact_and_client_scoped() -> None:
+    """A query writes one request and reads one terminal under its own prefix."""
+    bindings = shipped_bindings()
+    prefix = "local.omnimarket.work_ledger_query_client.consume.v1."
+    request = "onex.cmd.omnimarket.work-ledger-query-requested.v1"
+    terminal = "onex.evt.omnimarket.work-ledger-query-completed.v1"
+    query_bindings = tuple(
+        binding
+        for binding in bindings.bindings
+        if binding.physical_topic in (request, terminal)
+    )
+    assert {
+        (
+            binding.broker,
+            binding.physical_topic,
+            binding.direction,
+            binding.consumer_group,
+        )
+        for binding in query_bindings
+    } == {
+        (BROKER, request, "produce", None),
+        (BROKER, terminal, "consume", prefix + "call"),
+    }
+    before = bindings.model_copy(
+        update={
+            "bindings": tuple(b for b in bindings.bindings if b not in query_bindings),
+            "group_prefixes": tuple(
+                p for p in bindings.group_prefixes if p.prefix != prefix
+            ),
+        }
+    )
+    expected = {
+        (BROKER, "TOPIC", request, "LITERAL", "WRITE"),
+        (BROKER, "TOPIC", request, "LITERAL", "DESCRIBE"),
+        (BROKER, "TOPIC", terminal, "LITERAL", "READ"),
+        (BROKER, "TOPIC", terminal, "LITERAL", "DESCRIBE"),
+        (BROKER, "GROUP", prefix, "PREFIXED", "READ"),
+        (BROKER, "GROUP", prefix, "PREFIXED", "DESCRIBE"),
+    }
+    after = derive(bindings)
+    assert after - derive(before) == expected
+    assert derive(before) - after == set()
+    assert len(after) == len(derive(before)) + len(expected)
+    committed = {
+        (g["broker"], g["resource_type"], g["resource"], g["pattern"], g["operation"])
+        for g in json.loads(DERIVED.read_text())["grants"]
+    }
+    assert committed == after
+
+
+def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> None:
+    """The query prefix is core's derived client group and covers no runtime group."""
+    query_client = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_query_client",
+        version="v1",
+    )
+    append_client = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_append_client",
+        version="v1",
+    )
+    query_node = compute_consumer_group_id(
+        env="local",
+        service="omnimarket",
+        node_name="work_ledger_query_effect",
+        version="v1",
+    )
+    dev_prefixes = [
+        p.prefix for p in shipped_bindings().group_prefixes if p.broker == BROKER
+    ]
+    assert f"{query_client}." in dev_prefixes
+    assert f"{append_client}." in dev_prefixes
+    # A PREFIXED group ACL covers a group whose id starts with the prefix.
+    covering = [p for p in dev_prefixes if f"{query_client}.call".startswith(p)]
+    assert covering == [f"{query_client}."]
+    for group in (query_node, f"{query_node}.worker"):
+        assert not any(group.startswith(prefix) for prefix in dev_prefixes), group
+    assert not f"{append_client}.call".startswith(f"{query_client}.")
