@@ -548,6 +548,21 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-runner-tmp-reaper
+    statement: The pre-job runner hook removes stale entries from its dedicated TMPDIR and warns when byte or inode use reaches the advisory threshold.
+    acceptance:
+      - id: AC17427523001
+        statement: 'AC17427523001: stale TMPDIR entries are removed while fresh entries and pytest retention roots survive; shared /tmp and an unset TMPDIR are not reaped; byte or inode use at the advisory threshold emits a warning naming the runner and both percentages -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py -q'
+  - id: req-omn17427-disk-watermark-inodes
+    statement: The disk watermark reports inode pressure as an advisory warning while preserving the free-space critical floor and handling unreadable inode use.
+    acceptance:
+      - id: AC17427523002
+        statement: 'AC17427523002: inode use at 85 percent or above warns with inode_used_pct_advisory and inode_used_pct in the event, 84 percent stays quiet, the critical free-space floor takes precedence, and unreadable inode use leaves byte checks active -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q'
+  - id: req-omn17427-scratch-watermark
+    statement: The hourly disk-gc unit checks /scratch as an optional mount without substituting the root filesystem when it is absent.
+    acceptance:
+      - id: AC17427523003
+        statement: 'AC17427523003: the hourly unit invokes the watermark with --mount /scratch --mount-optional and a missing optional mount returns quietly without an event -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py -q -k "optional_mount or hourly_unit"'
   - id: req-omn17427-issuer-overlay-coverage
     statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
     acceptance:
@@ -610,7 +625,7 @@ requirements:
       - id: AC17427240101
         statement: 'AC17427240101: check_lane_census_drift.py exits 1 on the recorded omnibase_infra#5187 drift red (dev-lane oneshot_failed, census 2026-10-24T06:55:03Z) as a push, as a workflow_dispatch and with no event, and 0 with a LANE-CENSUS-DRIFT warning as a pull_request; a finding_count_mismatch still exits 1 on a pull request; the staleness workflow step does not override GITHUB_EVENT_NAME -- falsifier: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q fails at the merge base'
       - id: AC17427240102
-        statement: 'AC17427240102: the live system reporter keeps nonzero census drift CRITICAL and lists it in Active issues even when invoked from a pull_request job; push, workflow_dispatch and unset event contexts retain that verdict -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical'
+        statement: 'AC17427240102: the direct checker reports nonzero census drift as advisory only for pull_request while the live system reporter keeps the same drift CRITICAL and lists it in Active issues even when invoked from a pull_request job; push, workflow_dispatch and unset event contexts retain the blocking checker and CRITICAL reporter verdicts -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -871,6 +886,38 @@ dod_evidence:
       - AC181
       - AC182
       - AC183
+  - id: dod-omn17427-runner-tmp-reaper
+    description: Runs the real pre-job hook against temporary runner directories and controlled df responses, checking stale-entry removal, retained entries and byte or inode warning annotations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523001]
+  - id: dod-omn17427-disk-watermark-inodes
+    description: Runs the watermark shell script with controlled df responses and checks its event builder, including inode warnings, free-space priority and unreadable inode use.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523002]
+  - id: dod-omn17427-scratch-watermark
+    description: Reads the installed unit source and checks absent optional mounts, plain directories, real mounts and unreadable filesystems, refusing an emitted fallback event.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py -q -k "optional_mount or hourly_unit"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523003]
+  - id: dod-omn17427-runner-tmp-deploy-check
+    description: Hosted-runner deploy check requires GNU realpath before exercising the real runner hook, watermark and event builder using temporary directories and fake df responses. Includes BSD inode parsing, mount identity, warning boundaries, ownership, symlink and timeout safety; reads the disk-gc unit without a Docker daemon, broker, credentials or live lane changes.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -c 'realpath -m . >/dev/null && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523001, AC17427523002, AC17427523003]
   - id: dod-omn17427-ac180-thread-disposition
     description: The gate tests drive classify_threads, GitFixVerifier on a temporary git repository and run_gate with the thread fetch replaced; the live-contact tests replay GitHub's recorded 422 to the old create-review payload and the thread gate check-runs of the 20 latest merged dev heads. They fail on the merge base, whose gate ignores resolved threads and has no disposition rule.
     source: manual
@@ -2828,20 +2875,20 @@ dod_evidence:
     binds_ac:
       - AC17427240101
   - id: dod-omn17427-live-census-report-strict
-    description: Runs the reporter against a fresh synthetic drift snapshot in pull_request, push, workflow_dispatch and unset Actions contexts; every context must retain the CRITICAL row and actionable remedy. The pull_request case fails before the reporter clears the inherited CI event.
+    description: Pairs the direct checker event-policy tests with the live reporter drift tests. The direct checker must make drift advisory only for pull_request, while the reporter must retain the CRITICAL row and actionable remedy in every context. The checker pull_request case fails at the merge base, which enforces drift for every event; the reporter pull_request case fails if event isolation is removed from the head.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427240102
   - id: dod-omn17427-live-census-report-deploy
-    description: Hosted-runner deploy check drives the real reporter with synthetic census inputs and local command stubs, requiring CRITICAL live drift and its Active issues entry. No Docker daemon, lane, credentials or Slack request is used.
+    description: Hosted-runner deploy check pairs the real checker event-policy tests with the reporter using synthetic census inputs and local command stubs, requiring advisory pull_request checks alongside CRITICAL live drift and its Active issues entry. No Docker daemon, lane, credentials or Slack request is used.
     source: manual
     checks:
       - check_type: command
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_lane_census_sink_omn18949.py -q -k live_report_keeps_drift_critical
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427240102
