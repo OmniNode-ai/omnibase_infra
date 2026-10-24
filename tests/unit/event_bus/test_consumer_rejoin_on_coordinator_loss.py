@@ -427,10 +427,13 @@ async def test_a_failed_recreate_is_recorded_rather_than_swallowed() -> None:
         clock.advance(600.0)
         consumer = (await supervisor.next_batch(consumer)).consumer
 
+    # The third poll confirms the stall and rejoins; the consumer is then
+    # lost, and each later poll (600 s apart, past LOST_CONSUMER_RETRY_SECONDS)
+    # retries exactly once. A retry storm would record more.
     events = supervisor.rejoin_events
-    assert len(events) >= 1
+    assert len(events) == 3
     assert all(event.rejoin_succeeded is False for event in events)
-    assert "ConnectionError" in events[0].failure_detail
+    assert all("ConnectionError" in event.failure_detail for event in events)
 
 
 @pytest.mark.asyncio

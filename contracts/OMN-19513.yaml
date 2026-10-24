@@ -23,7 +23,7 @@ requirements:
       - id: AC3
         statement: "AC3: docker-compose.dev-lane.yml raises omninode-runtime's CPU limit to 2.0 while the base file keeps 1.0 and the memory limit stays 1536M -- falsifier: uv run pytest tests/unit/docker/test_omn19513_dev_lane_runtime_cpu_cap.py fails at origin/dev, which has no test file"
   - id: req-omn19513-consumer-rejoins-after-broker-restart
-    statement: "A consumer whose replacement cannot start while the broker is down is retried until it rejoins, and reports unready meanwhile."
+    statement: "A consumer whose replacement cannot start while the broker is down is retried until it rejoins, and meanwhile ConsumerRejoinSupervisor.sync_status() reports ready=False with last_rejoin_failed=True (the readiness dimension, OMN-18640)."
     acceptance:
       - id: AC4
         statement: "AC4: the rejoin supervisor replaces a consumer that raises on poll or whose replacement failed to start, retrying every 30 seconds, instead of polling the stopped handle -- falsifier: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart.py -q -p no:cacheprovider fails 3 of 3 at origin/dev with ConsumerStoppedError out of next_batch"

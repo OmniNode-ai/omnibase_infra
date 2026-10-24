@@ -35,6 +35,12 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import ModelConsumerRejoinP
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     ConsumerRejoinSupervisor,
 )
+from omnibase_infra.models.health.enum_consumer_stall_reason import (
+    EnumConsumerStallReason,
+)
+from omnibase_infra.models.health.model_consumer_stall_verdict import (
+    ModelConsumerStallVerdict,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -119,20 +125,25 @@ class AiokafkaLikeConsumer:
         self.stopped = True
 
 
-@pytest.fixture(autouse=True)
-def _virtual_sleep(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> None:
-    """The supervisor paces retries with ``asyncio.sleep``; spend no real time."""
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    """A virtual clock that also drives ``asyncio.sleep``.
+
+    The supervisor paces lost-consumer retries with ``asyncio.sleep``. The
+    fake advances the clock instead of spending real time, and still yields
+    to the event loop once through the real ``sleep(0)``. Only tests that ask
+    for ``clock`` get the patch.
+    """
+    fake_clock = FakeClock()
+    real_sleep = asyncio.sleep
 
     async def fake_sleep(seconds: float, result: Any = None) -> Any:
-        clock.advance(seconds)
+        fake_clock.advance(seconds)
+        await real_sleep(0)
         return result
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-
-
-@pytest.fixture
-def clock() -> FakeClock:
-    return FakeClock()
+    return fake_clock
 
 
 def _supervisor(clock: FakeClock, recreate: Any) -> ConsumerRejoinSupervisor:
@@ -239,3 +250,40 @@ async def test_readiness_fails_while_no_replacement_can_be_started(
     status = supervisor.sync_status()
     assert status.last_rejoin_failed
     assert not status.ready
+    # The fourth poll confirms the stall; each of the 8 later polls (60 s
+    # apart, past LOST_CONSUMER_RETRY_SECONDS) retries the replacement once.
+    events = supervisor.rejoin_events
+    assert len(events) == 9
+    assert all(event.rejoin_succeeded is False for event in events)
+    assert all("KafkaConnectionError" in event.failure_detail for event in events)
+    assert wedged.stopped
+
+
+def test_a_failed_consumer_is_a_stall_signature() -> None:
+    """``STALLED_CONSUMER_FAILED`` counts as stalled, so readiness can fail on it."""
+    verdict = ModelConsumerStallVerdict(
+        reason=EnumConsumerStallReason.STALLED_CONSUMER_FAILED,
+        consecutive_stalls=POLICY.required_consecutive_stalls,
+        required_consecutive_stalls=POLICY.required_consecutive_stalls,
+    )
+    assert verdict.is_stalled
+
+
+@pytest.mark.asyncio
+async def test_a_lost_consumer_rejoin_event_names_the_failed_reason(
+    clock: FakeClock,
+) -> None:
+    """A lost consumer's rejoin event carries its own reason and both errors."""
+    broken = AiokafkaLikeConsumer(wedged=False, poll_error=ConsumerStoppedError())
+
+    async def recreate() -> AiokafkaLikeConsumer:
+        raise KafkaConnectionError("redpanda:9092 refused the connection")
+
+    supervisor = _supervisor(clock, recreate)
+    await supervisor.next_batch(broken)
+
+    (event,) = supervisor.rejoin_events
+    assert event.rejoin_succeeded is False
+    assert event.reason is EnumConsumerStallReason.STALLED_CONSUMER_FAILED
+    assert "ConsumerStoppedError" in event.failure_detail
+    assert "KafkaConnectionError" in event.failure_detail
