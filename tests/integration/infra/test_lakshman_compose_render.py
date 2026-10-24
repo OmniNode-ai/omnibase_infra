@@ -688,17 +688,33 @@ def test_every_service_naming_the_lane_overlay_mounts_it() -> None:
     ONEX_CORE_041 "Bifrost lane overlay not found" on every boot. The delegation
     writer did exactly that on a fresh bring-up of this lane (OMN-17427): it merges
     the lane's runtime env and had no mount, while the two runtimes beside it did.
+    The mount must be a read-only bind of this lane's overlay file with
+    create_host_path false, so a missing file is refused instead of made a directory.
     """
     services = _compose_config_json()["services"]
-    unmounted = sorted(
-        name
-        for name, config in services.items()
-        if (
-            target := (config.get("environment") or {}).get("BIFROST_LANE_OVERLAY_PATH")
-        )
-        and not _mounts_at(config, target)
+    expected_source = (
+        f"{RENDER_ONLY_SECRETS['ONEX_LANE_OVERLAY_DIR']}/{COMPOSE_PROJECT}.bifrost.yaml"
     )
-    assert not unmounted, (
-        f"{unmounted} name BIFROST_LANE_OVERLAY_PATH but mount nothing at it; "
+    carriers = {
+        name: config
+        for name, config in services.items()
+        if (config.get("environment") or {}).get("BIFROST_LANE_OVERLAY_PATH")
+    }
+    assert "projection-delegation-writer" in carriers
+    invalid_mounts: dict[str, list[dict[str, Any]]] = {}
+    for name, config in carriers.items():
+        target = config["environment"]["BIFROST_LANE_OVERLAY_PATH"]
+        mounts = _mounts_at(config, target)
+        if not (
+            len(mounts) == 1
+            and mounts[0].get("type") == "bind"
+            and mounts[0].get("source") == expected_source
+            and mounts[0].get("read_only") is True
+            and mounts[0].get("bind", {}).get("create_host_path") is False
+        ):
+            invalid_mounts[name] = mounts
+    assert not invalid_mounts, (
+        f"{invalid_mounts} name BIFROST_LANE_OVERLAY_PATH but lack exactly one "
+        "read-only bind of this lane's overlay file with create_host_path false; "
         "add `- *lane-overlay-mount` to their volumes"
     )
