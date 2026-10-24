@@ -70,6 +70,12 @@ ExecStart=/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/docker-volume-gc.sh" --
 # 4. Watermark alert ratchet (non-zero exit on breach is expected; do not fail the unit).
 ExecStart=-/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/disk-watermark-check.sh" --mount /data
 
+# 5. The same ratchet on /scratch, the CI runner scratch disk where a host has one (every
+#    runner's TMPDIR and job workspace), bytes and inodes (OMN-17427). On 2026-10-21 one reached
+#    100% of its inodes at 77% of its bytes and no alarm fired, because nothing watched it.
+#    --mount-optional makes this a quiet no-op on a host without /scratch.
+ExecStart=-/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/disk-watermark-check.sh" --mount /scratch --mount-optional
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=onex-disk-gc
