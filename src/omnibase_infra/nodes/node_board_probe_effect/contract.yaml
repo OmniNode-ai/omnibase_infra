@@ -150,7 +150,7 @@ error_handling:
     retry_on: []
   error_types:
     - name: "SurfaceUnreadable"
-      description: "The surface could not be read; recorded as an INDETERMINATE result, never raised"
+      description: "The surface could not be read; recorded as an INDETERMINATE result, never raised. A refused consumer-flow projection GET reads at most 2048 body bytes and appends JSON status, error and reason string fields, or at most 200 printable fallback characters, to its HTTP status. An empty body keeps the status alone. The board result and its record retain this reason without adding retries or changing timeouts."
       recoverable: false
 health_check:
   enabled: true
