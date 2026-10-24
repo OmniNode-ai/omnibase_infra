@@ -193,6 +193,9 @@ migrations:
   forward/nodes/node_projection_claude_hook_events/0005_add_goal_id.sql: expand-only # additive: nullable uuid columns and a partial index
   forward/nodes/node_projection_claude_hook_events/0006_add_lane_model_host_exit_code.sql: expand-only # additive: four nullable columns
   forward/nodes/node_projection_claude_hook_events/0007_add_guard_refusal_and_token_usage.sql: expand-only # additive: seven nullable columns and three partial indexes
+  forward/nodes/node_projection_claude_hook_events/0008_add_producer_sequence.sql: expand-only
+  forward/nodes/node_projection_compaction_receipts/0000_create_compaction_receipts.sql: forward-only # UNIQUE INDEX on created table
+  forward/nodes/node_projection_compaction_receipts/0001_grant_omninode_runtime_compaction_receipts.sql: expand-only
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
@@ -410,6 +413,7 @@ migrations:
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
+  forward/nodes/node_projection_session_content/0002_add_session_barrier_stamps.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
   forward/nodes/node_projection_session_replay/0001_create_session_replay_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT SESSION_REPLAY_S
