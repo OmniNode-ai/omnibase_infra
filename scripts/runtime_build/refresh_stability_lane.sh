@@ -305,6 +305,8 @@ readonly REFRESH_BUILD_SERVICES=(
 readonly ROLLBACK_SERVICES=(
     "${REFRESH_BUILD_SERVICES[@]}"
 )
+# Prefix of the kernel's folded-roles log line in src/omnibase_infra/runtime/service_kernel.py, pinned by tests/unit/runtime/auto_wiring/test_folded_roles_log_marker_omn21288.py.
+readonly FOLDED_ROLES_LOG_MARKER="Auto-wiring folded roles"
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
 # projection-api's container_name is prefixed "omnimarket-", not "omninode-" --
 # resolve by explicit map, never assume a pattern (OMN-13826-class lesson).
@@ -343,7 +345,7 @@ LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the 
 REF="origin/dev"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
-EFFECTS_MANIFEST_URL=""
+EFFECTS_MANIFEST_URL="" # OMN-21288: empty = no effects runtime; verify_stability_refresh.py reads "" as None and skips the effects manifest (pinned by test_empty_effects_manifest_url_skips_the_effects_manifest)
 HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
 # OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
@@ -835,7 +837,7 @@ if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     # OMN-21288: the deploy handler retires effects before main is recreated.
     # grep reads the whole log (no -q): under pipefail an early grep exit
     # would SIGPIPE docker logs and read as "not found".
-    if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep "Auto-wiring folded roles" >/dev/null; then
+    if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep -F "${FOLDED_ROLES_LOG_MARKER}" >/dev/null; then
         err "main runtime did not attach its folded roles"
     fi
     remaining_effects="$(docker ps -aq \

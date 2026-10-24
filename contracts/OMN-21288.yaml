@@ -24,7 +24,7 @@ requirements:
     acceptance:
       - id: AC3
         statement: |-
-          AC3: on the lab proof lane (compose project STABILITY_TEST_COMPOSE_PROJECT) the main runtime logs its folded roles and no runtime-effects container runs -- falsifier: the docker probe below exits non-zero while the separate effects container still runs
+          AC3: on the lab proof lane (compose project STABILITY_TEST_COMPOSE_PROJECT) the main runtime logs its folded roles and no runtime-effects container runs -- falsifier: the policy and compose pytest below fails while the lane runs a separate effects container or main reads no fold; the live docker probe is pending a lab refresh
   - id: req-omn21288-ac4-folded-service-readers
     statement: "Step 1: the deploy handler and the lab proof lane's refresh never start a folded service, and the deploy agent's health target and stability digest for a folded role read the main runtime container."
     acceptance:
@@ -73,12 +73,12 @@ dod_evidence:
     binds_ac: []
   - id: dod-omn21288-ac3-lab-lane-effects-folded-deploy
     description: >-
-      Live probe on the lab proof lane after a refresh carrying this change: no container of the lane's compose project runs the runtime-effects service, and the lane's main runtime container logged "Auto-wiring folded roles". Both are read from the running Docker daemon by compose labels, so it exits 1 while the separate effects container runs or while main runs an image that predates the fold.
+      Hosted-runner check: the lab proof lane's runtime policy and compose overlay fold effects into main (exactly one lane folds and only effects, the rendered env carries the fold for that lane only, main reads it, and the runtime-effects service is opt-in only under the folded-effects profile), from tests/unit/docker/test_stability_lane_effects_folded_omn21288.py. This test file is new on this branch, so the check fails at the merge base. The live probe on the lab proof lane (no runtime-effects container of the lane's compose project, and main logged "Auto-wiring folded roles") is PENDING a lab refresh carrying this change and is not claimed here; refresh_stability_lane.sh runs that probe after its health gate.
     source: manual
     checks:
-      - check_type: command
+      - check_type: test_passes
         check_value: |-
-          sh -c 'p="${STABILITY_TEST_COMPOSE_PROJECT:?source docker/runtime-policy.env}"; test -z "$(docker ps -q --filter label=com.docker.compose.project=$p --filter label=com.docker.compose.service=runtime-effects)" && docker logs "$(docker ps -q --filter label=com.docker.compose.project=$p --filter label=com.docker.compose.service=omninode-runtime)" 2>&1 | grep "Auto-wiring folded roles" >/dev/null'
+          uv run --frozen pytest tests/unit/docker/test_stability_lane_effects_folded_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
   - id: dod-omn21288-ac4-folded-service-readers

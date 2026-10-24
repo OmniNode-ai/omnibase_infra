@@ -616,8 +616,14 @@ def test_folded_effects_verification_runs_on_pass_without_retiring(
     verification = text[start : text.index("    # Prune old preflight tags", start)]
     success = text.index('    RESULT="SUCCESS"')
     assert success < start < text.index("elif [[", success)
+    (marker,) = (
+        line
+        for line in text.splitlines()
+        if line.startswith("readonly FOLDED_ROLES_LOG_MARKER=")
+    )
     script = f"""
 set -euo pipefail
+{marker}
 CONTAINER_EXISTS={str(container_exists).lower()}
 MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
 COMPOSE_PROJECT=lane-a
