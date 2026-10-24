@@ -245,6 +245,7 @@ def _run_readback(
             "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
             _extract_function("exclude_cloud_database_services"),
             _extract_scalar("OWN_SOURCE_REPO"),
+            _extract_function("resolve_lane_folded_services"),
             _extract_function("resolve_lane_runtime_services"),
             _extract_function("service_is_one_shot"),
             _extract_function("readback_one_shot_service"),

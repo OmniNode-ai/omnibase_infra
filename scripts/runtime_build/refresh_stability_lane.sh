@@ -232,7 +232,7 @@ readonly COMPOSE_PROJECT="${STABILITY_TEST_COMPOSE_PROJECT}"
 # consumer_groups_stability.yaml, or a contract schema extension, is the
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-stability-test-redpanda"
-readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # OMN-17562: the six standalone projection writers this lane introduces.
 #
 # BUILD SCOPE, NOT VERIFICATION SCOPE. This array is handed to
@@ -310,7 +310,6 @@ readonly ROLLBACK_SERVICES=(
 # resolve by explicit map, never assume a pattern (OMN-13826-class lesson).
 declare -A CORE_CONTAINERS=(
     [omninode-runtime]="omninode-stability-test-runtime"
-    [runtime-effects]="omninode-stability-test-runtime-effects"
     [runtime-worker]="omninode-stability-test-runtime-worker"
     [projection-api]="omnimarket-stability-test-projection-api"
 )
@@ -339,18 +338,12 @@ readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 # URLs. Read it from the sourced runtime-policy.env instead; fail fast BY NAME
 # if absent. --manifest-url/--health-url still fully override these defaults.
 require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
-# OMN-15837: the health gate now derives its declared consumer-group set from
-# the introspection manifests the refreshed image serves. The EFFECTS runtime
-# serves its own profile-filtered manifest, and its contracts mint consumer
-# groups the main runtime's manifest never describes (273 live on this lane), so
-# the gate needs both. Read the port from the same contract-rendered source as
-# the main port -- never a second hardcoded literal.
-require_contract_var STABILITY_TEST_RUNTIME_EFFECTS_PORT
+# OMN-21288: the main manifest includes the folded effects profile.
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
-EFFECTS_MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_EFFECTS_PORT}/v1/introspection/manifest"
+EFFECTS_MANIFEST_URL=""
 HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
 # OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
@@ -839,6 +832,18 @@ log "  build provenance failing      : [${DECISION_PROVENANCE}]"
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     RESULT="SUCCESS"
     log "=== SUCCESS: health-gate PASS, ancestry OK ==="
+    # OMN-21288: the deploy handler retires effects before main is recreated.
+    # grep reads the whole log (no -q): under pipefail an early grep exit
+    # would SIGPIPE docker logs and read as "not found".
+    if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep "Auto-wiring folded roles" >/dev/null; then
+        err "main runtime did not attach its folded roles"
+    fi
+    remaining_effects="$(docker ps -aq \
+        --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+        --filter "label=com.docker.compose.service=runtime-effects")"
+    if [[ -n "${remaining_effects}" ]]; then
+        err "runtime-effects containers still exist after folded deploy: ${remaining_effects}"
+    fi
     # Prune old preflight tags (keep last 3) -- bounded local rollback history.
     # Over the full anchored set (OMN-18061), or the writers accumulate tags
     # forever because nothing ever prunes what nothing ever anchored.

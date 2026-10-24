@@ -159,9 +159,9 @@ def test_red_control_the_pre_fix_rule_rolls_back_the_same_input() -> None:
         (
             {
                 "core_services_running": False,
-                "core_services_not_running": ["runtime-effects=created"],
+                "core_services_not_running": ["runtime-worker=created"],
             },
-            "core_services_running=false[runtime-effects=created]",
+            "core_services_running=false[runtime-worker=created]",
         ),
         ({"errors": ["health fetch failed: HTTP Error 503"]}, "gate_errors=1"),
     ],
@@ -580,9 +580,10 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     # never the property under test -- the three assertions below are -- and a
     # literal here means every service legitimately added to the lane arrives
     # with an unrelated red test and an invitation to "just bump the number".
-    # Shrink-only instead: 10 is the floor this ticket found, and losing a
-    # service from the build scope is the regression worth catching.
+    # OMN-21288: effects now run inside main and must not be rebuilt or restored
+    # as a separate service. Keep the remaining build coverage.
     assert len(build_set) >= 10, sorted(build_set)
+    assert "runtime-effects" not in core_set | build_set | rollback_set
     assert core_set < build_set, "CORE_SERVICES must be a strict subset of the build"
     assert rollback_set == build_set, (
         f"rollback set {sorted(rollback_set)} != deployed set {sorted(build_set)}"
@@ -590,6 +591,58 @@ def test_the_rollback_set_is_the_deployed_set() -> None:
     assert rollback_set > core_set, (
         "a rollback set equal to CORE_SERVICES is the mixed-revision defect"
     )
+
+
+@pytest.mark.unit
+def test_folded_lane_verifier_checks_only_the_remaining_core_services() -> None:
+    from verify_stability_refresh import CORE_SERVICES
+
+    assert set(CORE_SERVICES) == {
+        "omninode-runtime",
+        "runtime-worker",
+        "projection-api",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("container_exists", [False, True])
+@pytest.mark.parametrize("main_logged_fold", [False, True])
+def test_folded_effects_verification_runs_on_pass_without_retiring(
+    container_exists: bool, main_logged_fold: bool
+) -> None:
+    """PASS verifies folded roles and retirement without changing the result."""
+    text = REFRESH_STABILITY.read_text()
+    start = text.index("    # OMN-21288: the deploy handler retires effects")
+    verification = text[start : text.index("    # Prune old preflight tags", start)]
+    success = text.index('    RESULT="SUCCESS"')
+    assert success < start < text.index("elif [[", success)
+    script = f"""
+set -euo pipefail
+CONTAINER_EXISTS={str(container_exists).lower()}
+MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
+COMPOSE_PROJECT=lane-a
+RESULT=SUCCESS
+declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
+err() {{ printf 'ERR: %s\\n' "$*"; }}
+docker() {{
+    case "$1" in
+        ps) if "$CONTAINER_EXISTS"; then printf 'c0ffee\\n'; fi ;;
+        logs) printf '%s\\n' "$MAIN_LOG" ;;
+        *) return 9 ;;
+    esac
+}}
+"""
+    result = subprocess.run(
+        ["bash", "-c", script + verification + 'printf "RESULT=%s\\n" "$RESULT"'],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert ("did not attach its folded roles" in result.stdout) is not main_logged_fold
+    assert (
+        "runtime-effects containers still exist" in result.stdout
+    ) is container_exists
+    assert "RESULT=SUCCESS" in result.stdout
 
 
 @pytest.mark.unit

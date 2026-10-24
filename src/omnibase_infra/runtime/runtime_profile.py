@@ -288,10 +288,12 @@ def resolve_runtime_folded_profiles(
     this process. The lane's runtime policy contract declares the list
     (``folded_profiles``) and the renderer writes it.
 
-    Consumer groups are derived from each node's identity, not from the role, so
-    a folded node joins the group the role's own container used: a fold that
-    still has the role's container running shares the partitions with it rather
-    than processing each record twice.
+    Consumer group ids are derived from the node identity and then carry the
+    folding process's ``KAFKA_INSTANCE_ID`` suffix (``.__i.<id>``; see
+    ``event_bus_kafka.subscribe`` / ``apply_instance_discriminator``). On a lane
+    with a per-container instance id, a folded node joins a new group under the
+    folding process's instance id, rather than the role container's group. A
+    new group starts at the subscription's ``auto_offset_reset``.
 
     Unset or blank folds nothing. Each name is validated on the same terms as
     ``RUNTIME_PROFILE``; an unregistered name is refused, because it would fold
