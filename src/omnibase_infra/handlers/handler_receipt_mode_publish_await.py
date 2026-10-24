@@ -110,8 +110,24 @@ class HandlerReceiptModePublishAwait:
         awaited_events: tuple[str, ...],
         deadline_ms: int,
     ) -> tuple[ModelReceiptModeEvent, ...]:
-        """Run one async exchange; the deadline includes bus startup."""
-        expires_at = time.monotonic() + deadline_ms / 1000
+        """Run one exchange within a positive integer deadline, including startup.
+
+        An action key marks a verdict candidate, even when its value is null or
+        invalid. The hook adapter validates that candidate and applies its
+        configured fallback; the transport does not interpret action values.
+        Invalid or unrepresentable deadlines fail before any bus work.
+        """
+        if (
+            isinstance(deadline_ms, bool)
+            or not isinstance(deadline_ms, int)
+            or deadline_ms <= 0
+        ):
+            raise ValueError("deadline_ms must be a positive integer")
+        try:
+            deadline_seconds = deadline_ms / 1000
+        except OverflowError as exc:
+            raise ValueError("deadline_ms must fit in a finite timeout") from exc
+        expires_at = time.monotonic() + deadline_seconds
         return asyncio.run(
             self._publish_and_await(
                 topic=topic,
@@ -163,6 +179,7 @@ class HandlerReceiptModePublishAwait:
             if not (correlated or echoed):
                 return
             events.append(ModelReceiptModeEvent(topic=subscribed_topic, payload=reply))
+            # Match the adapter's verdict selection; it owns value validation.
             if "action" in reply:
                 finished.set()
 

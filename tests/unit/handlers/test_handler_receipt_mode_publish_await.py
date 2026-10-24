@@ -11,6 +11,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -155,7 +156,10 @@ def test_invocation_echo_alone_correlates_reply() -> None:
     assert events[0].payload == {"invocation_id": "invocation-1", "action": "allow"}
 
 
-def test_every_subscription_exists_before_synchronous_publish_reply() -> None:
+@pytest.mark.parametrize("action", [None, "allow", "unknown", False, {}])
+def test_every_subscription_exists_before_synchronous_publish_reply(
+    action: JsonValue,
+) -> None:
     bus = EventBusInmemory()
     subscriber_counts: list[int] = []
     groups: list[dict[tuple[str, str], str]] = []
@@ -171,13 +175,16 @@ def test_every_subscription_exists_before_synchronous_publish_reply() -> None:
         command = ModelEventEnvelope[dict[str, object]].model_validate_json(
             message.value
         )
-        await _reply(bus, ACTION_TOPIC, str(command.correlation_id), {"action": None})
+        await _reply(bus, ACTION_TOPIC, str(command.correlation_id), {"action": action})
+        await _reply(
+            bus, PROGRESS_TOPIC, str(command.correlation_id), {"status": "late"}
+        )
 
     _respond(bus, responder)
     events = _call(bus)
     assert subscriber_counts == [1, 1]
     assert events == (
-        ModelReceiptModeEvent(topic=ACTION_TOPIC, payload={"action": None}),
+        ModelReceiptModeEvent(topic=ACTION_TOPIC, payload={"action": action}),
     )
     receipt_groups = {
         group for topic, group in groups[0] if topic in (PROGRESS_TOPIC, ACTION_TOPIC)
@@ -237,8 +244,10 @@ def test_deadline_includes_startup_and_still_closes_bus(
     close.assert_awaited_once()
 
 
+@pytest.mark.parametrize("error_type", [RuntimeError, TimeoutError])
 def test_publish_failure_unsubscribes_every_topic_and_closes(
     monkeypatch: pytest.MonkeyPatch,
+    error_type: type[Exception],
 ) -> None:
     bus = EventBusInmemory()
     original_subscribe = bus.subscribe
@@ -260,16 +269,102 @@ def test_publish_failure_unsubscribes_every_topic_and_closes(
         return unsubscribe
 
     monkeypatch.setattr(bus, "subscribe", subscribe)
-    monkeypatch.setattr(
-        bus, "publish", AsyncMock(side_effect=RuntimeError("publish failed"))
-    )
+    error = error_type("publish failed")
+    monkeypatch.setattr(bus, "publish", AsyncMock(side_effect=error))
     monkeypatch.setattr(bus, "close", close)
-    with pytest.raises(RuntimeError, match="publish failed"):
+    with pytest.raises(error_type, match="publish failed") as exc:
         _call(bus)
+    assert exc.value is error
     assert len(unsubscribes) == 2
     for unsubscribe in unsubscribes:
         unsubscribe.assert_awaited_once()
     close.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "deadline_ms",
+    [0, -1, True, False, 1.5, float("nan"), float("inf"), "1000", 10**1000],
+    ids=[
+        "zero",
+        "negative",
+        "true",
+        "false",
+        "fraction",
+        "nan",
+        "inf",
+        "text",
+        "overflow",
+    ],
+)
+def test_invalid_deadline_refused_before_bus_construction(deadline_ms: object) -> None:
+    factory = Mock()
+    handler = HandlerReceiptModePublishAwait(factory)
+    with pytest.raises(ValueError, match="deadline_ms must"):
+        handler.publish_and_await(
+            topic=COMMAND_TOPIC,
+            command_type=COMMAND_TYPE,
+            payload={},
+            awaited_events=(ACTION_TOPIC,),
+            deadline_ms=cast("int", deadline_ms),
+        )
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", ["subscribe", "publish", "wait"])
+def test_deadline_cleans_up_and_returns_only_collected_progress(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    bus = EventBusInmemory()
+
+    async def responder(message: ModelEventMessage) -> None:
+        command = ModelEventEnvelope[dict[str, object]].model_validate_json(
+            message.value
+        )
+        await _reply(
+            bus, PROGRESS_TOPIC, str(command.correlation_id), {"status": "ready"}
+        )
+
+    _respond(bus, responder)
+    subscribe = bus.subscribe
+    publish = bus.publish
+    unsubscribes: list[AsyncMock] = []
+
+    async def subscribe_and_track(
+        topic: str,
+        *,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+        group_id: str,
+    ) -> Callable[[], Awaitable[None]]:
+        if stage == "subscribe" and unsubscribes:
+            await asyncio.sleep(10)
+        unsubscribe = AsyncMock(
+            wraps=await subscribe(topic, on_message=on_message, group_id=group_id)
+        )
+        unsubscribes.append(unsubscribe)
+        return unsubscribe
+
+    async def publish_then_wait(topic: str, *, key: bytes | None, value: bytes) -> None:
+        await publish(topic, key=key, value=value)
+        if stage == "publish" and topic == COMMAND_TOPIC:
+            await asyncio.sleep(10)
+
+    close = AsyncMock(wraps=bus.close)
+    monkeypatch.setattr(bus, "subscribe", subscribe_and_track)
+    monkeypatch.setattr(bus, "publish", publish_then_wait)
+    monkeypatch.setattr(bus, "close", close)
+    started = time.monotonic()
+    events = _call(bus, deadline_ms=200)
+    assert time.monotonic() - started < 2
+    assert events == (
+        ()
+        if stage == "subscribe"
+        else (ModelReceiptModeEvent(topic=PROGRESS_TOPIC, payload={"status": "ready"}),)
+    )
+    assert len(unsubscribes) == (1 if stage == "subscribe" else 2)
+    for unsubscribe in unsubscribes:
+        unsubscribe.assert_awaited_once()
+    close.assert_awaited_once()
+    assert asyncio.run(bus.health_check())["started"] is False
 
 
 def test_default_factory_refuses_without_workspace(
