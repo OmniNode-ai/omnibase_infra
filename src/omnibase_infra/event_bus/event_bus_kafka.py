@@ -298,6 +298,9 @@ from omnibase_infra.models.health.enum_consumer_health_severity import (
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
 )
+from omnibase_infra.models.health.model_consumer_rejoin_alarm import (
+    ModelConsumerRejoinAlarm,
+)
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
 )
@@ -604,6 +607,7 @@ class EventBusKafka(
         # unsubscribed, and the evidence that this runtime wedged and
         # recovered must outlive the consumer it happened to.
         self._consumer_rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
+        self._consumer_rejoin_alarms: list[ModelConsumerRejoinAlarm] = []
         # Keys currently being started (reserved under lock before await consumer.start())
         self._pending_consumer_keys: set[tuple[str, str]] = set()
 
@@ -1171,6 +1175,8 @@ class EventBusKafka(
             self._group_consumers.clear()
             # OMN-18640: the supervisors hold per-group stall state that is
             # meaningless once the consumers are gone.
+            for supervisor in self._rejoin_supervisors.values():
+                supervisor.end_episode(recovered=False)
             self._rejoin_supervisors.clear()
 
         for consumer in consumers_to_close:
@@ -2815,7 +2821,9 @@ class EventBusKafka(
                     pass
 
             consumer = self._group_consumers.pop(consumer_key, None)
-            self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            supervisor = self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            if supervisor is not None:
+                supervisor.end_episode(recovered=False)
             if consumer is not None:
                 try:
                     await consumer.stop()
@@ -3601,6 +3609,10 @@ class EventBusKafka(
             supervisor.sync_status() for supervisor in self._rejoin_supervisors.values()
         )
 
+    def consumer_rejoin_alarms(self) -> tuple[ModelConsumerRejoinAlarm, ...]:
+        """Bounded recovery alarm history, independent of health emission."""
+        return tuple(self._consumer_rejoin_alarms)
+
     def _rejoin_supervisor_for(
         self, topic: str, group_id: str
     ) -> ConsumerRejoinSupervisor:
@@ -3630,6 +3642,14 @@ class EventBusKafka(
             poll_timeout_ms=self._config.consumer_poll_timeout_ms,
             recreate_consumer=_recreate,
             emit_event=self._record_consumer_rejoin_event,
+            broker=self._sanitize_bootstrap_servers(self._bootstrap_servers),
+            kafka_group_id=self._resolve_effective_group_id(
+                group_id, topic, uuid4(), (topic, group_id)
+            ),
+            coordinator_unavailable_seconds=self._config.consumer_coordinator_unavailable_seconds,
+            coordinator_rejoin_cooldown_seconds=self._config.consumer_coordinator_rejoin_cooldown_seconds,
+            probe_timeout_seconds=self._config.consumer_stall_probe_timeout_seconds,
+            emit_alarm=self._record_consumer_rejoin_alarm,
         )
         self._rejoin_supervisors[key] = supervisor
         return supervisor
@@ -3729,6 +3749,31 @@ class EventBusKafka(
             hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
             service_label="EventBusKafka",
         )
+
+    async def _record_consumer_rejoin_alarm(
+        self, alarm: ModelConsumerRejoinAlarm
+    ) -> None:
+        """Retain the alarm locally and mirror it onto the health topic best-effort."""
+        self._consumer_rejoin_alarms.append(alarm)
+        del self._consumer_rejoin_alarms[:-CONSUMER_REJOIN_HISTORY_CAPACITY]
+        if self._health_emitter is None:
+            return
+        try:
+            await self._health_emitter.emit_event(
+                consumer_identity=f"eventbus.{alarm.topic}",
+                consumer_group=alarm.consumer_group,
+                topic=alarm.topic,
+                event_type=EnumConsumerHealthEventType.CONSUMER_GROUP_STALLED,
+                severity=EnumConsumerHealthSeverity.CRITICAL,
+                correlation_id=alarm.event_id,
+                error_message=alarm.message[:500],
+                error_type=alarm.reason,
+                hostname=socket.gethostname(),
+                service_label="EventBusKafka",
+            )
+        except (OSError, RuntimeError, KafkaError):
+            # Health mirroring is best-effort; the local record above is the alarm.
+            logger.debug("consumer_group_rejoin_alarm_mirror_failed", exc_info=True)
 
     async def _process_consumed_record(
         self,
