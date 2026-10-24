@@ -512,6 +512,9 @@ def _run_step_tail(
         f"action={action}\n"
         f"pr_number={pr_number}\n"
         f"remote_sha={remote_sha}\n"
+        "dep_refresh_status=unchanged\n"
+        "dep_refresh_detail='uv.lock unchanged'\n"
+        "dep_refresh_moved=0\n"
     )
     script = prelude + marker + run.split(marker, 1)[1]
     env = _base_env(tmp_path, CANDIDATE_SHA=_DEV_HEAD)
