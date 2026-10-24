@@ -27,40 +27,88 @@ _DOCKERFILE = _ROOT / "docker" / "Dockerfile.runtime"
 _FILELOCK_FIXED = (4, 2, 1)
 _UNDICI_FIXED = (6, 29, 1)
 
+_VERSION = r"([0-9]+(?:\.[0-9]+)*)"
+_STAGE_RE = re.compile(r"^FROM\s+\S+\s+AS\s+(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+_TORCH_RE = re.compile(
+    r"pip install torch --index-url https://download\.pytorch\.org/", re.MULTILINE
+)
+_FILELOCK_RE = re.compile(r"""pip install\s+["']?filelock\b([^"'\s]*)["']?""")
+_FILELOCK_FLOOR_RE = re.compile(rf"^>={_VERSION}$")
+_PATCH_LOOP_RE = re.compile(r"^\s*for spec in ([^;\n]+);\s*do\b", re.MULTILINE)
+_UNDICI_SPEC_RE = re.compile(rf"^undici@{_VERSION}$")
+
 
 def _version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
 
-def _builder_stage() -> str:
-    text = _DOCKERFILE.read_text(encoding="utf-8")
-    return text.split("AS runtime", 1)[0]
+def _floor(spec: str) -> tuple[int, ...] | None:
+    match = _FILELOCK_FLOOR_RE.match(spec)
+    return _version(match.group(1)) if match else None
+
+
+def _stages() -> dict[str, str]:
+    """Map each named build stage to its instructions, comment lines removed."""
+    lines = _DOCKERFILE.read_text(encoding="utf-8").splitlines()
+    text = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+    starts = list(_STAGE_RE.finditer(text))
+    names = [match.group(1) for match in starts]
+    assert len(names) == len(set(names)), f"duplicate stage names: {names}"
+    ends = [match.start() for match in starts[1:]] + [len(text)]
+    return {
+        match.group(1): text[match.start() : end]
+        for match, end in zip(starts, ends, strict=True)
+    }
+
+
+def test_stages_parsed_from_from_lines() -> None:
+    stages = _stages()
+    assert {"builder", "runtime"} <= stages.keys(), sorted(stages)
+    venv_copy = "COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv"
+    assert venv_copy in stages["runtime"], (
+        "the runtime stage no longer ships the builder's /app/.venv"
+    )
 
 
 def test_filelock_floor_installed_after_torch_from_pytorch_index() -> None:
-    builder = _builder_stage()
-    torch_at = builder.find(
-        "pip install torch --index-url https://download.pytorch.org"
-    )
-    assert torch_at != -1, "the torch install from the PyTorch CPU index moved"
-    floors = [
-        (match.start(), _version(match.group(1)))
-        for match in re.finditer(r'pip install "filelock>=([0-9.]+)"', builder)
+    stages = _stages()
+    builder = stages["builder"]
+    torch_installs = [match.end() for match in _TORCH_RE.finditer(builder)]
+    assert torch_installs, "the torch install from the PyTorch CPU index moved"
+    installs = [
+        (match.start(), match.group(1)) for match in _FILELOCK_RE.finditer(builder)
     ]
-    assert floors, "no filelock upgrade in the builder stage"
-    assert any(at > torch_at and floor >= _FILELOCK_FIXED for at, floor in floors), (
+    assert installs, "no filelock upgrade in the builder stage"
+    last_torch = max(torch_installs)
+    fixed = [
+        at
+        for at, spec in installs
+        if at > last_torch and (_floor(spec) or ()) >= _FILELOCK_FIXED
+    ]
+    assert fixed, (
         f"filelock must be upgraded to >={_FILELOCK_FIXED} after the torch install; "
-        f"found {floors}"
+        f"found {installs}"
     )
+    later = [spec for at, spec in installs if at > min(fixed)]
+    assert all((_floor(spec) or ()) >= _FILELOCK_FIXED for spec in later), (
+        f"a later builder install re-pins filelock below the floor: {later}"
+    )
+    for name, body in stages.items():
+        if name != "builder":
+            assert not _FILELOCK_RE.search(body), f"stage {name} reinstalls filelock"
 
 
 def test_npm_bundled_undici_patched_to_fixed_release() -> None:
-    text = _DOCKERFILE.read_text(encoding="utf-8")
-    specs = re.findall(r"\bundici@([0-9.]+)\b", text)
-    assert specs, "the npm bundle patch loop no longer patches undici"
-    for spec in specs:
-        version = _version(spec)
-        assert version[0] == _UNDICI_FIXED[0], (
-            f"undici@{spec} leaves node-gyp's ^6 range"
-        )
-        assert version >= _UNDICI_FIXED, f"undici@{spec} is below {_UNDICI_FIXED}"
+    loops = [
+        match.group(1).split()
+        for match in _PATCH_LOOP_RE.finditer(_stages()["runtime"])
+        if any(spec.startswith("undici@") for spec in match.group(1).split())
+    ]
+    assert len(loops) == 1, "the npm bundle patch loop no longer patches undici"
+    undici = [spec for spec in loops[0] if spec.startswith("undici@")]
+    assert len(undici) == 1, f"the patch loop names undici more than once: {undici}"
+    match = _UNDICI_SPEC_RE.match(undici[0])
+    assert match, f"{undici[0]} is not an exact undici release"
+    version = _version(match.group(1))
+    assert version[0] == _UNDICI_FIXED[0], f"{undici[0]} leaves node-gyp's ^6 range"
+    assert version >= _UNDICI_FIXED, f"{undici[0]} is below {_UNDICI_FIXED}"
