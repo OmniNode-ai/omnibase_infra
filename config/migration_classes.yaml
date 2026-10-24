@@ -413,6 +413,7 @@ migrations:
   forward/nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/097_savings_overview_all_runs.sql: forward-only # Replace aggregate population and append run count
   forward/nodes/node_projection_savings/098_delegation_savings_measured_population.sql: forward-only # Replace monetary population and append provenance counts
+  forward/nodes/node_projection_savings/100_savings_overview_token_directions.sql: forward-only # Replace the overview view and append its token directions
   forward/nodes/node_projection_savings/099_savings_series_tenant_bucket.sql: forward-only # Replace tenant/day series view and append tenant key
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_content/0002_add_session_barrier_stamps.sql: expand-only
@@ -430,6 +431,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0005_tenant_credentials_fingerprint_and_set_at.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0006_tenant_credentials_expires_at.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0007_tenant_credentials_bound_host.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0008_tenant_credentials_workspace_id.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
