@@ -554,6 +554,7 @@ def test_committed_derived_grants_are_the_nodes_output() -> None:
         (g.broker, g.resource_type, g.resource, g.pattern, g.operation)
         for g in committed.grants
     } == typed_rows()
+    assert len(committed.grants) == len(typed_rows())
     derivation = HandlerBrokerGrantDerive().handle(shipped_bindings())
     assert DERIVED.read_text() == derivation.model_dump_json(indent=2) + "\n", (
         "developer-principal-derived-grants.json is not the node's output; regenerate: "
@@ -671,7 +672,7 @@ def test_the_delegation_terminal_readback_grants_read_one_topic_and_write_none()
     }
 
 
-def test_the_hook_edge_grants_produce_metadata_only() -> None:
+def test_the_hook_edge_grants_produce_only_hook_events() -> None:
     """A developer machine may publish its hook events and read none of them back."""
     rows = derive(shipped_bindings())
     hook_edge = {
@@ -685,8 +686,11 @@ def test_the_hook_edge_grants_produce_metadata_only() -> None:
         for operation in ("WRITE", "DESCRIBE")
     }
     assert "onex.evt.omniclaude.hook-event.v1" in HOOK_EDGE_TOPICS
-    # The laptop lane mirror (OMN-19983) is the one producer of an omniintelligence
-    # topic; the hook edge adds none.
+
+
+def test_the_non_mirror_omniintelligence_grants_are_exactly_compaction() -> None:
+    """The mirror and compaction are independently checked exceptions."""
+    rows = derive(shipped_bindings())
     mirror = {(r[1], r[2]) for r in lane_mirror_rows()}
     # The only omniintelligence topics outside the mirror are the compaction request and
     # the one omniintelligence-named compaction reply; the exclusion is exact, not a
@@ -728,9 +732,87 @@ def test_the_compaction_replies_grant_read_on_three_topics_and_one_group_prefix(
         )
         for operation in ("READ", "DESCRIBE")
     }
+    assert COMPACTION_COMMAND_TOPIC not in COMPACTION_REPLY_TOPICS
     assert compaction_command == {
         ("TOPIC", COMPACTION_COMMAND_TOPIC, "WRITE"),
         ("TOPIC", COMPACTION_COMMAND_TOPIC, "DESCRIBE"),
+    }
+
+
+@pytest.mark.parametrize("suffix", ["000000000000", "abcdef123456", "ffffffffffff"])
+def test_compaction_replies_use_prefix_grants_for_concrete_runtime_groups(
+    suffix: str,
+) -> None:
+    """Real per-call groups produce the same prefix rows as the representative binding."""
+    shipped = shipped_bindings()
+    concrete = shipped.model_copy(
+        update={
+            "bindings": tuple(
+                binding.model_copy(
+                    update={"consumer_group": f"receipt-mode-client.{suffix}"}
+                )
+                if binding.physical_topic in COMPACTION_REPLY_TOPICS
+                else binding
+                for binding in shipped.bindings
+            )
+        }
+    )
+    assert derive(concrete) == derive(shipped)
+    assert not any(
+        row[1] == "GROUP" and row[2] == f"receipt-mode-client.{suffix}"
+        for row in derive(concrete)
+    )
+
+
+def test_compaction_replies_add_only_the_declared_dev_grants() -> None:
+    """Removing the compaction declarations removes exactly ten ACL rows."""
+    shipped = shipped_bindings()
+    topics = {COMPACTION_COMMAND_TOPIC, *COMPACTION_REPLY_TOPICS}
+    without = shipped.model_copy(
+        update={
+            "bindings": tuple(
+                binding
+                for binding in shipped.bindings
+                if binding.physical_topic not in topics
+            ),
+            "group_prefixes": tuple(
+                prefix
+                for prefix in shipped.group_prefixes
+                if prefix.prefix != "receipt-mode-client."
+            ),
+        }
+    )
+    expected = (
+        {
+            (BROKER, "TOPIC", topic, "LITERAL", operation)
+            for topic in COMPACTION_REPLY_TOPICS
+            for operation in ("READ", "DESCRIBE")
+        }
+        | {
+            (BROKER, "TOPIC", COMPACTION_COMMAND_TOPIC, "LITERAL", operation)
+            for operation in ("WRITE", "DESCRIBE")
+        }
+        | {
+            (BROKER, "GROUP", "receipt-mode-client.", "PREFIXED", operation)
+            for operation in ("READ", "DESCRIBE")
+        }
+    )
+    assert derive(shipped) - derive(without) == expected
+    assert derive(without) - derive(shipped) == set()
+    assert len(expected) == 10
+    assert not any(row[0] != BROKER for row in expected)
+
+
+def test_compaction_replies_are_not_implicitly_granted_to_other_principals() -> None:
+    """The compute handler derives only the bindings supplied for that principal."""
+    unrelated = ModelBrokerGrantBindings(
+        principal="unrelated-service", bindings=(consume("unrelated-group", "prod"),)
+    )
+    rows = derive(unrelated)
+    assert rows == {
+        ("prod", "TOPIC", "fixture.topic", "LITERAL", "READ"),
+        ("prod", "TOPIC", "fixture.topic", "LITERAL", "DESCRIBE"),
+        ("prod", "GROUP", "unrelated-group", "LITERAL", "READ"),
     }
 
 

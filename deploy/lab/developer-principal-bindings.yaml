@@ -108,13 +108,21 @@
 # publishing the rest.
 # COMPACTION RECEIPT-MODE REPLIES (OMN-21099): the Claude Code hook's `compaction`
 # binding publishes the compaction command and awaits its reply, through
-# HandlerReceiptModePublishAwait (OMN-21341). That client subscribes to the three
+# HandlerReceiptModePublishAwait (implemented by OMN-21341). OMN-21099 grants
+# this existing client access. It subscribes to the three
 # `awaited_events` topics of the binding in node_claude_code_hook_adapter_effect's
-# contract, each under a fresh group `receipt-mode-client.<12 hex>`; the prefix
-# below is that group's whole grant. The grant is READ and DESCRIBE on the three
-# reply topics and no write on any of them; the one write is on the command topic
-# `onex.cmd.omniintelligence.context-compaction-requested.v1`, which the client
-# publishes its request to.
+# contract under a fresh group `receipt-mode-client.<12 hex>` for each call.
+# The `.call` binding values below are representative members of that prefix,
+# following the other per-call bindings in this file; they are not runtime IDs.
+# HandlerBrokerGrantDerive suppresses literal group rows covered by the prefix.
+# Reply TOPIC grants are READ and DESCRIBE only. The request TOPIC grant is WRITE
+# and DESCRIBE only, on `onex.cmd.omniintelligence.context-compaction-requested.v1`.
+# GROUP grants are READ and DESCRIBE on the receipt-mode-client. prefix on dev.
+# This is a shared developer-lane client prefix, not isolation between machines:
+# principals may join each other's receipt groups and read the shared reply topics.
+# The handler's correlation filter selects responses; it is not an ACL boundary.
+# Runtime command-consumer groups use separate prefixes. Per-principal receipt
+# isolation requires changing the client's group IDs and reply topic routing too.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}

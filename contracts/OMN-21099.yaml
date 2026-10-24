@@ -14,7 +14,7 @@ requirements:
         statement: |-
           AC1: the derived developer-principal grants carry READ and DESCRIBE on exactly onex.cmd.omniintelligence.context-compaction-package.v1, onex.evt.omnimarket.context-compaction-prepared.v1, onex.evt.omnimarket.context-compaction-fallback.v1 and the group prefix receipt-mode-client., no WRITE on any of them, and WRITE and DESCRIBE on the compaction command topic onex.cmd.omniintelligence.context-compaction-requested.v1 only -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies, which fails at the merge base where the bindings declare none of them
   - id: req-omn21099-ac2-derived-file
-    statement: "The committed derived grants file deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, and is the derivation node's output for the shipped bindings."
+    statement: "The committed derived grants file deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, independently enumerated by TYPED_GRANTS, DECLARED_GRANTS and HOOK_EDGE_GRANTS in tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py, and is the derivation node's output for the shipped bindings."
     acceptance:
       - id: AC2
         statement: |-
@@ -25,7 +25,7 @@ evidence_requirements:
     command: |-
       uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
   - kind: manual
-    description: "A hosted-runner deploy check runs the committed_derived unit test, checks the shipped grant JSON against expected permissions and against the node output without broker access."
+    description: "Deploy validation command for the existing caller-contract deploy gate: compare the shipped grant JSON with independently enumerated permissions and node output. Runnable on a hosted runner without broker access; this declares a probe, not a new workflow or a live broker apply."
     command: "deploy: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived"
 emergency_bypass:
   enabled: false
