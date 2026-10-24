@@ -31,6 +31,7 @@ import asyncio
 import gc
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from statistics import mean
 
 import pytest
@@ -42,6 +43,79 @@ from tests.performance.event_bus.conftest import generate_unique_topic
 
 # Mark all tests in this module as performance tests
 pytestmark = [pytest.mark.performance]
+
+# Variance threshold set at 75% to account for GC pauses, CPU contention,
+# and resource sharing when running in full test suite. The test passes
+# at 50% when run individually but is flaky under shared resource conditions.
+SUSTAINED_VARIANCE_BOUND = 0.75
+WARMUP_KEY_PREFIX = "sustained-warmup"
+
+
+@dataclass(frozen=True)
+class SustainedLoadResult:
+    """Publish counts from one sustained-load measurement."""
+
+    warmup_count: int
+    interval_counts: tuple[int, ...]
+    total_time: float
+
+
+async def measure_sustained_load(
+    bus: EventBusInmemory,
+    topic: str,
+    value: bytes,
+    *,
+    interval_duration: float,
+    num_intervals: int,
+    warmup: bool = True,
+) -> SustainedLoadResult:
+    """Publish for ``num_intervals`` measured intervals and count each.
+
+    With ``warmup``, gc.collect() and one discarded interval keyed
+    ``WARMUP_KEY_PREFIX`` run first, so the measured intervals see steady
+    state rather than cold-start cost.
+    """
+
+    async def _publish_for(duration: float, key_prefix: str) -> int:
+        interval_start = time.perf_counter()
+        count = 0
+
+        while time.perf_counter() - interval_start < duration:
+            await bus.publish(
+                topic=topic,
+                key=f"{key_prefix}-{count}".encode(),
+                value=value,
+            )
+            count += 1
+
+        return count
+
+    warmup_count = 0
+    if warmup:
+        gc.collect()
+        warmup_count = await _publish_for(interval_duration, WARMUP_KEY_PREFIX)
+
+    overall_start = time.perf_counter()
+    interval_counts = [
+        await _publish_for(interval_duration, f"sustained-{interval}")
+        for interval in range(num_intervals)
+    ]
+
+    return SustainedLoadResult(
+        warmup_count=warmup_count,
+        interval_counts=tuple(interval_counts),
+        total_time=time.perf_counter() - overall_start,
+    )
+
+
+def max_throughput_variance(interval_counts: list[int]) -> float:
+    """Largest relative deviation of an interval count from the mean."""
+    # Guard against division by zero
+    avg_count = mean(interval_counts)
+    if avg_count <= 0:
+        return 0.0
+    return max(abs(c - avg_count) / avg_count for c in interval_counts)
+
 
 # -----------------------------------------------------------------------------
 # Sustained Load Tests
@@ -59,6 +133,8 @@ class TestSustainedLoad:
         """Test sustained publishing for 5 seconds.
 
         Validates that throughput remains stable over extended operation.
+        A discarded warm-up interval, preceded by gc.collect(), runs first so
+        the measured intervals see steady state rather than cold-start cost.
 
         Stability Target:
             Throughput variance < 75% between intervals (relaxed from 50%
@@ -74,47 +150,32 @@ class TestSustainedLoad:
 
         interval_duration = 1.0
         num_intervals = 5
-        interval_counts: list[int] = []
 
-        overall_start = time.perf_counter()
-
-        for interval in range(num_intervals):
-            interval_start = time.perf_counter()
-            count = 0
-
-            while time.perf_counter() - interval_start < interval_duration:
-                await bus.publish(
-                    topic=topic,
-                    key=f"sustained-{interval}-{count}".encode(),
-                    value=sample_message_bytes,
-                )
-                count += 1
-
-            interval_counts.append(count)
-
-        total_time = time.perf_counter() - overall_start
-        total_ops = sum(interval_counts)
+        result = await measure_sustained_load(
+            bus,
+            topic,
+            sample_message_bytes,
+            interval_duration=interval_duration,
+            num_intervals=num_intervals,
+        )
 
         await bus.close()
 
-        # Calculate throughput variance (guard against division by zero)
-        avg_count = mean(interval_counts)
-        if avg_count > 0:
-            max_variance = max(abs(c - avg_count) / avg_count for c in interval_counts)
-        else:
-            max_variance = 0.0
+        interval_counts = list(result.interval_counts)
+        warmup_count = result.warmup_count
+        total_time = result.total_time
+        total_ops = sum(interval_counts)
+        max_variance = max_throughput_variance(interval_counts)
 
         print(f"\nSustained Load ({num_intervals} x {interval_duration}s):")
         print(f"  Interval counts: {interval_counts}")
+        print(f"  Warm-up ops:     {warmup_count}")
         print(f"  Total ops:       {total_ops}")
         print(f"  Total time:      {total_time:.2f}s")
         print(f"  Avg throughput:  {total_ops / total_time:.0f} ops/sec")
         print(f"  Max variance:    {max_variance * 100:.1f}%")
 
-        # Variance threshold set at 75% to account for GC pauses, CPU contention,
-        # and resource sharing when running in full test suite. The test passes
-        # at 50% when run individually but is flaky under shared resource conditions.
-        assert max_variance < 0.75, (
+        assert max_variance < SUSTAINED_VARIANCE_BOUND, (
             f"Throughput variance {max_variance * 100:.1f}%, expected < 75%"
         )
 

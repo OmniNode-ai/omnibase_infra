@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_consumer_coordinator_rejoin_compute
+contract_name: node_consumer_coordinator_rejoin_compute
+node_name: node_consumer_coordinator_rejoin_compute
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: COMPUTE_GENERIC
+description: Decide bounded coordinator recovery and one alarm per episode, without I/O.
+input_model:
+  name: ModelConsumerCoordinatorRejoinRequest
+  module: omnibase_infra.models.health.model_consumer_coordinator_rejoin_request
+  description: Measured coordinator availability and declared recovery bounds.
+output_model:
+  name: ModelConsumerCoordinatorRejoinDecision
+  module: omnibase_infra.models.health.model_consumer_coordinator_rejoin_decision
+  description: Rejoin action, alarm action and their classification.
+capabilities:
+  - name: consumer_coordinator.rejoin_decide
+    description: Decide whether coordinator loss requires a client rebuild.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: consumer_coordinator.rejoin_decide
+      handler:
+        name: HandlerConsumerCoordinatorRejoin
+        module: omnibase_infra.handlers.handler_consumer_coordinator_rejoin
+      description: Pure decision from coordinator and broker availability.
+      supported_operations: [consumer_coordinator.rejoin_decide]
+      input_model:
+        name: ModelConsumerCoordinatorRejoinRequest
+        module: omnibase_infra.models.health.model_consumer_coordinator_rejoin_request
+        description: Measurements and recovery bounds for one consumer.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+metadata:
+  description: Decide coordinator recovery from one observation, without I/O.
+  author: OmniNode Team
+  license: MIT
+  tags: [compute, consumer, coordinator, rejoin]
+  related_tickets: [OMN-21337, OMN-18640]
