@@ -59,6 +59,8 @@ class TestSustainedLoad:
         """Test sustained publishing for 5 seconds.
 
         Validates that throughput remains stable over extended operation.
+        A discarded warm-up interval, preceded by gc.collect(), runs first so
+        the measured intervals see steady state rather than cold-start cost.
 
         Stability Target:
             Throughput variance < 75% between intervals (relaxed from 50%
@@ -76,20 +78,27 @@ class TestSustainedLoad:
         num_intervals = 5
         interval_counts: list[int] = []
 
-        overall_start = time.perf_counter()
-
-        for interval in range(num_intervals):
+        async def _publish_for(duration: float, key_prefix: str) -> int:
             interval_start = time.perf_counter()
             count = 0
 
-            while time.perf_counter() - interval_start < interval_duration:
+            while time.perf_counter() - interval_start < duration:
                 await bus.publish(
                     topic=topic,
-                    key=f"sustained-{interval}-{count}".encode(),
+                    key=f"{key_prefix}-{count}".encode(),
                     value=sample_message_bytes,
                 )
                 count += 1
 
+            return count
+
+        gc.collect()
+        warmup_count = await _publish_for(interval_duration, "sustained-warmup")
+
+        overall_start = time.perf_counter()
+
+        for interval in range(num_intervals):
+            count = await _publish_for(interval_duration, f"sustained-{interval}")
             interval_counts.append(count)
 
         total_time = time.perf_counter() - overall_start
@@ -106,6 +115,7 @@ class TestSustainedLoad:
 
         print(f"\nSustained Load ({num_intervals} x {interval_duration}s):")
         print(f"  Interval counts: {interval_counts}")
+        print(f"  Warm-up ops:     {warmup_count}")
         print(f"  Total ops:       {total_ops}")
         print(f"  Total time:      {total_time:.2f}s")
         print(f"  Avg throughput:  {total_ops / total_time:.0f} ops/sec")
