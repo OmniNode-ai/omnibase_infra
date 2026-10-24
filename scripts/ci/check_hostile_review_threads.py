@@ -50,7 +50,7 @@ accept or refuse it with one sentence; and ``--post-verdicts`` (this script)
 posts each verdict under the workflow's own token as a reply on the thread
 that begins with
 
-    <!-- hostile-review-judge rejection=<comment id> digest=<sha256/16> verdict=accepted|refused judge=<voter> identity=<model> -->
+    <!-- hostile-review-judge rejection=<comment id> digest=<sha256> verdict=accepted|refused judge=<voter> identity=<model> -->
 
 and this gate honours it only when all of these hold:
 
@@ -64,7 +64,7 @@ and this gate honours it only when all of these hold:
 An accepted rejection clears the thread. A refused one blocks with the
 judge's sentence until a verified ``fixed-in`` or a new rejection the judge
 accepts. A rejection the judge has not answered (it was unavailable, the
-rejection came from an account without write access, or every configured
+rejection came from an account not associated with the repository, or every configured
 judge shares a voter's identity) blocks with that reason: the judge fails
 closed. There is no human override and no other credential.
 
@@ -132,11 +132,15 @@ MIN_REJECT_REASON_CHARS = 10
 # either, so a verdict another account posts is not a verdict.
 JUDGE_MARKER = "hostile-review-judge"
 JUDGE_LOGINS = frozenset({"github-actions", "github-actions[bot]"})
-# Only a rejection from an account with write access is judged. On a public
-# repository anyone can reply on a thread, and each judgement is a paid model
-# call; an outsider's rejection blocks with this reason instead.
+# Only a rejection from an account GitHub associates with the repository as
+# OWNER, MEMBER or COLLABORATOR is judged. That is not a write-access check:
+# MEMBER is organization membership, and COLLABORATOR covers read and triage
+# roles too. It keeps an unassociated account's reply, which anyone can post on
+# a public repository, from costing a paid model call; such a rejection blocks
+# with this reason instead.
 JUDGED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-JUDGE_DIGEST_CHARS = 16
+# The full SHA-256 hex digest of the rejection body a verdict binds to.
+JUDGE_DIGEST_CHARS = 64
 _JUDGE_MARKER_RE = re.compile(
     rf"\A<!-- {JUDGE_MARKER} rejection=(?P<rejection>\d+) "
     rf"digest=(?P<digest>[0-9a-f]{{{JUDGE_DIGEST_CHARS}}}) "
@@ -284,8 +288,8 @@ def not_judgeable(disposition: Disposition) -> str:
         return "the rejection has no comment id to bind a verdict to"
     if disposition.author_association not in JUDGED_ASSOCIATIONS:
         return (
-            f"the rejection's author {disposition.author or '?'} has no write access "
-            f"to this repository (association "
+            f"the rejection's author {disposition.author or '?'} is not an owner, "
+            f"member or collaborator of this repository (association "
             f"{disposition.author_association or 'unknown'}), so the review bot does "
             "not judge it"
         )

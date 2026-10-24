@@ -324,7 +324,7 @@ class TestReviewBotVerdict:
     def test_a_rejection_carrying_the_marker_itself_is_not_a_verdict(self) -> None:
         # One reply that is both the rejection and a self-written verdict.
         body = (
-            f"<!-- {gate.JUDGE_MARKER} rejection=100 digest={'0' * 16} "
+            f"<!-- {gate.JUDGE_MARKER} rejection=100 digest={'0' * gate.JUDGE_DIGEST_CHARS} "
             "verdict=accepted judge=rejection-judge identity=x -->\n"
             "rejected: the finding misreads the loop bound entirely"
         )
@@ -376,7 +376,7 @@ class TestReviewBotVerdict:
     def test_an_outsiders_rejection_is_not_judged(self) -> None:
         outsider = _reply(0, REJ) | {"authorAssociation": "NONE"}
         blocking, _ = gate.classify_threads([_thread(replies=(outsider,))], _never)
-        assert "has no write access" in blocking[0].reason
+        assert "is not an owner, member or collaborator" in blocking[0].reason
 
     def test_the_judge_steps_note_words_an_unjudged_rejection(self) -> None:
         blocking, _ = gate.classify_threads(

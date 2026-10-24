@@ -245,6 +245,24 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
     assert cleared == []
     assert blocking[0].judge_verdict == "unjudged"
 
+    # A verdict binds to the full SHA-256 of the rejection: one bound to a
+    # truncated 64-bit prefix is not a verdict and clears nothing.
+    digest = gate.body_digest(rejection)
+    assert len(digest) == 64
+    truncated: dict[str, Any] = {
+        "body": (
+            f"<!-- {gate.JUDGE_MARKER} rejection=4338600001 "
+            f"digest={digest[:16]} verdict=accepted "
+            "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
+        ),
+        "author": {"login": "github-actions"},
+    }
+    thread["comments"]["nodes"].append(truncated)
+    blocking, cleared = gate.classify_threads([thread], no_fix_check)
+    assert cleared == []
+    assert blocking[0].judge_verdict == "unjudged"
+    thread["comments"]["nodes"].remove(truncated)
+
     thread["comments"]["nodes"].append(
         {
             "body": (

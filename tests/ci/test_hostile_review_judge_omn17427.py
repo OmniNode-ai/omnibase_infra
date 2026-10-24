@@ -235,7 +235,10 @@ class TestPendingFile:
     ) -> None:
         thread = _thread(_rejection(association="NONE"))
         assert _pending(env, head_repo, monkeypatch, [thread])["items"] == []
-        assert "has no write access" in _gate([thread], env)[0][0].reason
+        assert (
+            "is not an owner, member or collaborator"
+            in _gate([thread], env)[0][0].reason
+        )
 
     def test_a_fork_pr_judges_nothing_and_says_why(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
