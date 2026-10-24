@@ -177,7 +177,10 @@ jobs:
           # a deploy in progress is waited for, not graded. Idle, unreadable or
           # undeclared agents and an exhausted budget are still RED. The
           # resolver's own busy test; nothing is re-derived here.
+          # OMN-20410, run 40028107581: the gateway answered during a deploy,
+          # so also wait when the lane answers but its agent reads busy.
           deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
+          wait-while-busy: 'true'
 
       - name: Drive the healthy and the dying delegation and grade C16
         env:

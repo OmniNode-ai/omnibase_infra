@@ -83,6 +83,7 @@ databases:
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
+              - compaction_receipts
               - consumer_flow_windows
               - delegate_skill_command_claims
               - demo_readiness_latest
