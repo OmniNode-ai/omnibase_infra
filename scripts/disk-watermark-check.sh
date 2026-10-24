@@ -68,10 +68,13 @@
 # There is deliberately no --warn/--crit flag: a threshold an operator can retype
 # per invocation is not a declared threshold. Edit the JSON, in a reviewed commit.
 #
-# Exit codes: 0 ok (under every threshold, or published), 10 warn breached,
-#             20 crit breached (free space below the floor), 2 bad args or an
-#             unreadable threshold declaration. (Non-zero breach codes let the
-#             timer surface state in `systemctl --user status`.)
+# Exit codes: 0 ok (under every threshold, published, or quiet --mount-optional
+#             when the path is not a mount point), 10 warn breached,
+#             20 crit breached (free space below the floor), 2 bad args, an
+#             unreadable threshold declaration, or df cannot read or parse the
+#             target (including a mounted --mount-optional filesystem that df
+#             cannot read, which never falls back to /). (Non-zero breach codes
+#             let the timer surface state in `systemctl --user status`.)
 #
 # Runs on .201 via deploy/disk-gc.timer (shares the GC timer). Log: ~/.local/log/onex/disk-watermark.log
 # Runs on Mac via the reaper daemon (T4/OMN-13228) or operator invocation.
