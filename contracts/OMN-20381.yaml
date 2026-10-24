@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: The vendored 0007 file is byte-identical to the omnimarket source, adds only the seven nullable columns and three partial indexes, and is declared in the ledger and the migration classes -- falsifier: the vendor test fails with the file, its ledger row or its class removed"
+  - id: req-omn20381-vendor-tenant-credentials-0008
+    statement: The tenant-credentials 0008 workspace_id migration is vendored byte-identical to omnimarket's source, bound in the application-migrations ledger and classified expand-only, so a released omnibase_infra carries it.
+    acceptance:
+      - id: AC2
+        statement: "AC2: docker/migrations/forward/nodes/node_projection_tenant_credentials carries 0008_tenant_credentials_workspace_id.sql as the omnimarket git blob e5b9044b, bound in the application-migration ledger by sha256, declared expand-only and passing the application database SQL gate on every supported topology profile, with an unowned-target positive control -- falsifier: uv run pytest tests/unit/migrations/test_omn20381_tenant_credentials_workspace_id_vendor.py -q fails at the merge base, where the file is not vendored"
 evidence_requirements:
   - kind: tests
     description: The vendored 0007 file matches the omnimarket source sha256, adds only the nullable columns and partial indexes, passes the application database SQL gate on every topology profile, and is declared in the ledger and the migration classes.
     command: uv run pytest tests/unit/migrations/test_omn19513_claude_hook_events_vendor.py -q
+  - kind: tests
+    description: The vendored 0008 file matches the omnimarket source sha256 and git blob, adds only the nullable workspace_id column, is bound in the ledger, declared expand-only, runs after the table-creating 0000 and passes the application database SQL gate on every supported topology profile. An unowned-target positive control is rejected on every profile.
+    command: uv run pytest tests/unit/migrations/test_omn20381_tenant_credentials_workspace_id_vendor.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -29,3 +37,20 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn20381-ac2-vendor-tenant-credentials-0008
+    description: The vendor test checks byte identity, ledger binding, expand-only classification, nullable-column shape and migration ordering, and runs the application database SQL gate against every supported topology profile with an unowned-target positive control on each. It fails at the merge base, where the 0008 file, its ledger row and its class do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20381_tenant_credentials_workspace_id_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20381-ac2-workspace-migration-deploy-probe
+    description: Hosted-runner deploy artifact probe reads the vendored 0008 migration from this checkout's commit and requires the omnimarket source sha256. It fails on a tree without the migration or with different bytes and needs no private runtime. This checks the release artifact, not whether a lane database has applied it.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/docker/migrations/forward/nodes/node_projection_tenant_credentials/0008_tenant_credentials_workspace_id.sql" | python3 -c 'import hashlib, sys; assert hashlib.sha256(sys.stdin.buffer.read()).hexdigest() == "688d94ce82f950d757a5658dfeac55d018c5d70424b91585cb3018eaea2dc79e"'
+        cwd: ${OMNI_HOME}/omnibase_infra
