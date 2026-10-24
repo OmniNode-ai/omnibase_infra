@@ -106,6 +106,23 @@
 # stay a separate, consented grant. A class whose fan-out names an ungranted topic is
 # dead-lettered by the drainer after its first failures, so the machine keeps
 # publishing the rest.
+# COMPACTION RECEIPT-MODE REPLIES (OMN-21099): the Claude Code hook's `compaction`
+# binding publishes the compaction command and awaits its reply, through
+# HandlerReceiptModePublishAwait (implemented by OMN-21341). OMN-21099 grants
+# this existing client access. It subscribes to the three
+# `awaited_events` topics of the binding in node_claude_code_hook_adapter_effect's
+# contract under a fresh group `receipt-mode-client.<12 hex>` for each call.
+# The `.call` binding values below are representative members of that prefix,
+# following the other per-call bindings in this file; they are not runtime IDs.
+# HandlerBrokerGrantDerive suppresses literal group rows covered by the prefix.
+# Reply TOPIC grants are READ and DESCRIBE only. The request TOPIC grant is WRITE
+# and DESCRIBE only, on `onex.cmd.omniintelligence.context-compaction-requested.v1`.
+# GROUP grants are READ and DESCRIBE on the receipt-mode-client. prefix on dev.
+# This is a shared developer-lane client prefix, not isolation between machines:
+# principals may join each other's receipt groups and read the shared reply topics.
+# The handler's correlation filter selects responses; it is not an ACL boundary.
+# Runtime command-consumer groups use separate prefixes. Per-principal receipt
+# isolation requires changing the client's group IDs and reply topic routing too.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -175,6 +192,10 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-fallback.v1, direction: consume, consumer_group: receipt-mode-client.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
@@ -184,5 +205,6 @@ group_prefixes:
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
   - {broker: dev, prefix: local.rr.morning_phase.}
   - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
+  - {broker: dev, prefix: receipt-mode-client.}
 described_groups:
   - {broker: dev, group: "*"}
