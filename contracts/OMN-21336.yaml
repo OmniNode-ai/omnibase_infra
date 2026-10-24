@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21336
+title: Vendor the compaction receipts migrations and their interim grant ahead of the omnimarket writer node
+summary: >-
+  Holds node_projection_compaction_receipts/0000 and 0001 as interim vendored files (omnimarket#4347 declares the relation and its cursor sequence in omnimarket's ownership manifest but dropped the SQL before merging), digest-pinned until the omnimarket writer node carries them. Adds checksum-bound ledger rows and migration classes, one interim grant declaration for compaction_receipts (named in the OMN-18863 expiry module), and the regenerated topology instances and rendered catalogs. This is the infrastructure deployment half of OMN-21336; the writer node follows in omnimarket once this repository's dev-merge tag carries it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21336-infra-vendor
+    statement: >-
+      The two vendored receipts migrations retain the source bytes, each has exactly one checksum-bound ledger row and the correct class, none is fenced, and the interim grant declaration names the vendored create migration.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: compaction_receipts/0000 and 0001 match their pinned digests and live-hash ledger checksums in a well-formed ledger, with their classes without a FORCE fence, and the interim declaration grants read_write under role compaction_receipts -- falsifier: the vendor unit test fails any assertion.
+  - id: req-omn21336-live-apply
+    statement: >-
+      The receipts chain applies to an ephemeral PostgreSQL database, reapplies without changing a populated row, delivers the declared column types, and gives omninode_runtime exactly SELECT, INSERT and UPDATE on the table and USAGE on the cursor sequence.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the live-apply tests apply 0000 and 0001 twice around a populated row, assert the column types, the exact table, schema and sequence privileges, and an upsert as omninode_runtime that returns its cursor while DELETE is refused -- falsifier: any test in test_compaction_receipts_vendor_omn21336.py fails.
+evidence_requirements:
+  - kind: tests
+    description: Source byte pins, ledger checksums, classes, absence of fences and the interim grant declaration.
+    command: uv run pytest tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q
+  - kind: tests
+    description: Real migration apply, replay, column types and runtime privileges.
+    command: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_receipts_vendor_omn21336.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21336-infra-vendor
+    description: Pins both source digests, their exact ledger rows and classes, the interim declaration, and proves neither is fenced.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21336-live-apply
+    description: Applies the chain twice around a populated row and proves column types and exact runtime privileges.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_receipts_vendor_omn21336.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
