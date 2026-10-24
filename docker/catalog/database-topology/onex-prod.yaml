@@ -86,6 +86,8 @@ databases:
               - compaction_receipts
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - delegation_lab_job_outbox
+              - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
@@ -439,5 +441,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: d6e6d7b38dc81d22d9640d7ea669e6100d9a0a6793e4cf2c2fbdea521a0b5606
+  sha256: a80251aef406cd7e20d7fe949e63136dd15626475b4505245652575ee2d72ee7
 topology_instance: onex-prod
