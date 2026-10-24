@@ -20,6 +20,7 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
 )
 from omnibase_infra.event_bus.consumer_rejoin_supervisor import (
     COORDINATOR_ERROR_LOG_GATE,
+    LOST_CONSUMER_RETRY_SECONDS,
     ConsumerRejoinSupervisor,
 )
 
@@ -343,6 +344,11 @@ async def test_consumer_rejoin_failure_alarms_once_per_episode_and_rearms_after_
         ):
             await h.poll()
         assert len(h.supervisor.alarms) == 1
+        # The stopped handle is never polled again (OMN-19513): recovery is a
+        # replacement that starts, then flow on it.
+        h.fail = False
+        await h.poll(LOST_CONSUMER_RETRY_SECONDS)
+        assert h.consumer is h.replacement
         h.consumer._wedged = False
         h.consumer._pending = [object()]
         await h.poll()
@@ -351,6 +357,9 @@ async def test_consumer_rejoin_failure_alarms_once_per_episode_and_rearms_after_
             r.getMessage().startswith("consumer_group_rejoin_recovered ")
             for r in caplog.records
         )
+        h.fail = True
+        h.consumer._wedged = True
+        h.consumer._coordinator.coordinator_id = None
         # Cover a new loss bound and cooldown, plus both confirmation windows.
         for _ in range(
             polls_for(
@@ -524,7 +533,9 @@ async def test_backlog_rejoin_failure_alarms_without_claiming_coordinator_loss()
     assert len(h.supervisor.alarms) == 1
     assert h.supervisor.alarms[0].reason == "stalled_backlog_not_draining"
     assert "coordinator is unavailable" not in h.supervisor.alarms[0].message
-    h.consumer._end_offsets = [10]
+    h.fail = False
+    await h.poll(LOST_CONSUMER_RETRY_SECONDS)
+    assert h.consumer is h.replacement
     await h.poll()
     assert not h.supervisor.alarm_active
 
@@ -541,9 +552,10 @@ async def test_alarm_emitter_failure_never_breaks_recovery() -> None:
     ):
         await h.poll()
     assert len(h.supervisor.alarms) == 1
-    h.consumer._coordinator.coordinator_id = 0
-    h.consumer._end_offsets = [10]
-    await h.poll(POLICY.stall_seconds + POLL_SECONDS)
+    h.fail = False
+    await h.poll(LOST_CONSUMER_RETRY_SECONDS)
+    assert h.consumer is h.replacement
+    await h.poll()
     assert not h.supervisor.alarm_active
 
 
@@ -574,6 +586,8 @@ async def test_bus_wires_bounds_identity_and_retains_bounded_alarms(
         consumer_coordinator_unavailable_seconds=20,
         consumer_coordinator_rejoin_cooldown_seconds=30,
         consumer_stall_probe_timeout_seconds=0.02,
+        # A lost consumer sleeps one poll interval in real time (OMN-19513).
+        consumer_poll_timeout_ms=100,
     )
     bus = EventBusKafka(config=config)
     clock = FakeClock()
