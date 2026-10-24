@@ -127,10 +127,10 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen python -c "import importlib.metadata as m; assert m.version('omnibase-core') == '0.47.53', m.version('omnibase-core')"
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.53'), v"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
