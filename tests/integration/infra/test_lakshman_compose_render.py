@@ -690,6 +690,8 @@ def test_every_service_naming_the_lane_overlay_mounts_it() -> None:
     the lane's runtime env and had no mount, while the two runtimes beside it did.
     The mount must be a read-only bind of this lane's overlay file with
     create_host_path false, so a missing file is refused instead of made a directory.
+    The rendered config omits a false create_host_path (``bind: {}``) and writes a
+    true one out, so an absent key reads as false.
     """
     services = _compose_config_json()["services"]
     expected_source = (
@@ -710,7 +712,7 @@ def test_every_service_naming_the_lane_overlay_mounts_it() -> None:
             and mounts[0].get("type") == "bind"
             and mounts[0].get("source") == expected_source
             and mounts[0].get("read_only") is True
-            and mounts[0].get("bind", {}).get("create_host_path") is False
+            and mounts[0].get("bind", {}).get("create_host_path", False) is False
         ):
             invalid_mounts[name] = mounts
     assert not invalid_mounts, (
