@@ -17,6 +17,10 @@ inputs:
     description: 'Seconds to wait while eligible lanes report a deploy in progress; 0 keeps single-shot resolution.'
     required: false
     default: '0'
+  wait-while-busy:
+    description: 'wait out an in-flight deploy even when the lane answers'
+    required: false
+    default: 'false'
 outputs:
   name:
     description: 'The chosen lane name.'
@@ -38,4 +42,5 @@ runs:
         LANE_REQUIRE: ${{ inputs.require }}
         LANE_MATCH: ${{ inputs.match }}
         LANE_DEPLOY_WAIT_SECONDS: ${{ inputs.deploy-wait-seconds }}
+        LANE_DEPLOY_WAIT_WHILE_BUSY: ${{ inputs.wait-while-busy }}
       run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"
