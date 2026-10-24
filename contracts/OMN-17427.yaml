@@ -517,6 +517,11 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-agent-commit-refused-rejoin
+    statement: The deploy agent treats a refused offset commit on every commit path (reject, skip, dedup, accept, quarantine and self-update rewind) as a group rejoin that redelivers the record, logged as commit_refused_rejoin, and never exits on it.
+    acceptance:
+      - id: AC17427525901
+        statement: 'AC17427525901: with a fake consumer whose commit raises CommitFailedError, a routed-elsewhere record returns (None, None) with no seek, lane_not_allowed and duplicate return their rejection, the accept returns the command and logs accept_commit_failed, the record and fetch quarantines and the rewind log a warning without raising, and the next poll handles the redelivered record and commits it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q'
   - id: req-omn17427-dev-broker-image
     statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
     acceptance:
@@ -802,6 +807,9 @@ evidence_requirements:
   - kind: tests
     description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
     command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
+  - kind: tests
+    description: A fake KafkaConsumer refuses commits with CommitFailedError on every commit path of the deploy agent's consumer; no broker is contacted.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
   - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
@@ -2527,6 +2535,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac154-agent-commit-rejoin
+    description: A fake KafkaConsumer whose commit raises CommitFailedError drives the deploy agent's skip, reject, accept, quarantine and rewind commit paths; each fails at the merge base by raising and passes at the head. No broker or lab host is contacted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
+  - id: dod-omn-17427-ac154-agent-commit-rejoin-ci
+    description: Hosted-runner deploy check of the same fakes; it does not claim an install on a live lane, which is the parent lane's.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
   - id: dod-omn-17427-ac146-dev-broker-image
     description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
     source: manual
