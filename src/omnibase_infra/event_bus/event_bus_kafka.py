@@ -3664,7 +3664,8 @@ class EventBusKafka(
 
         Raises:
             Exception: Propagated to the supervisor, which records a failed
-                rejoin and retries after the cooldown.
+                rejoin and retries after the cooldown. The half-started
+                replacement is stopped before the exception propagates.
         """
         effective_group_id = self._resolve_effective_group_id(
             group_id, topic, uuid4(), (topic, group_id)
@@ -3677,7 +3678,22 @@ class EventBusKafka(
             self._config.auto_offset_reset,
             group_id=group_id,
         )
-        await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
+        # A consumer whose start failed is never published; close it so retries
+        # every LOST_CONSUMER_RETRY_SECONDS do not leak clients (OMN-19513).
+        try:
+            await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
+        except BaseException:
+            try:
+                await consumer.stop()
+            except (KafkaError, OSError, RuntimeError) as cleanup_err:
+                logger.warning(
+                    "consumer_group_rejoin_cleanup_failed topic=%s group=%s error=%s",
+                    topic,
+                    effective_group_id,
+                    cleanup_err,
+                    exc_info=True,
+                )
+            raise
         self._group_consumers[(topic, group_id)] = consumer
         logger.warning(
             "consumer_group_rejoined topic=%s group=%s -- replacement consumer "

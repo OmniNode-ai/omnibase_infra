@@ -158,3 +158,7 @@ async def test_consume_loop_delivers_after_two_failed_rejoins(
     ]
     assert bus.consumer_sync_statuses()[0].ready
     assert len({call.args[1] for call in build.call_args_list}) == 1
+    # Each replacement whose start failed was closed rather than leaked.
+    for failed in replacements[:2]:
+        failed.stop.assert_awaited_once()
+    recovered.stop.assert_not_awaited()
