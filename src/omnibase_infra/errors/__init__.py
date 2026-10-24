@@ -27,6 +27,7 @@ Exports:
     PolicyRegistryError: Policy registry operation errors
     ComputeRegistryError: Compute registry operation errors
     EventBusRegistryError: Event bus registry operation errors
+    DispatchCancelledError: A subscriber dispatch ended in CancelledError while its consume loop was not cancelled
     DispatchDeadlineExceededError: A consumed record's handler outlived its per-dispatch deadline
     DlqDependencyLifecycleTimeoutError: A DLQ replay dependency start() exceeded its bound
     DlqPersistenceUnconfirmedError: A DLQ write was not confirmed durable — offset must not advance (OMN-14936)
@@ -141,6 +142,7 @@ from omnibase_infra.errors.error_db_ownership import (
     DbOwnershipMissingError,
 )
 from omnibase_infra.errors.error_dispatch_deadline import (
+    DispatchCancelledError,
     DispatchDeadlineExceededError,
 )
 from omnibase_infra.errors.error_dlq_dependency_lifecycle import (
@@ -232,6 +234,8 @@ __all__: list[str] = [
     # DB ownership errors
     "DbOwnershipMismatchError",
     "DbOwnershipMissingError",
+    # Subscriber dispatch cancelled from inside (OMN-17427)
+    "DispatchCancelledError",
     # Per-dispatch deadline refusal (OMN-19355)
     "DispatchDeadlineExceededError",
     # DLQ topic resolution refusal (OMN-18084)
