@@ -322,6 +322,15 @@ jobs:
             echo "PR #${PR} is already armed; not arming again (OMN-19216)."
             exit 0
           fi
+          # OMN-17292: a draft's check_suite completion reaches this step too, and
+          # GitHub refuses to arm a draft ("Pull request is a draft"), which failed
+          # the job red. A draft is not armable yet: the ready_for_review trigger
+          # arms it after the flip, as the enqueue step's DRAFT -> wait does.
+          draft="$(gh pr view "$PR" --repo "$GH_REPO" --json isDraft --jq '.isDraft')"
+          if [ "$draft" = "true" ]; then
+            echo "PR #${PR} is a draft; not arming until it is marked ready (OMN-17292)."
+            exit 0
+          fi
           # OMN-16300 / OMN-19697: a branch without a queue requires an explicit
           # merge method, while a queue-controlled branch rejects one because its
           # ruleset owns the method. Decide from the live queue response.
