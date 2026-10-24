@@ -36,6 +36,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +59,7 @@ _RESOLVER = _ROOT / "scripts" / "resolve_omnimarket_contract_pin.py"
 _ADVANCE_GUARD = _ROOT / "scripts" / "ci" / "check_omnimarket_contract_pin_advance.py"
 
 _GATE_JOB = "application-database-domain-enforcement"
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_TAG_RE = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 
 
 def _gate_job_text() -> str:
@@ -163,14 +164,14 @@ def test_pre_setup_steps_run_on_stdlib_only() -> None:
         )
 
 
-def test_pin_file_declares_an_immutable_commit_sha() -> None:
-    """A mutable ref (branch/tag) as the pin would reintroduce the coupling."""
+def test_pin_file_declares_a_strict_release_tag() -> None:
+    """The train-owned pin accepts only strict release tags."""
     assert _PIN_FILE.is_file(), f"missing contract pin file: {_PIN_FILE}"
     document = _pin_document()
 
-    ref = document["omnimarket_contract_ref"]
-    assert isinstance(ref, str) and _SHA_RE.fullmatch(ref), (
-        f"omnimarket_contract_ref must be a full 40-hex commit sha, got {ref!r}; "
+    ref = document["omnimarket_release_tag"]
+    assert isinstance(ref, str) and _TAG_RE.fullmatch(ref), (
+        f"omnimarket_release_tag must be a strict release tag, got {ref!r}; "
         "a branch name would make the derivation non-deterministic again"
     )
     assert document["repository"] == "OmniNode-ai/omnimarket"
@@ -180,11 +181,11 @@ def test_pin_resolution_is_offline_and_deterministic() -> None:
     """The resolver must be a pure function of committed state.
 
     No token, no network, no ``GITHUB_EVENT_PATH`` dependence — running it twice
-    in an empty environment must yield the pinned sha both times. This is what
+    in an empty environment must yield the pinned tag both times. This is what
     makes an unrelated PR's verdict immune to an omnimarket merge.
     """
     assert _RESOLVER.is_file(), f"missing resolver: {_RESOLVER}"
-    expected = _pin_document()["omnimarket_contract_ref"]
+    expected = _pin_document()["omnimarket_release_tag"]
 
     outputs = []
     for _ in range(2):
@@ -385,21 +386,25 @@ def test_omnimarket_dev_moving_past_the_pin_does_not_move_the_derivation_input(
     assert (
         resolver.resolve_pin()
         == resolver.resolve_pin()
-        == _pin_document()["omnimarket_contract_ref"]
+        == _pin_document()["omnimarket_release_tag"]
     )
 
     # And the answer tracks the FILE, not omnimarket dev. Pointed at a pin file
-    # naming the older commit in that same capture, the resolver returns the
-    # older commit -- even though dev has demonstrably moved past it. Under
+    # naming an older release tag, the resolver returns the older tag even
+    # though dev has demonstrably moved past it. Under
     # live-resolve there was no such file to consult and no way to hold still.
     older = _pin_document()
-    older["omnimarket_contract_ref"] = payload["base_commit"]["sha"]
+    older["omnimarket_release_tag"] = "v0.4.1"
     older_pin = tmp_path / "older-pin.yaml"
     older_pin.write_text(yaml.safe_dump(older), encoding="utf-8")
-    assert resolver.resolve_pin(older_pin) == payload["base_commit"]["sha"]
+    assert resolver.resolve_pin(older_pin) == "v0.4.1"
 
 
-def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "ref",
+    ["dev", "a" * 40, "dev-20261023000000-abcdef012345", "v0.4.319-rc1"],
+)
+def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path, ref: str) -> None:
     """Discriminator for the false_red case above.
 
     A resolver that returned whatever it found would satisfy the accept proof
@@ -409,10 +414,10 @@ def test_the_resolver_refuses_a_mutable_ref(tmp_path: Path) -> None:
     resolver = _resolver_module()
     mutable = tmp_path / "pin.yaml"
     mutable.write_text(
-        "repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: dev\n",
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_release_tag: {ref}\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="40-hex"):
+    with pytest.raises(ValueError, match="release tag"):
         resolver.resolve_pin(mutable)
 
 
@@ -434,10 +439,19 @@ def test_a_scheduled_bot_advances_the_pin_and_regenerates_in_one_commit() -> Non
 
     # `on:` parses as the boolean True under YAML 1.1.
     triggers = document.get("on", document.get(True))
-    assert "schedule" in triggers, "the pin must advance on a schedule"
-    assert "workflow_dispatch" in triggers, "and be advanceable on demand"
+    assert triggers["workflow_run"] == {
+        "workflows": ["Release Train (nightly)"],
+        "types": ["completed"],
+        "branches": ["dev"],
+    }
+    assert "schedule" not in triggers
+    assert "push" not in triggers
+    assert triggers["workflow_dispatch"] is None
+    assert "workflow_run.event == 'schedule'" in document["jobs"]["refresh"]["if"]
 
     body = _REFRESH_WORKFLOW.read_text(encoding="utf-8")
+    assert "git ls-remote --tags" in body
+    assert "omnimarket/commits/" not in body
     assert "generate_application_database_table_grants.py" in body
     assert "--write" in body
     # The rendered docker catalogs must move with the instances, or the
@@ -590,7 +604,7 @@ def test_an_upstream_contract_addition_cannot_red_an_unrelated_infra_pr(
     # And the pin is what the enforcement job actually feeds the derivation,
     # regardless of what omnimarket dev did in the meantime.
     assert (
-        _pin_document()["omnimarket_contract_ref"]
+        _pin_document()["omnimarket_release_tag"]
         == subprocess.run(
             [sys.executable, str(_RESOLVER)],
             capture_output=True,
@@ -656,9 +670,9 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
     base_sha = run("rev-parse", "HEAD").stdout.strip()
 
     # HEAD: the pin file is introduced.
-    head_pin = "fd3e66c71ccfd4f7383904baa19e5bd700993a05"
+    head_pin = "v0.4.319"
     (repo / ".github" / "omnimarket-contract-pin.yaml").write_text(
-        f"repository: OmniNode-ai/omnimarket\nomnimarket_contract_ref: {head_pin}\n",
+        f"repository: OmniNode-ai/omnimarket\nomnimarket_release_tag: {head_pin}\n",
         encoding="utf-8",
     )
     run("add", "-A")
@@ -682,3 +696,72 @@ def test_the_pin_introducing_pr_does_not_trip_its_own_forward_only_guard(
         "guard -- a creation has no predecessor to move backwards from. "
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
+
+
+def _run_tag_migration_guard(
+    tmp_path: Path, base_pin: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute the real CI guard with a failing compare API in a local repo."""
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    shutil.copyfile(_RESOLVER, repo / "scripts" / _RESOLVER.name)
+    pin = repo / ".github" / "omnimarket-contract-pin.yaml"
+    pin.write_text("repository: OmniNode-ai/omnimarket\n" + base_pin, encoding="utf-8")
+    run = functools.partial(_git, cwd=repo)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "ci@omninode.ai")
+    run("config", "user.name", "ci")
+    run("add", "-A")
+    run("commit", "-qm", "base pin")
+    base_sha = run("rev-parse", "HEAD").stdout.strip()
+    pin.write_text(
+        "repository: OmniNode-ai/omnimarket\nomnimarket_release_tag: v0.4.319\n",
+        encoding="utf-8",
+    )
+    run("add", "-A")
+    run("commit", "-qm", "release tag pin")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\necho 'compare API failed' >&2\nexit 1\n", encoding="utf-8"
+    )
+    gh.chmod(0o755)
+    return subprocess.run(
+        ["bash", "-c", _forward_only_guard_script()],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **scrub_git_location_env(os.environ),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "PIN_BASE_REVISION": base_sha,
+            "HEAD_PIN": "v0.4.319",
+        },
+    )
+
+
+def test_legacy_pin_to_release_tag_bootstraps_the_forward_only_guard(
+    tmp_path: Path,
+) -> None:
+    """The first tag pin has no predecessor in release-tag form."""
+    completed = _run_tag_migration_guard(
+        tmp_path, "omnimarket_contract_ref: " + "a" * 40 + "\n"
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert (
+        "base revision carries no release-tag pin - nothing in tag form to advance "
+        "from; forward-only guard not applicable"
+    ) in completed.stdout
+
+
+def test_release_tag_base_cannot_skip_a_failed_forward_only_proof(
+    tmp_path: Path,
+) -> None:
+    """After bootstrap, a compare failure must stop the advance."""
+    completed = _run_tag_migration_guard(tmp_path, "omnimarket_release_tag: v0.4.318\n")
+    assert completed.returncode != 0
+    assert "compare API failed" in completed.stderr
+    assert "no release-tag pin" not in completed.stdout

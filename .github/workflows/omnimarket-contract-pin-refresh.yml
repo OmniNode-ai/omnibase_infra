@@ -1,53 +1,48 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-17292: advance the omnimarket contract pin and regenerate the derived
-# application-database TABLE grants, as an actionable bot PR.
+# omnimarket-contract-pin-refresh.yml (OMN-17292)
 #
-# This is the freshness half of the OMN-17292 split, and it is load-bearing.
+# WHY THIS EXISTS
+#   `Application Database Domain Enforcement (OMN-15361)` derives the TABLE
+#   grants in src/omnibase_infra/topology/instances/*.yaml from omnimarket's
+#   `db_io.db_tables` declarations at .github/omnimarket-contract-pin.yaml. That
+#   value is an omnimarket release tag, so an omnimarket dev merge cannot change
+#   an infra PR's verdict (the OMN-17141 / OMN-16930 / OMN-17290 org-wide reds).
 #
-# `Application Database Domain Enforcement (OMN-15361)` derives the TABLE grants
-# in src/omnibase_infra/topology/instances/*.yaml from omnimarket node
-# `db_io.db_tables` declarations. OMN-15703 made that derivation read
-# omnimarket's live `dev` tip at CI-run time. Because omnibase_infra `dev`
-# enforces through the single required `CI Summary` umbrella (OMN-4497), an
-# omnimarket merge then turned the required check red on every open infra PR at
-# once -- three times in 21 hours (OMN-17141, OMN-16930, OMN-17290), each
-# costing an unrelated lane a full investigate-fix-merge cycle while every other
-# infra PR sat blocked.
+#   This workflow is the only writer of that value. Until OMN-17292 moved it
+#   to the train, it opened one PR per omnimarket dev commit, at a commit sha,
+#   every six hours. Releases are cut by the overnight train, and the lab deploys from
+#   tags, so the contract reference follows the train's tag instead.
 #
-# OMN-17292 pins the derivation input so an infra PR's verdict depends only on
-# committed state. Pinning ALONE would be a straight return to OMN-15701 (a
-# stale pin used as a `--write` input silently reverted 8 live grants), so this
-# workflow is the other half: it advances the pin on a schedule, updates the
-# omnimarket entry in .github/sibling-pins.yaml and its inline workflow refs,
-# regenerates the instances AND the rendered catalogs in the same commit, and
-# opens a PR. The pin can be briefly behind omnimarket dev; it cannot sit stale
-# silently, and scripts/ci/check_omnimarket_contract_pin_advance.py keeps it
-# forward-only.
+# WHEN
+#   After each scheduled run of release-train-nightly.yml completes, and by hand
+#   dispatch. The hourly dispatches release-train-dependency-advance.yml makes of
+#   that same workflow do not move it (the job's `if:`).
 #
-# Modelled on the sanctioned in-repo precedent for exactly this problem class:
-# .github/workflows/sibling-lock-refresh.yml (OMN-13902), which solved stale
-# cross-repo sibling pins the same way.
+# WHAT IT WRITES
+#   The newest strict `v<MAJOR>.<MINOR>.<PATCH>` tag of omnimarket, never a sha,
+#   into the pin file, the omnimarket entry of .github/sibling-pins.yaml and the
+#   inline workflow refs that read it, with the regenerated grants and rendered
+#   catalogs in the same commit. One fixed branch keeps at most one such PR open;
+#   a later run refreshes it in place.
 #
-# Related: OMN-17156 attacks the same failure from the upstream side (block an
-# omnimarket PR until its infra counterpart exists). The two are complementary:
-# OMN-17156 keeps the two repos ordered; this keeps infra's CI verdict
-# deterministic when that ordering is not perfect.
+# STALENESS (OMN-15701)
+#   The value can lag omnimarket by one train cycle. That is the budget chosen
+#   here. The forward-only guard refuses a move to an ancestor or a diverged
+#   tag, which is the direction that silently reverted grants in OMN-15701.
+#
+# OMN-17156 remains the upstream ordering gate; this keeps infra's verdict a
+# function of committed state when that ordering is not perfect.
 
-name: Omnimarket contract pin refresh
+name: Release Train (omnimarket contract tag)
 
 on:
-  schedule:
-    # Every 6 hours. Bounds how far the pin can lag omnimarket dev, which is
-    # the OMN-15701 staleness budget being deliberately chosen here.
-    - cron: "23 */6 * * *"
+  workflow_run:
+    workflows: ["Release Train (nightly)"]
+    types: [completed]
+    branches: [dev]
   workflow_dispatch:
-    inputs:
-      target_ref:
-        description: "omnimarket ref to pin (default: current omnimarket dev HEAD)."
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -58,7 +53,10 @@ concurrency:
 
 jobs:
   refresh:
-    name: Advance omnimarket contract pin
+    # The train's own overnight run moves the tag; the hourly dependency-advance
+    # dispatches of that workflow do not.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'schedule'
+    name: Advance omnimarket contract tag
     # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to ubuntu-latest.
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["ubuntu-latest"]') }}
@@ -87,32 +85,36 @@ jobs:
           ref: dev
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Resolve the current and target pins
+      - name: Resolve the current pin and the train's newest release tag
         id: pins
         shell: bash
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TARGET_REF_INPUT: ${{ github.event.inputs.target_ref }}
+          OMNIMARKET_REMOTE: https://github.com/OmniNode-ai/omnimarket.git
         run: |
           set -euo pipefail
           current="$(python3 scripts/resolve_omnimarket_contract_pin.py)"
-          target_ref="${TARGET_REF_INPUT:-dev}"
-          target="$(gh api "repos/OmniNode-ai/omnimarket/commits/${target_ref}" --jq .sha)"
-          if [[ ! "$target" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::omnimarket ${target_ref} resolved to an invalid sha: '${target}'" >&2
+          tags="$(git ls-remote --tags --refs "$OMNIMARKET_REMOTE" 'refs/tags/v*')"
+          target="$(printf '%s\n' "$tags" | awk '{sub(/^refs\/tags\//, "", $2); print $2}' \
+            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | sort -V | tail -n 1)" || {
+            echo "::error::omnimarket has no strict release tag" >&2
+            exit 1
+          }
+          if [[ -z "$target" ]]; then
+            echo "::error::omnimarket has no strict release tag" >&2
             exit 1
           fi
           echo "current=${current}" >> "$GITHUB_OUTPUT"
           echo "target=${target}" >> "$GITHUB_OUTPUT"
           if [[ "$current" == "$target" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "contract pin already at ${current} - nothing to advance."
+            echo "contract tag already at ${current} - nothing to advance."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "advancing contract pin ${current} -> ${target}"
+            echo "advancing contract tag ${current} -> ${target}"
           fi
 
-      - name: Checkout omnimarket at the target pin
+      - name: Checkout omnimarket at the target tag
         if: steps.pins.outputs.changed == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -130,16 +132,16 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CURRENT_PIN: ${{ steps.pins.outputs.current }}
-          TARGET_PIN: ${{ steps.pins.outputs.target }}
+          TARGET_TAG: ${{ steps.pins.outputs.target }}
         run: |
           set -euo pipefail
           compare_json="$(mktemp)"
-          gh api "repos/OmniNode-ai/omnimarket/compare/${CURRENT_PIN}...${TARGET_PIN}" \
+          gh api "repos/OmniNode-ai/omnimarket/compare/${CURRENT_PIN}...${TARGET_TAG}" \
             > "$compare_json"
           python3 scripts/ci/check_omnimarket_contract_pin_advance.py \
             --compare-json "$compare_json" \
             --base-pin "$CURRENT_PIN" \
-            --head-pin "$TARGET_PIN"
+            --head-pin "$TARGET_TAG"
 
       - name: Setup Python and uv
         if: steps.pins.outputs.changed == 'true'
@@ -151,44 +153,43 @@ jobs:
           # other job in the repo builds against.
           cache-enabled: "false"
 
-      - name: Advance the pin and regenerate the derived grants
-        # The pin and the grants it derives must move in ONE commit. A commit
-        # that advanced the pin without regenerating would land a `dev` that
-        # fails its own `--check`, which is the org-wide red this ticket exists
-        # to remove -- self-inflicted this time.
+      - name: Write the tag into the pin files
         if: steps.pins.outputs.changed == 'true'
-        id: regenerate
         shell: bash
+        env:
+          TARGET_TAG: ${{ steps.pins.outputs.target }}
         run: |
           set -euo pipefail
-          python3 - "${{ steps.pins.outputs.target }}" <<'PY'
+          python3 - <<'PY_TAG'
+          import os
           import re
-          import sys
           from pathlib import Path
 
-          target = sys.argv[1]
+          tag_pattern = r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+          target = os.environ["TARGET_TAG"]
+          if re.fullmatch(tag_pattern, target) is None:
+              raise SystemExit("::error::TARGET_TAG must be a strict release tag")
+
           path = Path(".github/omnimarket-contract-pin.yaml")
           original = path.read_text(encoding="utf-8")
           updated, count = re.subn(
-              r"^omnimarket_contract_ref: [0-9a-f]{40}$",
-              f"omnimarket_contract_ref: {target}",
+              r"^omnimarket_release_tag: " + tag_pattern + r"$",
+              f"omnimarket_release_tag: {target}",
               original,
-              count=1,
               flags=re.MULTILINE,
           )
           if count != 1:
-              raise SystemExit("::error::could not rewrite omnimarket_contract_ref in the pin file")
-          path.write_text(updated, encoding="utf-8")
+              raise SystemExit("::error::expected exactly one omnimarket_release_tag in the pin file")
+          changes = {path: updated}
 
           path = Path(".github/sibling-pins.yaml")
           original = path.read_text(encoding="utf-8")
-          pattern = r"^  omnimarket: ([0-9a-f]{40})$"
-          matches = re.findall(pattern, original, flags=re.MULTILINE)
+          pattern = r"^  omnimarket: (" + tag_pattern + r")$"
+          matches = list(re.finditer(pattern, original, flags=re.MULTILINE))
           if len(matches) != 1:
-              raise SystemExit("::error::could not rewrite the omnimarket entry in .github/sibling-pins.yaml")
-          old = matches[0]
-          updated = re.sub(pattern, f"  omnimarket: {target}", original, flags=re.MULTILINE)
-          path.write_text(updated, encoding="utf-8")
+              raise SystemExit("::error::expected exactly one omnimarket entry in .github/sibling-pins.yaml")
+          old = matches[0].group(1)
+          changes[path] = re.sub(pattern, f"  omnimarket: {target}", original, flags=re.MULTILINE)
 
           if old != target:
               total = 0
@@ -200,12 +201,22 @@ jobs:
                       original,
                   )
                   if count:
-                      workflow.write_text(updated, encoding="utf-8")
+                      changes[workflow] = updated
                       print(f"{workflow}: updated {count} omnimarket sibling pin ref(s)")
                       total += count
               if total == 0:
                   raise SystemExit("::error::no workflow ref matched the old omnimarket sibling pin")
-          PY
+          for path, updated in changes.items():
+              path.write_text(updated, encoding="utf-8")
+          PY_TAG
+
+      - name: Regenerate and prove the derived grants
+        # The tag and its derived grants and rendered catalogs move in one commit.
+        if: steps.pins.outputs.changed == 'true'
+        id: regenerate
+        shell: bash
+        run: |
+          set -euo pipefail
           # --write regenerates the topology instances AND re-renders the
           # docker/catalog/database-topology projections derived from them
           # (OMN-17292), so the pin and every artifact derived from it move in
@@ -220,33 +231,33 @@ jobs:
             --contracts-root .proof-dependencies/omnimarket/src/omnimarket/nodes \
             --check --prove
 
-      - name: Open the pin-advance PR
+      - name: Open or refresh the contract-tag PR
         if: steps.pins.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CURRENT_PIN: ${{ steps.pins.outputs.current }}
-          TARGET_PIN: ${{ steps.pins.outputs.target }}
+          TARGET_TAG: ${{ steps.pins.outputs.target }}
         run: |
           set -euo pipefail
           # The Repo Evidence Gate needs a changed test-side path, a bound check that
           # fails at the merge base with the test side overlaid, and an evidence item
           # that differs from the merge base's: write the target fixture and name the
-          # target sha in the item so each refresh carries its own evidence (OMN-20068).
-          PATTERN="omnimarket_contract_ref: ${TARGET_PIN}"
+          # target tag in the item so each refresh carries its own evidence (OMN-20068).
+          PATTERN="omnimarket_release_tag: ${TARGET_TAG}"
           grep -qF -- "$PATTERN" .github/omnimarket-contract-pin.yaml
           cat > tests/ci/fixtures/omnimarket_contract_pin_advance_omn17292.yaml <<EOF_FIXTURE
           # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
           # SPDX-License-Identifier: MIT
           # Written by .github/workflows/omnimarket-contract-pin-refresh.yml on each pin
-          # advance: the sha tests/ci/test_omnimarket_contract_pin_advance_omn17292.py
+          # advance: the tag tests/ci/test_omnimarket_contract_pin_advance_omn17292.py
           # expects every omnimarket pin to carry (OMN-17292, OMN-20068).
-          omnimarket_contract_ref: ${TARGET_PIN}
+          omnimarket_release_tag: ${TARGET_TAG}
           EOF_FIXTURE
           CHECK="env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
           cat > contracts/OMN-17292.yaml <<EOF_CONTRACT
           schema_version: "1.0.0"
           ticket_id: OMN-17292
-          title: "The omnimarket contract pin advances to ${TARGET_PIN}"
+          title: "The omnimarket contract tag moves to ${TARGET_TAG}"
           summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
           is_seam_ticket: false
           interface_change: false
@@ -256,10 +267,10 @@ jobs:
               statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
               acceptance:
                 - id: AC1
-                  statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN} -- falsifier: $CHECK"
+                  statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry ${TARGET_TAG} -- falsifier: $CHECK"
           evidence_requirements:
             - kind: tests
-              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
+              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_TAG}.
               command: "$CHECK"
           emergency_bypass:
             enabled: false
@@ -267,7 +278,7 @@ jobs:
             follow_up_ticket_id: ''
           dod_evidence:
             - id: dod-omn-17292-ac1
-              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
+              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_TAG}.
               source: manual
               checks:
                 - check_type: test_passes
@@ -287,31 +298,39 @@ jobs:
             echo "pin moved but no derived output changed - nothing to propose."
             exit 0
           fi
-          BRANCH="bot/omnimarket-contract-pin-$(date -u +%Y%m%d%H%M%S)"
-          # OMN-18273: commit as the App this job already authenticates as. The
-          # previous "omninode-bot <bot@omninode.ai>" resolved to no GitHub
-          # account, so the commit rendered unlinked and named neither a bot nor
-          # a run. The numeric prefix on the address is what links it.
+          BRANCH="automation/omnimarket-contract-tag-omn-17292"
+          remote_sha=$(git ls-remote --heads origin "refs/heads/${BRANCH}" | cut -f1)
+          pr_number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          # OMN-18273: authenticate and commit as the App, with both run trailers.
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git commit -m "chore(OMN-17292): advance omnimarket contract pin to ${TARGET_PIN:0:12} [bot]" \
+          git commit -m "chore(OMN-17292): move the omnimarket contract tag to ${TARGET_TAG} [bot]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          git push origin "$BRANCH"
+          if [[ -n "$remote_sha" ]]; then
+            git push --force-with-lease="${BRANCH}:${remote_sha}" origin "$BRANCH"
+          else
+            git push origin "$BRANCH"
+          fi
           {
-            printf '%s\n' "Automated omnimarket contract-pin advance (OMN-17292)."
+            printf '%s\n' "Opened by the overnight release train follower (OMN-17292)."
             printf '\n'
-            printf '%s\n' "Advances \`.github/omnimarket-contract-pin.yaml\` from \`${CURRENT_PIN}\` to \`${TARGET_PIN}\`, also moves the omnimarket entry of \`.github/sibling-pins.yaml\` and the inline workflow \`ref:\` shas that read it (OMN-20331), and regenerates the derived application-database TABLE grants and rendered catalogs in the same commit."
+            printf '%s\n' "Moves the omnimarket contract tag: \`${CURRENT_PIN}\` -> \`${TARGET_TAG}\`. Updates \`.github/omnimarket-contract-pin.yaml\`, the omnimarket sibling pin and its inline workflow refs, and regenerates the derived TABLE grants and rendered catalogs in the same commit."
             printf '\n'
-            printf '%s\n' "This PR is the surface upstream contract drift is supposed to land on. Before OMN-17292 this same drift appeared as a red required check on every open omnibase_infra PR simultaneously, with no action available to their authors (OMN-17141, OMN-16930, OMN-17290)."
+            printf '%s\n' "At most one such PR is open; it is refreshed in place on this fixed branch."
             printf '\n'
-            printf '%s\n' "The advance was proven forward-only against real omnimarket history (\`scripts/ci/check_omnimarket_contract_pin_advance.py\`), so it cannot silently revert grants the way the stale pin in OMN-15701 did, and the regenerated output already passes \`--check --prove\` locally in the bot run."
+            printf '%s\n' "The advance was proven forward-only against omnimarket history and the derived output passes \`--check --prove\`."
             printf '\n'
             printf '%s\n' "Evidence-Ticket: OMN-17292"
           } > /tmp/pin-pr-body.md
-          gh pr create \
-            --base dev \
-            --head "$BRANCH" \
-            --title "chore(OMN-17292): advance omnimarket contract pin to ${TARGET_PIN:0:12}" \
-            --body-file /tmp/pin-pr-body.md
+          TITLE="chore(OMN-17292): move the omnimarket contract tag to ${TARGET_TAG}"
+          if [[ -n "$pr_number" ]]; then
+            gh pr edit "$pr_number" --title "$TITLE" --body-file /tmp/pin-pr-body.md
+          else
+            gh pr create \
+              --base dev \
+              --head "$BRANCH" \
+              --title "$TITLE" \
+              --body-file /tmp/pin-pr-body.md
+          fi
