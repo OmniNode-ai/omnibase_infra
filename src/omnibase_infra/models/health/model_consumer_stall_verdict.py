@@ -49,6 +49,8 @@ class ModelConsumerStallVerdict(BaseModel):
         return self.reason in {
             EnumConsumerStallReason.STALLED_BACKLOG_NOT_DRAINING,
             EnumConsumerStallReason.STALLED_NO_ASSIGNMENT,
+            EnumConsumerStallReason.STALLED_CONSUMER_FAILED,
+            EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE,
         }
 
     @property

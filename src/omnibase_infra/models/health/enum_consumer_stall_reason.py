@@ -43,6 +43,13 @@ class EnumConsumerStallReason(StrEnum):
     and the configured window has elapsed. This is the ``Empty`` group shape
     recorded on OMN-18640 as the second outage class."""
 
+    STALLED_CONSUMER_FAILED = "stalled_consumer_failed"
+    """The consumer raised on poll or its replacement could not be started,
+    so no live consumer holds the group."""
+
+    STALLED_COORDINATOR_UNAVAILABLE = "stalled_coordinator_unavailable"
+    """Leaders answer but the client has had no coordinator past the bound."""
+
     CONSUME_TASK_DEAD = "consume_task_dead"
     """The consume task for this group ENDED while the bus was running and the
     subscription was still registered (OMN-17427). Nothing polls, so aiokafka

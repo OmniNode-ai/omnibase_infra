@@ -1,0 +1,31 @@
+{
+  "provenance": "Reconstructed timeline from the OMN-20410 measured occurrence: C16 run 40028107581 observed 2026-10-23T21:37 to 21:41Z during dev deploy 4d7dd5fc. Body shape is the deploy agent's /health surface. The full UUID is padded from the short id.",
+  "correlation_id": "4d7dd5fc-0000-4000-8000-000000000001",
+  "accepted_at": "2026-10-23T21:27:29Z",
+  "completed_at": "2026-10-23T22:08:35Z",
+  "timeline": [
+    {
+      "observed_at": "2026-10-23T21:37:00Z",
+      "health": {
+        "state": "deploying",
+        "active_job": {
+          "correlation_id": "4d7dd5fc-0000-4000-8000-000000000001",
+          "started_at": "2026-10-23T21:27:29Z"
+        },
+        "last_result": null
+      }
+    },
+    {
+      "observed_at": "2026-10-23T22:08:35Z",
+      "health": {
+        "state": "idle",
+        "active_job": null,
+        "last_result": {
+          "correlation_id": "4d7dd5fc-0000-4000-8000-000000000001",
+          "completed_at": "2026-10-23T22:08:35Z",
+          "settling": false
+        }
+      }
+    }
+  ]
+}

@@ -187,6 +187,7 @@ Protocol Compatibility:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import inspect
 import json
@@ -301,6 +302,9 @@ from omnibase_infra.models.health.enum_consumer_stall_reason import (
 )
 from omnibase_infra.models.health.model_consumer_group_rejoin_event import (
     ModelConsumerGroupRejoinEvent,
+)
+from omnibase_infra.models.health.model_consumer_rejoin_alarm import (
+    ModelConsumerRejoinAlarm,
 )
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
@@ -630,6 +634,7 @@ class EventBusKafka(
         # unsubscribed, and the evidence that this runtime wedged and
         # recovered must outlive the consumer it happened to.
         self._consumer_rejoin_events: list[ModelConsumerGroupRejoinEvent] = []
+        self._consumer_rejoin_alarms: list[ModelConsumerRejoinAlarm] = []
         # Keys currently being started (reserved under lock before await consumer.start())
         self._pending_consumer_keys: set[tuple[str, str]] = set()
 
@@ -1215,6 +1220,8 @@ class EventBusKafka(
             self._group_consumers.clear()
             # OMN-18640: the supervisors hold per-group stall state that is
             # meaningless once the consumers are gone.
+            for supervisor in self._rejoin_supervisors.values():
+                supervisor.end_episode(recovered=False)
             self._rejoin_supervisors.clear()
 
         for consumer in consumers_to_close:
@@ -2860,7 +2867,9 @@ class EventBusKafka(
                     pass
 
             consumer = self._group_consumers.pop(consumer_key, None)
-            self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            supervisor = self._rejoin_supervisors.pop(consumer_key, None)  # OMN-18640
+            if supervisor is not None:
+                supervisor.end_episode(recovered=False)
             if consumer is not None:
                 try:
                     await consumer.stop()
@@ -3662,6 +3671,10 @@ class EventBusKafka(
             supervisor.sync_status() for supervisor in self._rejoin_supervisors.values()
         )
 
+    def consumer_rejoin_alarms(self) -> tuple[ModelConsumerRejoinAlarm, ...]:
+        """Bounded recovery alarm history, independent of health emission."""
+        return tuple(self._consumer_rejoin_alarms)
+
     def _rejoin_supervisor_for(
         self, topic: str, group_id: str
     ) -> ConsumerRejoinSupervisor:
@@ -3692,6 +3705,14 @@ class EventBusKafka(
             recreate_consumer=_recreate,
             emit_event=self._record_consumer_rejoin_event,
             clock=self._clock,
+            broker=self._sanitize_bootstrap_servers(self._bootstrap_servers),
+            kafka_group_id=self._resolve_effective_group_id(
+                group_id, topic, uuid4(), (topic, group_id)
+            ),
+            coordinator_unavailable_seconds=self._config.consumer_coordinator_unavailable_seconds,
+            coordinator_rejoin_cooldown_seconds=self._config.consumer_coordinator_rejoin_cooldown_seconds,
+            probe_timeout_seconds=self._config.consumer_stall_probe_timeout_seconds,
+            emit_alarm=self._record_consumer_rejoin_alarm,
         )
         self._rejoin_supervisors[key] = supervisor
         return supervisor
@@ -3726,7 +3747,8 @@ class EventBusKafka(
 
         Raises:
             Exception: Propagated to the supervisor, which records a failed
-                rejoin and retries after the cooldown.
+                rejoin and retries after the cooldown. The half-started
+                replacement is stopped before the exception propagates.
         """
         effective_group_id = self._resolve_effective_group_id(
             group_id, topic, uuid4(), (topic, group_id)
@@ -3739,7 +3761,22 @@ class EventBusKafka(
             self._config.auto_offset_reset,
             group_id=group_id,
         )
-        await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
+        # A consumer whose start failed is never published; close it so retries
+        # every LOST_CONSUMER_RETRY_SECONDS do not leak clients (OMN-19513).
+        try:
+            await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
+        except BaseException:
+            try:
+                await consumer.stop()
+            except (KafkaError, OSError, RuntimeError) as cleanup_err:
+                logger.warning(
+                    "consumer_group_rejoin_cleanup_failed topic=%s group=%s error=%s",
+                    topic,
+                    effective_group_id,
+                    cleanup_err,
+                    exc_info=True,
+                )
+            raise
         self._group_consumers[(topic, group_id)] = consumer
         logger.warning(
             "consumer_group_rejoined topic=%s group=%s -- replacement consumer "
@@ -3810,31 +3847,12 @@ class EventBusKafka(
                     continue
 
                 supervisor = self._rejoin_supervisor_for(topic, group_id)
-                idle_seconds = supervisor.seconds_since_last_poll()
-                if task.done():
-                    reason = EnumConsumerStallReason.CONSUME_TASK_DEAD
-                elif idle_seconds > parked_after:
-                    reason = EnumConsumerStallReason.CONSUME_TASK_PARKED
-                else:
-                    continue
-
-                if not supervisor.restart_allowed():
-                    logger.debug(
-                        "consume_task_restart_deferred topic=%s group=%s "
-                        "reason=%s -- inside the rejoin cooldown",
-                        topic,
-                        group_id,
-                        reason.value,
-                    )
-                    continue
-
-                await self._restart_consume_task(
-                    topic,
-                    group_id,
-                    task,
-                    supervisor,
-                    reason,
-                    idle_seconds,
+                await supervisor.supervise_consume_task(
+                    task_done=task.done(),
+                    parked_after_seconds=parked_after,
+                    restart=functools.partial(
+                        self._restart_consume_task, topic, group_id, task
+                    ),
                 )
 
     async def _restart_consume_task(
@@ -3842,11 +3860,15 @@ class EventBusKafka(
         topic: str,
         group_id: str,
         task: asyncio.Task[None],
-        supervisor: ConsumerRejoinSupervisor,
         reason: EnumConsumerStallReason,
         idle_seconds: float,
-    ) -> None:
-        """Replace one dead or parked consume task. Caller holds ``self._lock``."""
+    ) -> tuple[bool, str]:
+        """Replace one dead or parked consume task. Caller holds ``self._lock``.
+
+        Returns whether the consumer rebuild succeeded and its failure detail.
+        The new loop is started last, so the supervisor restarts its poll
+        clock before that loop first polls.
+        """
         consumer_key = (topic, group_id)
         task_error: BaseException | None = None
         if task.done():
@@ -3896,16 +3918,10 @@ class EventBusKafka(
                 group_id,
             )
 
-        supervisor.note_loop_restarted()
         new_task = asyncio.create_task(self._consume_loop(topic, group_id, uuid4()))
         self._group_consumer_tasks[consumer_key] = new_task
         self._refresh_topic_consumer_views(topic)
-        await supervisor.record_consume_task_restart(
-            reason,
-            idle_seconds=idle_seconds,
-            succeeded=succeeded,
-            failure_detail=failure_detail,
-        )
+        return succeeded, failure_detail
 
     async def _record_consumer_rejoin_event(
         self, event: ModelConsumerGroupRejoinEvent
@@ -3948,6 +3964,31 @@ class EventBusKafka(
             hostname=os.environ.get("HOSTNAME", ""),  # ONEX_EXCLUDE: env
             service_label="EventBusKafka",
         )
+
+    async def _record_consumer_rejoin_alarm(
+        self, alarm: ModelConsumerRejoinAlarm
+    ) -> None:
+        """Retain the alarm locally and mirror it onto the health topic best-effort."""
+        self._consumer_rejoin_alarms.append(alarm)
+        del self._consumer_rejoin_alarms[:-CONSUMER_REJOIN_HISTORY_CAPACITY]
+        if self._health_emitter is None:
+            return
+        try:
+            await self._health_emitter.emit_event(
+                consumer_identity=f"eventbus.{alarm.topic}",
+                consumer_group=alarm.consumer_group,
+                topic=alarm.topic,
+                event_type=EnumConsumerHealthEventType.CONSUMER_GROUP_STALLED,
+                severity=EnumConsumerHealthSeverity.CRITICAL,
+                correlation_id=alarm.event_id,
+                error_message=alarm.message[:500],
+                error_type=alarm.reason,
+                hostname=socket.gethostname(),
+                service_label="EventBusKafka",
+            )
+        except (OSError, RuntimeError, KafkaError):
+            # Health mirroring is best-effort; the local record above is the alarm.
+            logger.debug("consumer_group_rejoin_alarm_mirror_failed", exc_info=True)
 
     async def _process_consumed_record(
         self,
