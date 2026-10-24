@@ -147,6 +147,7 @@ migrations:
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only
+  forward/nodes/node_llm_delegation_call_effect/0000_delegation_lab_job_execution.sql: expand-only # additive tables and runtime grants
   forward/nodes/node_llm_delegation_projection/0001_create_llm_delegation_daily_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_DELEGATION_DAILY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_LLM_DE
   forward/nodes/node_llm_delegation_projection/0002_grant_omninode_runtime_llm_delegation_daily_projection.sql: expand-only
   forward/nodes/node_log_persistence_effect/0000_create_log_entries.sql: forward-only # ALTER TABLE ALTER COLUMN; EXECUTE; ALTER TABLE ADD CONSTRAINT LOG_ENTRIES_PKEY
