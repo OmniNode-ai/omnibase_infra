@@ -93,10 +93,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
   - id: dod-omn-17292-ac5-deploy-runtime-image-cve-floors
-    description: Deploy-scope DoD for docker/Dockerfile.runtime. Reads the content of docker/Dockerfile.runtime at commit 1e3541916b1814583f9031bdf9bec274c9af9c79 through the GitHub content API and asserts the undici@6.29.1 pack spec and the "filelock>=4.2.1" upgrade are both present; it exits nonzero on the merge base, which has neither.
+    description: Deploy-scope DoD for docker/Dockerfile.runtime. Reads the content of docker/Dockerfile.runtime at the checked-out commit of the tree under test through the GitHub content API and asserts the undici@6.29.1 pack spec and the "filelock>=4.2.1" upgrade are both present; it exits nonzero when run in the merge base's tree, which has neither.
     source: manual
     checks:
       - check_type: command
         check_value: >-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=1e3541916b1814583f9031bdf9bec274c9af9c79" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
