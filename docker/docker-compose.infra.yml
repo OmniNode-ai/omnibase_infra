@@ -706,9 +706,13 @@ services:
       #
       # Sized against a control on the same host rather than guessed: the judge
       # broker serves 1537 partitions on 2G, and this one carries 1756, so 12G
-      # is a deliberately conservative first step. 12G -> 8G is a later ticket,
-      # gated on a 24h soak. Raise it back by setting DEV_REDPANDA_MEMORY.
-      - --memory ${DEV_REDPANDA_MEMORY:-12G}
+      # is a deliberately conservative first step. The 12G step soaked from
+      # 2026-10-11 to 2026-10-20; read on 2026-10-20T06:33Z, 7 h after its last
+      # recreate, the dev broker held 1.33 GB resident and 10.89 GB swapped, so it
+      # fills its whole arena with cache and the kernel pages it out. This is
+      # the second staged step, 12G -> 8G (OMN-19077 AC-5), and the stability
+      # lane's broker keeps its own 12G. Raise it back by setting DEV_REDPANDA_MEMORY.
+      - --memory ${DEV_REDPANDA_MEMORY:-8G}
       # OMN-5176: --admin-addr removed — rpk wraps it into redpanda.yaml but
       # the actual binary rejects the flag, causing a crash-loop on recreate.
       # Admin API defaults to 0.0.0.0:9644 in dev-container mode; port mapping
@@ -778,7 +782,7 @@ services:
       file: docker-compose.broker-profile.yml
       service: redpanda-settings
     environment:
-      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:-12G}
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:-8G}
     depends_on:
       redpanda:
         condition: service_healthy
