@@ -27,7 +27,7 @@ requirements:
     acceptance:
       - id: AC3
         statement: >-
-          AC3: omnimarket#4380's database checks pass against an omnibase_infra release that carries this change -- falsifier: uv run pytest tests/test_golden_chain_projection_delegation_capability_map.py -v in omnimarket against that release
+          AC3: the release input omnimarket#4380 needs is pinned -- the vendored bytes, ledger checksums, classes, fence and interim grant declaration -- and a test fails when one diverges or is missing -- falsifier: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_map_vendor.py -q in omnibase_infra
 evidence_requirements:
   - kind: tests
     description: The shipped grant in every topology instance and rendered catalog.
@@ -72,8 +72,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/test_golden_chain_projection_delegation_capability_map.py -v
         cwd: ${OMNI_HOME}/omnimarket
-    binds_ac:
-      - AC3
   - id: dod-omn21403-published-migration-artifact
     description: Hosted deployment-artifact probe reads the writer grant migration at this candidate commit from the public repository. A commit without the migration or its grant fails; this does not claim a database rollout or release.
     source: manual
@@ -89,3 +87,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_map_vendor.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

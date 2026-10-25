@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Pin delegation capability-map migrations from omnimarket#4380, 677d2941ff7e.
 
-The reviewed source digests pin the vendored bytes. The ledger must bind each
+The reviewed source digests pin the vendored bytes. The create migration also
+restores its four CHECK constraints on a drifted table, so it differs from the
+source by those guarded blocks. The ledger must bind each
 artifact exactly once and match its live digest, and the interim declaration
 must derive the tenant_projection_writer grant shipped in all three instances.
 """
@@ -34,7 +36,7 @@ _PROFILES = sorted(
 _VENDORED = [
     (
         _CREATE,
-        "cd7e33e472e746638ebf10cfebb60e415041456eaaecba9f5d0f5f27fbb12a9b",
+        "04ab2f892baf98b55c34570ffc1bb1849f7a7bca496bfd8808a832ba72a7cc5d",
         "forward-only",
     ),
     (
