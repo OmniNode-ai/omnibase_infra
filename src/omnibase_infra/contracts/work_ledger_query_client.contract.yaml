@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: work_ledger_query_client
+description: Dev-lane client of omnimarket node_work_ledger_query_effect (OMN-20740).
+event_bus:
+  publish_topics: [onex.cmd.omnimarket.work-ledger-query-requested.v1]
+  subscribe_topics: [onex.evt.omnimarket.work-ledger-query-completed.v1]
+client:
+  lane: dev
+  consumer_group_prefix: local.omnimarket.work_ledger_query_client.consume.v1.
+  queries: [rows, open-claims, holds, inbox, newest-per-lane, rulings]
