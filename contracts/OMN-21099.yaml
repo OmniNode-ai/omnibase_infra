@@ -1,8 +1,8 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21099
-title: "Developer principals may read the compaction reply topics the Claude Code hook awaits"
+title: "Developer principals may read the compaction reply topics, and the dev lane gives runtime-effects the compaction pack-builder settings"
 summary: >-
-  Declares READ and DESCRIBE for a developer machine's lab dev-lane principal on the three compaction reply topics the Claude Code hook's compaction binding awaits and on the receipt-mode client's group prefix, in the developer-principal bindings, and regenerates the derived grants file from them. The declaration is delivered; applying the rows to the live dev broker is the lab principal issuer's apply step and is not part of this change.
+  Declares READ and DESCRIBE for a developer machine's lab dev-lane principal on the three compaction reply topics the Claude Code hook's compaction binding awaits and on the receipt-mode client's group prefix, in the developer-principal bindings, and regenerates the derived grants file from them. The declaration is delivered; applying the rows to the live dev broker is the lab principal issuer's apply step and is not part of this change. A second delivery under the same ticket gives the compose dev lane's runtime-effects service the settings omnimarket's compaction pack builder reads: ONEX_CONTEXT_SOURCE_TENANT_ID, defaulting to lab and overridable from the operator env as DEV_LANE_CONTEXT_SOURCE_TENANT_ID, and ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on read-only mounts of host directories the operator env names. The readers live in omnimarket, which this repository does not install; this change and its tests cover the shipped compose configuration and what compose renders from it. Delivering the values to the running dev lane is the deploy agent's converge step after merge, read on the lab afterwards, and is not part of this change.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -19,6 +19,30 @@ requirements:
       - id: AC2
         statement: |-
           AC2: the committed deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the three compaction replies and receipt-mode-client. group prefix, and equals the output of node_broker_grant_derive_compute for the shipped bindings -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
+  - id: req-omn21099-ac3-runtime-effects-context-source-tenant
+    statement: "The dev-lane compose file gives runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}, which compose renders as lab by default and as the operator value when DEV_LANE_CONTEXT_SOURCE_TENANT_ID is set."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: services.runtime-effects.environment.ONEX_CONTEXT_SOURCE_TENANT_ID in docker/docker-compose.dev-lane.yml equals ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}, and docker compose config over docker-compose.infra.yml and docker-compose.dev-lane.yml renders it as lab, or as the operator value when DEV_LANE_CONTEXT_SOURCE_TENANT_ID is set -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k "carries_the_context_source_tenant or renders_the_lab_tenant or operator_env_overrides", which fails at the merge base where the test file and the runtime-effects entry are absent
+  - id: req-omn21099-ac4-lane-identity-untouched
+    statement: "The context-source tenant does not reuse the lane identity ONEX_TENANT_ID."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: the runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID entry interpolates DEV_LANE_CONTEXT_SOURCE_TENANT_ID and no other variable, and still renders as lab when ONEX_TENANT_ID is set to a sentinel -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity
+  - id: req-omn21099-ac5-session-source-paths
+    statement: "The dev-lane bundle gives runtime-effects every compaction pack-builder setting, with ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on read-only bind mounts whose host directories come from the operator env variables DEV_LANE_SESSION_TRANSCRIPT_DIR and DEV_LANE_WORK_LEDGER_DIR, and no other service in the dev-lane or borrower stacks carries either path or mount."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: docker compose config over the dev-lane stack renders runtime-effects with ONEX_CONTEXT_SOURCE_TENANT_ID, OMNINODE_INTERNAL_DB_URL, ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH set; the two paths sit on bind mounts rendered read_only true whose sources are the directories named by DEV_LANE_SESSION_TRANSCRIPT_DIR and DEV_LANE_WORK_LEDGER_DIR; and no other service in the dev-lane render or in any borrower render carries either path or mount, a borrower being an overlay that redeclares a dev-lane-only service with no image, build or extends -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "not borrower", which fails at the merge base, where runtime-effects carries neither ONEX_SESSION_TRANSCRIPT_ROOT nor ONEX_LEDGER_PATH
+  - id: req-omn21099-ac6-borrower-overlays-blank
+    statement: "Every overlay that layers the dev-lane overlay and replaces runtime-effects volumes explicitly blanks both session-source path variables, because its volume override drops the mounts."
+    acceptance:
+      - id: AC6
+        statement: |-
+          AC6: at least one borrower overlay is found under docker/ (an overlay that redeclares a dev-lane-only service with no image, build or extends), each one blanks ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on runtime-effects, and each borrower stack renders both blank -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k borrower
 evidence_requirements:
   - kind: tests
     description: "The compaction reply rows are READ and DESCRIBE only, the committed derived grants are the node's output, and the discovery and issuer tests agree on the row count."
@@ -27,6 +51,13 @@ evidence_requirements:
   - kind: manual
     description: "Deploy validation command for the existing caller-contract deploy gate: compare the shipped grant JSON with independently enumerated permissions and node output. Runnable on a hosted runner without broker access; this declares a probe, not a new workflow or a live broker apply."
     command: "deploy: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived"
+  - kind: tests
+    description: "The dev-lane compose bundle delivers the context-source tenant and the read-only session-source paths to runtime-effects, separate from the lane identity tenant, and the borrower lanes blank the paths."
+    command: |-
+      uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q
+  - kind: manual
+    description: "Deploy validation command for the existing caller-contract deploy gate: parse the shipped dev-lane compose file and assert the runtime-effects tenant entry. Runnable on a hosted runner without lab access; it reads the committed file only and touches no running lane."
+    command: "deploy: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -50,3 +81,57 @@ dod_evidence:
         check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn21099-ac3-context-source-tenant
+    description: >-
+      Read docker/docker-compose.dev-lane.yml and assert runtime-effects carries ONEX_CONTEXT_SOURCE_TENANT_ID as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}, and that docker compose config renders it as lab by default and as the operator value when set. Reads and renders the committed files only; no running lane is touched. That the deployed dev lane then binds the compaction pack build is read after the deploy agent converges and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k "carries_the_context_source_tenant or renders_the_lab_tenant or operator_env_overrides"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21099-deploy-dev-compose-tenant
+    description: >-
+      Deploy configuration probe, runnable on a hosted runner: read docker/docker-compose.dev-lane.yml through the GitHub contents API at the commit checked out in the tree under test (git rev-parse HEAD), the file the deploy agent converges the dev lane from, and require the runtime-effects context-source tenant line. It goes red at the merge base, where that line is absent. That the running runtime-effects container carries the variable is read on the lab after the converge and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'ONEX_CONTEXT_SOURCE_TENANT_ID: .{DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21099-ac4-lane-identity-untouched
+    description: >-
+      Assert the runtime-effects context-source tenant entry interpolates only DEV_LANE_CONTEXT_SOURCE_TENANT_ID, and still renders as lab when ONEX_TENANT_ID is set. Reads and renders the committed files only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn21099-ac5-pack-builder-settings
+    description: >-
+      Read and render the dev-lane compose bundle and assert runtime-effects has every pack-builder setting, read-only bind mounts sourced from the operator env for its session-source paths, and that no other service in the dev-lane or borrower stacks carries either path or mount. No running lane is touched. That the running container carries the paths is read on the lab after the deploy agent converges and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "not borrower"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21099-deploy-session-source-paths
+    description: >-
+      Deploy configuration probe, runnable on a hosted runner: read docker/docker-compose.dev-lane.yml through the GitHub contents API at the commit checked out in the tree under test (git rev-parse HEAD), the file the deploy agent converges the dev lane from, and require the runtime-effects session transcript root line. Reads the committed file only and goes red at the merge base, where that line is absent. That the running container carries the session-source paths is read on the lab after the converge and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'ONEX_SESSION_TRANSCRIPT_ROOT: /etc/onex/session-transcripts'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21099-ac6-borrower-overlays
+    description: >-
+      Assert every borrower overlay found under docker/ explicitly blanks the runtime-effects session transcript root and ledger path when replacing its volumes, and that each borrower lane's rendered stack carries both blank. No running lane is touched. The running container is read on the lab after the deploy agent converges and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k borrower
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]

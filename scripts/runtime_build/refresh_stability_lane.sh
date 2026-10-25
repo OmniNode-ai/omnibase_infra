@@ -107,6 +107,11 @@
 #      every service it deployed, so restoring the subset would leave the lane
 #      on a revision combination nothing has ever run. The lane is left as
 #      found; see rollback.missing_rollback_anchors in the receipt.
+#
+#      FAILED_FOLDED_EFFECTS (OMN-21288): health gate passed but the main runtime
+#      did not log its folded roles or a runtime-effects container remains. The
+#      lane is left as found with no rollback and its preflight tags kept as
+#      rollback anchors; see the log lines and receipt result.
 #   64 usage / precondition error
 
 set -euo pipefail
@@ -232,7 +237,7 @@ readonly COMPOSE_PROJECT="${STABILITY_TEST_COMPOSE_PROJECT}"
 # consumer_groups_stability.yaml, or a contract schema extension, is the
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-stability-test-redpanda"
-readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+readonly CORE_SERVICES=(omninode-runtime runtime-worker projection-api)
 # OMN-17562: the six standalone projection writers this lane introduces.
 #
 # BUILD SCOPE, NOT VERIFICATION SCOPE. This array is handed to
@@ -305,12 +310,13 @@ readonly REFRESH_BUILD_SERVICES=(
 readonly ROLLBACK_SERVICES=(
     "${REFRESH_BUILD_SERVICES[@]}"
 )
+# Prefix of the kernel's folded-roles log line in src/omnibase_infra/runtime/service_kernel.py, pinned by tests/unit/runtime/auto_wiring/test_folded_roles_log_marker_omn21288.py.
+readonly FOLDED_ROLES_LOG_MARKER="Auto-wiring folded roles"
 # service -> lane-scoped container_name (docker-compose.stability-test.yml).
 # projection-api's container_name is prefixed "omnimarket-", not "omninode-" --
 # resolve by explicit map, never assume a pattern (OMN-13826-class lesson).
 declare -A CORE_CONTAINERS=(
     [omninode-runtime]="omninode-stability-test-runtime"
-    [runtime-effects]="omninode-stability-test-runtime-effects"
     [runtime-worker]="omninode-stability-test-runtime-worker"
     [projection-api]="omnimarket-stability-test-projection-api"
 )
@@ -339,18 +345,12 @@ readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 # URLs. Read it from the sourced runtime-policy.env instead; fail fast BY NAME
 # if absent. --manifest-url/--health-url still fully override these defaults.
 require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
-# OMN-15837: the health gate now derives its declared consumer-group set from
-# the introspection manifests the refreshed image serves. The EFFECTS runtime
-# serves its own profile-filtered manifest, and its contracts mint consumer
-# groups the main runtime's manifest never describes (273 live on this lane), so
-# the gate needs both. Read the port from the same contract-rendered source as
-# the main port -- never a second hardcoded literal.
-require_contract_var STABILITY_TEST_RUNTIME_EFFECTS_PORT
+# OMN-21288: the main manifest includes the folded effects profile.
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
-EFFECTS_MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_EFFECTS_PORT}/v1/introspection/manifest"
+EFFECTS_MANIFEST_URL="" # OMN-21288: empty = no effects runtime; verify_stability_refresh.py reads "" as None and skips the effects manifest (pinned by test_empty_effects_manifest_url_skips_the_effects_manifest)
 HEALTH_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/health"
 MODE="plan"
 # OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
@@ -838,17 +838,45 @@ log "  build provenance failing      : [${DECISION_PROVENANCE}]"
 
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     RESULT="SUCCESS"
-    log "=== SUCCESS: health-gate PASS, ancestry OK ==="
-    # Prune old preflight tags (keep last 3) -- bounded local rollback history.
-    # Over the full anchored set (OMN-18061), or the writers accumulate tags
-    # forever because nothing ever prunes what nothing ever anchored.
-    for svc in "${ROLLBACK_SERVICES[@]}"; do
-        image_tag="${COMPOSE_PROJECT}-${svc}"
-        old_tags="$(docker images --format '{{.Tag}}' "${image_tag}" | grep '^preflight-' | sort -r | tail -n +4 || true)"
-        for t in ${old_tags}; do
-            docker rmi "${image_tag}:${t}" >/dev/null 2>&1 || true
+    # OMN-21288: the deploy handler retires effects before main is recreated.
+    # grep reads the whole log (no -q): under pipefail an early grep exit
+    # would SIGPIPE docker logs and read as "not found".
+    if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep -F "${FOLDED_ROLES_LOG_MARKER}" >/dev/null; then
+        err "main runtime did not attach its folded roles"
+        RESULT="FAILED_FOLDED_EFFECTS"
+    fi
+    if ! remaining_effects="$(docker ps -aq \
+        --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+        --filter "label=com.docker.compose.service=runtime-effects")"; then
+        err "could not read runtime-effects container census"
+        RESULT="FAILED_FOLDED_EFFECTS"
+    fi
+    if [[ -n "${remaining_effects}" ]]; then
+        err "runtime-effects containers still exist after folded deploy: ${remaining_effects}"
+        RESULT="FAILED_FOLDED_EFFECTS"
+    fi
+    log "folded effects verification: ${RESULT}"
+    if [[ "${RESULT}" == FAILED_FOLDED_EFFECTS ]]; then
+        err "STOP AND REPORT: the lane is SERVING and was NOT rolled back."
+        err "Preflight tags were kept as rollback anchors. Read the main runtime"
+        err "log for the folded-roles marker and the runtime-effects census"
+        err "before re-running."
+    fi
+    if [[ "${RESULT}" == SUCCESS ]]; then
+        log "=== SUCCESS: health-gate PASS, ancestry OK, folded effects verified ==="
+    fi
+    if [[ "${RESULT}" == SUCCESS ]]; then
+        # Prune old preflight tags (keep last 3) -- bounded local rollback history.
+        # Over the full anchored set (OMN-18061), or the writers accumulate tags
+        # forever because nothing ever prunes what nothing ever anchored.
+        for svc in "${ROLLBACK_SERVICES[@]}"; do
+            image_tag="${COMPOSE_PROJECT}-${svc}"
+            old_tags="$(docker images --format '{{.Tag}}' "${image_tag}" | grep '^preflight-' | sort -r | tail -n +4 || true)"
+            for t in ${old_tags}; do
+                docker rmi "${image_tag}:${t}" >/dev/null 2>&1 || true
+            done
         done
-    done
+    fi
 elif [[ "${DECISION_RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then
     # ============================================================
     # BUILD-PROVENANCE FINDING -- report, do NOT recreate (OMN-18061)
@@ -1132,5 +1160,7 @@ case "${RESULT}" in
     # restored; FAILED_BUILD_PROVENANCE got there by never being touched
     # (OMN-18061).
     FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE) exit 1 ;;
+    # OMN-21288: folded-effects verification failed; no rollback, anchors kept.
+    FAILED_FOLDED_EFFECTS) exit 2 ;;
     *) exit 2 ;;
 esac

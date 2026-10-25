@@ -337,6 +337,55 @@ else
     RUNTIME_BUILD_SERVICES=("${RUNTIME_SERVICES[@]}")
 fi
 
+resolve_lane_folded_services() {
+    # OMN-21288: the compose services a lane folds into omninode-runtime, from
+    # the lane's rendered <PREFIX>_RUNTIME_MAIN_FOLDED_PROFILES. A folded
+    # service is never built or started; restart_services() retires its old
+    # container. The profile -> service map is explicit, never a pattern, and
+    # an unknown profile fails loud. The result is LANE_FOLDED_SERVICES; with a
+    # second argument (an array name) the folded services are also removed
+    # from that array in place.
+    local compose_project="$1"
+    local filter_name="${2:-}"
+    local -A folded_profile_services=(
+        [effects]=runtime-effects
+        [worker]=runtime-worker
+    )
+    LANE_FOLDED_SERVICES=()
+    # Only the lab proof lane folds today; its project name and its folded
+    # profiles both come from the sourced runtime-policy.env.
+    if [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
+        && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
+        local -a profiles=()
+        local profile
+        IFS=',' read -r -a profiles <<< "${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        for profile in "${profiles[@]}"; do
+            profile="${profile#"${profile%%[![:space:]]*}"}"
+            profile="${profile%"${profile##*[![:space:]]}"}"
+            [[ -n "${profile}" ]] || continue
+            if [[ -z "${folded_profile_services[${profile}]:-}" ]]; then
+                log_error "Unknown folded runtime profile: ${profile}"
+                return 1
+            fi
+            LANE_FOLDED_SERVICES+=("${folded_profile_services[${profile}]}")
+        done
+    fi
+
+    [[ -n "${filter_name}" ]] || return 0
+    local -n filtered_services="${filter_name}"
+    local -a remaining_services=()
+    local svc folded_service
+    for svc in "${filtered_services[@]}"; do
+        for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
+            if [[ "${svc}" == "${folded_service}" ]]; then
+                continue 2
+            fi
+        done
+        remaining_services+=("${svc}")
+    done
+    filtered_services=("${remaining_services[@]}")
+}
+
 resolve_lane_runtime_services() {
     # Populate a caller-provided array (by name) with the runtime services to
     # build/restart for one lane: the lane-agnostic set, plus that lane's OWN
@@ -367,7 +416,9 @@ resolve_lane_runtime_services() {
 
     # A scoped-build override is an explicit operator instruction to touch ONLY
     # the named services; silently appending to it would defeat the point.
+    # OMN-21288: a folded service is dropped here too; it is never started.
     if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+        resolve_lane_folded_services "${compose_project}" "${_out_args_name}" || return 1
         return 0
     fi
 
@@ -403,6 +454,7 @@ resolve_lane_runtime_services() {
     for svc in "${lane_only_services[@]}"; do
         eval "${_out_args_name}+=( $(printf '%q' "${svc}") )"
     done
+    resolve_lane_folded_services "${compose_project}" "${_out_args_name}" || return 1
 }
 readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
@@ -2977,7 +3029,12 @@ build_images() {
     log_step "Build Images"
 
     local -a build_scope
-    resolve_lane_runtime_services build_scope "${compose_project}"
+    resolve_lane_runtime_services build_scope "${compose_project}" || return 1
+    # Compose interprets an empty service list as every service in the project.
+    if [[ "${#build_scope[@]}" -eq 0 ]]; then
+        log_info "No runtime services remain to build."
+        return 0
+    fi
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -3724,8 +3781,36 @@ restart_services() {
     # OMN-17448: the dev lane additionally recreates the standalone projection
     # writers, which are declared only in its own overlay.
     local -a lane_services
-    resolve_lane_runtime_services lane_services "${compose_project}"
+    resolve_lane_runtime_services lane_services "${compose_project}" || return 1
     exclude_cloud_database_services lane_services || return 1
+
+    if [[ "${#lane_services[@]}" -eq 0 ]]; then
+        log_info "No runtime services remain to restart."
+        return 0
+    fi
+
+    # OMN-21288: retire folded roles before main claims their host ports.
+    # A scoped worker restart must leave effects serving until main is replaced.
+    local -a retired_containers=()
+    local folded_service container_ids svc
+    local restarting_main=false
+    for svc in "${lane_services[@]}"; do
+        if [[ "${svc}" == omninode-runtime ]]; then
+            restarting_main=true
+        fi
+    done
+    resolve_lane_folded_services "${compose_project}" || return 1
+    for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
+        [[ "${restarting_main}" == true ]] || continue
+        container_ids="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=${compose_project}" \
+            --filter "label=com.docker.compose.service=${folded_service}")" || return 1
+        [[ -n "${container_ids}" ]] || continue
+        mapfile -t retired_containers <<< "${container_ids}"
+        log_info "Retiring ${folded_service} containers ${retired_containers[*]}: role is folded into omninode-runtime"
+        docker stop --time 30 "${retired_containers[@]}" || return 1
+        docker rm "${retired_containers[@]}" || return 1
+    done
 
     local cmd=(
         docker compose
@@ -4202,7 +4287,7 @@ readback_deployed_ref() {
     # OMN-17448: the readback's in-scope set must match what was actually built
     # and restarted, or a dev-lane writer would be created and never verified.
     local -a readback_scope
-    resolve_lane_runtime_services readback_scope "${compose_project}"
+    resolve_lane_runtime_services readback_scope "${compose_project}" || return 1
     exclude_cloud_database_services readback_scope || return 1
 
     log_info "Verifying in-scope service(s): ${readback_scope[*]}"

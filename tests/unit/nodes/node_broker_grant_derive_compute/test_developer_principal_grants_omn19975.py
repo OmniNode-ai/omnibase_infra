@@ -144,6 +144,8 @@ TYPED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 # group they are read under is the `local.omnibase_core.runtime_local_` prefix above.
 # The morning ground-state run (OMN-20673) adds its start command, its two terminals,
 # the delegation request and the reply under the morning_phase reply group.
+# The morning friction sweep caller (OMN-21400) adds its start command, its two terminals read
+# and the reply group prefix of its per-call request_response instance.
 # The DoD closeout proof (OMN-21048) publishes the decide command and reads
 # its decided event under its own group prefix.
 # The laptop lane mirror (OMN-19983) writes, as the machine's issued principal, the
@@ -246,6 +248,25 @@ DECLARED_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         ("read", "describe"),
     ),
     ("group", "local.rr.morning_phase.", "prefixed", ("read", "describe")),
+    (
+        "topic",
+        "onex.cmd.omnibase-internal.morning-friction-sweep.v1",
+        "literal",
+        ("write", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    (
+        "topic",
+        "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+        "literal",
+        ("read", "describe"),
+    ),
+    ("group", "local.rr.friction-run-", "prefixed", ("read", "describe")),
     (
         "topic",
         "onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1",
@@ -519,6 +540,66 @@ def test_the_morning_grants_are_declared_and_nothing_wider() -> None:
         ("TOPIC", "onex.evt.omnibase-infra.delegation-failed.v1", "DESCRIBE"),
         ("GROUP", "local.rr.morning_phase.", "READ"),
         ("GROUP", "local.rr.morning_phase.", "DESCRIBE"),
+        ("TOPIC", "onex.cmd.omnibase-internal.morning-friction-sweep.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnibase-internal.morning-friction-sweep.v1", "DESCRIBE"),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+            "READ",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+            "DESCRIBE",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+            "READ",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+            "DESCRIBE",
+        ),
+    }
+
+
+def test_the_friction_sweep_grants_start_it_read_both_terminals_and_write_neither() -> (
+    None
+):
+    """The caller publishes the start command, reads under its own reply group prefix only."""
+    rows = derive(shipped_bindings())
+    friction = {
+        (resource_type, resource, operation)
+        for _, resource_type, resource, _, operation in rows
+        if "friction-sweep" in resource or "friction-run-" in resource
+    }
+    assert friction == {
+        ("TOPIC", "onex.cmd.omnibase-internal.morning-friction-sweep.v1", "WRITE"),
+        ("TOPIC", "onex.cmd.omnibase-internal.morning-friction-sweep.v1", "DESCRIBE"),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+            "READ",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+            "DESCRIBE",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+            "READ",
+        ),
+        (
+            "TOPIC",
+            "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+            "DESCRIBE",
+        ),
+        ("GROUP", "local.rr.friction-run-", "READ"),
+        ("GROUP", "local.rr.friction-run-", "DESCRIBE"),
     }
 
 
@@ -897,3 +978,25 @@ def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> N
     for group in (query_node, f"{query_node}.worker"):
         assert not any(group.startswith(prefix) for prefix in dev_prefixes), group
     assert not f"{append_client}.call".startswith(f"{query_client}.")
+
+
+def test_h105_scm_pr_create_derived_file_is_exactly_the_nodes_output() -> None:
+    source = ROOT / "deploy/lab/h105-scm-pr-create-bindings.yaml"
+    bindings = ModelBrokerGrantBindings.model_validate(
+        yaml.safe_load(source.read_text())
+    )
+    derived = source.with_name("h105-scm-pr-create-derived-grants.json")
+    assert bindings.principal == "dev-jonah-omnibook"
+    assert (
+        derived.read_text()
+        == HandlerBrokerGrantDerive().handle(bindings).model_dump_json(indent=2) + "\n"
+    )
+    assert derive(bindings) == {
+        ("dev", resource_type, resource, pattern, operation)
+        for resource_type, resource, pattern in (
+            ("TOPIC", "onex.evt.omnimarket.github-repo-write-completed.v1", "LITERAL"),
+            ("TOPIC", "onex.evt.omnimarket.github-repo-write-failed.v1", "LITERAL"),
+            ("GROUP", "local.omnimarket.scm_command_client.consume.v1.", "PREFIXED"),
+        )
+        for operation in ("READ", "DESCRIBE")
+    }

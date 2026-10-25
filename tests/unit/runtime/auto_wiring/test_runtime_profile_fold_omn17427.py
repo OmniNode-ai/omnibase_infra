@@ -229,6 +229,9 @@ def test_policy_contract_without_a_fold_renders_no_fold_key() -> None:
     from scripts.render_runtime_policy_env import render_env
 
     raw = yaml.safe_load(_POLICY_CONTRACT.read_text(encoding="utf-8"))
+    for profile in raw["profiles"].values():
+        for service in profile["services"].values():
+            service.pop("folded_profiles", None)
     env = render_env(ModelRuntimePolicyContract.model_validate(raw))
 
     assert not [key for key in env if key.endswith("_FOLDED_PROFILES")]

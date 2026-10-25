@@ -211,6 +211,7 @@ def _run_readback(
             _extract_array("DEV_LANE_CLOUD_DB_SERVICES"),
             "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
             _extract_function("exclude_cloud_database_services"),
+            _extract_function("resolve_lane_folded_services"),
             _extract_function("resolve_lane_runtime_services"),
             # OMN-18656: readback_deployed_ref() now partitions by the repo
             # that BUILT each image before asserting its ref, so its new
@@ -383,7 +384,7 @@ def test_stability_lane_readback_covers_its_own_writer_services(
     the readback would silently skip the six containers whose whole purpose is
     to prove the lane writes rows.
     """
-    lane_agnostic = ["omninode-runtime", "runtime-effects", "runtime-worker"]
+    lane_agnostic = ["omninode-runtime", "runtime-worker"]
     writers = [
         "projection-tenant-registry-writer",
         "projection-delegation-writer",
@@ -400,7 +401,6 @@ def test_stability_lane_readback_covers_its_own_writer_services(
     ]
     ps_map = {
         "omninode-runtime": "omninode-stability-test-runtime",
-        "runtime-effects": "omninode-stability-test-runtime-effects",
         "runtime-worker": "omninode-stability-test-runtime-worker",
         **{name: f"omnimarket-stability-test-{name}" for name in writers},
     }
