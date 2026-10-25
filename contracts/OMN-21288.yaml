@@ -24,7 +24,7 @@ requirements:
     acceptance:
       - id: AC3
         statement: |-
-          AC3: on the lab proof lane (compose project STABILITY_TEST_COMPOSE_PROJECT) the main runtime logs its folded roles and no runtime-effects container runs -- falsifier: the policy and compose pytest below fails while the lane runs a separate effects container or main reads no fold; the live docker probe is pending a lab refresh
+          AC3: on the lab proof lane (compose project STABILITY_TEST_COMPOSE_PROJECT) the main runtime logs its folded roles and no runtime-effects container runs -- falsifier: refresh_stability_lane.sh records FAILED_FOLDED_EFFECTS when the fold log is missing, an effects container remains, or its census fails. Hosted policy, compose and runtime discovery tests prove the implementation; live rollout is pending a lab refresh.
   - id: req-omn21288-ac4-folded-service-readers
     statement: "Step 1: the deploy handler and the lab proof lane's refresh never start a folded service, and the deploy agent's health target and stability digest for a folded role read the main runtime container."
     acceptance:
@@ -83,12 +83,16 @@ dod_evidence:
     binds_ac: [AC3]
   - id: dod-omn21288-ac4-folded-service-readers
     description: >-
-      The deploy handler's folded-service tests (excluded from the resolved list, also under the scoped-build override; retired by compose labels before the recreate, never with -v; unknown profile refused) and the deploy agent's folded-digest tests (folded effects reads the main runtime container and digest, unfolded reads its own, prod still reads its own effects container and a mismatched digest is still refused). Both files are new on this branch, so the run fails at the merge base.
+      The deploy handler's folded-service tests (excluded from the resolved list, also under the scoped-build override; retired by compose labels before main's recreate, never with -v; empty build and restart scopes do nothing; scoped worker restarts preserve effects; unknown profile refused) and the deploy agent's folded-digest tests (folded effects reads the main runtime container and digest from one policy read, unfolded reads its own, prod still reads its own effects container and a mismatched digest is still refused). Both files are new on this branch, so the run fails at the merge base.
     source: manual
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py scripts/deploy-agent/tests/unit/test_executor_folded_effects_digest_omn21288.py -q --no-cov
+          uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: |-
+          uv run --frozen pytest scripts/deploy-agent/tests/unit/test_executor_folded_effects_digest_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
   - id: dod-omn21288-deploy-folded-services
@@ -105,5 +109,17 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn21288-ac3-runtime-ownership-and-refresh-readback
+    description: >-
+      Execute the committed stability effects fold through real runtime contract discovery and compare main's attached contracts with the separate main/effects union. Exercise the refresh readback's missing-log, leftover-container and unreadable-census failures, which must change SUCCESS to FAILED_FOLDED_EFFECTS without a destructive rollback. These hosted-runner checks require no running lane or credentials; a live lane rollout remains pending.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/runtime/test_runtime_profile_fold_omn17427.py -k committed_stability -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k folded_effects_verification -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

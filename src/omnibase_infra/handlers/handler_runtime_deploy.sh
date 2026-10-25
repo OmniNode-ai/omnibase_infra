@@ -418,8 +418,8 @@ resolve_lane_runtime_services() {
     # the named services; silently appending to it would defeat the point.
     # OMN-21288: a folded service is dropped here too; it is never started.
     if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
-        resolve_lane_folded_services "${compose_project}" "${_out_args_name}"
-        return
+        resolve_lane_folded_services "${compose_project}" "${_out_args_name}" || return 1
+        return 0
     fi
 
     # Keyed on the OVERLAY, not on the lane name: these services exist because
@@ -454,7 +454,7 @@ resolve_lane_runtime_services() {
     for svc in "${lane_only_services[@]}"; do
         eval "${_out_args_name}+=( $(printf '%q' "${svc}") )"
     done
-    resolve_lane_folded_services "${compose_project}" "${_out_args_name}"
+    resolve_lane_folded_services "${compose_project}" "${_out_args_name}" || return 1
 }
 readonly RUNTIME_BUILD_SERVICES
 # Migration services refreshed (one-shot) before the --no-deps runtime restart.
@@ -3030,6 +3030,11 @@ build_images() {
 
     local -a build_scope
     resolve_lane_runtime_services build_scope "${compose_project}" || return 1
+    # Compose interprets an empty service list as every service in the project.
+    if [[ "${#build_scope[@]}" -eq 0 ]]; then
+        log_info "No runtime services remain to build."
+        return 0
+    fi
 
     local build_date
     build_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -3779,25 +3784,33 @@ restart_services() {
     resolve_lane_runtime_services lane_services "${compose_project}" || return 1
     exclude_cloud_database_services lane_services || return 1
 
+    if [[ "${#lane_services[@]}" -eq 0 ]]; then
+        log_info "No runtime services remain to restart."
+        return 0
+    fi
+
     # OMN-21288: retire folded roles before main claims their host ports.
+    # A scoped worker restart must leave effects serving until main is replaced.
     local -a retired_containers=()
-    local folded_service container_ids
+    local folded_service container_ids svc
+    local restarting_main=false
+    for svc in "${lane_services[@]}"; do
+        if [[ "${svc}" == omninode-runtime ]]; then
+            restarting_main=true
+        fi
+    done
     resolve_lane_folded_services "${compose_project}" || return 1
     for folded_service in "${LANE_FOLDED_SERVICES[@]}"; do
+        [[ "${restarting_main}" == true ]] || continue
         container_ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=${compose_project}" \
             --filter "label=com.docker.compose.service=${folded_service}")" || return 1
         [[ -n "${container_ids}" ]] || continue
         mapfile -t retired_containers <<< "${container_ids}"
         log_info "Retiring ${folded_service} containers ${retired_containers[*]}: role is folded into omninode-runtime"
-        docker stop "${retired_containers[@]}" || return 1
+        docker stop --time 30 "${retired_containers[@]}" || return 1
         docker rm "${retired_containers[@]}" || return 1
     done
-
-    if [[ "${#lane_services[@]}" -eq 0 ]]; then
-        log_info "No runtime services remain to restart."
-        return 0
-    fi
 
     local cmd=(
         docker compose

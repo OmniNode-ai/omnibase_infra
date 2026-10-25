@@ -286,9 +286,7 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
     assert policy_env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
     # OMN-21288: main publishes the effects port; the old service stays opt-in.
     assert services["runtime-effects"]["profiles"] == ["folded-effects"]
-    assert services["runtime-effects"]["ports"] == [
-        "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
-    ]
+    assert services["runtime-effects"]["ports"] == []
     assert policy_env["STABILITY_TEST_RUNTIME_EFFECTS_PORT"] == "18086"
 
 

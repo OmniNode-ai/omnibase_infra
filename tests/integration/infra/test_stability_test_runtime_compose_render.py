@@ -368,6 +368,23 @@ def test_stability_lane_runtime_services_render_with_runtime_profile() -> None:
 
 
 @pytest.mark.integration
+def test_opted_in_effects_cannot_claim_mains_host_port() -> None:
+    result = subprocess.run(
+        _docker_compose_command(
+            "--profile", "folded-effects", "config", "--format", "json"
+        ),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        env=_compose_render_env(),
+        text=True,
+    )
+    services = json.loads(result.stdout)["services"]
+    assert _published_ports(services["runtime-effects"]) == set()
+    assert _published_ports(services["omninode-runtime"]) == {"18085", "18086"}
+
+
+@pytest.mark.integration
 def test_stability_lane_renders_the_standalone_projection_writers() -> None:
     """OMN-17562: the proof lane runs a real write path, not just the dev lane.
 

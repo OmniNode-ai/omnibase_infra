@@ -607,10 +607,11 @@ def test_folded_lane_verifier_checks_only_the_remaining_core_services() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize("container_exists", [False, True])
 @pytest.mark.parametrize("main_logged_fold", [False, True])
+@pytest.mark.parametrize("census_readable", [False, True])
 def test_folded_effects_verification_runs_on_pass_without_retiring(
-    container_exists: bool, main_logged_fold: bool
+    container_exists: bool, main_logged_fold: bool, census_readable: bool
 ) -> None:
-    """PASS verifies folded roles and retirement without changing the result."""
+    """A failed fold readback changes the receipt result without recreating."""
     text = REFRESH_STABILITY.read_text()
     start = text.index("    # OMN-21288: the deploy handler retires effects")
     verification = text[start : text.index("    # Prune old preflight tags", start)]
@@ -625,14 +626,17 @@ def test_folded_effects_verification_runs_on_pass_without_retiring(
 set -euo pipefail
 {marker}
 CONTAINER_EXISTS={str(container_exists).lower()}
+CENSUS_READABLE={str(census_readable).lower()}
 MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
 COMPOSE_PROJECT=lane-a
 RESULT=SUCCESS
 declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
 err() {{ printf 'ERR: %s\\n' "$*"; }}
+log() {{ printf '%s\\n' "$*"; }}
 docker() {{
     case "$1" in
-        ps) if "$CONTAINER_EXISTS"; then printf 'c0ffee\\n'; fi ;;
+        ps) "$CENSUS_READABLE" || return 7
+            if "$CONTAINER_EXISTS"; then printf 'c0ffee\\n'; fi ;;
         logs) printf '%s\\n' "$MAIN_LOG" ;;
         *) return 9 ;;
     esac
@@ -645,10 +649,15 @@ docker() {{
         check=True,
     )
     assert ("did not attach its folded roles" in result.stdout) is not main_logged_fold
-    assert (
-        "runtime-effects containers still exist" in result.stdout
-    ) is container_exists
-    assert "RESULT=SUCCESS" in result.stdout
+    assert ("runtime-effects containers still exist" in result.stdout) is (
+        container_exists and census_readable
+    )
+    expected = (
+        "SUCCESS"
+        if main_logged_fold and not container_exists and census_readable
+        else "FAILED_FOLDED_EFFECTS"
+    )
+    assert f"RESULT={expected}" in result.stdout
 
 
 @pytest.mark.unit

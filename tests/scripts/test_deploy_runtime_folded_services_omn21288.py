@@ -159,18 +159,82 @@ restart_services /tmp "$PROJECT"
     )
     lines = result.stdout.splitlines()
     if override:
-        assert "stop effects-id effects-old-id" in lines
-        assert "rm effects-id effects-old-id" in lines
+        assert not any(line.startswith(("stop ", "rm ")) for line in lines)
         assert not any(line.startswith("UP ") for line in lines)
         return
     up = next(i for i, line in enumerate(lines) if line.startswith("UP "))
     assert (
-        lines.index("stop effects-id effects-old-id")
+        lines.index("stop --time 30 effects-id effects-old-id")
         < lines.index("rm effects-id effects-old-id")
         < up
     )
     assert "runtime-effects" not in lines[up]
     if "worker" in profiles:
-        assert lines.index("stop worker-id") < lines.index("rm worker-id") < up
+        assert (
+            lines.index("stop --time 30 worker-id") < lines.index("rm worker-id") < up
+        )
         assert "runtime-worker" not in lines[up]
     assert " -v" not in result.stdout
+
+
+def test_empty_folded_build_scope_never_invokes_compose() -> None:
+    harness = (
+        _harness("effects", FOLDING_PROJECT, override=True)
+        + "\n"
+        + _function("build_images")
+        + r"""
+log_step() { :; }
+log_info() { printf '%s\n' "$*"; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+docker() { printf 'unexpected docker invocation\n' >&2; return 9; }
+build_images /tmp "$PROJECT" unused
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=True
+    )
+    assert "No runtime services remain to build." in result.stdout
+    assert not result.stderr
+
+
+def test_scoped_worker_restart_preserves_effects() -> None:
+    harness = (
+        _harness("effects", FOLDING_PROJECT, override=True)
+        + "\n"
+        + _function("restart_services")
+        + r"""
+RUNTIME_BUILD_SERVICES=(runtime-worker)
+RUNTIME_BUILD_SERVICES_OVERRIDE=runtime-worker
+log_step() { :; }
+log_info() { :; }
+log_cmd() { :; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+exclude_cloud_database_services() { :; }
+COMPOSE_PROFILE=runtime
+RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
+docker() { printf 'unexpected effects retirement\n' >&2; return 9; }
+compose_up_bounded() { shift; printf 'UP %s\n' "$*"; }
+restart_services /tmp "$PROJECT"
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=True
+    )
+    assert "runtime-worker" in result.stdout
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_unknown_profile_propagates_when_caller_handles_failure(override: bool) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _harness("unknown-role", FOLDING_PROJECT, override)
+            + '\nif resolve_lane_runtime_services services "$PROJECT"; then exit 9; fi',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "Unknown folded runtime profile: unknown-role" in result.stderr

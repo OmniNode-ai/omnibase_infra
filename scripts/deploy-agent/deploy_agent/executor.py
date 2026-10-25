@@ -899,7 +899,6 @@ SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
     "runtime-effects": 1,
 }
 
-SERVICE_FOLDED_PROFILE: dict[str, str] = {"runtime-effects": "effects"}
 LANE_POLICY_PREFIX: dict[EnumRuntimeLane, str] = {
     EnumRuntimeLane.STABILITY_TEST: "STABILITY_TEST",
 }
@@ -940,8 +939,8 @@ def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
             f"no runtime_health_targets mapping for service {service!r}; known "
             f"services: {sorted(SERVICE_HEALTH_TARGET_INDEX)}"
         )
-    if SERVICE_FOLDED_PROFILE.get(service) in lane_folded_profiles(lane):
-        index = SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]
+    # lane_config_for already maps folded health targets to main. Resolve once
+    # so a policy-file update cannot split this lookup across two snapshots.
     container_name, _ = lane_config_for(lane).runtime_health_targets[index]
     return container_name
 

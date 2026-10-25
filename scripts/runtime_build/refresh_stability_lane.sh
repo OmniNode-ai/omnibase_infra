@@ -833,18 +833,26 @@ log "  build provenance failing      : [${DECISION_PROVENANCE}]"
 
 if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     RESULT="SUCCESS"
-    log "=== SUCCESS: health-gate PASS, ancestry OK ==="
     # OMN-21288: the deploy handler retires effects before main is recreated.
     # grep reads the whole log (no -q): under pipefail an early grep exit
     # would SIGPIPE docker logs and read as "not found".
     if ! docker logs "${CORE_CONTAINERS[omninode-runtime]}" 2>&1 | grep -F "${FOLDED_ROLES_LOG_MARKER}" >/dev/null; then
         err "main runtime did not attach its folded roles"
+        RESULT="FAILED_FOLDED_EFFECTS"
     fi
-    remaining_effects="$(docker ps -aq \
+    if ! remaining_effects="$(docker ps -aq \
         --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
-        --filter "label=com.docker.compose.service=runtime-effects")"
+        --filter "label=com.docker.compose.service=runtime-effects")"; then
+        err "could not read runtime-effects container census"
+        RESULT="FAILED_FOLDED_EFFECTS"
+    fi
     if [[ -n "${remaining_effects}" ]]; then
         err "runtime-effects containers still exist after folded deploy: ${remaining_effects}"
+        RESULT="FAILED_FOLDED_EFFECTS"
+    fi
+    log "folded effects verification: ${RESULT}"
+    if [[ "${RESULT}" == SUCCESS ]]; then
+        log "=== SUCCESS: health-gate PASS, ancestry OK, folded effects verified ==="
     fi
     # Prune old preflight tags (keep last 3) -- bounded local rollback history.
     # Over the full anchored set (OMN-18061), or the writers accumulate tags

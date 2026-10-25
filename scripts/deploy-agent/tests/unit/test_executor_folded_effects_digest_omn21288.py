@@ -74,6 +74,22 @@ def test_folded_health_targets_keep_both_ports(inspected: list[str]) -> None:
     )
 
 
+def test_digest_resolution_reads_policy_once(
+    monkeypatch: pytest.MonkeyPatch, inspected: list[str]
+) -> None:
+    reads: list[None] = []
+
+    def load_policy() -> dict[str, str]:
+        reads.append(None)
+        # A second read would observe a different policy during a rewrite.
+        return {FOLDED_KEY: "effects" if len(reads) == 1 else ""}
+
+    monkeypatch.setattr("deploy_agent.executor._load_runtime_policy_env", load_policy)
+    assert DeployExecutor().resolve_stability_ready_digest("runtime-effects") == DIGEST
+    assert inspected == [MAIN]
+    assert len(reads) == 1
+
+
 def test_prod_effects_digest_keeps_own_container(inspected: list[str]) -> None:
     DeployExecutor().verify_running_image_digest(
         lane=EnumRuntimeLane.PROD, expected_digest=DIGEST, service="runtime-effects"
