@@ -32,7 +32,10 @@
 #      undeclared that the manifest now declares, a snapshot that miscounts its
 #      own findings, a lane one file knows and the other does not, and a
 #      manifest lane the table generator has no entry for are each a hard
-#      failure.
+#      failure. On pull_request the drift count alone is reported as a
+#      warning (OMN-17427): the checker reads GITHUB_EVENT_NAME, which this
+#      step must not override, because no PR here can move the overlay census.
+#      Push to dev/main and workflow_dispatch still fail on it.
 #
 #      The drift_count assertion was in the ticket and not in the first merged
 #      implementation, which said in its own comment that it "deliberately does

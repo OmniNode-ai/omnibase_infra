@@ -1,0 +1,1 @@
+Live-contact exception: The only CI-tooling path in this merge commit's index is .github/workflows/hostile-reviewer.yml, which arrives unchanged from origin/dev where #5330 already merged it, and this commit changes no CI tooling of its own.
