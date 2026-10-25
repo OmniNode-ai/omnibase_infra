@@ -1,15 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The Hostile Reviewer reads omniintelligence by its newest dev tag and passes the Claude key (OMN-20910).
+"""The Hostile Reviewer reads omniintelligence by its newest dev tag (OMN-20910).
 
 Operator ruling 2026-10-18: lab consumers read tags, not pins. omniintelligence
 tags every dev merge ``dev-<UTC>-<sha12>``, so the review tooling is resolved at
 run time from ``refs/tags/dev-*`` and logged; a branch tip stays refused
-(OMN-20331). The Claude API voters' key is the org Actions secret
-``HOSTILE_REVIEW_ANTHROPIC_API_KEY``, handed to the review step alone. The
-voter code reads the variable its overlay entry names in ``api_key_env`` (and
-``ANTHROPIC_API_KEY`` when none is named), and never substitutes another
-variable for it.
+(OMN-20331). No Claude provider key is passed from an Actions secret. The
+Claude API voter reaches the review gateway through the dogfood tenant by
+reference (OMN-20974, OMN-21350).
 
 The clone step is executed against a fake ``git`` rather than text-matched, so
 the tag selection is the one the workflow runs.
@@ -35,8 +33,7 @@ _WORKFLOW = (
     / "workflows"
     / "hostile-reviewer.yml"
 )
-_KEY_EXPR = "${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}"
-_KEY_ENV_NAMES = ("ANTHROPIC_API_KEY", "REVIEW_ANTHROPIC_API_KEY")
+_CLAUDE_KEY = re.compile(r"\b(?:HOSTILE_REVIEW_|REVIEW_)?ANTHROPIC_API_KEY\b")
 _NEWEST = "dev-20261018085529-fe44102f0bf5"
 _LS_REMOTE = "".join(
     f"{sha * 40}\trefs/tags/{name}\n"
@@ -56,6 +53,11 @@ case "$1" in
   -C) echo "$@" >> "$FAKE_LOG"; [ "$3" = rev-parse ] && echo 0123456789abcdef0123456789abcdef01234567; true ;;
 esac
 """
+
+
+def _claude_key_mentions(text: str) -> list[str]:
+    """Every place a Claude provider key name appears in the text."""
+    return _CLAUDE_KEY.findall(text)
 
 
 def _steps() -> list[dict[str, Any]]:
@@ -133,33 +135,39 @@ def test_clone_step_never_reads_a_branch_tip_or_a_pin() -> None:
     assert re.search(r"--branch\s+(dev|main)\b", "git clone --branch dev url dir")
 
 
-def test_claude_key_reaches_only_the_review_step() -> None:
-    holders = [
-        s["name"]
-        for s in _steps()
-        if "HOSTILE_REVIEW_ANTHROPIC_API_KEY" in yaml.safe_dump(s)
-    ]
-    assert holders == ["Run adversarial review"]
-    env = _step("Run adversarial review")["env"]
-    for name in _KEY_ENV_NAMES:
-        assert env[name] == _KEY_EXPR
-    # Positive control: the preflight holds the other secret and not this one.
-    preflight = _step("Preflight — probe review endpoint reachability")["env"]
-    assert "LOCAL_LLM_SHARED_SECRET" in preflight
-    assert not set(_KEY_ENV_NAMES) & set(preflight)
+def test_claude_key_reaches_no_workflow_step() -> None:
+    assert _claude_key_mentions(_WORKFLOW.read_text(encoding="utf-8")) == []
+    for planted in (
+        '"ANTHROPIC_API_KEY": x\n',
+        "export REVIEW_ANTHROPIC_API_KEY=abc\n",
+        "env:\n  ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}\n",
+    ):
+        assert _claude_key_mentions(planted)
+    assert _claude_key_mentions("LOCAL_LLM_SHARED_SECRET: x\n") == []
+    # Positive control: the review step still holds the lab voters' secret.
+    assert "LOCAL_LLM_SHARED_SECRET" in _step("Run adversarial review")["env"]
 
 
-def test_key_is_a_secret_expression_never_a_literal() -> None:
+def test_no_secret_expression_or_literal_key_in_workflow() -> None:
     text = _WORKFLOW.read_text(encoding="utf-8")
     assert not re.search(r"sk-ant-[A-Za-z0-9_-]+", text)
-    lines = [
-        ln
-        for ln in text.splitlines()
-        if re.match(r"\s+(REVIEW_)?ANTHROPIC_API_KEY:", ln)
-    ]
-    assert len(lines) == len(_KEY_ENV_NAMES)
-    for line in lines:
-        assert line.strip().endswith(_KEY_EXPR), line
+    secret_reference = re.compile(
+        r"\bsecrets\s*(?:\.\s*[A-Za-z0-9_]*(?:ANTHROPIC|CLAUDE)[A-Za-z0-9_]*"
+        r"|\[\s*['\"][^'\"\]]*(?:ANTHROPIC|CLAUDE)[^'\"\]]*['\"]\s*\])",
+        re.IGNORECASE,
+    )
+    assert not secret_reference.search(text)
+    # Positive controls: every reference form and key name the workflow used.
+    for planted in (
+        "${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}",
+        "${{ secrets . REVIEW_ANTHROPIC_API_KEY }}",
+        "${{ Secrets.ANTHROPIC_API_KEY }}",
+        "${{ secrets['HOSTILE_REVIEW_ANTHROPIC_API_KEY'] }}",
+        '${{ secrets["HOSTILE_REVIEW_ANTHROPIC_API_KEY"] }}',
+        '${{ SECRETS[ "CLAUDE_API_KEY" ] }}',
+    ):
+        assert secret_reference.search(planted), planted
+    assert not secret_reference.search("${{ secrets.LOCAL_LLM_SHARED_SECRET }}")
 
 
 def test_dev_tag_and_key_tests_run_as_ci_step_and_hook() -> None:
