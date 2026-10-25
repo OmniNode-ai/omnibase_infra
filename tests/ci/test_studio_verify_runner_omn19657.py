@@ -75,7 +75,7 @@ def test_studio_verify_runner_is_the_only_runner_labelled_host_200() -> None:
             if "host-200" in _labels(service or {}):
                 carriers.append(f"{path.name}:{name}")
     assert carriers == [f"{COMPOSE.name}:{SERVICE}"], (
-        f"host-200 must name exactly one declared runner, found {carriers}"
+        f"the instance label must name exactly one declared runner, found {carriers}"
     )
 
 
@@ -103,17 +103,16 @@ def test_studio_verify_runner_declares_no_group_add() -> None:
     assert "group_add" not in _runner()
 
 
+@pytest.mark.lab_overlay
 def test_the_dev_200_route_labels_have_a_runner_to_land_on() -> None:
     """Positive control across the seam: once the routing table declares the
     dev-200 instance's verify block, its labels are satisfiable by this
     runner. Skips today because that block has not landed yet (OMN-19543/
     OMN-19507); this is the seam test, not the trigger to land it."""
-    routing = ROOT / "config" / "deploy_lane_routing.yaml"
-    if not routing.is_file():
-        pytest.skip("the routing table is not on this base yet")
-    table = yaml.safe_load(routing.read_text(encoding="utf-8")) or {}
+    from scripts.ci.deploy_lane_verify_route import load_table
+
+    table = load_table()
     instance = (table.get("instances") or {}).get("dev-200")
-    if instance is None or "verify" not in instance:
-        pytest.skip("the routing table declares no dev-200 verify block yet")
+    assert instance is not None and "verify" in instance
     wanted = set(instance["verify"]["runner_labels"])
     assert wanted <= _labels(_runner()), (sorted(wanted), sorted(_labels(_runner())))

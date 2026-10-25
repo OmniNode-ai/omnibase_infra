@@ -520,3 +520,51 @@ def test_route_models_roundtrip_through_json() -> None:
     for model in (topology, declaration, route):
         encoded = model.model_dump_json()
         assert type(model).model_validate_json(encoded) == model
+
+
+@pytest.mark.parametrize(
+    "mutation", ["valid", "missing", "changed", "contract-changed"]
+)
+def test_private_snapshot_retains_both_integrity_bindings(
+    tmp_path, monkeypatch, mutation
+):
+    from types import SimpleNamespace
+
+    data = _overlay_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    package = tmp_path / "package"
+    contract_path = package / "config/ci_bus_lanes.yaml"
+    contract_path.parent.mkdir(parents=True)
+    contract = f"overlay_sha256: {digest}\nlanes: {{}}\n".encode()
+    contract_path.write_bytes(contract)
+    root = tmp_path / "private"
+    snapshot = root / f"config/onex/overlays/ci_bus_lanes/{digest}.yaml"
+    snapshot.parent.mkdir(parents=True)
+    if mutation != "missing":
+        snapshot.write_bytes(data + (b"# changed\n" if mutation == "changed" else b""))
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(root))
+    monkeypatch.setattr(
+        routes_module.metadata, "distribution", lambda _name: SimpleNamespace()
+    )
+    monkeypatch.setattr(routes_module.resources, "files", lambda _name: package)
+    monkeypatch.setattr(
+        routes_module,
+        "_record_sha256_hex",
+        lambda _dist: hashlib.sha256(contract).hexdigest(),
+    )
+    if mutation == "contract-changed":
+        contract_path.write_bytes(contract + b"# changed\n")
+    routes_module._read_packaged_overlay.cache_clear()
+    try:
+        if mutation == "valid":
+            resolved = resolve_bounded_delegation_route(
+                transport=_AddressedBus(), selected_route=_route()
+            )
+            assert resolved.manifest_sha256 == digest
+        else:
+            with pytest.raises(InfraUnavailableError):
+                resolve_bounded_delegation_route(
+                    transport=_AddressedBus(), selected_route=_route()
+                )
+    finally:
+        routes_module._read_packaged_overlay.cache_clear()

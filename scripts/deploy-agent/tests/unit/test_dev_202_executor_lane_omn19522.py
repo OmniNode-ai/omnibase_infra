@@ -71,6 +71,7 @@ _DOCKER = _REPO_ROOT / "docker"
 _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_202_OVERLAY = _DOCKER / "docker-compose.dev-202.yml"
 _DEV_202_UNIT = _DEPLOY_DIR / "deploy-agent-dev-202.service"
+_DEV_202 = _DEV_202_OVERLAY.stem.removeprefix("docker-compose.")
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
 _ENV_TEMPLATE = _DEPLOY_DIR / "dev-instance.env.template"
 
@@ -165,6 +166,7 @@ def _files_of(cmd: list[str]) -> list[str]:
 # --------------------------------------------------------------------------- #
 # AC1 -- the dev-202 instance's composition                                    #
 # --------------------------------------------------------------------------- #
+@pytest.mark.lab_overlay
 class TestDev202LaneConfig:
     def test_dev_202_lane_config_names_its_own_project_files_and_targets(
         self,
@@ -192,6 +194,7 @@ class TestDev202LaneConfig:
         must be a service the overlay declares and the port half the host port
         that service publishes.
         """
+        select_dev_instance(_DEV_202)
         cfg = DEV_INSTANCE_LANE_CONFIGS["dev-202"]
         overlay = yaml.load(_DEV_202_OVERLAY.read_text(), Loader=_ComposeLoader)  # noqa: S506
         services: dict[str, Any] = overlay["services"]
@@ -232,12 +235,15 @@ class TestDev202LaneConfig:
         """The routing table's instances and the executor's are the same set,
         so an instance the table names always has a composition to run."""
         table = load_routing_table(_REPO_ROOT)
-        assert set(table.instances) == set(DEV_INSTANCE_LANE_CONFIGS)
+        select_dev_instance(table.default_instance)
+        assert set(table.instances) | {executor_mod.DEFAULT_DEV_INSTANCE} == set(
+            DEV_INSTANCE_LANE_CONFIGS
+        )
 
     def test_dev_202_lane_config_refuses_an_unknown_instance(self) -> None:
         with pytest.raises(ValueError, match="dev-999"):
             select_dev_instance("dev-999")
-        assert active_dev_instance() == "dev-201"
+        assert active_dev_instance() == executor_mod.DEFAULT_DEV_INSTANCE
 
     def test_dev_202_lane_config_is_selected_by_agent_construction(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -378,11 +384,12 @@ def _run_dev_job(
 # --------------------------------------------------------------------------- #
 # AC2 -- the .201-only phases and services never run on dev-202                #
 # --------------------------------------------------------------------------- #
+@pytest.mark.lab_overlay
 class TestDev202PhasesOff:
     def test_dev_202_phases_off_declared_for_all_four(self) -> None:
+        select_dev_instance(_DEV_202)
         cfg = DEV_INSTANCE_LANE_CONFIGS["dev-202"]
         assert cfg.disabled_phases == frozenset(_HOST_201_PHASES)
-        select_dev_instance("dev-202")
         for phase in EnumInstancePhase:
             assert not lane_runs_phase(EnumRuntimeLane.DEV, phase)
 
@@ -469,6 +476,7 @@ class TestDev202PhasesOff:
             for name, spec in overlay["services"].items()
             if (spec or {}).get("profiles") == ["dev-202-disabled"]
         }
+        select_dev_instance(_DEV_202)
         cfg = DEV_INSTANCE_LANE_CONFIGS["dev-202"]
         assert disabled_by_overlay >= _DEV_202_DISABLED
         assert cfg.disabled_services == frozenset(
@@ -499,9 +507,10 @@ class TestDev202PhasesOff:
 # --------------------------------------------------------------------------- #
 # AC3 -- dev-201 and a router-less agent are unchanged                         #
 # --------------------------------------------------------------------------- #
+@pytest.mark.lab_overlay
 class TestDev201Unchanged:
     def test_dev_201_unchanged_config_is_the_legacy_dev_lane(self) -> None:
-        assert active_dev_instance() == "dev-201"
+        assert active_dev_instance() == executor_mod.DEFAULT_DEV_INSTANCE
         default = lane_config_for(EnumRuntimeLane.DEV)
         select_dev_instance("dev-201")
         cfg = lane_config_for(EnumRuntimeLane.DEV)
@@ -573,7 +582,7 @@ class TestDev201Unchanged:
         agent = DeployAgent(skip_self_update=True)
 
         assert agent._router is None
-        assert active_dev_instance() == "dev-201"
+        assert active_dev_instance() == executor_mod.DEFAULT_DEV_INSTANCE
         assert lane_config_for(EnumRuntimeLane.DEV).compose_project == "omnibase-infra"
 
 

@@ -67,7 +67,11 @@ from deploy_agent.events import (
     ModelLaneMirrorForwarder,
     ModelLaneMirrorReceipt,
 )
-from deploy_agent.routing import ROUTING_TABLE_RELPATH, RoutingTableError
+from deploy_agent.routing import (
+    PrivateRoutingConfigError,
+    RoutingTableError,
+    read_routing_text,
+)
 
 #: The key an instance's composition sits under in the routing table.
 LANE_KEY: Final = "lane"
@@ -141,11 +145,10 @@ def parse_instance_lanes(text: str) -> dict[str, ModelInstanceLane]:
 
 def load_instance_lanes(repo_root: str | Path) -> dict[str, ModelInstanceLane]:
     """The blocks in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+        text = read_routing_text()
+    except PrivateRoutingConfigError as exc:
+        raise RoutingTableError(str(exc)) from exc
     return parse_instance_lanes(text)
 
 
@@ -242,11 +245,10 @@ def instance_runtime_lanes_from_text(text: str) -> dict[str, str]:
 
 def load_instance_runtime_lanes(repo_root: str | Path) -> dict[str, str]:
     """The runtime lane ids in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+        text = read_routing_text()
+    except PrivateRoutingConfigError as exc:
+        raise RoutingTableError(str(exc)) from exc
     return instance_runtime_lanes_from_text(text)
 
 
@@ -384,8 +386,7 @@ def default_instance_lane_env_exports(repo_root: str | Path, search_root: Path) 
     does, and a refresh never undoes what the agent applied. The overlay clone
     is the one under ``search_root`` that carries fragments.
     """
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(read_routing_text())
     default = str(raw.get("default_instance") or "").strip()
     lanes = load_instance_runtime_lanes(repo_root)
     if default not in lanes:

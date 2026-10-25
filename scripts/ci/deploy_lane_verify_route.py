@@ -48,6 +48,7 @@ outputs stay empty and the verify job cannot start on a guessed runner.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -57,6 +58,32 @@ from typing import Any, Final
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+_CONFIG_HANDLER = (
+    Path(__file__).resolve().parents[2]
+    / "src/omnibase_infra/handlers/handler_deploy_routing_config.py"
+)
+_CONFIG_MODULE_NAME = "onex_deploy_routing_config_handler"
+if _CONFIG_MODULE_NAME in sys.modules:
+    _private_config = sys.modules[_CONFIG_MODULE_NAME]
+else:
+    _config_spec = importlib.util.spec_from_file_location(
+        _CONFIG_MODULE_NAME, _CONFIG_HANDLER
+    )
+    if _config_spec is None or _config_spec.loader is None:
+        raise ImportError(f"cannot load deployment config handler at {_CONFIG_HANDLER}")
+    _private_config = importlib.util.module_from_spec(_config_spec)
+    sys.modules[_CONFIG_MODULE_NAME] = _private_config
+    _config_spec.loader.exec_module(_private_config)
+PrivateRoutingConfigError = _private_config.PrivateRoutingConfigError
+
+
+def read_routing_text(digest: str | None = None) -> str:
+    return str(_private_config.read_routing_text(digest, environ=os.environ))
+
+
+contract_digest = _private_config.contract_digest
+
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 ROUTING_TABLE: Final = _REPO_ROOT / "config" / "deploy_lane_routing.yaml"
@@ -102,10 +129,12 @@ def requester_repository(requested_by: str) -> str | None:
     return match.group(1) if match else None
 
 
-def load_table(path: Path = ROUTING_TABLE) -> dict[str, Any]:
+def load_table(path: Path | None = None) -> dict[str, Any]:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+        raw = yaml.safe_load(
+            read_routing_text() if path is None else path.read_text(encoding="utf-8")
+        )
+    except (OSError, yaml.YAMLError, PrivateRoutingConfigError) as exc:
         raise VerifyRouteError(f"routing table unreadable at {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise VerifyRouteError(f"routing table at {path} is not a mapping")
@@ -223,7 +252,7 @@ def _append(path_var: str, values: dict[str, str]) -> None:
 
 
 def write_route_outputs(
-    *, runtime_lane: str, requested_by: str, table_path: Path = ROUTING_TABLE
+    *, runtime_lane: str, requested_by: str, table_path: Path | None = None
 ) -> int:
     """``lab_pass_receipt.py route-outputs``: the trigger job's outputs."""
     try:
@@ -239,7 +268,7 @@ def write_route_outputs(
     return 0
 
 
-def write_lane_env(*, receipt_lane: str, table_path: Path = ROUTING_TABLE) -> int:
+def write_lane_env(*, receipt_lane: str, table_path: Path | None = None) -> int:
     """``lab_pass_receipt.py route-env``: one receipt lane's verify environment."""
     try:
         targets = targets_for_receipt_lane(load_table(table_path), receipt_lane)

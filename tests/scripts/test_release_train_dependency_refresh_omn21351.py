@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 import yaml
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("placeholder_routing_overlay")]
 
 _ROOT = Path(__file__).resolve().parents[2]
 _POLICY = _ROOT / "config" / "release_train_policy.yaml"

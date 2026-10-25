@@ -9,7 +9,6 @@ dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket refusal.
 
 from __future__ import annotations
 
-from importlib import resources
 from pathlib import Path
 from typing import Final
 from urllib.parse import urlsplit
@@ -19,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.runtime.bounded_delegation_routes import (
+    _read_packaged_overlay,
+    _sha256_hex,
     claimed_bounded_lane,
     validate_bounded_lane_broker_identity,
 )
@@ -83,10 +84,15 @@ def _load_lane_document(path_for_test: Path | None = None) -> object:
         if path_for_test is not None:
             content = path_for_test.read_text(encoding="utf-8")
         else:
-            resource = resources.files(_LANE_RESOURCE_PACKAGE).joinpath(
-                *_LANE_RESOURCE_PATH.split("/")
-            )
-            content = resource.read_text(encoding="utf-8")
+            overlay = _read_packaged_overlay()
+            if overlay is None:
+                raise InfraUnavailableError("lane contract is not installed")
+            data, digest, _source = overlay
+            if digest is None or digest != _sha256_hex(data):
+                raise InfraUnavailableError(
+                    "private lane overlay vendor/manifest mismatch"
+                )
+            content = data.decode("utf-8")
         return yaml.safe_load(content)
     except (ModuleNotFoundError, OSError, yaml.YAMLError) as exc:
         raise InfraUnavailableError(

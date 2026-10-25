@@ -1,0 +1,73 @@
+name: 'Fetch the private deploy routing overlay'
+description: >-
+  OMN-20934. The lane manifest and the committed deploy routing overlay describe one lab's hosts, lanes and addresses, so they are private deployment config and this repository ships neither. This reads config/onex/overlays/deploy_lane_routing from the CI overlay repository (the org Actions variable OMNI_CI_OVERLAY_REPO, a bare repository name under this owner) with a read-only App token, places it outside the workspace and exports ONEX_WORKSPACE_CONFIG_ROOT, which every census reader resolves its inputs from. An unset variable, an unreadable repository or a missing file fails the step: there is no in-repo census to fall back to. The census is data, read unpinned from the overlay's default branch where the refresh leg commits it, and validated by each reader; nothing from it is executed.
+author: 'OmniNode'
+inputs:
+  overlay-repo:
+    description: 'The CI overlay repository name, normally vars.OMNI_CI_OVERLAY_REPO.'
+    required: true
+  app-id:
+    description: 'App id for a read-only installation token, normally secrets.ONEXBOT_APP_ID.'
+    required: true
+  private-key:
+    description: 'The App private key, normally secrets.ONEXBOT_APP_PRIVATE_KEY.'
+    required: true
+outputs:
+  root:
+    description: 'The config root, also exported as ONEX_WORKSPACE_CONFIG_ROOT.'
+    value: ${{ steps.place.outputs.root }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the CI overlay
+      id: overlay
+      shell: bash
+      env:
+        CI_OVERLAY_REPO: ${{ inputs.overlay-repo }}
+      run: |
+        set -euo pipefail
+        if [ -z "${CI_OVERLAY_REPO}" ]; then
+          echo "::error::no deploy routing overlay configured: OMNI_CI_OVERLAY_REPO is unset, so no CI overlay supplies config/onex/overlays/deploy_lane_routing. This repository ships no lane manifest or census; put yours in a repository of your own and set OMNI_CI_OVERLAY_REPO to its name."
+          exit 1
+        fi
+        if [[ ! "${CI_OVERLAY_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          echo "::error::OMNI_CI_OVERLAY_REPO must be a bare repository name, got '${CI_OVERLAY_REPO}'"
+          exit 1
+        fi
+        echo "name=${CI_OVERLAY_REPO}" >> "$GITHUB_OUTPUT"
+    - name: Mint a read-only CI overlay token
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ steps.overlay.outputs.name }}
+        permission-contents: read
+    - name: Fetch config/onex/overlays/deploy_lane_routing from the CI overlay
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        repository: ${{ github.repository_owner }}/${{ steps.overlay.outputs.name }}
+        token: ${{ steps.token.outputs.token }}
+        path: .deploy-routing-overlay-checkout
+        persist-credentials: false
+        sparse-checkout: |
+          config/onex/overlays/deploy_lane_routing
+        sparse-checkout-cone-mode: false
+    - name: Place the CI overlay outside the workspace
+      id: place
+      shell: bash
+      env:
+        OVERLAY_NAME: ${{ steps.overlay.outputs.name }}
+      run: |
+        set -euo pipefail
+        dest="${RUNNER_TEMP}/deploy-routing-overlay"
+        rm -rf "$dest"
+        mv .deploy-routing-overlay-checkout "$dest"
+        echo "deploy routing overlay read from ${GITHUB_REPOSITORY_OWNER}/${OVERLAY_NAME} at $(git -C "$dest" rev-parse HEAD)"
+        if ! compgen -G "$dest/config/onex/overlays/deploy_lane_routing/*.yaml" > /dev/null; then
+          echo "::error::the CI overlay supplies no deployment routing snapshots"
+          exit 1
+        fi
+        echo "ONEX_WORKSPACE_CONFIG_ROOT=$dest" >> "$GITHUB_ENV"
+        echo "root=$dest" >> "$GITHUB_OUTPUT"

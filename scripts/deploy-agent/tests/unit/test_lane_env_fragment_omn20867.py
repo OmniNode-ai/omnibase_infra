@@ -348,7 +348,12 @@ def test_shell_exports_round_trip_through_bash() -> None:
 
 
 @pytest.mark.unit
-def test_refresh_exports_the_default_instance_fragment(tmp_path: Path) -> None:
+def test_refresh_exports_the_default_instance_fragment(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.instance_lanes.read_routing_text", lambda: ROUTING_TEXT
+    )
     repo_root = tmp_path / "infra"
     (repo_root / "config").mkdir(parents=True)
     (repo_root / "config" / "deploy_lane_routing.yaml").write_text(

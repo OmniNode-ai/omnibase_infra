@@ -92,6 +92,14 @@ GATEWAY_DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-gateway.sh"
 CORRELATION_ID = "11111111-1111-4111-8111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_reconcile_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the build lock only inside the test's disposable workspace."""
+    monkeypatch.setattr(
+        "deploy_agent.executor._reconcile_lock_roots", lambda: [str(tmp_path)]
+    )
+
+
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
     return None
 

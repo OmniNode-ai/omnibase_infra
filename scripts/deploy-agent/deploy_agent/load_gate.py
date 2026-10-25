@@ -63,7 +63,11 @@ from typing import Final
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from deploy_agent.routing import ROUTING_TABLE_RELPATH, RoutingTableError
+from deploy_agent.routing import (
+    PrivateRoutingConfigError,
+    RoutingTableError,
+    read_routing_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -334,9 +338,8 @@ def load_gate_for_instance(
     repo_root: str | Path, instance: str
 ) -> ModelLoadGateThresholds | None:
     """The gate ``instance`` declares in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+        text = read_routing_text()
+    except PrivateRoutingConfigError as exc:
+        raise RoutingTableError(str(exc)) from exc
     return parse_load_gates(text).get(instance)

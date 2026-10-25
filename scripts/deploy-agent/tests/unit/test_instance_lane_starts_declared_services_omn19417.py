@@ -137,6 +137,7 @@ def test_instance_lane_deploy_starts_every_declared_running_service(
     )
 
 
+@pytest.mark.lab_overlay
 def test_instance_lane_phoenix_stays_out_of_the_201_deps_leg() -> None:
     """Control: the .201 composition is unchanged; its Phoenix stays runtime-only."""
     config = DEV_INSTANCE_LANE_CONFIGS["dev-201"]

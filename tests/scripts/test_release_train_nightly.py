@@ -36,6 +36,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.lab_overlay
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MODULE = _REPO_ROOT / "scripts" / "ci" / "release_train.py"
 _POLICY = _REPO_ROOT / "config" / "release_train_policy.yaml"

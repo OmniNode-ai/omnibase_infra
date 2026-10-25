@@ -48,11 +48,13 @@ this needs a fetch failure on one host at the moment of the command.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import re
 import socket
 import subprocess
+import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,6 +64,32 @@ import yaml
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
+
+_CONFIG_HANDLER = (
+    Path(__file__).resolve().parents[3]
+    / "src/omnibase_infra/handlers/handler_deploy_routing_config.py"
+)
+_CONFIG_MODULE_NAME = "onex_deploy_routing_config_handler"
+if _CONFIG_MODULE_NAME in sys.modules:
+    _private_config = sys.modules[_CONFIG_MODULE_NAME]
+else:
+    _config_spec = importlib.util.spec_from_file_location(
+        _CONFIG_MODULE_NAME, _CONFIG_HANDLER
+    )
+    if _config_spec is None or _config_spec.loader is None:
+        raise ImportError(f"cannot load deployment config handler at {_CONFIG_HANDLER}")
+    _private_config = importlib.util.module_from_spec(_config_spec)
+    sys.modules[_CONFIG_MODULE_NAME] = _private_config
+    _config_spec.loader.exec_module(_private_config)
+PrivateRoutingConfigError = _private_config.PrivateRoutingConfigError
+
+
+def read_routing_text(digest: str | None = None) -> str:
+    return str(_private_config.read_routing_text(digest, environ=os.environ))
+
+
+contract_digest = _private_config.contract_digest
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +103,6 @@ ENV_INSTANCE: Final = "DEPLOY_AGENT_INSTANCE"
 #: The lanes the table routes. Only the dev lane has two instances; a command
 #: for any other lane is decided by the lane fence alone, as before.
 ROUTED_LANES: Final = frozenset({EnumRuntimeLane.DEV})
-
-#: The default every version of the table must name (pinned by a test).
-PINNED_DEFAULT_INSTANCE: Final = "dev-201"
 
 #: ``requested_by`` of a command the CI rebuild trigger published.
 _CI_REQUESTER_RE: Final = re.compile(r"^gha/([a-z][a-z0-9_]*)/")
@@ -265,15 +290,14 @@ AGENT_CLONE_ROOT: Final = Path(__file__).resolve().parents[3]
 
 
 def load_routing_table(repo_root: str | Path | None = None) -> ModelRoutingTable:
-    """The table shipped with this process's code. Used for identity, the
-    consumer group and the default, never for a command's route."""
-    path = Path(repo_root if repo_root is not None else AGENT_CLONE_ROOT) / (
-        ROUTING_TABLE_RELPATH
-    )
+    """The private snapshot bound by this process's portable source contract.
+
+    Used for identity, consumer group and default; commands bind their own snapshot.
+    """
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+        text = read_routing_text()
+    except PrivateRoutingConfigError as exc:
+        raise RoutingTableError(str(exc)) from exc
     return parse_routing_table(text)
 
 
@@ -371,7 +395,10 @@ class GitTableAtRef:
         if shown.returncode != 0:
             # The commit exists, so a failed show means the file is absent there.
             return None
-        return parse_routing_table(shown.stdout)
+        try:
+            return parse_routing_table(read_routing_text(contract_digest(shown.stdout)))
+        except PrivateRoutingConfigError as exc:
+            raise RoutingTableError(str(exc)) from exc
 
 
 class ModelRoutingDecision(BaseModel):
@@ -392,12 +419,6 @@ class DeployRouter:
         instance: ModelAgentInstance,
         table_at_ref: TableAtRef,
     ) -> None:
-        if table.default_instance != PINNED_DEFAULT_INSTANCE:
-            raise RoutingTableError(
-                f"default_instance must be {PINNED_DEFAULT_INSTANCE!r}: a ref that "
-                "names no table routes to the default, and only a default every "
-                "table version agrees on keeps that a function of the command"
-            )
         self.table = table
         self.instance = instance
         self._table_at_ref = table_at_ref
@@ -431,6 +452,10 @@ class DeployRouter:
             return ModelRoutingDecision(
                 instance=default, basis=f"default (no table at {ref[:12]})"
             )
+        if at_ref.default_instance != default:
+            raise RoutingTableError(
+                "default_instance differs across deployment routing snapshots"
+            )
         return ModelRoutingDecision(
             instance=at_ref.route(cmd.runtime_lane, cmd.requested_by),
             basis=f"table at {ref[:12]}",
@@ -450,6 +475,8 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
     """
     table = load_routing_table()
     instance = resolve_instance(table)
+    # The source contract binds immutable private bytes by digest, so agents
+    # updating at different times still compute the same route for a command.
     return DeployRouter(table, instance, GitTableAtRef(deploy_source_dir))
 
 
@@ -574,9 +601,8 @@ def parse_lane_flags(text: str) -> dict[str, ModelLaneFlags]:
 
 def lane_flags_for_instance(repo_root: str | Path, instance: str) -> ModelLaneFlags:
     """The flags ``instance`` declares in ``repo_root``'s committed table."""
-    path = Path(repo_root) / ROUTING_TABLE_RELPATH
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+        text = read_routing_text()
+    except PrivateRoutingConfigError as exc:
+        raise RoutingTableError(str(exc)) from exc
     return parse_lane_flags(text).get(instance, ModelLaneFlags())

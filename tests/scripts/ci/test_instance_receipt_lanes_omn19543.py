@@ -30,7 +30,7 @@ import pytest
 from scripts.ci import instance_receipt_lanes as irl
 from scripts.ci.lab_pass_receipt import ANY_OF_DEFAULT_LANES, EnumLabLane
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 _ROOT = Path(__file__).resolve().parents[3]
 _RT_PATH = _ROOT / "scripts" / "ci" / "release_train.py"
@@ -103,7 +103,7 @@ def test_the_release_train_refuses_a_lane_the_receipt_enum_does_not_declare(
     rt = _release_train()
     table = tmp_path / "deploy_lane_routing.yaml"
     table.write_text(_FIXTURE, encoding="utf-8")
-    monkeypatch.setattr(rt.instance_receipt_lanes, "ROUTING_TABLE", table)
+    monkeypatch.setattr(rt.instance_receipt_lanes, "read_routing_text", table.read_text)
     with pytest.raises(rt.ReleaseTrainConfigError, match="compose-dev-999"):
         rt.lab_evidence_lanes(rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE, "omnimarket")
 
@@ -238,7 +238,7 @@ def test_an_unreadable_table_refuses_the_gate(
     from scripts.ci import lab_pass_receipt
 
     module = lab_pass_receipt._instance_receipt_lanes()
-    monkeypatch.setattr(module, "ROUTING_TABLE", tmp_path / "absent.yaml")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "absent"))
     args = ("--lane", "compose-dev", "--instance-lanes-for", "omnimarket")
     assert _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV, *args) == 1
 

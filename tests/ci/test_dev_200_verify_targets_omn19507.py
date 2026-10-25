@@ -33,7 +33,7 @@ from scripts.ci.lane_settle_budget import (
     load_declaration,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEV_200_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-200.yml"

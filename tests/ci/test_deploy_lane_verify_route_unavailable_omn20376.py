@@ -20,7 +20,7 @@ from scripts.ci.deploy_lane_verify_route import (
     route,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("placeholder_routing_overlay")]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "deploy-agent"))
@@ -74,13 +74,13 @@ def test_unavailable_default_refuses_even_a_matching_route() -> None:
         resolve(table, runtime_lane="dev", requested_by="gha/omnimarket/pr-2870")
 
 
-@pytest.mark.parametrize("variant", ["committed", "unavailable", "available"])
+@pytest.mark.parametrize("variant", ["declared", "unavailable", "available"])
 @pytest.mark.parametrize(
     "requested_by", ["gha/omnimarket/pr-1", "gha/omnibase_infra/pr-1", "operator/x"]
 )
 def test_verify_route_agrees_with_agent(variant: str, requested_by: str) -> None:
     table = copy.deepcopy(load_table())
-    if variant != "committed":
+    if variant != "declared":
         routed = next(
             row["instance"]
             for row in table["routes"]

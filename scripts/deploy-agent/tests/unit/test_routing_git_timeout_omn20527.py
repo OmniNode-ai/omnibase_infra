@@ -20,7 +20,6 @@ from uuid import uuid4
 import pytest
 from deploy_agent.events import ModelRebuildRequested
 from deploy_agent.routing import (
-    PINNED_DEFAULT_INSTANCE,
     DeployRouter,
     GitTableAtRef,
     RoutingTableError,
@@ -95,5 +94,5 @@ def test_a_timing_out_fetch_routes_the_command_to_the_default() -> None:
 
     decision = router.decide(cmd)
 
-    assert decision.instance == PINNED_DEFAULT_INSTANCE
+    assert decision.instance == table.default_instance
     assert "unreadable" in decision.basis

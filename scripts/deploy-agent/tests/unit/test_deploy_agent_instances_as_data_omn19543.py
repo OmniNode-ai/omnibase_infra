@@ -42,10 +42,11 @@ from deploy_agent.routing import (
     RoutingTableError,
     load_routing_table,
     parse_routing_table,
+    read_routing_text,
     resolve_instance,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _TABLE = _REPO_ROOT / "config" / "deploy_lane_routing.yaml"
@@ -205,9 +206,17 @@ class TestInstanceCompositionIsData:
             build_dev_instance_lane_configs(specs)
 
     def test_two_instances_may_not_share_a_receipt_lane(self) -> None:
-        text = _TABLE.read_text().replace(
-            "receipt_lane: compose-dev-200", "receipt_lane: compose-dev-202"
-        )
+        import copy
+
+        raw = yaml.safe_load(read_routing_text())
+        blocks = [spec["lane"] for spec in raw["instances"].values() if "lane" in spec]
+        assert len(blocks) >= 2
+        changed = copy.deepcopy(raw)
+        lanes = [
+            spec["lane"] for spec in changed["instances"].values() if "lane" in spec
+        ]
+        lanes[1]["receipt_lane"] = lanes[0]["receipt_lane"]
+        text = yaml.safe_dump(changed)
         with pytest.raises(RoutingTableError, match="same receipt_lane"):
             parse_instance_lanes(text)
 
@@ -247,7 +256,12 @@ class TestDev200Instance:
             assert table.route(EnumRuntimeLane.DEV, requester) == "dev-201"
 
     def test_dev_200_proves_omnimarket_only(self) -> None:
-        spec = parse_instance_lanes(_TABLE.read_text())["dev-200"]
+        specs = parse_instance_lanes(read_routing_text())
+        spec = next(
+            spec
+            for spec in specs.values()
+            if spec.health_ports.main == _DEV_200_BLOCK.start + 85
+        )
         assert spec.receipt_lane == "compose-dev-200"
         assert spec.proves == ("omnimarket",)
 

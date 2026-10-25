@@ -44,6 +44,7 @@ from deploy_agent.routing import (
     load_routing_table,
     parse_lane_flags,
     parse_routing_table,
+    read_routing_text,
     resolve_instance,
 )
 
@@ -262,7 +263,7 @@ SATELLITE_MERGED_BY = datetime(2026, 10, 21, tzinfo=UTC)
 
 
 def _committed_flags() -> dict[str, ModelLaneFlags]:
-    text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
+    text = read_routing_text()
     return parse_lane_flags(text)
 
 
@@ -275,6 +276,7 @@ def _satellite_instances() -> list[str]:
     ]
 
 
+@pytest.mark.lab_overlay
 def test_committed_dev_lanes_carry_no_freeze() -> None:
     # The operator lifted the dev-201 Tech Week freeze on 2026-10-06 (RULINGs
     # 07:55:26Z and 14:16:08Z), so neither full dev lane is frozen. Only the
@@ -290,6 +292,7 @@ def test_committed_dev_lanes_carry_no_freeze() -> None:
         assert other_flags.frozen_reason(UNTIL) is None
 
 
+@pytest.mark.lab_overlay
 def test_committed_satellite_lane_is_frozen_so_its_full_stack_is_not_recreated() -> (
     None
 ):
@@ -349,13 +352,14 @@ def _agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DeployAgent:
     monkeypatch.setattr(agent_mod, "LAB_OVERLAY_ENABLED", False)
     agent = DeployAgent(skip_self_update=True)
     table = agent._router.table if agent._router else load_routing_table()
+    secondary = next(name for name in table.instances if name != table.default_instance)
     routed = table.model_copy(
         update={
             "routes": (
                 ModelRoute(
                     runtime_lane=EnumRuntimeLane.DEV,
                     requester_repository="omnimarket",
-                    instance="dev-202",
+                    instance=secondary,
                 ),
             )
         }

@@ -43,9 +43,9 @@ from deploy_agent.load_gate import (
     parse_memory_free_percent,
 )
 from deploy_agent.routing import (
-    ROUTING_TABLE_RELPATH,
     RoutingTableError,
     parse_routing_table,
+    read_routing_text,
     resolve_instance,
 )
 
@@ -251,8 +251,9 @@ def test_load_gate_the_routing_parser_still_routes_a_table_with_a_gate() -> None
     assert table.default_instance == "dev-201"
 
 
+@pytest.mark.lab_overlay
 def test_load_gate_the_committed_table_gates_dev_200_and_nothing_else() -> None:
-    text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
+    text = read_routing_text()
     gates = parse_load_gates(text)
 
     assert set(gates) == {"dev-200"}, "the .201 and .202 agents are unchanged"
@@ -293,8 +294,9 @@ def test_load_gate_an_agent_on_an_excluded_host_refuses_to_start() -> None:
     )
 
 
+@pytest.mark.lab_overlay
 def test_load_gate_the_committed_table_excludes_101_and_cites_the_ruling() -> None:
-    text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
+    text = read_routing_text()
     raw = yaml.safe_load(text)
     table = parse_routing_table(text)
 

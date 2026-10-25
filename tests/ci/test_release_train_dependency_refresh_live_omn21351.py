@@ -21,7 +21,7 @@ from typing import Any, cast
 
 import pytest
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("placeholder_routing_overlay")]
 
 _ROOT = Path(__file__).resolve().parents[2]
 

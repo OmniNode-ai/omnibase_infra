@@ -751,7 +751,7 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 #: from dev) and every caller that predates instances see the .201 lane. It is
 #: also the routing table's pinned default, the one instance that declares no
 #: ``lane:`` block and keeps ``_LANE_CONFIGS[DEV]``.
-DEFAULT_DEV_INSTANCE = "dev-201"
+DEFAULT_DEV_INSTANCE = "__default__"
 
 
 def dev_instance_lane_config(
@@ -819,15 +819,10 @@ def build_dev_instance_lane_configs(
 #: once at agent start from the instance the routing table resolved
 #: (``select_dev_instance``). Built from the table shipped with this code, the
 #: same copy the router reads identity from, so the two cannot disagree.
-DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_configs(
-    load_instance_lanes(AGENT_CLONE_ROOT)
-)
-
-#: OMN-20867. Each dev instance's runtime lane id (its ``verify.receipt_lane``),
-#: the name its env fragment is read under in the deployment overlay clone.
-DEV_INSTANCE_RUNTIME_LANES: dict[str, str] = load_instance_runtime_lanes(
-    AGENT_CLONE_ROOT
-)
+DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = {
+    DEFAULT_DEV_INSTANCE: _LANE_CONFIGS[EnumRuntimeLane.DEV]
+}
+DEV_INSTANCE_RUNTIME_LANES: dict[str, str] = {}
 
 
 class _DevInstanceSelection:
@@ -844,6 +839,16 @@ def select_dev_instance(name: str) -> None:
     .202 that fallback would bring up an ``omnibase-infra`` project on a host it
     is not declared for.
     """
+    if name not in DEV_INSTANCE_RUNTIME_LANES:
+        from deploy_agent.routing import load_routing_table
+
+        table = load_routing_table()
+        configs = build_dev_instance_lane_configs(load_instance_lanes(AGENT_CLONE_ROOT))
+        configs[table.default_instance] = _LANE_CONFIGS[EnumRuntimeLane.DEV]
+        DEV_INSTANCE_LANE_CONFIGS.update(configs)
+        runtime_lanes = load_instance_runtime_lanes(AGENT_CLONE_ROOT)
+        runtime_lanes[DEFAULT_DEV_INSTANCE] = runtime_lanes[table.default_instance]
+        DEV_INSTANCE_RUNTIME_LANES.update(runtime_lanes)
     if name not in DEV_INSTANCE_LANE_CONFIGS:
         raise ValueError(
             f"deploy-agent instance {name!r} has no dev-lane composition "

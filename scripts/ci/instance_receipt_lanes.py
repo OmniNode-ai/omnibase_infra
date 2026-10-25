@@ -35,6 +35,14 @@ from typing import Final
 
 import yaml
 
+if __package__:
+    from .deploy_lane_verify_route import PrivateRoutingConfigError, read_routing_text
+else:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from deploy_lane_verify_route import PrivateRoutingConfigError, read_routing_text
+
 ROUTING_TABLE: Final = (
     Path(__file__).resolve().parents[2] / "config" / "deploy_lane_routing.yaml"
 )
@@ -77,10 +85,11 @@ def receipt_lanes_from_text(text: str, repo: str) -> tuple[str, ...]:
 
 def receipt_lanes_for(repo: str, table: Path | None = None) -> tuple[str, ...]:
     """``receipt_lanes_from_text`` over the committed table (or ``table``)."""
-    table = table if table is not None else ROUTING_TABLE
     try:
-        text = table.read_text(encoding="utf-8")
-    except OSError as exc:
+        text = (
+            read_routing_text() if table is None else table.read_text(encoding="utf-8")
+        )
+    except (OSError, PrivateRoutingConfigError) as exc:
         raise InstanceReceiptLanesError(
             f"routing table unreadable at {table}: {exc}"
         ) from exc
