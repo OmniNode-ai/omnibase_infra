@@ -119,7 +119,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
-  - id: dod-omn20413-ac7-routing-audit-private-public-pr-shadow
+  - id: dod-omn20413-ac7-private-public-pr-shadow
     description: AC7 tests drive audit_github_variables with a private repository's public-PR shadow on its declared trusted fleet value; the positive control fails at the merge base, where that shadow is reported as drift.
     source: manual
     checks:
