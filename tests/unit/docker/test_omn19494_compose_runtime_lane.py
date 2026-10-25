@@ -151,6 +151,18 @@ STACKS: dict[str, _Stack] = {
     ),
 }
 
+#: OMN-21279: the standalone dev-bus member names no lab lane in the public
+#: file. Its deploy path supplies the dev lane's own name from the private lane
+#: overlay, so the render here takes that name from the dev stack above.
+DEV_BUS_MEMBER_FILE = "docker-compose.dev-bus-member.yml"
+DEV_BUS_MEMBER_LANE_VARIABLE = "DEV_BUS_MEMBER_RUNTIME_LANE"
+STACKS["dev-bus-member"] = _Stack(
+    files=(DEV_BUS_MEMBER_FILE,),
+    lane=STACKS["dev"].lane,
+    lane_naming_services=frozenset({"runtime-effects"}),
+    env={DEV_BUS_MEMBER_LANE_VARIABLE: STACKS["dev"].lane},
+)
+
 #: Compose files that are not a deployed lane stack of their own. A file in
 #: this set must define no service whose profile owns lane-scoped contracts.
 #: The value records why it needs no lane.
@@ -292,7 +304,7 @@ def test_the_rendered_lane_is_a_registered_lane(stack_id: str) -> None:
 def test_a_lane_file_declares_its_lane_as_a_literal_not_a_shell_value(
     stack_id: str,
 ) -> None:
-    """Only the prepr slot id interpolates, and only the slot token it names."""
+    """Only the prepr slot id and the dev-bus member's required lane interpolate."""
     stack = STACKS[stack_id]
     own_file = stack.files[-1]
     services = _load(own_file).get("services") or {}
@@ -302,6 +314,13 @@ def test_a_lane_file_declares_its_lane_as_a_literal_not_a_shell_value(
     }
     for name, raw in declared.items():
         if raw is None:
+            continue
+        if "${" in raw and own_file == DEV_BUS_MEMBER_FILE:
+            # Required, no default: a missing value fails the render, and the
+            # rendered lane must still equal the dev stack's (test above).
+            assert re.fullmatch(
+                rf"\$\{{{DEV_BUS_MEMBER_LANE_VARIABLE}:\?[^{{}}$]+\}}", raw
+            ), raw
             continue
         if "${" in raw:
             assert own_file == "docker-compose.prepr.yml", (

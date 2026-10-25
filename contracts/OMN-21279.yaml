@@ -14,6 +14,11 @@ requirements:
         statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
       - id: AC2
         statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-dev-bus-member
+    statement: 'Operator 2026-10-25: "the node should be deployed in every runtime. And whoever answers it gets the lease". Lab hosts serve the GitHub nodes on the dev bus in the dev runtime-effects consumer group.'
+    acceptance:
+      - id: AC3
+        statement: 'AC3: docker/docker-compose.dev-bus-member.yml attaches only node_github_repo_gateway_effect and node_github_repo_write_effect, with ONEX_ENVIRONMENT, KAFKA_INSTANCE_ID and ONEX_GROUP_ID literal and equal to the dev runtime-effects values, the runtime lane a required deploy input from the private lane overlay, GitHub auth from a mounted secret file and no env file -- falsifier: pytest tests/unit/docker/test_dev_bus_member_omn21279.py'
 evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
@@ -69,3 +74,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac3-dev-bus-member-shares-the-group
+    description: >-
+      AC3. Reads docker/docker-compose.dev-bus-member.yml and docker/docker-compose.infra.yml and asserts the member's group identity (ONEX_ENVIRONMENT local, KAFKA_INSTANCE_ID runtime-effects, ONEX_GROUP_ID onex-runtime-effects) is literal and equals the dev runtime-effects values, the node selection is exactly the two GitHub nodes, the runtime lane is a required DEV_BUS_MEMBER_RUNTIME_LANE value that renders to the dev stack's lane, no GITHUB_TOKEN or GH_TOKEN environment key or env_file exists, the resolver maps GITHUB_TOKEN to /run/secrets/github_token and the image is not a digest pin. Red first: the compose file does not exist at the merge base.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_bus_member_omn21279.py tests/unit/docker/test_omn19494_compose_runtime_lane.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC3"

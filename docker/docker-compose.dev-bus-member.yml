@@ -1,0 +1,70 @@
+# OMN-21279 dev-bus member: one runtime-effects on every lab host.
+#
+# WHAT THIS IS. A STANDALONE composition, never an overlay on another lane.
+# It attaches only node_github_repo_gateway_effect and node_github_repo_write_effect
+# to the dev lane's broker, so every lab host serves these GitHub nodes in the
+# dev runtime-effects consumer group. The broker assigns each command to one
+# member: matching groups share; different instances/versions duplicate.
+#
+# WHY. Operator 2026-10-25: "the node should be deployed in every runtime. And
+# whoever answers it gets the lease". The dev lane's one runtime-effects is a
+# single point of failure for every `onex scm` write; these members share that work.
+#
+# INVARIANTS. The measured dev group identity (2026-10-25) is
+# {ONEX_ENVIRONMENT}.{package}.{node}.consume.{contract version}.
+# __i.{KAFKA_INSTANCE_ID}.__t.{topic}. Keep ONEX_ENVIRONMENT=local and
+# KAFKA_INSTANCE_ID=runtime-effects on every host, with the SAME omnimarket
+# release as dev. Deploy the composed runtime image for that release by TAG,
+# never a digest/sha pin. A different instance or contract version duplicates
+# delivery instead of sharing it. Node selection leaves every other contract
+# unattached. No host-specific group identity is allowed.
+# The runtime lane is the dev lane's own name, read by the deploy path from the
+# private lane overlay and supplied as DEV_BUS_MEMBER_RUNTIME_LANE; this file
+# names no lab lane. The member is never that lane's health speaker.
+#
+# DEPLOY INPUTS. The deploy path reads the dev external listener and the runtime
+# lane from the private lane overlay config/lab/ci_bus_lanes.yaml (lanes.dev.broker
+# and lanes.dev.bus_member.runtime_lane) and resolves
+# this host's own lane principal from its lane credential store at deploy time,
+# never an env file. The listener is SASL_PLAINTEXT / SCRAM-SHA-256. GitHub auth
+# comes only from the host secret store's materialized mode 0600 file, mounted
+# at /run/secrets/github_token; resolver convention fallback stays disabled.
+# Health binds loopback only; contracts are read-only and data is host-local.
+name: omnibase-infra-dev-bus-member
+services:
+  runtime-effects:
+    image: "${DEV_BUS_MEMBER_RUNTIME_IMAGE:?Set the composed runtime image tag for the release the dev lane runs; never a digest/sha pin}"
+    container_name: omninode-dev-bus-member-runtime-effects
+    restart: unless-stopped
+    labels:
+      com.omninode.lane: dev
+      com.omninode.ticket: OMN-21279
+    environment:
+      RUNTIME_PROFILE: effects
+      ONEX_RUNTIME_LANE: "${DEV_BUS_MEMBER_RUNTIME_LANE:?Set the dev lane runtime name read by the deploy path from the private lane overlay config/lab/ci_bus_lanes.yaml lanes.dev.bus_member.runtime_lane; never an env file}"
+      ONEX_RUNTIME_LANE_HEALTH_SPEAKER: "false"
+      ONEX_RUNTIME_NODE_SELECTION: "node_github_repo_gateway_effect,node_github_repo_write_effect"
+      ONEX_ENVIRONMENT: local
+      KAFKA_ENVIRONMENT: local
+      KAFKA_INSTANCE_ID: runtime-effects
+      ONEX_GROUP_ID: onex-runtime-effects
+      ONEX_ACTIVE_RUNTIME_PACKAGES: omnibase_infra,omnimarket
+      KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_SASL_MECHANISM: SCRAM-SHA-256
+      ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
+      KAFKA_BOOTSTRAP_SERVERS: "${DEV_BUS_MEMBER_BOOTSTRAP_SERVERS:?Set the dev lane's external listener read by the deploy path from the private lane overlay config/lab/ci_bus_lanes.yaml lanes.dev.broker; never an env file}"
+      KAFKA_SASL_USERNAME: "${DEV_BUS_MEMBER_SASL_USERNAME:?Set the host's own lane principal username resolved from the host's lane credential store at deploy time; never an env file}"
+      KAFKA_SASL_PASSWORD: "${DEV_BUS_MEMBER_SASL_PASSWORD:?Set the host's own lane principal password resolved from the host's lane credential store at deploy time; never an env file}"
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: >-
+        {"enable_convention_fallback":false,"mappings":[{"logical_name":"GITHUB_TOKEN","source":{"source_path":"/run/secrets/github_token","source_type":"file"}}]}
+    secrets: [github_token]
+    ports:
+      - "127.0.0.1:${DEV_BUS_MEMBER_HEALTH_PORT:-43086}:8085"
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - effects_data:/app/data
+secrets:
+  github_token:
+    file: "${DEV_BUS_MEMBER_GITHUB_TOKEN_FILE:?Set the host secret store's materialized file, mode 0600, containing the GitHub token}"
+volumes:
+  effects_data:
