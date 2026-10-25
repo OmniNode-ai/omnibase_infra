@@ -99,10 +99,10 @@ dod_evidence:
       - "AC2"
   - id: dod-omn-21279-ac2-dev-build-context-classification
     description: >-
-      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. On 389b7933 the live-tree guard fails on the bare sibling Dockerfile.runtime; origin/dev at 5bb5f114 passes 39 tests on h101 through lab-run lw-f79c867d6e8a40e6. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile.
+      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile. Run the composed-image regression alongside the exclusion guard: the guard alone also passes on the merge base, whose dev overlay still builds market workloads on the infra-only image. The composed-image tests read that product overlay and fail there, binding this item to the AC2 runtime-image change.
     source: generated
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py -q -n 0 --no-cov -p no:randomly
+        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
       - "AC2"
