@@ -95,6 +95,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "local.rr.friction-run-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.rr.friction-run-",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.rr.morning_phase.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -145,6 +159,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-internal.morning-friction-sweep.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-internal.morning-friction-sweep.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -342,6 +370,34 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {
