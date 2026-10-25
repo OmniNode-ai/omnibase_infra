@@ -854,16 +854,18 @@ if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
     if [[ "${RESULT}" == SUCCESS ]]; then
         log "=== SUCCESS: health-gate PASS, ancestry OK, folded effects verified ==="
     fi
-    # Prune old preflight tags (keep last 3) -- bounded local rollback history.
-    # Over the full anchored set (OMN-18061), or the writers accumulate tags
-    # forever because nothing ever prunes what nothing ever anchored.
-    for svc in "${ROLLBACK_SERVICES[@]}"; do
-        image_tag="${COMPOSE_PROJECT}-${svc}"
-        old_tags="$(docker images --format '{{.Tag}}' "${image_tag}" | grep '^preflight-' | sort -r | tail -n +4 || true)"
-        for t in ${old_tags}; do
-            docker rmi "${image_tag}:${t}" >/dev/null 2>&1 || true
+    if [[ "${RESULT}" == SUCCESS ]]; then
+        # Prune old preflight tags (keep last 3) -- bounded local rollback history.
+        # Over the full anchored set (OMN-18061), or the writers accumulate tags
+        # forever because nothing ever prunes what nothing ever anchored.
+        for svc in "${ROLLBACK_SERVICES[@]}"; do
+            image_tag="${COMPOSE_PROJECT}-${svc}"
+            old_tags="$(docker images --format '{{.Tag}}' "${image_tag}" | grep '^preflight-' | sort -r | tail -n +4 || true)"
+            for t in ${old_tags}; do
+                docker rmi "${image_tag}:${t}" >/dev/null 2>&1 || true
+            done
         done
-    done
+    fi
 elif [[ "${DECISION_RESULT}" == "FAILED_BUILD_PROVENANCE" ]]; then
     # ============================================================
     # BUILD-PROVENANCE FINDING -- report, do NOT recreate (OMN-18061)

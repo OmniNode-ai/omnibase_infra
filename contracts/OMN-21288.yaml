@@ -121,5 +121,17 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k folded_effects_verification -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn21288-effects-state-and-failed-refresh
+    description: >-
+      Main keeps its own runtime_data and mounts the retired effects_data and effects_logs volumes separately. Folded archives address the same relative directories in effects_data; historical delegation files remain available, while boot regenerates main's delegation config from policy. Exercise all fold readback failures and require rollback tags to be pruned only on SUCCESS. These checks do not claim a running lane rollout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_stability_lane_effects_folded_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k folded_effects_verification -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3, AC4]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

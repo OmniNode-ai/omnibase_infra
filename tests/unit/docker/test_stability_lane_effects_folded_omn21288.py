@@ -64,15 +64,23 @@ def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     assert committed == format_dotenv(rendered)
 
 
-def test_main_reads_the_fold_and_takes_the_effects_archive_dirs_unchanged() -> None:
+def test_main_reads_the_fold_and_preserves_the_effects_archive_volume() -> None:
     services = load_compose(_lane_overlay())["services"]
     main_env = services["omninode-runtime"]["environment"]
     effects_env = services["runtime-effects"]["environment"]
     assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"] == (
         f"${{{FOLDED_KEY}:?runtime policy contract must set {FOLDED_KEY}}}"
     )
+    assert "runtime_data:/app/data" in services["omninode-runtime"]["volumes"]
+    assert "effects_data:/app/effects-data" in services["omninode-runtime"]["volumes"]
+    assert (
+        "effects_logs:/app/effects-logs:ro" in services["omninode-runtime"]["volumes"]
+    )
+    assert "effects_data:/app/data" in services["runtime-effects"]["volumes"]
     for key, value in ARCHIVE_DIRS.items():
-        assert main_env[key] == effects_env[key] == value
+        assert effects_env[key] == value
+        # Both runtime paths address the same directory in the old volume.
+        assert main_env[key] == value.replace("/app/data/", "/app/effects-data/")
 
 
 def test_effects_service_is_opt_in_only() -> None:

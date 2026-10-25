@@ -255,9 +255,10 @@ services:
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: stability-test-main
       ONEX_RUNTIME_FOLDED_PROFILES: ${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES}
-      # The prune effects now run in this process.
-      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
-      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
+      # Folded prunes keep writing the retired effects volume, so existing
+      # archives stay in place. Main retains its own /app/data state.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/effects-data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/effects-data/consumer-flow-archive
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/stability-test/main
       ONEX_RUNTIME_CAPABILITIES: ${STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-stability-test-runtime-main
@@ -294,6 +295,11 @@ services:
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
+      # Preserve effects archives and historical delegation files in place.
+      # Boot regenerates main's delegation config from its declared policy;
+      # the retired files remain available here without overwriting main.
+      - effects_data:/app/effects-data
+      - effects_logs:/app/effects-logs:ro
       - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"

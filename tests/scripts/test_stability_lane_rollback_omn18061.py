@@ -609,12 +609,15 @@ def test_folded_lane_verifier_checks_only_the_remaining_core_services() -> None:
 @pytest.mark.parametrize("main_logged_fold", [False, True])
 @pytest.mark.parametrize("census_readable", [False, True])
 def test_folded_effects_verification_runs_on_pass_without_retiring(
-    container_exists: bool, main_logged_fold: bool, census_readable: bool
+    container_exists: bool,
+    main_logged_fold: bool,
+    census_readable: bool,
+    tmp_path: Path,
 ) -> None:
     """A failed fold readback changes the receipt result without recreating."""
     text = REFRESH_STABILITY.read_text()
     start = text.index("    # OMN-21288: the deploy handler retires effects")
-    verification = text[start : text.index("    # Prune old preflight tags", start)]
+    verification = text[start : text.index("elif [[", start)]
     success = text.index('    RESULT="SUCCESS"')
     assert success < start < text.index("elif [[", success)
     (marker,) = (
@@ -630,14 +633,19 @@ CENSUS_READABLE={str(census_readable).lower()}
 MAIN_LOG={"'Auto-wiring folded roles: profile=main'" if main_logged_fold else "'booted'"}
 COMPOSE_PROJECT=lane-a
 RESULT=SUCCESS
+ROLLBACK_SERVICES=(omninode-runtime)
+DOCKER_CALLS='{tmp_path / "docker-calls"}'
 declare -A CORE_CONTAINERS=([omninode-runtime]=lane-a-runtime)
 err() {{ printf 'ERR: %s\\n' "$*"; }}
 log() {{ printf '%s\\n' "$*"; }}
 docker() {{
+    printf '%s\\n' "$*" >> "$DOCKER_CALLS"
     case "$1" in
         ps) "$CENSUS_READABLE" || return 7
             if "$CONTAINER_EXISTS"; then printf 'c0ffee\\n'; fi ;;
         logs) printf '%s\\n' "$MAIN_LOG" ;;
+        images) printf 'preflight-4\\npreflight-3\\npreflight-2\\npreflight-1\\n' ;;
+        rmi) printf '%s\\n' "$*" >&2 ;;
         *) return 9 ;;
     esac
 }}
@@ -658,6 +666,10 @@ docker() {{
         else "FAILED_FOLDED_EFFECTS"
     )
     assert f"RESULT={expected}" in result.stdout
+    calls = (tmp_path / "docker-calls").read_text()
+    assert ("rmi lane-a-omninode-runtime:preflight-1" in calls) is (
+        expected == "SUCCESS"
+    )
 
 
 @pytest.mark.unit

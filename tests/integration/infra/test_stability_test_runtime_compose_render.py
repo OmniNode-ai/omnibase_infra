@@ -532,10 +532,21 @@ def test_stability_lane_render_contains_isolated_runtime_identity(
     assert "runtime-effects" not in services
     main_env = services["omninode-runtime"]["environment"]
     assert main_env["ONEX_RUNTIME_FOLDED_PROFILES"] == "effects"
-    assert main_env["ONEX_DEAD_LETTER_ARCHIVE_DIR"] == "/app/data/dead-letter-archive"
     assert (
-        main_env["ONEX_CONSUMER_FLOW_ARCHIVE_DIR"] == "/app/data/consumer-flow-archive"
+        main_env["ONEX_DEAD_LETTER_ARCHIVE_DIR"]
+        == "/app/effects-data/dead-letter-archive"
     )
+    assert (
+        main_env["ONEX_CONSUMER_FLOW_ARCHIVE_DIR"]
+        == "/app/effects-data/consumer-flow-archive"
+    )
+    main_mounts = {
+        volume["target"]: volume for volume in services["omninode-runtime"]["volumes"]
+    }
+    assert main_mounts["/app/data"]["source"] == "runtime_data"
+    assert main_mounts["/app/effects-data"]["source"] == "effects_data"
+    assert main_mounts["/app/effects-logs"]["source"] == "effects_logs"
+    assert main_mounts["/app/effects-logs"]["read_only"] is True
     assert services["runtime-worker"]["container_name"] == (
         "omninode-stability-test-runtime-worker"
     )
