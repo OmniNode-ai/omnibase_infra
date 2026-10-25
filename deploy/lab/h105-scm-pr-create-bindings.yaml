@@ -1,13 +1,17 @@
 # SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204.
-# h105's existing broker principal only, on dev. These are the write node's
-# terminal topics, not its command. Derive with HandlerBrokerGrantDerive, as
-# for developer-principal-bindings.yaml; never hand-type broker ACL rows.
+# OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204 (terminal reads),
+# and OPERATOR-CONSENT 2026-10-25T23:01:04Z, lane=orchestrator-31d9 (the command
+# write). h105's existing broker principal only, on dev. The write node's two
+# terminal topics are read; its one command topic, github-repo-write-requested,
+# is produced (WRITE and DESCRIBE), which is what `onex scm pr-create` publishes.
+# Derive with HandlerBrokerGrantDerive, as for developer-principal-bindings.yaml;
+# never hand-type broker ACL rows.
 # The client group prefix is already in the shared developer grant set. Stating
 # it here makes this capability's wire bindings complete without widening it.
 principal: dev-jonah-omnibook
 bindings:
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.github-repo-write-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-write-completed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.github-repo-write-failed.v1, direction: consume, consumer_group: local.omnimarket.scm_command_client.consume.v1.call}
 group_prefixes:
