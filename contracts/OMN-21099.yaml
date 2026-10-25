@@ -59,7 +59,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'ONEX_CONTEXT_SOURCE_TENANT_ID: .{DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'ONEX_CONTEXT_SOURCE_TENANT_ID: .{DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21099-ac2-lane-identity-untouched
@@ -86,7 +86,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'ONEX_SESSION_TRANSCRIPT_ROOT: /etc/onex/session-transcripts'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'ONEX_SESSION_TRANSCRIPT_ROOT: /etc/onex/session-transcripts'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
   - id: dod-omn21099-ac4-borrower-overlays
