@@ -385,8 +385,8 @@ requirements:
   - id: req-omn17427-dev-broker-8g-step
     statement: The dev lane's Redpanda broker takes the second staged OMN-19077 step, its declared default reservation going from 12G to 8G in docker/docker-compose.infra.yml for both the broker command and the profile service that logs it, while the stability lane's broker keeps its own 12G dial.
     acceptance:
-      - id: AC190
-        statement: 'AC190: docker-compose.infra.yml declares --memory ${DEV_REDPANDA_MEMORY:-8G} and REDPANDA_PROFILE_MEMORY ${DEV_REDPANDA_MEMORY:-8G}, the stability lane still declares ${STABILITY_TEST_REDPANDA_MEMORY:-12G}, and no two lanes share a dial -- falsifier: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q'
+      - id: AC17427518701
+        statement: 'AC17427518701: docker-compose.infra.yml declares --memory ${DEV_REDPANDA_MEMORY:-8G} and REDPANDA_PROFILE_MEMORY ${DEV_REDPANDA_MEMORY:-8G}, the stability lane still declares ${STABILITY_TEST_REDPANDA_MEMORY:-12G}, and no two lanes share a dial -- falsifier: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q'
   - id: req-omn17427-dependabot-sibling-pins
     statement: Dependabot opens no github-actions update for an OmniNode-ai sibling workflow or action pin, which moves only through .github/sibling-pins.yaml or a deliberate pin PR; third-party actions keep their weekly updates.
     acceptance:
@@ -2228,7 +2228,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC190
+      - AC17427518701
   - id: dod-omn-17427-ac100-dev-broker-8g-deploy-check
     description: Hosted-runner deploy check -- the published dev-lane compose declares the 8G dev broker default for the broker and its profile service. Reads repository files only; no Docker daemon, broker or lab host is used.
     source: manual
@@ -2237,7 +2237,7 @@ dod_evidence:
         check_value: uv run pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q -k "dev_broker_takes_the_staged_8g_step or dev_lane_reads_its_own_memory_dial"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC190
+      - AC17427518701
   - id: dod-omn-17427-ac141-dependabot-sibling-pins
     description: Reads the committed .github/dependabot.yml and workflow files; checks the OmniNode-ai/* ignore and that actions/setup-node still updates. It does not claim a Dependabot run.
     source: manual
