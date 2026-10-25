@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Execute the laptop-profile health step against a stub Docker (OMN-19972).
 
-OMN-19972's demo half adds the projection API, the LLM call and cost writer and
-the consumer-health projection to the ``local`` bundle, and its acceptance says
+OMN-19972's demo half adds the projection API and the consumer-health
+projection to the ``local`` bundle (the LLM cost writer moved to
+``local-market`` under OMN-21279), and its acceptance says
 the ``runtime-boot (mode=catalog-local)`` job asserts each added service
 healthy -- falsified by the step passing with a service stopped.
 
@@ -34,7 +35,6 @@ _STEP = "Every health-checked laptop service reports healthy"
 _PROJECT = "omnibase-infra-local"
 _ADDED = (
     "projection-api",
-    "omnimarket-projection-llm-cost",
     "consumer-health-projection",
     # OMN-19972 (T3.6): the tenant-projection kernel carries the usage writer.
     "tenant-projection-writer",
@@ -133,9 +133,9 @@ def test_step_fails_when_an_added_service_is_unhealthy(tmp_path: Path) -> None:
 
 
 def test_step_fails_when_an_added_service_never_started(tmp_path: Path) -> None:
-    result, _, _ = _run_step(tmp_path, missing="omnimarket-projection-llm-cost")
+    result, _, _ = _run_step(tmp_path, missing="tenant-projection-writer")
     assert result.returncode == 1, _show(result)
-    assert "omnimarket-projection-llm-cost" in result.stdout
+    assert "tenant-projection-writer" in result.stdout
 
 
 def test_step_fails_when_an_added_service_never_leaves_starting(tmp_path: Path) -> None:

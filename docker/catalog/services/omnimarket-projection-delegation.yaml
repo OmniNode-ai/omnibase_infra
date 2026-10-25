@@ -1,10 +1,8 @@
 name: omnimarket-projection-delegation
 description: Kafka-to-DB projection consumer for delegation events (OMN-7610)
-# OMN-19496: built from docker/Dockerfile.runtime, which installs omnimarket, as
-# the dev lane's projection-delegation-writer is (docker-compose.dev-lane.yml).
-# The former omnimarket-projection:latest image was built only in the
-# omnimarket repo, so no catalog render could start this service.
-image: runtime:latest
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-delegation
 required_env:

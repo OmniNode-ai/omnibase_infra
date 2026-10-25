@@ -152,9 +152,6 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
     ]
     assert sorted(runtime) == [
         "consumer-health-projection",
-        "omnimarket-projection-delegation",
-        "omnimarket-projection-llm-cost",
-        "omnimarket-projection-tenant-credentials",
         "omninode-runtime",
         "projection-api",
         "runtime-effects",
@@ -214,7 +211,9 @@ def test_local_runtime_kernels_mount_and_pin_the_local_overlay() -> None:
         assert len(mounts) == 1, f"{name}: {svc['volumes']}"
         assert mounts[0].startswith("${ONEX_LOCAL_BIFROST_OVERLAY:?")
         env = svc["environment"]
-        assert env["BIFROST_LANE_OVERLAY_PATH"] == _OVERLAY_PIN
+        assert "BIFROST_LANE_OVERLAY_PATH" not in env
+        assert "BIFROST_CONTRACT_PATH" not in env
+        assert "BIFROST_VERIFY_ENDPOINTS" not in env
         assert env["DELEGATION_ROUTING_TIERS_PATH"]
         assert env["GITHUB_TOKEN"] == ""
         assert env["DEPLOY_AGENT_HMAC_SECRET"] == ""
@@ -238,7 +237,7 @@ def test_local_projection_writer_binds_the_lab_principals_not_the_superuser(
     ``postgres`` where ``omninode_runtime`` was expected, and no
     ``delegation_events`` row was ever written.
     """
-    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local-market"])
     services = generate_compose(resolved)["services"]
     assert isinstance(services, dict)
     env = services[writer]["environment"]
@@ -261,11 +260,11 @@ def test_local_projection_writer_binds_the_lab_principals_not_the_superuser(
 
 
 def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> None:
-    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local-market"])
     services = generate_compose(resolved)["services"]
     assert isinstance(services, dict)
     writer = services["omnimarket-projection-tenant-credentials"]
-    assert writer["image"] == f"{_PROJECT}-runtime:latest"
+    assert writer["image"] == f"{_PROJECT}-omnimarket-runtime:latest"
     assert writer["command"] == [
         "python",
         "-m",
@@ -836,7 +835,6 @@ def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> 
 
 _PAGE_SERVICES = (
     "projection-api",
-    "omnimarket-projection-llm-cost",
     "consumer-health-projection",
 )
 _LAPTOP_PROJECTION_API_PORT = 3102
@@ -989,10 +987,16 @@ def test_local_projection_api_is_given_the_compose_broker() -> None:
     assert env.get("KAFKA_BROKERS") == "redpanda:9092"
 
 
-def test_llm_cost_writer_builds_from_the_runtime_image_and_reports_ready() -> None:
-    for bundle in ("local", "omnimarket-projections"):
+def test_llm_cost_writer_uses_the_market_image_and_reports_ready() -> None:
+    for bundle in ("local-market", "omnimarket-projections"):
         svc = _services(_render(bundle))["omnimarket-projection-llm-cost"]
-        assert "omnimarket-projection:latest" not in str(svc["image"]), bundle
+        expected = (
+            f"{_PROJECT}-omnimarket-runtime:latest"
+            if bundle == "local-market"
+            else "omnimarket-runtime:latest"
+        )
+        assert svc["image"] == expected, bundle
+        assert "build" not in svc, bundle
         test = svc["healthcheck"]["test"]  # type: ignore[index]
         assert "/ready" in " ".join(test), bundle
         env = svc["environment"]
@@ -1168,20 +1172,37 @@ def test_local_render_has_the_redpanda_local_sasl_one_shot_sasl() -> None:
     assert str(env["KAFKA_SASL_PASSWORD"]).startswith("${REDPANDA_SUPERUSER_PASSWORD:?")
 
 
-def test_local_kafka_clients_carry_the_four_sasl_variables_and_wait_sasl() -> None:
-    compose = _render("local")
+@pytest.mark.parametrize("bundle", ["local", "local-market"])
+def test_local_kafka_clients_carry_the_four_sasl_variables_and_wait_sasl(
+    bundle: str,
+) -> None:
+    compose = _render(bundle)
     services = _services(compose)
     clients = _sasl_clients(compose)
     runtime_layer = sorted(
         name
         for name, m in CatalogResolver(catalog_dir=_CATALOG_DIR)
-        .resolve(["local"])
+        .resolve([bundle])
         .manifests.items()
         if m.layer == EnumInfraLayer.RUNTIME
     )
     # Every runtime-layer service of the bundle is a broker client.
     assert clients == runtime_layer
-    assert len(clients) >= 7
+    expected = {
+        "consumer-health-projection",
+        "omninode-runtime",
+        "projection-api",
+        "runtime-effects",
+        "tenant-projection-writer",
+    }
+    if bundle == "local-market":
+        expected |= {
+            "omnimarket-projection-delegation",
+            "omnimarket-projection-tenant-credentials",
+            "omnimarket-projection-llm-cost",
+        }
+        assert len(clients) >= 7
+    assert set(clients) == expected
     for name in clients:
         env = services[name]["environment"]
         assert isinstance(env, dict)
@@ -1333,13 +1354,13 @@ _OTHER_BUNDLE_DIGESTS = {
     "memgraph": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
     "observability": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
     "omnidash": "ee979a6b6fdd9e4ff22bd20909c7abd6cf6a0dbd98d9673cff1dcd921a720c4e",
-    "omnimarket-projections": "980cb2d2cfc455f314f802f1924bd6a5d34717d780ad9c55fe63210a00dd0c72",
+    "omnimarket-projections": "9dc887c344ed076194a30883a35631b0843836fc58a05b16ec42c0dfe4df722b",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "deffe293bc3798851814d64749b0a8224321ef4a40d2b0d94a39dea13d4ea02e",
+    "runtime": "ac4a49f34ea8a3954c4a3cd72169d6054e678f00d3e84bda30976f3c8023b52c",
     "runtime-core": "cc190a3e893c543d7238cce224cf7d8e92336e321cd0a61aa79f9369e06159f4",
     "runtime-infrastructure": "1d80324c04b0c8b9ab5bccb876f76a51e9c4e347d35c0f155682576dce9698ba",
     "runtime-integrations": "3b746380a10853a69199c77766571f6acd2d337531407f70be9185710d16470c",
-    "runtime-observability-projections": "93b94710a4cbefb33888d1befb8c40372dc975486d332ab6aaf0342aaf7ff0b0",
+    "runtime-observability-projections": "d0937c309531243687b890a89f27f0578b78ef8e737126fdb00e2eefc83c10dc",
     "secrets": "778e163982415736c1bceaf9f18c84792e91645687f2099bb349d6d43accb4d5",
     "tenant-path": "f6699ea972dfa5f1a608c8a452c38ff31119baa3f5864eda35bbcc02abe9db61",
     "tracing": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
@@ -1360,10 +1381,11 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     in the same change; the failure names the bundle.
     """
     bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
-    # local-lane-mirror (OMN-19983) is the laptop stack plus one service.
-    assert sorted(set(bundles) - {"local", "local-lane-mirror"}) == sorted(
-        _OTHER_BUNDLE_DIGESTS
-    )
+    # local-lane-mirror and local-market extend the laptop stack.
+    # OMN-21279: only market image tags changed in the three updated digests.
+    assert sorted(
+        set(bundles) - {"local", "local-market", "local-lane-mirror"}
+    ) == sorted(_OTHER_BUNDLE_DIGESTS)
     drifted = sorted(
         name
         for name, pinned in _OTHER_BUNDLE_DIGESTS.items()
@@ -1590,3 +1612,65 @@ def test_status_local_group_listing_authenticates_as_the_local_superuser_sasl(
     assert "rpk group list user=onex-local" in calls
     assert "node_delegate_skill_orchestrator" in result.stdout
     assert "stub-secret" not in result.stdout + result.stderr + calls
+
+
+def test_local_is_infra_only_and_does_not_enable_bifrost_render() -> None:
+    bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
+    assert "BIFROST_CONTRACT_PATH" not in bundles["local"]["inject_env"]
+    assert all(
+        "omnimarket" not in str(svc["image"])
+        for svc in _services(_render("local")).values()
+    )
+
+
+def test_local_market_adds_only_the_three_market_writers_and_bifrost_render() -> None:
+    local = _services(_render("local"))
+    market = _services(_render("local-market"))
+    writers = {
+        "omnimarket-projection-delegation",
+        "omnimarket-projection-tenant-credentials",
+        "omnimarket-projection-llm-cost",
+    }
+    assert set(market) == set(local) | writers
+    for name in writers:
+        assert market[name]["image"] == f"{_PROJECT}-omnimarket-runtime:latest"
+        assert "build" not in market[name]
+        assert market[name]["depends_on"]["redpanda-local-sasl"] == {
+            "condition": "service_completed_successfully"
+        }
+    for name in ("omninode-runtime", "runtime-effects", *sorted(writers)):
+        env = market[name]["environment"]
+        assert (
+            env["BIFROST_CONTRACT_PATH"]
+            == "/app/data/delegation/bifrost_delegation.yaml"
+        )
+        assert env["BIFROST_LANE_OVERLAY_PATH"] == _OVERLAY_PIN
+        assert env["BIFROST_VERIFY_ENDPOINTS"] == "0"
+
+
+@pytest.mark.parametrize("project", [DEFAULT_PROJECT, "isolated-project"])
+@pytest.mark.parametrize(
+    ("bundle", "expected_count"), [("omnimarket-projections", 8), ("local-market", 3)]
+)
+def test_every_market_module_uses_the_project_scoped_market_image_without_build(
+    project: str,
+    bundle: str,
+    expected_count: int,
+) -> None:
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve([bundle])
+    resolved.project = project
+    services = _services(generate_compose(resolved))
+    market_services = []
+    for name, manifest in resolved.manifests.items():
+        command = [*(manifest.command or []), *(manifest.entrypoint or [])]
+        if not any(str(part).startswith("omnimarket.") for part in command):
+            continue
+        market_services.append(name)
+        expected = (
+            "omnimarket-runtime:latest"
+            if project == DEFAULT_PROJECT
+            else f"{project}-omnimarket-runtime:latest"
+        )
+        assert services[name]["image"] == expected
+        assert "build" not in services[name]
+    assert len(market_services) == expected_count

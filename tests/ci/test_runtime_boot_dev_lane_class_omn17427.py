@@ -19,7 +19,7 @@ boot passed both:
   healthy.
 
 The laptop boot job (``boot-catalog-local``) now ends with a dev-lane class
-phase: it rebuilds the runtime image on the current omnimarket release,
+phase: it rebuilds this repo's runtime image,
 recreates both kernels with the environment DERIVED from the dev lane's own
 compose files, and fails unless both stay healthy and running with no restart.
 These tests run the phase's own ``run:`` text from the workflow, unmodified:
@@ -52,8 +52,7 @@ _JOB = "boot-catalog-local"
 _DERIVE = (
     "Dev-lane class -- derive the kernel environment from the dev lane's compose files"
 )
-_RELEASE = "Dev-lane class -- resolve the current omnimarket release"
-_REBUILD = "Dev-lane class -- rebuild the runtime image on that release"
+_REBUILD = "Dev-lane class -- rebuild the runtime image"
 _RECREATE = "Dev-lane class -- recreate both kernels with that environment"
 _GATE = "Dev-lane class -- both kernels stay healthy and running with no restart (crash-loop gate)"
 _KERNELS = ("omninode-runtime", "runtime-effects")
@@ -105,15 +104,18 @@ def test_the_phase_runs_in_order_after_the_laptop_checks_and_before_the_log_tail
     None
 ):
     names = [s.get("name") for s in _steps()]
-    for name in (_DERIVE, _RELEASE, _REBUILD, _RECREATE, _GATE):
+    for name in (_DERIVE, _REBUILD, _RECREATE, _GATE):
         assert name in names, f"{_JOB} lacks the step {name!r}"
-    order = [names.index(n) for n in (_DERIVE, _RELEASE, _REBUILD, _RECREATE, _GATE)]
+    order = [names.index(n) for n in (_DERIVE, _REBUILD, _RECREATE, _GATE)]
     assert order == sorted(order)
     assert (
-        names.index("Delegate-skill command topic has a live consumer group") < order[0]
+        names.index(
+            "Stopped laptop service fails the health step and restoring it passes (negative control)"
+        )
+        < order[0]
     )
     assert order[-1] < names.index("Container state and log tail (always)")
-    for name in (_DERIVE, _RELEASE, _REBUILD, _RECREATE, _GATE):
+    for name in (_DERIVE, _REBUILD, _RECREATE, _GATE):
         assert "if" not in _step(name), f"{name!r} must not be conditional"
         assert not _step(name).get("continue-on-error"), (
             f"{name!r} must not be advisory"
@@ -323,66 +325,17 @@ def test_the_gate_fails_an_exited_kernel(tmp_path: Path, kernel: str) -> None:
     assert kernel in proc.stdout + proc.stderr
 
 
-# --------------------------------------------------------------------------
-# The release step, replayed against a recorded live `git ls-remote`.
-# --------------------------------------------------------------------------
-
-_GIT_STUB = """#!/usr/bin/env bash
-set -u
-[ "$1" = "ls-remote" ] || { echo "stub git: unexpected $*" >&2; exit 2; }
-printf '%s' "$STUB_LS_REMOTE"
-"""
-
-
-def _release(
-    tmp_path: Path, ls_remote: str
-) -> tuple[subprocess.CompletedProcess[str], Path]:
-    bindir = tmp_path / "bin"
-    bindir.mkdir(exist_ok=True)
-    git = bindir / "git"
-    git.write_text(_GIT_STUB, encoding="utf-8")
-    git.chmod(git.stat().st_mode | stat.S_IEXEC)
-    github_env = tmp_path / "github_env"
-    github_env.write_text("", encoding="utf-8")
-    proc = _run_step(
-        _RELEASE,
-        {
-            "PATH": f"{bindir}:{os.environ['PATH']}",
-            "STUB_LS_REMOTE": ls_remote,
-            "GITHUB_ENV": str(github_env),
-        },
-        _REPO,
-    )
-    return proc, github_env
-
-
-def _semver(tag: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in tag.removeprefix("v").split("."))
-
-
-@pytest.mark.live_contact("tests/ci/fixtures/omnimarket_release_tags_omn17427.json")
-def test_the_release_step_picks_the_highest_semver_tag_from_the_recorded_listing(
-    recorded_response: dict[str, Any], tmp_path: Path
-) -> None:
-    stdout = str(recorded_response["stdout"])
-    tags = [
-        line.split("refs/tags/", 1)[1]
-        for line in stdout.splitlines()
-        if "refs/tags/" in line
-        and re.fullmatch(r"v\d+\.\d+\.\d+", line.split("refs/tags/", 1)[1])
-    ]
-    expected = max(tags, key=_semver)
-    # The recorded listing is in lexical order, where v0.4.99 sorts last: a
-    # plain sort would boot a release two hundred versions old.
-    assert sorted(tags)[-1] != expected
-    proc, github_env = _release(tmp_path, stdout)
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert github_env.read_text(encoding="utf-8").strip() == (
-        f"OMNIMARKET_RELEASE_REF={expected}"
-    )
-
-
-def test_the_release_step_fails_when_no_release_tag_resolves(tmp_path: Path) -> None:
-    proc, github_env = _release(tmp_path, "")
-    assert proc.returncode != 0
-    assert github_env.read_text(encoding="utf-8") == ""
+def test_market_release_and_delegate_assertions_moved_out_of_the_infra_gate() -> None:
+    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"][_JOB]
+    names = [step.get("name") for step in job["steps"]]
+    assert "Dev-lane class -- resolve the current omnimarket release" not in names
+    assert "Delegate-skill command topic has a live consumer group" not in names
+    assert "DELEGATE_COMMAND_TOPIC" not in job["env"]
+    for name in (_REBUILD, _RECREATE):
+        assert "OMNIMARKET_REF" not in _step(name)["run"]
+        assert "OMNIMARKET_RELEASE_REF" not in _step(name)["run"]
+    assert 'm.version("omnibase_infra")' in _step(_RECREATE)["run"]
+    assert 'm.version("omnimarket")' not in _step(_RECREATE)["run"]
+    # The composed gate belongs to omnimarket; its implementation cannot be
+    # checked from this repository. Its owning repo must run those tests.
