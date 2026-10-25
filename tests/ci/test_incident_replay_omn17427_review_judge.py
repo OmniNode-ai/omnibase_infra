@@ -53,6 +53,14 @@ _LINE_RE = re.compile(
 )
 # The rejection's words are not in the log; the verdict under test does not
 # depend on them.
+HEAD = "a" * 40
+
+
+@pytest.fixture(autouse=True)
+def pr_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEAD_SHA", HEAD)
+
+
 _REJECTION = "rejected: placeholder, the job log does not carry the reply text"
 
 
@@ -110,7 +118,7 @@ def _verdict(thread: dict[str, Any], author: str) -> dict[str, Any]:
     return {
         "body": (
             f"<!-- {gate.JUDGE_MARKER} rejection={rejection['databaseId']} "
-            f"digest={gate.body_digest(rejection['body'])} verdict=accepted "
+            f"digest={gate.body_digest(rejection['body'])} head={HEAD} verdict=accepted "
             "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
             "**Review bot: rejection accepted**\n\n> the finding misreads the file\n"
         ),

@@ -50,6 +50,14 @@ _FIRST_BODY = (
 )
 
 
+HEAD = "a" * 40
+
+
+@pytest.fixture(autouse=True)
+def pr_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEAD_SHA", HEAD)
+
+
 REPLY_ID_BASE = 100
 
 
@@ -76,7 +84,7 @@ def _verdict(
         "databaseId": 900 + rejection_index,
         "body": (
             f"<!-- {gate.JUDGE_MARKER} rejection={REPLY_ID_BASE + rejection_index} "
-            f"digest={gate.body_digest(rejection_body)} verdict={verdict} "
+            f"digest={gate.body_digest(rejection_body)} head={HEAD} verdict={verdict} "
             "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
             f"**Review bot: rejection {verdict}**\n\n> {sentence}\n\ntail"
         ),
@@ -557,7 +565,7 @@ class TestRunGate:
         monkeypatch.setenv("GITHUB_TOKEN", "t")
         monkeypatch.setenv("REPO", "OmniNode-ai/omnibase_infra")
         monkeypatch.setenv("PR_NUMBER", "1")
-        monkeypatch.setenv("HEAD_SHA", "h" * 40)
+        monkeypatch.setenv("HEAD_SHA", HEAD)
         record = tmp_path / "records.jsonl"
         monkeypatch.setenv("DISPOSITION_RECORD_PATH", str(record))
         monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)

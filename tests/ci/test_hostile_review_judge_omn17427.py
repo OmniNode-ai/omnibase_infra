@@ -138,7 +138,7 @@ def head_repo(tmp_path: Path) -> dict[str, Any]:
     (repo / "src" / "a.py").write_text("def f(x):\n    check(x)\n    return use(x)\n")
     git("add", "-A")
     git("commit", "-qm", "head")
-    return {"dir": repo, "head": git("rev-parse", "HEAD")}
+    return {"dir": repo, "head": git("rev-parse", "HEAD"), "git": git}
 
 
 @pytest.fixture
@@ -277,6 +277,80 @@ class TestPendingFile:
 
 
 class TestPostedVerdicts:
+    def test_a_push_invalidates_acceptance_and_queues_a_new_judgement(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        thread["comments"]["nodes"].append(_as_read_back(github.posts[-1][2]["body"]))
+        assert _gate([thread], env)[0] == []
+
+        # Make the finding true without editing the rejection or its comment id.
+        (head_repo["dir"] / "src/a.py").write_text("def f(x):\n    return use(x)\n")
+        head_repo["git"]("add", "src/a.py")
+        head_repo["git"]("commit", "-qm", "remove input validation")
+        head_repo["head"] = head_repo["git"]("rev-parse", "HEAD")
+        monkeypatch.setenv("HEAD_SHA", head_repo["head"])
+        blocking, cleared = _gate([thread], env)
+        assert cleared == []
+        assert blocking[0].judge_verdict == "unjudged"
+        batch = _pending(env, head_repo, monkeypatch, [thread])
+        assert [item["key"] for item in batch["items"]] == ["22"]
+        assert "check(x)" not in batch["items"][0]["excerpt"]
+
+        # A new judgement at this head can clear it again.
+        _judged(env, _record())
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        thread["comments"]["nodes"].append(_as_read_back(github.posts[-1][2]["body"]))
+        assert _gate([thread], env)[0] == []
+
+    def test_a_legacy_verdict_without_a_head_cannot_clear_a_finding(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        body = (
+            f"<!-- {gate.JUDGE_MARKER} rejection=22 digest={gate.body_digest(REJ)} "
+            f"verdict=accepted judge=rejection-judge identity={OPUS} -->\n"
+            "> the caller validates this input"
+        )
+        thread["comments"]["nodes"].append(_as_read_back(body))
+        assert _gate([thread], env)[1] == []
+        assert len(gate.pending_rejections([thread])[0]) == 1
+
+    def test_a_push_during_judging_does_not_relabel_the_old_verdict(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        original_head = head_repo["head"]
+        monkeypatch.setenv("HEAD_SHA", "b" * 40)
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        body = github.posts[0][2]["body"]
+        assert gate.parse_judge_reply(body)["head"] == original_head
+        thread["comments"]["nodes"].append(_as_read_back(body))
+        assert _gate([thread], env)[1] == []
+        monkeypatch.delenv("HEAD_SHA")
+        assert _gate([thread], env)[1] == []
+
+    def test_a_pending_record_without_its_judged_head_posts_nothing(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _pending(env, head_repo, monkeypatch, [_thread(_rejection())])
+        status = json.loads(env["status"].read_text())
+        del status["replies"]["22"]["head_sha"]
+        env["status"].write_text(json.dumps(status))
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 1
+        assert github.posts == []
+        assert "head SHA" in json.loads(env["status"].read_text())["notes"]["22"]
+
     def test_an_accepted_rejection_clears_the_gate(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:

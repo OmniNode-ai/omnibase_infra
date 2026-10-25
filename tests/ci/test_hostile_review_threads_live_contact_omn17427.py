@@ -200,6 +200,7 @@ def test_the_fixed_poster_made_threads_and_the_gate_held_them(
 )
 def test_the_gate_does_not_depend_on_resolving_a_thread(
     recorded_response: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """GitHub refuses resolveReviewThread to the workflow token, so the reply is the record."""
     response = cast("dict[str, Any]", recorded_response["response"])
@@ -214,6 +215,8 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
     # the review bot judges rejections (OMN-17427) that reply alone blocks; the
     # bot's accepted verdict, under the workflow identity, clears the thread
     # with no resolve call.
+    head = "a" * 40
+    monkeypatch.setenv("HEAD_SHA", head)
     rejection = "rejected: the fixed-in check needs this PR's commit history"
     thread: dict[str, Any] = {
         "id": "PRRT_kwDOPuAjtM6u01K4",
@@ -267,7 +270,7 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
         {
             "body": (
                 f"<!-- {gate.JUDGE_MARKER} rejection=4338600001 "
-                f"digest={gate.body_digest(rejection)} verdict=accepted "
+                f"digest={gate.body_digest(rejection)} head={head} verdict=accepted "
                 "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
                 "**Review bot: rejection accepted**\n\n> the gate reads git history\n"
             ),
