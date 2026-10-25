@@ -9,7 +9,6 @@ Part of OMN-1976: Contract dependency materialization.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -22,7 +21,7 @@ from omnibase_infra.enums.enum_infra_resource_type import (
     EnumInfraResourceType,
 )
 from omnibase_infra.enums.enum_kafka_acks import EnumKafkaAcks
-from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.errors import InfraTimeoutError, ProtocolConfigurationError
 from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
 from omnibase_infra.runtime.models.model_http_client_config import (
     ModelHttpClientConfig,
@@ -919,9 +918,10 @@ class TestProviderKafkaProducerTimeout:
             )
             provider = ProviderKafkaProducer(config)
 
-            with pytest.raises(asyncio.TimeoutError):
+            with pytest.raises(InfraTimeoutError) as raised:
                 await provider.create()
 
+            assert isinstance(raised.value.__cause__, TimeoutError)
             # 1 initial attempt + the 3 declared retries, each torn down.
             assert mock_producer.start.await_count == 4
             assert mock_producer.stop.await_count == 4

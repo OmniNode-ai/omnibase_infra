@@ -861,7 +861,15 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
         return DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-    return _LANE_CONFIGS[lane]
+    config = _LANE_CONFIGS[lane]
+    if "effects" in lane_folded_profiles(lane):
+        targets = list(config.runtime_health_targets)
+        index = SERVICE_HEALTH_TARGET_INDEX["runtime-effects"]
+        _, port = targets[index]
+        main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
+        targets[index] = (main, port)
+        return config.model_copy(update={"runtime_health_targets": tuple(targets)})
+    return config
 
 
 def lane_runs_phase(lane: EnumRuntimeLane, phase: EnumInstancePhase) -> bool:
@@ -892,6 +900,25 @@ SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
     "runtime-effects": 1,
 }
 
+LANE_POLICY_PREFIX: dict[EnumRuntimeLane, str] = {
+    EnumRuntimeLane.STABILITY_TEST: "STABILITY_TEST",
+}
+
+
+def lane_folded_profiles(
+    lane: EnumRuntimeLane, policy_env: Mapping[str, str] | None = None
+) -> frozenset[str]:
+    """Return the profiles folded into a lane's main runtime."""
+    prefix = LANE_POLICY_PREFIX.get(lane)
+    if prefix is None:
+        return frozenset()
+    env = _load_runtime_policy_env() if policy_env is None else policy_env
+    return frozenset(
+        entry.strip().lower()
+        for entry in env.get(f"{prefix}_RUNTIME_MAIN_FOLDED_PROFILES", "").split(",")
+        if entry.strip()
+    )
+
 
 def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
     """Return the lane-qualified container name for a canonical service name.
@@ -902,6 +929,10 @@ def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
     regardless of which service the request actually targeted, wrongly
     rejecting a runtime-effects command carrying its own (genuinely
     stability-proven) effects digest.
+
+    OMN-21288: a service whose profile the lane folds into its main runtime
+    (``lane_folded_profiles``) resolves to the main runtime's container, so
+    its digest is the main runtime's; an unfolded one reads its own container.
     """
     index = SERVICE_HEALTH_TARGET_INDEX.get(service)
     if index is None:
@@ -909,6 +940,8 @@ def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
             f"no runtime_health_targets mapping for service {service!r}; known "
             f"services: {sorted(SERVICE_HEALTH_TARGET_INDEX)}"
         )
+    # lane_config_for already maps folded health targets to main. Resolve once
+    # so a policy-file update cannot split this lookup across two snapshots.
     container_name, _ = lane_config_for(lane).runtime_health_targets[index]
     return container_name
 
@@ -4952,6 +4985,8 @@ class DeployExecutor:
         stability-test for the REQUESTED service — resolved per-service
         (OMN-15181 round 4, Finding 11) via the single shared
         ``_health_target_container`` mapping, no second hardcoded map.
+        A folded profile reads the main runtime's container and digest; an
+        unfolded profile reads its own container and digest.
         Defaults to ``"omninode-runtime"`` (the pre-round-4 behavior) when no
         service is given. Returns ``None`` (fail-closed via the caller) when
         the stability-test container for that service cannot be inspected.
@@ -4971,10 +5006,9 @@ class DeployExecutor:
         FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
         before health checks so a lane is never marked healthy while serving an
         artifact that does not match the pinned digest. Resolved per-service
-        (OMN-15181 round 4, Finding 11) so a targeted runtime-effects deploy is
-        verified against its own container, not the runtime container by
-        default (``service`` defaults to ``"omninode-runtime"``, the
-        pre-round-4 behavior, when the caller does not name one).
+        (OMN-15181 round 4, Finding 11): a folded profile reads the main runtime's
+        container and digest, and an unfolded one reads its own container.
+        ``service`` defaults to ``"omninode-runtime"`` when not specified.
         """
         container = _health_target_container(lane, service)
         observed = _container_image_id(container)

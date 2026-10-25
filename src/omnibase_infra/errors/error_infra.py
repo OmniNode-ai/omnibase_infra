@@ -80,7 +80,7 @@ from __future__ import annotations
 import hashlib
 import traceback
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumCoreErrorCode
 from omnibase_core.models.errors import ModelOnexError
@@ -1109,3 +1109,17 @@ __all__: list[str] = [
     "SecretResolutionError",
     "UnknownHandlerTypeError",
 ]
+
+
+class WorkLedgerQueryError(RuntimeHostError):
+    """The node's answer is an error or violates the read contract."""
+
+    def __init__(self, message: str, *, correlation_id: UUID | None = None) -> None:
+        super().__init__(
+            message,
+            context=ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="work_ledger_query",
+                correlation_id=correlation_id,
+            ),
+        )

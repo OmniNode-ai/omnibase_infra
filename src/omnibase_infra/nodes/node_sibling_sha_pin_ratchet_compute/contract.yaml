@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_sibling_sha_pin_ratchet_compute"
+contract_name: "node_sibling_sha_pin_ratchet_compute"
+node_name: "node_sibling_sha_pin_ratchet_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  Shrink-only ratchet on commit-sha pins of internal siblings (OMN-18594, RULING 2026-10-23T12:01:59Z no commit-sha pins, RULING 2026-10-23T17:13:55Z no pins). Counts, per tracked file, the lines that pin an OmniNode sibling to a 40-hex commit: a git URL or reusable-workflow ref OmniNode-ai/<repo>...@<sha> or #<sha>, a workflow checkout ref: <sha>, a pre-commit rev: <sha>, a pin-map entry <sibling>: <sha>, and a uv source rev = "<sha>". The baseline is the base ref itself: a file that holds more pin lines than it held at the base fails, so today's pins are the baseline and the count can only fall, with no baseline file to raise. Pure: the candidate lines of both trees arrive on the request.
+
+input_model:
+  name: "ModelSiblingShaPinRatchetInput"
+  module: "omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.models.model_sibling_sha_pin_ratchet_input"
+  description: "Candidate 40-hex lines of the base ref and of the changed tree."
+output_model:
+  name: "ModelValidationReport"
+  module: "omnibase_core.models.validation.model_validation_report"
+  description: "The canonical OMN-2362 validation report."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "sibling_sha_pin_ratchet.check"
+      handler_type: "sibling_sha_pin_ratchet_check"
+      handler:
+        name: "NodeSiblingShaPinRatchetCompute"
+        module: "omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.handler"
+      supported_operations:
+        - "sibling_sha_pin_ratchet.check"
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
+  idempotent: true
+  timeout_ms: 30000
+metadata:
+  description: "Pure COMPUTE node: the count of internal-sibling commit-sha pins can only fall."
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-18594"
+  tags:
+    - compute
+    - validator
+    - ratchet
+    - pure-function
