@@ -131,8 +131,8 @@ async def test_request_response_wiring_passes_msk_auth_kwargs(
     monkeypatch.setattr(module, "AIOKafkaConsumer", _FakeAiokafkaClient)
     monkeypatch.setattr(
         module,
-        "build_aiokafka_auth_kwargs_from_env",
-        lambda: {"security_protocol": "SASL_SSL"},
+        "build_aiokafka_auth_kwargs_for",
+        lambda _bootstrap: {"security_protocol": "SASL_SSL"},
     )
     event_bus = MagicMock(spec=ProtocolEventBusLike)
     event_bus.publish = AsyncMock()

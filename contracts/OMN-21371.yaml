@@ -35,6 +35,15 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q -n 0 -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21371-ac1-standalone-lane-overlay-carriers
+    description: >-
+      Every standalone lane recipe mounts its overlay on exactly the services that name a non-empty BIFROST_LANE_OVERLAY_PATH; the collaborator lane writer is one, and the merge queue failed this test in Split 1/15 while it expected only the two runtimes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_bifrost_lane_overlay.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn21371-ac2-lane-overlay-selection
     description: >-
       The lane_overlay selection over the unit table test and the collaborator lane render test passes; the merged state is read after landing.
