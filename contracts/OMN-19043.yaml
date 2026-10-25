@@ -81,6 +81,15 @@ dod_evidence:
         check_value: >-
           uv run pytest -q --no-cov tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/cli/test_delegate_transport_terminal_omn18925.py -k "TestUnreachableBrokerFailsFastAndTyped or TestAPermanentFailureIsNotRetried"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19043-real-client-timeout"
+    description: >-
+      Real aiokafka producers on both surfaces connect to a local TCP peer that reads Kafka requests but never replies. Zero and two declared retries produce one and three observed connections respectively, each closed by client cleanup. Exhaustion raises InfraTimeoutError with the original timeout cause and deadline; the provider also reports the attempt count and total bound. No producer or retry helper is mocked.
+    source: "manual"
+    binds_ac: ["AC2", "AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/integration/event_bus/test_kafka_connect_timeout_omn19043.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-provider-timeout-deploy-probe"
     description: >-
       Read the published provider source at the checked-out commit from the public repository. Its TimeoutError handler must raise InfraTimeoutError with a ModelTimeoutErrorContext. This hosted-runner probe fails when the provider still propagates the bare timeout; it verifies published source rather than a live broker deployment.
