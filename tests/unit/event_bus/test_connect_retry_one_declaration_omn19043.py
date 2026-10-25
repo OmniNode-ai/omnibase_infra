@@ -14,11 +14,12 @@ of attempts, which is the drift the ticket's AC3 falsifier names.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
-from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraTimeoutError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
 from omnibase_infra.event_bus.models.config.model_kafka_event_bus_config import (
     ModelKafkaEventBusConfig,
@@ -54,15 +55,34 @@ async def test_provider_surface_makes_the_declared_number_of_attempts() -> None:
     producer = _NeverAnswers()
 
     with patch("aiokafka.AIOKafkaProducer", return_value=producer):
-        with pytest.raises((asyncio.TimeoutError, InfraTimeoutError)):
-            await ProviderKafkaProducer(
-                ModelKafkaProducerConfig(
-                    bootstrap_servers="silent-broker:19092",
-                    timeout_seconds=1.0,
-                )
-            ).create()
+        with patch(
+            "omnibase_infra.event_bus.kafka_connect_retry.asyncio.sleep",
+            wraps=asyncio.sleep,
+        ) as sleep:
+            with pytest.raises(InfraTimeoutError, match=r"1\.0s") as raised:
+                await ProviderKafkaProducer(
+                    ModelKafkaProducerConfig(
+                        bootstrap_servers="silent-broker:19092",
+                        timeout_seconds=1.0,
+                    )
+                ).create()
 
     assert producer.calls == 3  # 1 + the declared 2 retries
+    # The long sleeps belong to the stalled producer and are cancelled by
+    # each deadline. The two intervening sleeps must be awaited in order.
+    assert sleep.await_args_list == [
+        call(30.0),
+        call(0.001),
+        call(30.0),
+        call(0.002),
+        call(30.0),
+    ]
+    assert raised.value.model.context["timeout_seconds"] == 1.0
+    assert raised.value.model.context["connect_attempts"] == 3
+    assert raised.value.model.context["connect_bound_seconds"] == pytest.approx(3.003)
+    assert raised.value.model.context["transport_type"] == EnumInfraTransportType.KAFKA
+    assert isinstance(raised.value.__cause__, TimeoutError)
+    assert producer.stop.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -78,7 +98,22 @@ async def test_event_bus_surface_makes_the_declared_number_of_attempts() -> None
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaProducer",
         return_value=producer,
     ):
-        with pytest.raises((InfraConnectionError, InfraTimeoutError)):
-            await bus.start()
+        with patch(
+            "omnibase_infra.event_bus.kafka_connect_retry.asyncio.sleep",
+            wraps=asyncio.sleep,
+        ) as sleep:
+            with pytest.raises(InfraTimeoutError, match="1s") as raised:
+                await bus.start()
 
     assert producer.calls == 3  # the same dial, the same count
+    assert sleep.await_args_list == [
+        call(30.0),
+        call(0.001),
+        call(30.0),
+        call(0.002),
+        call(30.0),
+    ]
+    assert raised.value.model.context["timeout_seconds"] == 1
+    assert raised.value.model.context["transport_type"] == EnumInfraTransportType.KAFKA
+    assert isinstance(raised.value.__cause__, TimeoutError)
+    assert producer.stop.await_count == 3

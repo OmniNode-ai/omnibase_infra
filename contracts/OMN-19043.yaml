@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-19043"
 title: "A transport-class dispatch failure emits no typed terminal, so the caller gets an exception instead of a receipt"
 summary: >-
-  Coverage-only evidence for the merged fix (omnibase_infra#3934, 3d7c41f6). A delegate dispatch that cannot reach the broker writes a run directory whose receipt.json carries a typed transport refusal. Both Kafka connect surfaces retry with bounded backoff from one declared policy, and an unreachable broker is refused typed and inside the bound. Every bound check fails with the fix's source absent (its parent commit).
+  Evidence for the transport terminal and shared connect retry introduced in omnibase_infra#3934, with a provider timeout correction in this PR. A delegate dispatch that cannot reach the broker writes a run directory whose receipt.json carries a typed transport refusal. Both Kafka connect surfaces retry with bounded backoff from one declared policy, and an unreachable broker is refused typed and inside the bound. The provider now translates an exhausted connect timeout into InfraTimeoutError with its per-attempt deadline and total retry bound; the shared-dial tests assert the awaited exponential backoff on both surfaces.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -37,7 +37,7 @@ emergency_bypass:
 dod_evidence:
   - id: "dod-omn19043-ac1-transport-receipt-on-disk"
     description: >-
-      A transport-class receipt is written through the CLI run writer: receipt.json, run.json and result.txt exist, the cause names the transport (not a provider), and the record is distinguishable from a running and from a quality failure. A non-transport unresolvable terminal still raises. Fails at the fix's parent, which has no transport refusal model.
+      A transport-class receipt is written through the CLI run writer: receipt.json, run.json and result.txt exist, the cause names the transport (not a provider), and the record is distinguishable from a running and from a quality failure. A non-transport unresolvable terminal still raises.
     source: "manual"
     binds_ac: ["AC1"]
     checks:
@@ -47,7 +47,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-ac2-connect-survives-a-stall"
     description: >-
-      Both connect surfaces (ProviderKafkaProducer and EventBusKafka.start) connect on the second attempt after a first attempt outruns its deadline, and the default bound exceeds the measured 17.222 s stall. Exhaustion re-raises the original typed exception. Fails at the fix's parent, where connect was single-shot.
+      Both connect surfaces (ProviderKafkaProducer and EventBusKafka.start) connect on the second attempt after a first attempt outruns its deadline, and the default bound exceeds the measured 17.222 s stall. Provider exhaustion reports InfraTimeoutError with the deadline, total bound and original TimeoutError cause. The shared helper continues to preserve the original exception for its caller to translate.
     source: "manual"
     binds_ac: ["AC2"]
     checks:
@@ -55,9 +55,12 @@ dod_evidence:
         check_value: >-
           uv run pytest -q --no-cov tests/unit/event_bus/test_kafka_connect_retry_omn18925.py -k "TestConnectRetriesAcrossAStall or survives_the_measured_stall or TestRetryHelperBoundaries"
         cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/event_bus/test_connect_retry_one_declaration_omn19043.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-ac3-one-retry-declaration"
     description: >-
-      One KAFKA_MAX_RETRY_ATTEMPTS value drives both surfaces: against a broker that never answers, the DI producer and the event bus each make exactly 1 + the declared retries, and the policy model resolves the same dials for both. The circuit breaker counts one failure per exhausted start. At the fix's parent both surfaces make one attempt, so the new test fails.
+      One KAFKA_MAX_RETRY_ATTEMPTS value drives both surfaces: against a broker that never answers, the DI producer and the event bus each make exactly 1 + the declared retries, and the policy model resolves the same dials for both. Both surfaces await backoffs of 0.001 and 0.002 seconds between the three attempts and report InfraTimeoutError with the configured deadline. The circuit breaker counts one failure per exhausted start.
     source: "manual"
     binds_ac: ["AC3"]
     checks:
@@ -70,11 +73,21 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-ac4-unreachable-broker-fails-fast"
     description: >-
-      Against a real closed TCP port, EventBusKafka.start and ProviderKafkaProducer.create refuse with a typed error well inside the policy bound, and a locus-probe refusal still writes its receipt. A permanent (auth) failure is not retried. Fails at the fix's parent, which has neither the policy nor the refusal writer.
+      Against a real closed TCP port, EventBusKafka.start and ProviderKafkaProducer.create refuse with a typed error well inside the policy bound, and a locus-probe refusal still writes its receipt. A permanent (auth) failure is not retried.
     source: "manual"
     binds_ac: ["AC4"]
     checks:
       - check_type: "test_passes"
         check_value: >-
           uv run pytest -q --no-cov tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/cli/test_delegate_transport_terminal_omn18925.py -k "TestUnreachableBrokerFailsFastAndTyped or TestAPermanentFailureIsNotRetried"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19043-provider-timeout-deploy-probe"
+    description: >-
+      Read the published provider source at the checked-out commit from the public repository. Its TimeoutError handler must raise InfraTimeoutError with a ModelTimeoutErrorContext. This hosted-runner probe fails when the provider still propagates the bare timeout; it verifies published source rather than a live broker deployment.
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "command"
+        check_value: >-
+          curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/runtime/providers/provider_kafka_producer.py" | python -c 'import ast, sys; tree = ast.parse(sys.stdin.read()); handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id == "TimeoutError"]; assert any(isinstance(r, ast.Raise) and isinstance(r.exc, ast.Call) and isinstance(r.exc.func, ast.Name) and r.exc.func.id == "InfraTimeoutError" and any(k.arg == "context" and isinstance(k.value, ast.Call) and isinstance(k.value.func, ast.Name) and k.value.func.id == "ModelTimeoutErrorContext" for k in r.exc.keywords) for h in handlers for r in ast.walk(h)), "published provider has no typed connect timeout handler"'
         cwd: "${OMNI_HOME}/omnibase_infra"
