@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from aiokafka.structs import TopicPartition
 from click.testing import CliRunner
 
 from omnibase_infra.cli.cli_ledger import ledger_group
@@ -26,7 +27,12 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def wire(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state = SimpleNamespace(
-        sent=[], assigned=False, consumer_options={}, producer_options={}
+        sent=[],
+        assigned=False,
+        consumer_options={},
+        producer_options={},
+        consumer_created=0,
+        producer_created=0,
     )
     consumer = AsyncMock()
     producer = AsyncMock()
@@ -38,9 +44,12 @@ def wire(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     consumer.position.side_effect = position
 
-    async def send(topic: str, value: bytes, *, key: bytes) -> None:
+    async def send(
+        topic: str, value: bytes, *, key: bytes, headers: object
+    ) -> SimpleNamespace:
         assert state.assigned, "publish raced the reply consumer's starting position"
         state.sent.append((topic, json.loads(value), key))
+        return SimpleNamespace(topic=topic, partition=0, offset=0)
 
     producer.send_and_wait.side_effect = send
 
@@ -64,20 +73,35 @@ def wire(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     consumer.getone.side_effect = getone
 
+    async def getmany(**kwargs: object) -> dict:
+        state.assigned = True
+        if not state.sent:
+            return {}
+        reply = await consumer.getone()
+        topic = load_work_ledger_query_client_config().completed_topic
+        record = SimpleNamespace(
+            value=reply.value, topic=topic, partition=0, offset=0, key=None, headers=[]
+        )
+        return {TopicPartition(topic, 0): [record]}
+
+    consumer.getmany.side_effect = getmany
+
     def make_consumer(*args: object, **kwargs: object) -> AsyncMock:
+        state.consumer_created += 1
         state.consumer_options = kwargs
         return consumer
 
     def make_producer(**kwargs: object) -> AsyncMock:
+        state.producer_created += 1
         state.producer_options = kwargs
         return producer
 
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.AIOKafkaConsumer",
+        "omnibase_infra.event_bus.kafka_transport.AIOKafkaConsumer",
         make_consumer,
     )
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.AIOKafkaProducer",
+        "omnibase_infra.event_bus.kafka_transport.AIOKafkaProducer",
         make_producer,
     )
     state.consumer, state.producer = consumer, producer
@@ -201,6 +225,7 @@ def test_stdin_refuses_non_object_input_before_connecting(
     assert result.exit_code == 2
     assert "JSON object" in result.output
     assert not wire.sent
+    assert wire.consumer_created == wire.producer_created == 0
 
 
 def test_stdin_refuses_filter_overrides(wire: SimpleNamespace) -> None:
@@ -210,6 +235,7 @@ def test_stdin_refuses_filter_overrides(wire: SimpleNamespace) -> None:
     assert result.exit_code == 2
     assert "filter options" in result.output
     assert not wire.sent
+    assert wire.consumer_created == wire.producer_created == 0
 
 
 async def test_missing_freshness_is_refused(wire: SimpleNamespace) -> None:
@@ -255,3 +281,117 @@ def test_cli_refusal_is_nonzero_and_cannot_leak_a_credential(
     assert not result.stdout
     assert "refused (RuntimeError)" in result.stderr
     assert "synthetic-secret" not in result.output
+
+
+@pytest.mark.parametrize("timeout_s", [0, -1, float("inf"), float("nan")])
+async def test_invalid_timeout_refused_before_connecting(
+    timeout_s: float, wire: SimpleNamespace
+) -> None:
+    client = HandlerWorkLedgerQuery(
+        ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092")
+    )
+    with pytest.raises(ValueError, match="finite and positive"):
+        await client.query({"query": "rows"}, timeout_s=timeout_s)
+    assert wire.consumer_created == wire.producer_created == 0
+
+
+@pytest.mark.parametrize("timeout_s", ["0", "-1", "inf", "nan"])
+def test_cli_invalid_timeout_is_usage_error(
+    timeout_s: str, wire: SimpleNamespace
+) -> None:
+    result = CliRunner().invoke(ledger_group, ["query", "--timeout", timeout_s])
+    assert result.exit_code == 2
+    assert not result.stdout
+    assert wire.consumer_created == wire.producer_created == 0
+
+
+@pytest.mark.parametrize("correlation_id", ["not-a-uuid", 17])
+async def test_invalid_correlation_is_domain_error_before_connecting(
+    correlation_id: object, wire: SimpleNamespace
+) -> None:
+    client = HandlerWorkLedgerQuery(
+        ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092")
+    )
+    with pytest.raises(WorkLedgerQueryError, match="UUID string"):
+        await client.query({"query": "rows", "correlation_id": correlation_id})
+    assert wire.consumer_created == wire.producer_created == 0
+
+
+def test_stdin_size_limit_refuses_before_connecting(wire: SimpleNamespace) -> None:
+    result = CliRunner().invoke(
+        ledger_group, ["query", "--stdin"], input=" " * 1_048_577
+    )
+    assert result.exit_code == 2
+    assert "exceeds 1048576" in result.output
+    assert wire.consumer_created == wire.producer_created == 0
+
+
+@pytest.mark.parametrize(
+    ("override", "error"),
+    [({"query": "inbox"}, "query mismatch"), ({"parity": None}, "freshness or parity")],
+)
+async def test_reply_contract_is_enforced(
+    override: dict, error: str, wire: SimpleNamespace
+) -> None:
+    wire.reply_override = override
+    client = HandlerWorkLedgerQuery(
+        ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092")
+    )
+    with pytest.raises(WorkLedgerQueryError, match=error):
+        await client.query({"query": "rows"})
+    wire.consumer.stop.assert_awaited_once()
+    wire.producer.stop.assert_awaited_once()
+
+
+async def test_correlated_non_object_payload_is_refused(wire: SimpleNamespace) -> None:
+    async def getone() -> SimpleNamespace:
+        return SimpleNamespace(
+            value=json.dumps(
+                {"correlation_id": wire.sent[0][1]["correlation_id"], "payload": []}
+            ).encode()
+        )
+
+    wire.consumer.getone.side_effect = getone
+    client = HandlerWorkLedgerQuery(
+        ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092")
+    )
+    with pytest.raises(WorkLedgerQueryError, match="object payload"):
+        await client.query({"query": "rows"})
+
+
+def test_cli_inbox_and_repeated_kinds_preserve_request(
+    monkeypatch: pytest.MonkeyPatch, wire: SimpleNamespace
+) -> None:
+    monkeypatch.setattr(
+        "omnibase_infra.handlers.handler_work_ledger_query.resolve_work_ledger_query_transport",
+        lambda lane: ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092"),
+    )
+    result = CliRunner().invoke(
+        ledger_group,
+        [
+            "query",
+            "--query",
+            "inbox",
+            "--lane",
+            "a-lane",
+            "--until",
+            "2026-10-25T00:00:00Z",
+            "--kind",
+            "STATUS",
+            "--kind",
+            "CLAIM",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    request = wire.sent[0][1]["payload"]
+    assert request["lanes"] == ["a-lane"]
+    assert "lane" not in request
+    assert request["until"] == "2026-10-25T00:00:00Z"
+    assert request["kinds"] == ["STATUS", "CLAIM"]
+
+
+def test_cli_inbox_requires_lane_before_connecting(wire: SimpleNamespace) -> None:
+    result = CliRunner().invoke(ledger_group, ["query", "--query", "inbox"])
+    assert result.exit_code == 2
+    assert "requires --lane" in result.output
+    assert wire.consumer_created == wire.producer_created == 0

@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import UTC
 from importlib.resources import files
 from uuid import UUID, uuid4
 
 import click
 import yaml
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
@@ -28,9 +28,10 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
+    EnumKafkaAcks,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
+from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.models.model_work_ledger_query_cli_options import (
     ModelWorkLedgerQueryCliOptions,
@@ -38,9 +39,9 @@ from omnibase_infra.models.model_work_ledger_query_cli_options import (
 from omnibase_infra.models.model_work_ledger_query_client_config import (
     ModelWorkLedgerQueryClientConfig,
 )
-from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
+_MAX_STDIN_CHARS = 1_048_576
 
 
 class WorkLedgerQueryError(RuntimeHostError):
@@ -100,17 +101,22 @@ class HandlerWorkLedgerQuery:
         supplied_id = request.get("correlation_id")
         if supplied_id is not None and not isinstance(supplied_id, str):
             raise WorkLedgerQueryError("Request correlation_id must be a UUID string")
-        correlation_id = UUID(supplied_id) if supplied_id is not None else uuid4()
+        try:
+            correlation_id = UUID(supplied_id) if supplied_id is not None else uuid4()
+        except ValueError as exc:
+            raise WorkLedgerQueryError(
+                "Request correlation_id must be a UUID string"
+            ) from exc
         kind = request.get("query")
         if kind not in self._contract.queries:
             raise WorkLedgerQueryError(
                 "Unsupported work-ledger query", correlation_id=correlation_id
             )
-        if timeout_s <= 0:
-            raise ValueError("timeout_s must be positive")
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("timeout_s must be finite and positive")
         payload = {**request, "correlation_id": str(correlation_id)}
-        command = apply_topic_namespace(self._contract.command_topic)
-        completed = apply_topic_namespace(self._contract.completed_topic)
+        command = self._contract.command_topic
+        completed = self._contract.completed_topic
         parts = self._contract.command_topic.split(".")
         envelope = ModelEventEnvelope[dict[str, JsonValue]](
             payload=payload,
@@ -118,33 +124,30 @@ class HandlerWorkLedgerQuery:
             event_type=f"{parts[2]}.{parts[3]}",
             tenant_id=None,
         )
-        auth = build_aiokafka_auth_kwargs(self._transport)
-        consumer = AIOKafkaConsumer(
-            completed,
-            bootstrap_servers=self._transport.bootstrap_servers,
-            group_id=self._contract.consumer_group_prefix + uuid4().hex,
-            enable_auto_commit=False,
+        transport = KafkaTransport(
+            config=self._transport.model_copy(
+                update={"acks": EnumKafkaAcks.ALL, "enable_idempotence": False}
+            ),
+            group=self._contract.consumer_group_prefix + uuid4().hex,
+            topics=(completed,),
             auto_offset_reset="latest",
-            **auth,
-        )
-        producer = AIOKafkaProducer(
-            bootstrap_servers=self._transport.bootstrap_servers, acks="all", **auth
         )
         try:
             async with asyncio.timeout(timeout_s):
-                await consumer.start()
-                # start() joins the group. position() resolves the initial
-                # latest offset BEFORE send, so a fast reply cannot be skipped.
-                for partition in consumer.assignment():
-                    await consumer.position(partition)
-                await producer.start()
-                await producer.send_and_wait(
+                # The shared transport joins and primes the reply consumer
+                # before returning, establishing latest offsets before send.
+                await transport.start()
+                await transport.send(
                     command,
-                    envelope.model_dump_json().encode("utf-8"),
                     key=str(correlation_id).encode("utf-8"),
+                    value=envelope.model_dump_json().encode("utf-8"),
+                    headers={},
                 )
                 while True:
-                    message = await consumer.getone()
+                    messages = await transport.poll(max_messages=1, timeout_ms=1000)
+                    if not messages:
+                        continue
+                    message = messages[0]
                     try:
                         raw = _JSON_OBJECT.validate_json(message.value)
                     except ValueError:
@@ -184,11 +187,7 @@ class HandlerWorkLedgerQuery:
                         )
                     return answer
         finally:
-            # Both may have partially started, even if startup raised.
-            try:
-                await producer.stop()
-            finally:
-                await consumer.stop()
+            await transport.close()
 
 
 def resolve_work_ledger_query_transport(lane: str) -> ModelKafkaEventBusConfig:
@@ -260,6 +259,9 @@ def _read(request: dict[str, JsonValue], bus_lane: str, timeout_s: float) -> Non
 @click.pass_context
 def ledger_query(context: click.Context, **options: object) -> None:
     """Query work_ledger_rows through the lab read node; print its full JSON answer."""
+    timeout_s = options["timeout_s"]
+    if not isinstance(timeout_s, (int, float)) or not math.isfinite(timeout_s):
+        raise click.UsageError("--timeout must be finite and positive")
     args = ModelWorkLedgerQueryCliOptions.model_validate(options)
     if args.read_stdin:
         # The existing ledger-ask/catchup source adapter owns the request and
@@ -283,9 +285,12 @@ def ledger_query(context: click.Context, **options: object) -> None:
                 "--stdin cannot be combined with query filter options"
             )
         try:
-            stdin_request = TypeAdapter(dict[str, JsonValue]).validate_json(
-                click.get_text_stream("stdin").read()
-            )
+            stdin_text = click.get_text_stream("stdin").read(_MAX_STDIN_CHARS + 1)
+            if len(stdin_text) > _MAX_STDIN_CHARS:
+                raise click.UsageError(
+                    "stdin query JSON object exceeds 1048576 characters"
+                )
+            stdin_request = _JSON_OBJECT.validate_json(stdin_text)
         except ValidationError as exc:
             raise click.UsageError("stdin must contain one query JSON object") from exc
         _read(stdin_request, args.bus_lane, args.timeout_s)
