@@ -1,0 +1,55 @@
+{
+  "hostname": "lab-host",
+  "drift": true,
+  "units": [
+    {
+      "name": "onex-log-monitor.service",
+      "status": "DRIFT",
+      "installed_path": "~/.config/systemd/user/onex-log-monitor.service",
+      "tracked_sha256": "cf28b66d08a1",
+      "installed_sha256": "ab2718ca991d"
+    },
+    {
+      "name": "omninode-git-mirror-daemon.service",
+      "status": "DRIFT",
+      "installed_path": "/etc/systemd/system/omninode-git-mirror-daemon.service",
+      "tracked_sha256": "87e949eff13b",
+      "installed_sha256": "d2d17b029ca4"
+    },
+    {
+      "name": "omninode-git-mirror-refresh.service",
+      "status": "DRIFT",
+      "installed_path": "/etc/systemd/system/omninode-git-mirror-refresh.service",
+      "tracked_sha256": "64ea1122cbb3",
+      "installed_sha256": "97ace8123e8f"
+    },
+    {
+      "name": "omninode-git-mirror-refresh.timer",
+      "status": "OK",
+      "installed_path": "/etc/systemd/system/omninode-git-mirror-refresh.timer",
+      "tracked_sha256": "a9f17b7e44bc",
+      "installed_sha256": "a9f17b7e44bc"
+    },
+    {
+      "name": "monitor_logs.py",
+      "status": "MISSING",
+      "installed_path": "~/.omnibase/infra/deployed/0.34.1/scripts/monitor_logs.py",
+      "tracked_sha256": "b72e40cc9ad1",
+      "installed_sha256": null
+    },
+    {
+      "name": "onex-disk-gc.service",
+      "status": "DRIFT",
+      "installed_path": "~/.config/systemd/user/onex-disk-gc.service",
+      "tracked_sha256": "1e694007aac3",
+      "installed_sha256": "f8ab42cd7a00"
+    },
+    {
+      "name": "deploy-agent.service",
+      "status": "DRIFT",
+      "installed_path": "~/.config/systemd/user/deploy-agent.service",
+      "tracked_sha256": "619a7e948bef",
+      "installed_sha256": "b8db7905acd1"
+    }
+  ]
+}
