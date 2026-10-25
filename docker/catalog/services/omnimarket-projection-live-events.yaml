@@ -1,6 +1,8 @@
 name: omnimarket-projection-live-events
 description: Kafka-to-DB projection consumer for live-events (OMN-13079); additionally publishes bus-fed snapshot deltas (OMN-15800)
-image: omnimarket-projection:latest
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-live-events
 required_env:

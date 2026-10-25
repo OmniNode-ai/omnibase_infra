@@ -7,7 +7,7 @@ and the latest published GitHub releases.
 
 Checks three classes of pin:
 
-1. Dockerfile ARG git-ref pins (OMNIBASE_COMPAT_REF, OMNIMARKET_REF) — compared
+1. Dockerfile ARG git-ref pins (OMNIBASE_COMPAT_REF) — compared
    against the latest release tag on GitHub.
 2. pyproject.toml [tool.uv.sources] git rev/tag pins (omnibase-core,
    omnibase-spi) — compared against latest release tag.
@@ -174,7 +174,6 @@ _DOCKERFILE_ARG_PINS: dict[str, tuple[str, str]] = {
     # OMN-16296: ONEX_CHANGE_CONTROL_REF removed. onex_change_control is no
     # longer installed into the runtime image in either build mode, so there is
     # no ARG left to pin and nothing here to validate.
-    "OMNIMARKET_REF": ("omnimarket", "branch_or_sha"),
 }
 
 

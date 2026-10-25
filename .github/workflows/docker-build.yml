@@ -265,13 +265,13 @@ jobs:
       # OMN-12658: delegation-path import smoke. The Dockerfile RUN step already
       # fails the build on a skewed wheel; this step re-asserts the same import
       # on the loaded image so the failure mode is a clearly labeled required
-      # status check on the PR (foundation packages + canonical delegation node).
-      - name: Delegation import smoke (OMN-12658)
+      # status check on the PR (foundation packages).
+      - name: Foundation import smoke (OMN-12658)
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "Asserting foundation + delegation node imports on the built image..."
+          echo "Asserting foundation package imports on the built image..."
           docker run --rm ${{ steps.build.outputs.imageid }} \
-            python -c "import omnibase_compat; import omnibase_core; from omnimarket.nodes.node_llm_delegation_call_effect import HandlerLlmDelegationCall; print(f'delegation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}, {HandlerLlmDelegationCall.__name__}')"
+            python -c "import omnibase_compat; import omnibase_core; import omnibase_infra; print(f'foundation import smoke OK: omnibase_compat={omnibase_compat.__version__}, omnibase_core={omnibase_core.__version__}')"
 
       - name: Verify torch is CPU-only
         if: github.ref != 'refs/heads/main'
