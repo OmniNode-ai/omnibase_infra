@@ -74,6 +74,13 @@
 # instance `morning_phase`, whose reply group is `<env>.rr.morning_phase.<boot nonce>`
 # (RequestResponseWiring); a developer machine's env token is `local`. The prefix names
 # that one instance, so a developer principal cannot join another instance's reply group.
+# MORNING FRICTION SWEEP (OMN-21400): the operator machine's scheduled sweep caller
+# (`handler_friction_sweep_cli`) publishes the `omnibase-internal` sweep's start command and
+# reads its two terminals through a request_response instance named `friction-run-<correlation
+# id>`, whose reply group is `<env>.rr.friction-run-<correlation id>.<boot nonce>`
+# (RequestResponseWiring); a developer machine's env token is `local`. The prefix
+# `local.rr.friction-run-` names the caller's instances only. The lab runtime publishes both
+# terminals, so a developer principal gets no write on them.
 # DOD CLOSEOUT PROOF (OMN-21048): a machine proves the DoD closeout sweep by publishing
 # `dod-closeout-sweep-decide-requested` and reading the one `dod-closeout-sweep-decided`
 # event the node's contract declares as its terminal event, by correlation id. The
@@ -157,6 +164,9 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnibase-infra.delegation-request.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-completed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
+  - {broker: dev, physical_topic: onex.cmd.omnibase-internal.morning-friction-sweep.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnibase-internal.morning-friction-sweep-completed.v1, direction: consume, consumer_group: local.rr.friction-run-.call}
+  - {broker: dev, physical_topic: onex.evt.omnibase-internal.morning-friction-sweep-failed.v1, direction: consume, consumer_group: local.rr.friction-run-.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.projection-delegation-applied.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
@@ -204,6 +214,7 @@ group_prefixes:
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
   - {broker: dev, prefix: local.rr.morning_phase.}
+  - {broker: dev, prefix: local.rr.friction-run-}
   - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
   - {broker: dev, prefix: receipt-mode-client.}
 described_groups:
