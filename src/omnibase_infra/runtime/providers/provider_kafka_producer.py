@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraTimeoutError, ModelTimeoutErrorContext
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.kafka_connect_retry import connect_with_bounded_retry
 from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
@@ -67,11 +69,10 @@ class ProviderKafkaProducer:
             AIOKafkaProducer instance.
 
         Raises:
-            Exception: The final attempt's own failure, unchanged, once the
-                policy's attempts are exhausted. Per platform-wide rule #8
-                callers must still treat this as fatal; it now means "the
-                broker did not answer across the whole bound" rather than
-                "the broker did not answer once".
+            InfraTimeoutError: Connect exhausted its retry policy after a
+                timeout. Includes the per-attempt deadline and total bound.
+            Exception: Other final failures propagate unchanged. Per
+                platform-wide rule #8 callers must treat them as fatal.
         """
         from aiokafka import AIOKafkaProducer
 
@@ -115,12 +116,27 @@ class ProviderKafkaProducer:
                 current, producer = producer, None
                 await current.stop()
 
-        attempt = await connect_with_bounded_retry(
-            policy=policy,
-            connect=_connect,
-            cleanup=_cleanup,
-            target=self._config.bootstrap_servers,
-        )
+        try:
+            attempt = await connect_with_bounded_retry(
+                policy=policy,
+                connect=_connect,
+                cleanup=_cleanup,
+                target=self._config.bootstrap_servers,
+            )
+        except TimeoutError as exc:
+            raise InfraTimeoutError(
+                "Timeout connecting to Kafka after "
+                f"{policy.total_attempts} attempts with "
+                f"{policy.attempt_timeout_seconds}s per-attempt deadline "
+                f"({policy.total_bound_seconds}s retry bound)",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start",
+                    timeout_seconds=policy.attempt_timeout_seconds,
+                ),
+                connect_attempts=policy.total_attempts,
+                connect_bound_seconds=policy.total_bound_seconds,
+            ) from exc
 
         if producer is None:  # pragma: no cover - defensive
             raise RuntimeError(

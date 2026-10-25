@@ -81,7 +81,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_for
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
@@ -373,7 +373,8 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
             heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
             max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
-            **build_aiokafka_auth_kwargs_from_env(),
+            # Reply consumer uses this broker's bound lane transport, like producer (OMN-17427).
+            **build_aiokafka_auth_kwargs_for(self._bootstrap_servers),
         )
 
         rr_instance.consumer = consumer

@@ -1195,6 +1195,34 @@ _LANE = _default_lane()
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_empty_effects_manifest_url_skips_the_effects_manifest() -> None:
+    captured: dict[str, object] = {}
+
+    def capture(**kwargs: object) -> HealthGateReport:
+        captured.update(kwargs)
+        return HealthGateReport(lane=str(kwargs["lane"]))
+
+    with (
+        patch.object(_mod, "run_health_gate", capture),
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        _mod.main(
+            [
+                "--expected-revision",
+                "abc",
+                "--pre-image-ids",
+                "{}",
+                "--effects-manifest-url",
+                "",
+            ]
+        )
+        assert captured["effects_manifest_url"] is None
+
+        _mod.main(["--expected-revision", "abc", "--pre-image-ids", "{}"])
+        assert isinstance(captured["effects_manifest_url"], str)
+        assert captured["effects_manifest_url"]
+
+
 def _revision_mismatch_plan() -> dict:
     return {
         "host": "census-host",

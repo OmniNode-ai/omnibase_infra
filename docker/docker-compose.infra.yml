@@ -712,6 +712,15 @@ services:
       # fills its whole arena with cache and the kernel pages it out. This is
       # the second staged step, 12G -> 8G (OMN-19077 AC-5), and the stability
       # lane's broker keeps its own 12G. Raise it back by setting DEV_REDPANDA_MEMORY.
+      #
+      # OMN-20266: operator-env DEV_REDPANDA_MEMORY=6G (set 2026-10-21,
+      # recreated 2026-10-22T00:01Z) crashed the broker 12 times in 32 hours:
+      # 2,409 partitions on one shard; 4 seastar allocation failures of ~3.2 MB
+      # with 3.7 GB free, 8 segfaults. Do not set it below 12G without a soak.
+      # The system alert's dev-broker-memory row warns below 12G and
+      # dev-broker-restart goes CRITICAL on a restart-policy restart.
+      # The 8G default is the soak-gated step; dev-broker-memory will warn while
+      # the broker runs below 12G.
       - --memory ${DEV_REDPANDA_MEMORY:-8G}
       # OMN-5176: --admin-addr removed — rpk wraps it into redpanda.yaml but
       # the actual binary rejects the flag, causing a crash-loop on recreate.
