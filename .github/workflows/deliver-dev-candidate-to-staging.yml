@@ -1371,6 +1371,13 @@ jobs:
           repositories: ${{ github.event.client_payload.pinned_repo }}
           permission-actions: read
 
+      - name: Fetch the private deployment routing snapshots
+        uses: ./.github/actions/fetch-deploy-routing
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Read the compose-dev lab-pass receipt for the pinned sibling revision
         if: github.event.client_payload.pinned_repo != ''
         env:

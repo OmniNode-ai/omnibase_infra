@@ -53,6 +53,8 @@ runs:
         persist-credentials: false
         sparse-checkout: |
           config/lab/lane-census
+          config/onex/overlays/deploy_lane_routing
+          config/onex/overlays/ci_bus_lanes
         sparse-checkout-cone-mode: false
     - name: Place the CI overlay outside the workspace
       id: place

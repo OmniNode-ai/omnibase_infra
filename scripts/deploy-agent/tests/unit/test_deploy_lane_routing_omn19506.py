@@ -6,7 +6,7 @@ Task B3 of the second-deploy-slot plan (epic OMN-19500). The ticket's
 acceptance criteria, by test name:
 
 * AC1 ``routed_elsewhere``: a dev command requested by omnimarket is accepted by
-  the dev-202 instance and skipped by the .201 instance, with no rejection
+  the secondary instance and skipped by the primary instance, with no rejection
   published.
 * AC2 ``routing_default``: a requester no route names goes to the declared
   default, and a table with no default refuses agent start.
@@ -38,7 +38,6 @@ from deploy_agent.consumer import (
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 from deploy_agent.routing import (
     ENV_INSTANCE,
-    PINNED_DEFAULT_INSTANCE,
     ROUTING_TABLE_RELPATH,
     DeployRouter,
     GitTableAtRef,
@@ -55,23 +54,40 @@ SHA_A = "a" * 40
 SHA_B = "b" * 40
 
 TABLE_WITH_OMNIMARKET_ROUTE = """
-default_instance: dev-201
+default_instance: primary
 instances:
-  dev-201:
-    hostnames: [omninode-pc]
+  primary:
+    hostnames: [worker-a]
     consumer_group: onex-deploy-agent
-  dev-202:
-    hostnames: [omnipc2]
-    consumer_group: onex-deploy-agent-dev-202
+  secondary:
+    hostnames: [worker-b]
+    consumer_group: onex-deploy-agent-secondary
 routes:
   - runtime_lane: dev
     requester_repository: omnimarket
-    instance: dev-202
+    instance: secondary
 """
 
 TABLE_WITHOUT_ROUTES = (
     TABLE_WITH_OMNIMARKET_ROUTE.split("routes:", maxsplit=1)[0] + "routes: []\n"
 )
+
+
+@pytest.fixture(autouse=True)
+def _private_placeholder_routing(tmp_path, monkeypatch):
+    import hashlib
+
+    from deploy_agent.routing import _private_config as config
+
+    data = TABLE_WITH_OMNIMARKET_ROUTE.encode()
+    digest = hashlib.sha256(data).hexdigest()
+    snapshot = tmp_path / f"config/onex/overlays/deploy_lane_routing/{digest}.yaml"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_bytes(data)
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(f"overlay_sha256: {digest}\n")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path))
+    monkeypatch.setattr(config, "CONTRACT_PATH", contract)
 
 
 def _command(
@@ -145,7 +161,7 @@ def _committed(consumer: DeployConsumer) -> list[int]:
 
 
 def test_routed_elsewhere_the_201_instance_skips_an_omnimarket_command() -> None:
-    consumer = _consumer(_router("dev-201", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
+    consumer = _consumer(_router("primary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
     accepted, reason = _process(consumer, _command("gha/omnimarket/pr-2851"))
 
     assert (accepted, reason) == (None, None)
@@ -155,7 +171,7 @@ def test_routed_elsewhere_the_201_instance_skips_an_omnimarket_command() -> None
 
 
 def test_routed_elsewhere_the_202_instance_accepts_the_same_command() -> None:
-    consumer = _consumer(_router("dev-202", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
+    consumer = _consumer(_router("secondary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
     cmd = _command("gha/omnimarket/pr-2851")
     accepted, reason = _process(consumer, cmd)
 
@@ -167,7 +183,7 @@ def test_routed_elsewhere_the_202_instance_accepts_the_same_command() -> None:
 def test_routed_elsewhere_the_skip_runs_before_busy_and_duplicate() -> None:
     """A busy or duplicate refusal publishes; for another instance's command
     that would race its acceptance, so routing decides first."""
-    consumer = _consumer(_router("dev-201", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
+    consumer = _consumer(_router("primary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
     consumer.job_store.has_active_job.return_value = True
     consumer.job_store.is_duplicate.return_value = True
 
@@ -183,10 +199,10 @@ def test_routed_elsewhere_follows_the_table_at_the_command_ref() -> None:
     old_ref = _command("gha/omnimarket/pr-1", git_ref=SHA_B)
     acceptors = [
         name
-        for name in ("dev-201", "dev-202")
+        for name in ("primary", "secondary")
         if _process(_consumer(_router(name, tables)), old_ref)[0] is not None
     ]
-    assert acceptors == ["dev-201"]
+    assert acceptors == ["primary"]
 
 
 def test_routed_elsewhere_exactly_one_instance_accepts_each_command() -> None:
@@ -200,14 +216,14 @@ def test_routed_elsewhere_exactly_one_instance_accepts_each_command() -> None:
         cmd = _command(requester)
         acceptors = [
             name
-            for name in ("dev-201", "dev-202")
+            for name in ("primary", "secondary")
             if _process(_consumer(_router(name, tables)), cmd)[0] is not None
         ]
         assert len(acceptors) == 1, (requester, acceptors)
 
 
 def test_routed_elsewhere_lookahead_never_folds_another_instances_command() -> None:
-    consumer = _consumer(_router("dev-201", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
+    consumer = _consumer(_router("primary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
     with patch("deploy_agent.consumer.verify_command", return_value=True):
         ours = consumer._decode_for_lookahead(
             _message(_command("gha/omnibase_infra/pr-1"))
@@ -220,7 +236,7 @@ def test_routed_elsewhere_lookahead_never_folds_another_instances_command() -> N
 
 
 def test_routed_elsewhere_a_lane_the_table_does_not_route_is_untouched() -> None:
-    consumer = _consumer(_router("dev-202", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
+    consumer = _consumer(_router("secondary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}))
     consumer.allowed_lanes = frozenset({EnumRuntimeLane.STABILITY_TEST})
     cmd = _command("gha/omnibase_infra/pr-1", lane="stability-test")
     accepted, _reason = _process(consumer, cmd)
@@ -231,9 +247,9 @@ def test_routed_elsewhere_a_lane_the_table_does_not_route_is_untouched() -> None
 
 
 def test_routing_default_takes_a_requester_no_route_names() -> None:
-    router = _router("dev-201", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE})
+    router = _router("primary", {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE})
     decision = router.decide(_command("gha/omnibase_infra/pr-4084"))
-    assert decision.instance == "dev-201"
+    assert decision.instance == "primary"
 
 
 @pytest.mark.parametrize(
@@ -241,21 +257,20 @@ def test_routing_default_takes_a_requester_no_route_names() -> None:
     [
         ("origin/dev", {}, "not a sha"),
         (SHA_A, {SHA_A: None}, "no table at"),
-        (SHA_A, {}, "unreadable"),
     ],
 )
 def test_routing_default_when_the_ref_names_no_table(
     git_ref: str, tables: dict[str, str | None], basis: str
 ) -> None:
-    decision = _router("dev-202", tables).decide(
+    decision = _router("secondary", tables).decide(
         _command("gha/omnimarket/pr-1", git_ref=git_ref)
     )
-    assert decision.instance == PINNED_DEFAULT_INSTANCE
+    assert decision.instance == "primary"
     assert basis in decision.basis
 
 
 def test_routing_default_a_table_with_no_default_refuses() -> None:
-    text = TABLE_WITH_OMNIMARKET_ROUTE.replace("default_instance: dev-201\n", "")
+    text = TABLE_WITH_OMNIMARKET_ROUTE.replace("default_instance: primary\n", "")
     with pytest.raises(RoutingTableError, match="no default_instance"):
         parse_routing_table(text)
 
@@ -269,44 +284,46 @@ def test_routing_default_refuses_agent_start_without_a_default(
     from deploy_agent import routing as routing_mod
 
     table_path = tmp_path / ROUTING_TABLE_RELPATH
-    table_path.parent.mkdir(parents=True)
+    table_path.parent.mkdir(parents=True, exist_ok=True)
     table_path.write_text(
-        TABLE_WITH_OMNIMARKET_ROUTE.replace("default_instance: dev-201\n", ""),
+        TABLE_WITH_OMNIMARKET_ROUTE.replace("default_instance: primary\n", ""),
         encoding="utf-8",
     )
-    monkeypatch.setattr(routing_mod, "AGENT_CLONE_ROOT", tmp_path)
+    monkeypatch.setattr(routing_mod, "read_routing_text", table_path.read_text)
     with pytest.raises(RoutingTableError, match="no default_instance"):
         agent_mod.build_router_from_env("/nonexistent")
 
 
 def test_routing_default_must_be_the_pinned_instance() -> None:
     text = TABLE_WITH_OMNIMARKET_ROUTE.replace(
-        "default_instance: dev-201", "default_instance: dev-202"
+        "default_instance: primary", "default_instance: secondary"
     )
     table = parse_routing_table(text)
-    with pytest.raises(RoutingTableError, match="must be 'dev-201'"):
-        DeployRouter(table, table.instances["dev-201"], lambda sha: None)
+    original = parse_routing_table(TABLE_WITH_OMNIMARKET_ROUTE)
+    router = DeployRouter(original, original.instances["primary"], lambda sha: table)
+    with pytest.raises(RoutingTableError, match="differs across"):
+        router.decide(_command("gha/example/pr-1"))
 
 
 def test_routing_default_the_committed_table_names_the_pinned_default() -> None:
     table = load_routing_table()
-    assert table.default_instance == PINNED_DEFAULT_INSTANCE
+    assert table.default_instance == "primary"
     # OMN-19543 adds the .200 instance, routed nothing.
-    assert set(table.instances) == {"dev-201", "dev-202", "dev-200"}
+    assert set(table.instances) == {"primary", "secondary"}
 
 
 @pytest.mark.parametrize(
     ("mutation", "match"),
     [
-        (("instance: dev-202", "instance: dev-303"), "not declared"),
+        (("instance: secondary", "instance: unknown-instance"), "not declared"),
         (
             (
                 "routes:",
-                "routes:\n  - {runtime_lane: dev, requester_repository: omnimarket, instance: dev-201}\n",
+                "routes:\n  - {runtime_lane: dev, requester_repository: omnimarket, instance: primary}\n",
             ),
             "two routes",
         ),
-        (("hostnames: [omnipc2]", "hostnames: [omninode-pc]"), "names two instances"),
+        (("hostnames: [worker-b]", "hostnames: [worker-a]"), "names two instances"),
     ],
 )
 def test_routing_default_an_inconsistent_table_refuses(
@@ -321,18 +338,18 @@ def test_routing_default_instance_resolves_from_env_then_host(
 ) -> None:
     monkeypatch.delenv(ENV_INSTANCE, raising=False)
     table = parse_routing_table(TABLE_WITH_OMNIMARKET_ROUTE)
-    assert resolve_instance(table, env={}, hostname="omnipc2").name == "dev-202"
-    assert resolve_instance(table, env={}, hostname="OMNINODE-PC.local").name == (
-        "dev-201"
+    assert resolve_instance(table, env={}, hostname="worker-b").name == "secondary"
+    assert resolve_instance(table, env={}, hostname="WORKER-A.local").name == (
+        "primary"
     )
     assert (
-        resolve_instance(table, env={ENV_INSTANCE: "dev-202"}, hostname="x").name
-        == "dev-202"
+        resolve_instance(table, env={ENV_INSTANCE: "secondary"}, hostname="x").name
+        == "secondary"
     )
     with pytest.raises(RoutingTableError, match="matches no instance"):
         resolve_instance(table, env={}, hostname="stickybeatz")
     with pytest.raises(RoutingTableError, match="names no instance"):
-        resolve_instance(table, env={ENV_INSTANCE: "dev-9"}, hostname="omnipc2")
+        resolve_instance(table, env={ENV_INSTANCE: "dev-9"}, hostname="worker-b")
 
 
 # --- AC3 ----------------------------------------------------------------------
@@ -340,8 +357,11 @@ def test_routing_default_instance_resolves_from_env_then_host(
 
 def test_consumer_group_per_instance_each_router_subscribes_with_its_group() -> None:
     tables = {SHA_A: TABLE_WITH_OMNIMARKET_ROUTE}
-    assert consumer_group_for(_router("dev-202", tables)) == "onex-deploy-agent-dev-202"
-    assert consumer_group_for(_router("dev-201", tables)) == LEGACY_CONSUMER_GROUP
+    assert (
+        consumer_group_for(_router("secondary", tables))
+        == "onex-deploy-agent-secondary"
+    )
+    assert consumer_group_for(_router("primary", tables)) == LEGACY_CONSUMER_GROUP
     assert consumer_group_for(None) == LEGACY_CONSUMER_GROUP
 
 
@@ -364,25 +384,26 @@ def test_consumer_group_per_instance_reaches_the_kafka_client(
         job_store=store,
         allowed_lanes=frozenset({EnumRuntimeLane.DEV}),
         self_update_hook=lambda rewind: None,
-        router=_router("dev-202", {}),
+        router=_router("secondary", {}),
     )
-    assert captured["group_id"] == "onex-deploy-agent-dev-202"
+    assert captured["group_id"] == "onex-deploy-agent-secondary"
 
 
 def test_consumer_group_per_instance_a_shared_group_refuses() -> None:
     text = TABLE_WITH_OMNIMARKET_ROUTE.replace(
-        "consumer_group: onex-deploy-agent-dev-202", "consumer_group: onex-deploy-agent"
+        "consumer_group: onex-deploy-agent-secondary",
+        "consumer_group: onex-deploy-agent",
     )
     with pytest.raises(RoutingTableError, match="declared by two instances"):
         parse_routing_table(text)
 
 
 def test_consumer_group_per_instance_the_committed_table_keeps_201s_group() -> None:
-    """dev-201 keeps the group the running .201 agent commits under, so its
+    """primary keeps the group the running primary agent commits under, so its
     offsets carry over on self-update rather than restarting at ``latest``."""
     table = load_routing_table()
-    assert table.instances["dev-201"].consumer_group == LEGACY_CONSUMER_GROUP
-    assert table.instances["dev-202"].consumer_group == "onex-deploy-agent-dev-202"
+    assert table.instances["primary"].consumer_group == LEGACY_CONSUMER_GROUP
+    assert table.instances["secondary"].consumer_group == "onex-deploy-agent-secondary"
 
 
 # --- the ref reader, on a real clone -------------------------------------------
@@ -415,8 +436,11 @@ def test_git_table_at_ref_reads_the_committed_table_and_its_absence(
     _git(repo, "commit", "-q", "-m", "before the table")
     before = _git(repo, "rev-parse", "HEAD")
     table_path = repo / ROUTING_TABLE_RELPATH
-    table_path.parent.mkdir(parents=True)
-    table_path.write_text(TABLE_WITH_OMNIMARKET_ROUTE, encoding="utf-8")
+    table_path.parent.mkdir(parents=True, exist_ok=True)
+    import hashlib
+
+    digest = hashlib.sha256(TABLE_WITH_OMNIMARKET_ROUTE.encode()).hexdigest()
+    table_path.write_text(f"overlay_sha256: {digest}\n", encoding="utf-8")
     _git(repo, "add", ROUTING_TABLE_RELPATH)
     _git(repo, "commit", "-q", "-m", "the table")
     after = _git(repo, "rev-parse", "HEAD")
@@ -425,6 +449,11 @@ def test_git_table_at_ref_reads_the_committed_table_and_its_absence(
     assert reader(before) is None
     table = reader(after)
     assert table is not None
-    assert table.route(EnumRuntimeLane.DEV, "gha/omnimarket/pr-1") == "dev-202"
+    assert table.route(EnumRuntimeLane.DEV, "gha/omnimarket/pr-1") == "secondary"
     with pytest.raises(RoutingTableError, match="is not in"):
         reader("c" * 40)
+
+
+def test_missing_private_snapshot_never_falls_back_to_a_default():
+    with pytest.raises(RoutingTableError, match="not in the clone"):
+        _router("primary", {}).decide(_command("gha/example/pr-1"))

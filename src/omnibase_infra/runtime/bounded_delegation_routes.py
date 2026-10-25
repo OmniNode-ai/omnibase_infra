@@ -31,6 +31,8 @@ import base64
 import functools
 import hashlib
 import logging
+import os
+import re
 from importlib import metadata, resources
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -100,11 +102,55 @@ def _read_packaged_overlay() -> tuple[bytes, str | None, str] | None:
         data = resource.read_bytes()
     except (ModuleNotFoundError, OSError):
         return None
-    direct_url = dist.read_text("direct_url.json") or ""
-    source = f"{_OVERLAY_DISTRIBUTION}=={dist.version} {_OVERLAY_RECORD_PATH}"
-    if direct_url:
-        source = f"{source} direct_url={direct_url.strip()}"
-    return data, _record_sha256_hex(dist), source
+    manifest = _record_sha256_hex(dist)
+    if manifest is None or manifest != _sha256_hex(data):
+        raise InfraUnavailableError(
+            "lane contract vendor/manifest mismatch or missing sha256 RECORD entry"
+        )
+    try:
+        contract = yaml.safe_load(data)
+    except yaml.YAMLError as exc:
+        raise InfraUnavailableError("lane contract is not valid YAML") from exc
+    digest = contract.get("overlay_sha256") if isinstance(contract, dict) else None
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise InfraUnavailableError(
+            "lane contract requires overlay_sha256; private lane overlay is missing"
+        )
+    candidates: list[Path] = []
+    from omnibase_core.models.bootstrap.model_environment_bootstrap import (
+        ModelEnvironmentBootstrap,
+    )
+
+    environment = ModelEnvironmentBootstrap.capture_process_environment(
+        declared_keys=("ONEX_WORKSPACE_CONFIG_ROOT", "ONEX_SKILL_OVERLAY_ROOTS")
+    ).environment
+    root = (environment.optional("ONEX_WORKSPACE_CONFIG_ROOT") or "").strip()
+    if root:
+        candidates.append(
+            Path(root) / "config/onex/overlays/ci_bus_lanes" / f"{digest}.yaml"
+        )
+    else:
+        candidates.extend(
+            Path(item) / "ci_bus_lanes" / f"{digest}.yaml"
+            for item in (environment.optional("ONEX_SKILL_OVERLAY_ROOTS") or "").split(
+                os.pathsep
+            )
+            if item
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                private_data = candidate.read_bytes()
+            except OSError as exc:
+                raise InfraUnavailableError(
+                    f"private lane overlay unreadable at {candidate}"
+                ) from exc
+            return (
+                private_data,
+                digest,
+                f"private lane overlay {candidate} sha256={digest}",
+            )
+    return None
 
 
 def _read_overlay(
@@ -288,7 +334,7 @@ def resolve_bounded_delegation_route(
             raise InfraUnavailableError(
                 f"bounded delegation lane {environment!r} cannot be validated: the "
                 f"{_OVERLAY_DISTRIBUTION} lane overlay is not installed as a "
-                "package resource"
+                "package resource or private overlay; set ONEX_WORKSPACE_CONFIG_ROOT or ONEX_SKILL_OVERLAY_ROOTS"
             )
         logger.warning(
             "bounded delegation route gate not armed: the %s lane overlay is not "

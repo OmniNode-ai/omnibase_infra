@@ -238,6 +238,13 @@ jobs:
       # .201 only, so this resolves to dev-201 and a test refuses any route
       # that moves omnibase_infra off it. Fails the job on an unreadable table
       # rather than leaving the verify job a guessed runner.
+      - name: Fetch the private deployment routing snapshots
+        uses: ./.github/actions/fetch-deploy-routing
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Resolve the deploy-agent instance the command is routed to
         id: route
         env:
@@ -453,6 +460,13 @@ jobs:
       # before (tests/ci/test_deploy_lane_verify_route_omn19507.py). An unknown
       # lane exits non-zero and writes nothing, so no later step runs against a
       # guessed lane.
+      - name: Fetch the private deployment routing snapshots
+        uses: ./.github/actions/fetch-deploy-routing
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Read the routed lane's verify targets
         env:
           ROUTED_RECEIPT_LANE: ${{ needs.trigger-rebuild.outputs.receipt_lane }}

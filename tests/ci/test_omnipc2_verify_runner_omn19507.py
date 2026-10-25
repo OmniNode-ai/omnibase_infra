@@ -64,7 +64,7 @@ def test_omnipc2_verify_runner_is_the_only_runner_labelled_host_202() -> None:
             if "host-202" in _labels(service or {}):
                 carriers.append(f"{path.name}:{name}")
     assert carriers == [f"{COMPOSE.name}:{SERVICE}"], (
-        f"host-202 must name exactly one declared runner, found {carriers}"
+        f"the instance label must name exactly one declared runner, found {carriers}"
     )
 
 
@@ -85,15 +85,14 @@ def test_omnipc2_verify_runner_reads_the_lane_and_nothing_more() -> None:
     assert runner.get("mem_limit") == "2g"
 
 
+@pytest.mark.lab_overlay
 def test_the_dev_202_route_labels_have_a_runner_to_land_on() -> None:
     """Positive control across the seam: when the routing table declares the
     dev-202 instance, its verify labels are satisfiable by this runner."""
-    routing = ROOT / "config" / "deploy_lane_routing.yaml"
-    if not routing.is_file():
-        pytest.skip("the routing table is not on this base yet (OMN-19506)")
-    table = yaml.safe_load(routing.read_text(encoding="utf-8")) or {}
+    from scripts.ci.deploy_lane_verify_route import load_table
+
+    table = load_table()
     instance = (table.get("instances") or {}).get("dev-202")
-    if instance is None or "verify" not in instance:
-        pytest.skip("the routing table declares no dev-202 verify block yet")
+    assert instance is not None and "verify" in instance
     wanted = set(instance["verify"]["runner_labels"])
     assert wanted <= _labels(_runner()), (sorted(wanted), sorted(_labels(_runner())))

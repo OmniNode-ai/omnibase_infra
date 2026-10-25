@@ -200,6 +200,13 @@ jobs:
             .github/actions/deploy-gate/validate_pr_deploy_required.py
           sparse-checkout-cone-mode: false
 
+      - name: Fetch the private deployment routing snapshots
+        uses: ./.github/actions/fetch-deploy-routing
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Decide, per repo
         id: plan
         env:
@@ -418,7 +425,8 @@ jobs:
             git push origin "${branch}"
           fi
 
-          body=$(cat <<PREOF
+          body_file="${RUNNER_TEMP}/release-pr-body.md"
+          cat >"${body_file}" <<PREOF
           Opened by the scheduled release train (${TICKET}).
 
           - Repository: \`OmniNode-ai/${TARGET_REPO}\`
@@ -444,7 +452,7 @@ jobs:
 
           Evidence-Ticket: ${TICKET}
           PREOF
-          )
+          body=$(cat "${body_file}")
           if [ "${action}" = "refresh" ]; then
             gh pr edit "${pr_number}" \
               --repo "OmniNode-ai/${TARGET_REPO}" \

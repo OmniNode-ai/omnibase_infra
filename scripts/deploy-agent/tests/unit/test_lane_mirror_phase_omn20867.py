@@ -61,7 +61,6 @@ from deploy_agent.instance_lanes import (
 from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.publisher import build_completion_payload
 from deploy_agent.routing import (
-    PINNED_DEFAULT_INSTANCE,
     DeployRouter,
     ModelLaneFlags,
     load_routing_table,
@@ -475,7 +474,7 @@ def test_the_receipt_rides_the_terminal_facts() -> None:
 #: The committed table's shape: omnimarket rebuilds go to the synthetic
 #: ``inst-b``; every other requester, omnibase_infra included, to the default,
 #: whose name the router pins.
-DEFAULT = PINNED_DEFAULT_INSTANCE
+DEFAULT = "primary"
 ROUTING_TEXT = f"""\
 default_instance: {DEFAULT}
 instances:
@@ -618,6 +617,7 @@ def test_default_instance_does_not_follow_omnibase_infra(
     )
 
 
+@pytest.mark.lab_overlay
 def test_committed_routing_leaves_every_lab_pass_receipt_as_it_was() -> None:
     """omnibase_infra rebuilds still go to the default instance, and no other
     instance's receipt proves omnibase_infra, so a converge on any other
@@ -628,7 +628,9 @@ def test_committed_routing_leaves_every_lab_pass_receipt_as_it_was() -> None:
         == table.default_instance
     )
     raw = yaml.safe_load(
-        (REPO_ROOT / "config" / "deploy_lane_routing.yaml").read_text(encoding="utf-8")
+        __import__(
+            "deploy_agent.routing", fromlist=["read_routing_text"]
+        ).read_routing_text()
     )
     others = [
         spec["lane"]

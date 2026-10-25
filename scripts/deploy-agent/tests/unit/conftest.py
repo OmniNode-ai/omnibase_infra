@@ -103,7 +103,28 @@ def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+def _portable_routing_declaration(request, tmp_path, monkeypatch):
+    if request.node.get_closest_marker("lab_overlay") is not None:
+        return
+    import hashlib
+
+    from deploy_agent.routing import _private_config as config
+
+    data = b"default_instance: __default__\ninstances:\n  __default__:\n    hostnames: [example-worker]\n    consumer_group: example-deployer\n    flags: {max_dev_lag_minutes: 20}\n    verify: {receipt_lane: example-receipt}\nroutes: []\n"
+    digest = hashlib.sha256(data).hexdigest()
+    snapshot = tmp_path / f"config/onex/overlays/deploy_lane_routing/{digest}.yaml"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_bytes(data)
+    contract = tmp_path / "routing-contract.yaml"
+    contract.write_text(f"overlay_sha256: {digest}\n")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path))
+    monkeypatch.setattr(config, "CONTRACT_PATH", contract)
+
+
+@pytest.fixture(autouse=True)
+def _declare_agent_instance(
+    monkeypatch: pytest.MonkeyPatch, request, _portable_routing_declaration
+) -> None:
     """OMN-19506: a dev-lane agent must know which routing instance it is.
 
     On a lab host that comes from the host name; a test host matches none, so
@@ -112,7 +133,10 @@ def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     instance, is asserted in ``test_deploy_lane_routing_omn19506.py``, which
     deletes the variable and so is unaffected by this fixture.
     """
-    monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", "dev-201")
+    from deploy_agent.routing import load_routing_table
+
+    declared_default = load_routing_table().default_instance
+    monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", declared_default)
     # Declare a test host as well: the production router refuses excluded hosts
     # before reading DEPLOY_AGENT_INSTANCE, including lab test hosts.
     # Routing-policy tests supply their own hostname explicitly.
@@ -120,7 +144,9 @@ def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     # OMN-19522: agent construction selects the instance's dev-lane
     # composition process-wide; each test starts on, and is returned to, the
     # .201 one.
-    monkeypatch.setattr(executor_mod._DevInstanceSelection, "name", "dev-201")
+    monkeypatch.setattr(
+        executor_mod._DevInstanceSelection, "name", executor_mod.DEFAULT_DEV_INSTANCE
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -215,6 +215,7 @@ class TestDrift:
 
 
 class TestTheBoundIsContractData:
+    @pytest.mark.lab_overlay
     def test_the_committed_table_bounds_the_dev_lanes(self) -> None:
         table = load_routing_table()
         bounded = {table.default_instance} | {r.instance for r in table.routes}
@@ -236,6 +237,7 @@ class TestTheBoundIsContractData:
             parse_lane_flags(text)
 
 
+@pytest.mark.lab_overlay
 class TestInTheAgent:
     def test_an_overdue_agent_converges_and_publishes_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
