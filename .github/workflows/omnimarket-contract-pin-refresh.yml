@@ -54,8 +54,10 @@ concurrency:
 jobs:
   refresh:
     # The train's own overnight run moves the tag; the hourly dependency-advance
-    # dispatches of that workflow do not.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'schedule'
+    # dispatches and failed/cancelled overnight runs do not.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'schedule' && github.event.workflow_run.conclusion == 'success')
     name: Advance omnimarket contract tag
     # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to ubuntu-latest.
     runs-on: >-

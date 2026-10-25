@@ -248,7 +248,12 @@ def test_explicit_mount_is_additional_to_required_mounts(
 
 
 @pytest.mark.parametrize("unreadable", [False, True])
-def test_df_reads_actual_write_paths(tmp_path: Path, unreadable: bool) -> None:
+def test_df_reads_actual_write_paths(
+    tmp_path: Path, unreadable: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Record admission probes independently of the host's TMPDIR reaper.
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.delenv("RUNNER_TMP_REAP_DIR", raising=False)
     runner_home = tmp_path / "runner home"
     workspace = runner_home / "_work" / "repo" / "repo"
     workspace.mkdir(parents=True)

@@ -166,3 +166,11 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
+  - id: dod-omn17292-successful-train-only
+    description: Replays the actual refresh job guard; failed, cancelled and timed-out scheduled trains cannot refresh, successful scheduled trains and explicit manual dispatch can.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -n 0 --no-cov -k only_a_successful
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

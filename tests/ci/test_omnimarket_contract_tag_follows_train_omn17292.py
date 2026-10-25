@@ -151,3 +151,103 @@ def test_the_follower_states_its_staleness_budget_and_ordering_gate() -> None:
     assert "STALENESS (OMN-15701)" in header
     assert "one train cycle" in header
     assert "OMN-17156 remains the upstream ordering gate" in header
+
+
+@pytest.mark.parametrize(
+    ("event", "trigger", "conclusion", "allowed"),
+    [
+        ("workflow_run", "schedule", "failure", False),
+        ("workflow_run", "schedule", "cancelled", False),
+        ("workflow_run", "schedule", "timed_out", False),
+        ("workflow_run", "schedule", "success", True),
+        ("workflow_run", "workflow_dispatch", "success", False),
+        ("workflow_dispatch", "", "", True),
+    ],
+)
+def test_only_a_successful_scheduled_train_or_manual_dispatch_can_refresh(
+    event: str, trigger: str, conclusion: str, allowed: bool
+) -> None:
+    """Replay the workflow's actual boolean guard over terminal train events."""
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    guard = document["jobs"]["refresh"]["if"]
+    for field, value in (
+        ("github.event.workflow_run.conclusion", conclusion),
+        ("github.event.workflow_run.event", trigger),
+        ("github.event_name", event),
+    ):
+        guard = guard.replace(field, f"'{value}'")
+    result = subprocess.run(
+        ["bash", "-c", f"if [[ {guard} ]]; then exit 0; else exit 1; fi"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode in (0, 1), result.stderr
+    assert (result.returncode == 0) is allowed
+
+
+def test_remote_lookup_failure_cannot_publish_a_target(tmp_path: Path) -> None:
+    """An unreachable remote fails before a target or changed flag is published."""
+    repo = tmp_path / "infra"
+    _write_pin(repo, "v0.4.318")
+    (repo / RESOLVER).parent.mkdir()
+    shutil.copyfile(ROOT / RESOLVER, repo / RESOLVER)
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _step_script("Resolve the current pin and the train's newest release tag"),
+        ],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **scrub_git_location_env(os.environ),
+            "OMNIMARKET_REMOTE": str(tmp_path / "nonexistent-remote"),
+            "GITHUB_OUTPUT": str(output),
+        },
+    )
+    assert completed.returncode != 0
+    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert outputs == {"tag": "v0.4.318"}
+    assert "fatal:" in completed.stderr
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/release_train_refresh_conclusions_omn17292.json"
+)
+def test_recorded_train_completions_enforce_refresh_admission(
+    recorded_response: dict[str, object],
+) -> None:
+    """Replay real completed runs through the workflow's actual job guard."""
+    runs = recorded_response["workflow_runs"]
+    assert isinstance(runs, list)
+    seen: set[tuple[str, str]] = set()
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for run in runs:
+        assert run["status"] == "completed"
+        assert run["path"] == ".github/workflows/release-train-nightly.yml"
+        seen.add((run["event"], run["conclusion"]))
+        guard = document["jobs"]["refresh"]["if"]
+        for field, value in (
+            ("github.event.workflow_run.conclusion", run["conclusion"]),
+            ("github.event.workflow_run.event", run["event"]),
+            ("github.event_name", "workflow_run"),
+        ):
+            guard = guard.replace(field, f"'{value}'")
+        result = subprocess.run(
+            ["bash", "-c", f"if [[ {guard} ]]; then exit 0; else exit 1; fi"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode in (0, 1), result.stderr
+        allowed = run["event"] == "schedule" and run["conclusion"] == "success"
+        assert (result.returncode == 0) is allowed, run["html_url"]
+    assert seen == {
+        ("schedule", "success"),
+        ("schedule", "failure"),
+        ("workflow_dispatch", "success"),
+    }
