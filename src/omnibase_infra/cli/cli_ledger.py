@@ -1,38 +1,20 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""``onex ledger`` -- read the cloud ledger from the operator's own machine (OMN-17205).
+"""``onex ledger``: cloud hook receipts and dev database work-ledger reads.
 
-    onex ledger read --correlation-id <id>
+``read --correlation-id`` queries the cloud hook projection. It prints one
+JSON document and exits 0 for found, 1 for not found, 2 for absent projection,
+3 for unauthenticated and 4 for unavailable. Its HTTP credential and base URL
+come by reference from the machine's ``~/.onex`` store.
 
-That single line is the terminal read in ``beta/GOAL.md`` row 0b. Before this
-command existed the row's own probe could not be run by the person who set it:
-the staging Kubernetes API is unreachable from the operator Mac, and the
-deployed onex-api served no projection route, so every attempt came back 401 --
-the same answer it gives for a path it does not serve. A goal row whose probe
-cannot be executed is indistinguishable from a goal row with no probe: neither
-can fail, so neither can catch a drop.
+``query --bus-lane dev`` calls the database work-ledger read node over Kafka.
+``query --stdin`` implements ``ONEX_LEDGER_BUS_READ_COMMAND`` for ledger-ask
+and catchup: one typed query in, one correlated answer out. The machine's
+issued dev credential and the lane's declared transport are resolved by the
+work-ledger handler. Every failed read is nonzero, with no answer on stdout.
 
-CONTRACT OF THIS COMMAND
-    stdout is exactly one JSON document and nothing else, so the probe composes
-    into a shell pipeline and a goal row can cite the process's exit status.
-    Every diagnostic goes to stderr. The exit code is the verdict:
-
-        0  found              a row carries this correlation id
-        1  not_found          the projection is there and holds no such row
-        2  projection_absent  the projection does not exist on that plane
-        3  unauthenticated    no credential, or the plane refused it
-        4  unavailable        the plane could not answer, or was not reached
-
-    "No row" is a NON-ZERO exit on purpose. A probe that succeeds when the
-    ledger is empty is a probe that passes while the pipeline is dead.
-
-SECRETS
-    There is no ``--client-secret``, no ``--token`` and no ``--api-key`` option,
-    and a test asserts their absence: a secret passed on the command line lands
-    in the process table, the shell history and every exec log. The credential
-    is resolved by reference from ``~/.onex`` (mode 0600), which is also where
-    the base URL comes from -- there is no host literal and no environment
-    variable on this path.
+Neither command accepts a credential value on its command line. See
+``docs/operations/work_ledger_query.md`` for work-ledger ACLs and reader wiring.
 """
 
 from __future__ import annotations
@@ -56,6 +38,7 @@ from omnibase_infra.gateway.client.store_gateway_credential import (
     StoreGatewayCredential,
 )
 from omnibase_infra.gateway.models.model_cloud_ledger_read import ModelCloudLedgerRead
+from omnibase_infra.handlers.handler_work_ledger_query import ledger_query
 
 __all__ = ["ledger_group"]
 
@@ -76,7 +59,10 @@ def _emit(result: ModelCloudLedgerRead) -> NoReturn:
 
 @click.group("ledger")
 def ledger_group() -> None:  # stub-ok
-    """Read the ONEX cloud ledger projections."""
+    """Read the cloud hook ledger and the dev work ledger."""
+
+
+ledger_group.add_command(ledger_query)
 
 
 @ledger_group.command("read")

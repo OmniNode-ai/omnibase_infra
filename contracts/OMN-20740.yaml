@@ -1,0 +1,67 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20740
+title: Wire the dev database work-ledger query client to the derived ACL
+summary: >-
+  The six developer query grants already exist (OMN-21339), but no infra client used their reply group or implemented the stdin command consumed by the ledger-ask and catchup database source. Add the client, its packaged wire declaration, and onex ledger query --bus-lane dev --stdin. Prove the actual client against SCRAM topic/group ACLs and bind its operations to the existing derived dev grants. This is a prerequisite slice of S8, not the authority flip. AC1's seven exact UTC days and AC2's concurrent flip test remain outstanding; the checks below cover this lane's query prerequisite only and do not certify either parent criterion complete.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20740-parity-gated-reads
+    statement: Supply the authenticated read command needed by readers before the authority flip.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the daily parity receipt reads exact=yes for 7 consecutive UTC days before the flip -- falsifier: the lane=work-ledger-parity STATUS receipts
+      - id: AC2
+        statement: >-
+          AC2: a concurrent append test still yields exactly one claim token per claim after the flip -- falsifier: uv run pytest tests -k flip_claim_token_unique
+evidence_requirements:
+  - kind: tests
+    description: The query prerequisite preserves reader correlation, filters, freshness and parity and refuses failed reads.
+    command: uv run --frozen pytest tests/unit/cli/test_work_ledger_query_client_omn20740.py tests/unit/cli/test_work_ledger_query_grants_omn20740.py -q
+  - kind: tests
+    description: A real SCRAM broker refuses a developer before the grants, answers after the derived dev grants, and refuses an unrelated principal.
+    command: uv run --frozen pytest tests/integration/customer_path/test_work_ledger_query_acl_omn20740.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20740-ac1-reader-prerequisite
+    description: >-
+      Partial AC1 evidence: readers preserve the projection's freshness and parity without turning unmeasured or a read error into an exact day. The seven consecutive daily receipts remain required before the flip.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_query_client_omn20740.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20740-ac2-authenticated-reader-prerequisite
+    description: >-
+      Partial AC2 evidence: the database-reader command uses only the derived dev read grants and does not introduce write authority. This is not the concurrent append/claim-token flip test, which belongs to the future authority writer change and remains outstanding.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_work_ledger_query_grants_omn20740.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20740-broker-query-access
+    description: Real authorization over a disposable broker with synthetic non-superuser identities; no shared lane or credentials are required on a hosted runner.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_work_ledger_query_acl_omn20740.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20740-deploy-client-artifact
+    description: >-
+      Hosted-runner artifact probe for the machine-side read client: the evaluated GitHub commit must ship the handler. The client executes in the reader process, not a runtime container. This fails at a revision without the client; it does not assert a runtime rollout or flip.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -euo pipefail;
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_work_ledger_query.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c '^class HandlerWorkLedgerQuery:'
+        cwd: ${OMNI_HOME}/omnibase_infra
