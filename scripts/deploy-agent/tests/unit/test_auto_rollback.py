@@ -359,10 +359,10 @@ def test_agent_failed_verify_restores_and_job_stays_failed(
         correlation_id=uuid4(),
         requested_by="test",
         scope=scope,
-        runtime_lane=EnumRuntimeLane.DEV,
+        runtime_lane=EnumRuntimeLane.STABILITY_TEST,
     )
     agent, executor = _agent(tmp_path, monkeypatch, cmd)
-    point = _point()
+    point = _point(EnumRuntimeLane.STABILITY_TEST)
     capture = Mock(return_value=point)
     restore = Mock(
         return_value=executor_mod.ModelRollbackOutcome(
@@ -398,6 +398,7 @@ def test_agent_failed_verify_restores_and_job_stays_failed(
     ("lane", "scope"),
     [
         (EnumRuntimeLane.DEV, Scope.RUNTIME),
+        (EnumRuntimeLane.STABILITY_TEST, Scope.RUNTIME),
         (EnumRuntimeLane.PROD, Scope.RUNTIME),
         (EnumRuntimeLane.DEV, Scope.CORE),
     ],
@@ -419,7 +420,7 @@ def test_agent_passing_verify_never_restores_and_capture_is_scoped(
     monkeypatch.setattr(agent_mod, "restore_rollback_point", restore)
     agent._run_deploy(cmd)
     restore.assert_not_called()
-    if lane == EnumRuntimeLane.DEV and scope == Scope.RUNTIME:
+    if lane == EnumRuntimeLane.STABILITY_TEST and scope == Scope.RUNTIME:
         capture.assert_called_once_with(executor, lane)
     else:
         capture.assert_not_called()
