@@ -24,7 +24,8 @@
 #     make seed-infisical  # Seed Infisical from ONEX contracts (writes with --execute)
 #
 # Laptop profile (OMN-19496) -- the stack plus your own runtime, no lab or ops
-# secrets, under its own compose project `omnibase-infra-local`:
+# secrets, under its own compose project `omnibase-infra-local`. The projection
+# API runs in `local-market` on the omnimarket image (OMN-21279).
 #
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group

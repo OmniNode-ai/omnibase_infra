@@ -1,6 +1,8 @@
 name: omnimarket-projection-cost-by-repo
 description: Kafka-to-DB projection consumer for cost-by-repo snapshots (OMN-13077)
-image: omnimarket-projection:latest
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-cost-by-repo
 required_env:

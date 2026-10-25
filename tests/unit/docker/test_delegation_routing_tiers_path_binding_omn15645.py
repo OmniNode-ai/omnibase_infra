@@ -85,66 +85,52 @@ def test_compose_default_is_never_a_version_embedded_literal(
 
 
 @pytest.mark.unit
-def test_dockerfile_bakes_the_packaged_file_at_the_expected_fixed_path(
-    dockerfile_content: str,
+def test_dockerfile_bakes_the_tracked_file_at_the_expected_fixed_path(
+    dockerfile_content: str, project_root: Path
 ) -> None:
-    """Dockerfile.runtime must COPY the installed omnimarket routing_tiers.yaml
-    to the SAME fixed path the compose anchor declares — the two loci must
-    never drift independently."""
-    assert _EXPECTED_PATH in dockerfile_content, (
+    """Dockerfile.runtime must COPY the repo-tracked routing_tiers.yaml to the
+    SAME fixed path the compose anchor declares — the two loci must never
+    drift independently. The source is a tracked file, never a path inside an
+    installed omnimarket wheel (OMN-21279: the image carries no omnimarket)."""
+    copy = re.compile(
+        r"^COPY\s+(?:--chown=\S+\s+)?(?P<src>\S+)\s+"
+        + re.escape(_EXPECTED_PATH)
+        + r"\s*$",
+        re.MULTILINE,
+    ).search(dockerfile_content)
+    assert copy is not None, (
         f"docker/Dockerfile.runtime must bake a file at {_EXPECTED_PATH!r} "
         "(the same fixed path docker-compose.infra.yml's x-runtime-env anchor "
         f"binds {_ENV_KEY} to)."
     )
-    assert "omnimarket/configs/routing_tiers.yaml" in dockerfile_content, (
-        "docker/Dockerfile.runtime must source the baked file from the "
-        "installed omnimarket package's own configs/routing_tiers.yaml."
+    source = copy.group("src")
+    assert not _VERSION_EMBEDDED_LITERAL.search(source)
+    assert "site-packages" not in source
+    assert (project_root / source).is_file(), (
+        f"the COPY source {source!r} is not a tracked file of this repo"
     )
 
 
 @pytest.mark.unit
-def test_dockerfile_copy_source_uses_a_glob_never_a_literal_python_version(
-    dockerfile_content: str,
+def test_workspace_staging_overwrites_the_placeholder_ladder(
+    project_root: Path,
 ) -> None:
-    """The Dockerfile COPY --from=builder source must glob the interpreter
-    minor version (``python*``), matching the existing omnibase_core runtime
-    contracts COPY precedent, never hardcode e.g. ``python3.12``."""
-    for line in dockerfile_content.splitlines():
-        if "omnimarket/configs/routing_tiers.yaml" in line and "COPY" not in line:
-            # Continuation line of a multi-line COPY; still must not embed a
-            # literal version.
-            assert not _VERSION_EMBEDDED_LITERAL.search(line), (
-                f"Dockerfile COPY source line embeds a literal python3.X "
-                f"site-packages path: {line!r}. Use the python* glob instead "
-                "(matches the existing omnibase_core runtime contracts COPY)."
-            )
-    assert (
-        "/app/.venv/lib/python*/site-packages/omnimarket/configs/routing_tiers.yaml"
-        in (dockerfile_content)
-    ), (
-        "docker/Dockerfile.runtime must glob the venv's python* directory when "
-        "copying the packaged routing_tiers.yaml, never hardcode a python3.X "
-        "literal (the exact base-image-Python-bump trap OMN-15628's entrypoint "
-        "self-heal exists to correct for a *stale* pin)."
-    )
+    """The committed placeholder is replaced by the staged ladder (OMN-21279).
 
-
-@pytest.mark.unit
-def test_dockerfile_bake_runs_after_the_venv_copy(dockerfile_content: str) -> None:
-    """The routing_tiers.yaml bake must run AFTER the builder venv (which
-    contains the installed omnimarket package) is copied into the image."""
-    venv_copy_idx = dockerfile_content.find(
-        "COPY --from=builder --chown=omniinfra:omniinfra /app/.venv /app/.venv"
+    The image bakes ``workspace/routing_tiers.yaml``. A placeholder keeps the COPY
+    valid for release builds; stage_workspace.sh must overwrite it from the staged
+    sibling in workspace mode, and the placeholder must be an empty ladder so a
+    placement that names a tier fails loudly rather than reading stale data.
+    """
+    stage = (
+        project_root / "scripts" / "runtime_build" / "stage_workspace.sh"
+    ).read_text()
+    assert 'ROUTING_TIERS_OUT="workspace/routing_tiers.yaml"' in stage
+    assert "shutil.copyfile(sys.argv[1], sys.argv[2])" in stage
+    placeholder = yaml.safe_load(
+        (project_root / "workspace" / "routing_tiers.yaml").read_text()
     )
-    bake_idx = dockerfile_content.find(_EXPECTED_PATH)
-    assert venv_copy_idx != -1, "venv COPY step missing from Dockerfile.runtime"
-    assert bake_idx != -1, (
-        "routing_tiers.yaml bake step missing from Dockerfile.runtime"
-    )
-    assert venv_copy_idx < bake_idx, (
-        "the routing_tiers.yaml bake COPY must run AFTER the venv COPY step "
-        "(the source file only exists in the image once the venv has landed)"
-    )
+    assert placeholder == {"tiers": []}
 
 
 @pytest.mark.unit

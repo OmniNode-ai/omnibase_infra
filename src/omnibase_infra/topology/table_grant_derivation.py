@@ -455,6 +455,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="compaction_receipts",
         ),
     ),
+    # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
+    # lands its node contract (head 677d2941ff7e). This bridge expires once the
+    # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
+    # advancing past it; the OMN-18863 expiry module names this bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_capability_cells",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+            "0000_create_delegation_capability_cells.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_capability_cells",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+                "0000_create_delegation_capability_cells.sql"
+            ),
+            access="read_write",
+            role="delegation_capability_cells",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426

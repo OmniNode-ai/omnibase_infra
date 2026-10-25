@@ -100,7 +100,6 @@ VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 WORKSPACE_PACKAGES: dict[str, str] = {
     "omnibase_core": "omnibase-core",
     "omnibase_compat": "omnibase-compat",
-    "omnimarket": "omnimarket",
 }
 
 
@@ -552,7 +551,6 @@ def main() -> int:
             lock_path=lock_path,
             siblings={
                 "omnibase-compat": SIBLING_REPOS_DIR / "omnibase_compat",
-                "omnimarket": SIBLING_REPOS_DIR / "omnimarket",
             },
         )
         # Host self-check (OMN-12989): the runtime image's OWN omnibase_infra is

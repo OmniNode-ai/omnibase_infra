@@ -73,6 +73,12 @@ def _init_repo(path: Path, dist: str) -> None:
     (path / "pyproject.toml").write_text(
         f"[project]\nname = '{dist}'\nversion = '{_PIN_VERSION}'\n", encoding="utf-8"
     )
+    if dist == "omnimarket":
+        # OMN-21279: stage_workspace.sh copies the delegation routing ladder out
+        # of the staged omnimarket tree into the build context.
+        ladder = path / "src" / "omnimarket" / "configs"
+        ladder.mkdir(parents=True)
+        (ladder / "routing_tiers.yaml").write_text("tiers: []\n", encoding="utf-8")
     _git(path, "add", "-A")
     _git(path, "commit", "-q", "-m", "init")
 
@@ -388,7 +394,7 @@ def test_build_context_git_clone_stays_untracked_clean(tmp_path: Path) -> None:
     # ever the uncovered one.
     (build_ctx / ".gitignore").write_text(
         "workspace/sibling-repos/\nworkspace/sibling-vcs-provenance.json\n"
-        "workspace/sibling-pin-comparison.json\n",
+        "workspace/sibling-pin-comparison.json\nworkspace/routing_tiers.yaml\n",
         encoding="utf-8",
     )
     _git(build_ctx, "add", ".gitignore")

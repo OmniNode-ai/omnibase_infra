@@ -21,6 +21,8 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 
 pytestmark = pytest.mark.integration
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 _PLACEMENT = {
     "tier": "local",
     "fallback_for": ["local-coder"],
@@ -117,6 +119,28 @@ def test_env_resolved_render_refuses_a_tier_the_ladder_lacks(tmp_path: Path) -> 
         render_bifrost_delegation_contract_with_source(
             source_path=_base(tmp_path),
             environ=_environ(tmp_path, tier="lokal"),
+            verify_endpoints=False,
+        )
+    assert not (tmp_path / "rendered.yaml").exists()
+
+
+def test_env_resolved_render_refuses_any_tier_against_the_placeholder_ladder(
+    tmp_path: Path,
+) -> None:
+    """OMN-21279: a release image's committed empty ladder refuses every placement."""
+    placeholder = _REPO_ROOT / "workspace" / "routing_tiers.yaml"
+    assert yaml.safe_load(placeholder.read_text(encoding="utf-8")) == {"tiers": []}
+    environ = {
+        **_environ(tmp_path, tier="local"),
+        "DELEGATION_ROUTING_TIERS_PATH": str(placeholder),
+    }
+    with pytest.raises(
+        ProtocolConfigurationError,
+        match=r"local-second-host.*unknown tier .local.; ladder tiers: \[\]",
+    ):
+        render_bifrost_delegation_contract_with_source(
+            source_path=_base(tmp_path),
+            environ=environ,
             verify_endpoints=False,
         )
     assert not (tmp_path / "rendered.yaml").exists()
