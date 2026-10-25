@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 from deploy_agent.events import EnumRuntimeLane
-from deploy_agent.routing import PINNED_DEFAULT_INSTANCE, load_routing_table
+from deploy_agent.routing import load_routing_table
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 
 def test_dev_202_route_omnimarket_dev_rebuilds_go_to_dev_202() -> None:
@@ -40,7 +40,7 @@ def test_dev_202_route_omnimarket_dev_rebuilds_go_to_dev_202() -> None:
 )
 def test_dev_202_route_everything_else_stays_on_201(requested_by: str) -> None:
     table = load_routing_table()
-    assert table.route(EnumRuntimeLane.DEV, requested_by) == PINNED_DEFAULT_INSTANCE
+    assert table.route(EnumRuntimeLane.DEV, requested_by) == table.default_instance
 
 
 def test_dev_202_route_is_the_only_route() -> None:

@@ -9,7 +9,6 @@ from uuid import uuid4
 import pytest
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 from deploy_agent.routing import (
-    PINNED_DEFAULT_INSTANCE,
     DeployRouter,
     RoutingTableError,
     load_routing_table,
@@ -18,10 +17,12 @@ from deploy_agent.routing import (
 
 pytestmark = pytest.mark.unit
 
+DEFAULT_INSTANCE = "lane-a"
+
 TABLE_WITH_OMNIMARKET_ROUTE = f"""
-default_instance: {PINNED_DEFAULT_INSTANCE}
+default_instance: {DEFAULT_INSTANCE}
 instances:
-  {PINNED_DEFAULT_INSTANCE}:
+  {DEFAULT_INSTANCE}:
     hostnames: [host-a]
     consumer_group: group-a
   lane-b:
@@ -38,7 +39,7 @@ routes:
 @pytest.mark.parametrize(
     ("declaration", "expected"),
     [
-        ("    available: false\n", PINNED_DEFAULT_INSTANCE),
+        ("    available: false\n", DEFAULT_INSTANCE),
         ("    available: true\n", "lane-b"),
         ("", "lane-b"),
     ],
@@ -66,7 +67,7 @@ def test_only_default_agent_accepts_when_dev_202_is_unavailable() -> None:
         name: DeployRouter(table, instance, lambda sha: table).is_mine(command)[0]
         for name, instance in table.instances.items()
     }
-    assert accepted[PINNED_DEFAULT_INSTANCE] is True
+    assert accepted[DEFAULT_INSTANCE] is True
     assert accepted["lane-b"] is False
     assert sum(accepted.values()) == 1
 
@@ -88,11 +89,12 @@ def test_unavailable_default_refuses_table() -> None:
     )
     with pytest.raises(
         RoutingTableError,
-        match=rf"default_instance.*{PINNED_DEFAULT_INSTANCE}.*unavailable",
+        match=rf"default_instance.*{DEFAULT_INSTANCE}.*unavailable",
     ):
         parse_routing_table(text)
 
 
+@pytest.mark.lab_overlay
 def test_committed_route_keeps_dev_202_row_and_resolves_to_available_instance() -> None:
     table = load_routing_table()
     routed = next(

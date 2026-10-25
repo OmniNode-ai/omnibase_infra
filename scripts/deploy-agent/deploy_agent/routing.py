@@ -434,7 +434,20 @@ class DeployRouter:
             return ModelRoutingDecision(
                 instance=default, basis=f"default (ref {ref!r} is not a sha)"
             )
-        at_ref = self._table_at_ref(ref)
+        try:
+            at_ref = self._table_at_ref(ref)
+        except RoutingTableError as exc:
+            logger.warning(
+                "routing: table at %s unreadable (%s); %s takes the default %s "
+                "friction_type=routing_table_unreadable_at_ref",
+                ref[:12],
+                exc,
+                cmd.correlation_id,
+                default,
+            )
+            return ModelRoutingDecision(
+                instance=default, basis="default (table unreadable at ref)"
+            )
         if at_ref is None:
             return ModelRoutingDecision(
                 instance=default, basis=f"default (no table at {ref[:12]})"

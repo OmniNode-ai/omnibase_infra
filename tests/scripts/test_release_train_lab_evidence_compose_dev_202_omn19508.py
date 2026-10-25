@@ -47,7 +47,7 @@ lanes = rt.lab_pass_receipt.EnumLabLane
 PASS = rt.lab_pass_receipt.EnumLabPassResult.PASS
 FAIL = rt.lab_pass_receipt.EnumLabPassResult.FAIL
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 SHA = "5be72e12f1e9cb8168271a2dd31f8f6c5656e896"
 

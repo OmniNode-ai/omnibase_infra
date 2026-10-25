@@ -454,6 +454,9 @@ def test_git_table_at_ref_reads_the_committed_table_and_its_absence(
         reader("c" * 40)
 
 
-def test_missing_private_snapshot_never_falls_back_to_a_default():
-    with pytest.raises(RoutingTableError, match="not in the clone"):
-        _router("primary", {}).decide(_command("gha/example/pr-1"))
+def test_unreadable_snapshot_at_ref_takes_the_default_without_raising():
+    """OMN-20527: an unreadable table at the ref must not end the agent's poll loop."""
+    decision = _router("secondary", {}).decide(_command("gha/omnimarket/pr-1"))
+
+    assert decision.instance == "primary"
+    assert "unreadable" in decision.basis

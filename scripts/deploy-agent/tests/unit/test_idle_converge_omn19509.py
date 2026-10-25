@@ -299,13 +299,16 @@ def _agent(
     agent = DeployAgent(skip_self_update=True)
     if omnimarket_to_202:
         table = agent._router.table if agent._router else load_routing_table()
+        secondary = next(
+            name for name in table.instances if name != table.default_instance
+        )
         routed = table.model_copy(
             update={
                 "routes": (
                     route := ModelRoute(
                         runtime_lane=EnumRuntimeLane.DEV,
                         requester_repository="omnimarket",
-                        instance="dev-202",
+                        instance=secondary,
                     ),
                 ),
                 "instances": {
@@ -368,6 +371,7 @@ class TestIdleConvergeInTheAgent:
         agent._maybe_idle_converge()
         assert len(list((tmp_path / "jobs").glob("*.json"))) == 1
 
+    @pytest.mark.lab_overlay
     def test_idle_converge_fires_under_the_committed_table(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

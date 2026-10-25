@@ -45,6 +45,7 @@ def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(Path, "home", classmethod(test_home))
     monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
+    monkeypatch.setattr("deploy_agent.lock._LOCK_PATH", tmp_path / "deploy-agent.lock")
 
 
 class _NoopPromotionGuard:
@@ -103,21 +104,42 @@ def _declare_lane_fence(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _portable_routing_declaration(request, tmp_path, monkeypatch):
+def _portable_routing_declaration(request, tmp_path_factory, monkeypatch):
     if request.node.get_closest_marker("lab_overlay") is not None:
         return
     import hashlib
 
     from deploy_agent.routing import _private_config as config
 
-    data = b"default_instance: __default__\ninstances:\n  __default__:\n    hostnames: [example-worker]\n    consumer_group: example-deployer\n    flags: {max_dev_lag_minutes: 20}\n    verify: {receipt_lane: example-receipt}\nroutes: []\n"
+    data = b"""default_instance: __default__
+instances:
+  __default__:
+    hostnames: [example-worker]
+    consumer_group: example-deployer
+    flags: {max_dev_lag_minutes: 20}
+    verify: {receipt_lane: example-receipt}
+  secondary:
+    hostnames: [example-secondary]
+    consumer_group: example-secondary-deployer
+    verify: {receipt_lane: example-secondary-receipt}
+    lane:
+      compose_overlay: docker/example-overlay.yml
+      compose_project: example-secondary
+      postgres_container: example-secondary-postgres
+      runtime_container: example-secondary-runtime
+      health_ports: {main: 18085, effects: 18086}
+      receipt_lane: example-secondary-receipt
+      proves: [omnimarket]
+routes: []
+"""
     digest = hashlib.sha256(data).hexdigest()
-    snapshot = tmp_path / f"config/onex/overlays/deploy_lane_routing/{digest}.yaml"
+    overlay_root = tmp_path_factory.mktemp("routing-overlay")
+    snapshot = overlay_root / f"config/onex/overlays/deploy_lane_routing/{digest}.yaml"
     snapshot.parent.mkdir(parents=True, exist_ok=True)
     snapshot.write_bytes(data)
-    contract = tmp_path / "routing-contract.yaml"
+    contract = overlay_root / "routing-contract.yaml"
     contract.write_text(f"overlay_sha256: {digest}\n")
-    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path))
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(overlay_root))
     monkeypatch.setattr(config, "CONTRACT_PATH", contract)
 
 

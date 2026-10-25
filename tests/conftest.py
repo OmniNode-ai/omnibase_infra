@@ -65,6 +65,7 @@ Related Tickets:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import os
@@ -74,6 +75,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import yaml
 from dotenv import load_dotenv
 
 
@@ -1251,3 +1253,70 @@ async def event_bus() -> AsyncGenerator[object, None]:
     await bus.start()
     yield bus
     await bus.close()
+
+
+@pytest.fixture
+def placeholder_routing_overlay(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Give routing consumers a portable, digest-bound table with receipt evidence."""
+    from scripts.ci.deploy_lane_verify_route import _private_config
+    from scripts.ci.lab_pass_receipt import EnumLabLane
+
+    instance_lane = EnumLabLane.COMPOSE_DEV_202.value
+    verify = {
+        "receipt_lane": EnumLabLane.COMPOSE_DEV.value,
+        "runner_labels": ["example-runner"],
+        "deploy_agent_url": "http://agent.example.invalid",
+        "main_url": "http://main.example.invalid",
+        "effects_url": "http://effects.example.invalid",
+        "projection_url": "http://projection.example.invalid",
+        "compose_project": "example-project",
+        "runtime_container": "example-runtime",
+        "effects_container": "example-effects",
+        "postgres_container": "example-postgres",
+        "broker_container": "example-broker",
+    }
+    data = yaml.safe_dump(
+        {
+            "default_instance": "primary",
+            "instances": {
+                "primary": {
+                    "hostnames": ["worker-a.example.invalid"],
+                    "consumer_group": "example-primary",
+                    "verify": verify,
+                },
+                "secondary": {
+                    "hostnames": ["worker-b.example.invalid"],
+                    "consumer_group": "example-secondary",
+                    "verify": {**verify, "receipt_lane": instance_lane},
+                    "lane": {
+                        "compose_overlay": "docker/example-overlay.yml",
+                        "compose_project": "example-secondary",
+                        "postgres_container": "example-secondary-postgres",
+                        "runtime_container": "example-secondary-runtime",
+                        "health_ports": {"main": 18085, "effects": 18086},
+                        "receipt_lane": instance_lane,
+                        "proves": ["omnimarket"],
+                    },
+                },
+            },
+            "routes": [
+                {
+                    "runtime_lane": "dev",
+                    "requester_repository": "omnimarket",
+                    "instance": "secondary",
+                }
+            ],
+        }
+    ).encode()
+    digest = hashlib.sha256(data).hexdigest()
+    root = tmp_path_factory.mktemp("routing-overlay")
+    snapshot = root / f"config/onex/overlays/deploy_lane_routing/{digest}.yaml"
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_bytes(data)
+    contract = root / "routing-contract.yaml"
+    contract.write_text(f"overlay_sha256: {digest}\n", encoding="utf-8")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(root))
+    monkeypatch.setattr(_private_config, "CONTRACT_PATH", contract)
+    return snapshot

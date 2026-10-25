@@ -478,9 +478,10 @@ def test_host_mutex_agent_job_holds_the_slot_through_the_build(
 
     job = store.load(cmd.correlation_id)
     assert job is not None and job.status == "success"
-    assert fake.holder_during_build == "deploy-agent-dev-201"
+    expected_owner = f"deploy-agent-{agent._router.table.default_instance}"
+    assert fake.holder_during_build == expected_owner
     after = HostSlot(slot_dir).holder()
-    assert after is not None and after.owner == "deploy-agent-dev-201"
+    assert after is not None and after.owner == expected_owner
     assert after.reason.startswith("verify window"), after
 
 
