@@ -357,6 +357,10 @@ services:
       # mount, which this lane's volume override drops. Blank is no overlay, so a
       # morning run here is refused by name; the runtime boots either way.
       ONEX_SKILL_OVERLAY_ROOTS: ""
+      # OMN-21099: the session source's transcript root and ledger mounts are dropped
+      # by this lane's volume override too. Blank is unset, so the source refuses by name.
+      ONEX_SESSION_TRANSCRIPT_ROOT: ""
+      ONEX_LEDGER_PATH: ""
     volumes: !override
       - prepr_effects_logs:/app/logs
       - prepr_effects_data:/app/data

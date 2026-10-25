@@ -983,11 +983,27 @@ services:
       # variable from the lane identity ONEX_TENANT_ID, which this file leaves
       # alone. Non-secret; the operator env may override the dev-lane default.
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
+      #
+      # -- Session context sources (OMN-21099) ---------------------------------
+      # node_session_context_sources_effect (live mode) reads both, required with
+      # no default, for the compaction profile's required operator_words_unrecorded
+      # factor. Unset, the factor fails and the pack falls back to native.
+      # Host directories come from the operator env (DEV_LANE_SESSION_TRANSCRIPT_DIR,
+      # DEV_LANE_WORK_LEDGER_DIR), never this repo. The default is an empty directory,
+      # not `:?`, as with ONEX_SKILL_OVERLAY_ROOTS above: the lanes that layer this
+      # file interpolate it before merging, and each of them blanks both names.
+      # Mount the ledger directory, not the single file, so an atomic replace of
+      # the ledger file stays visible. Read-only: the container never writes either.
+      ONEX_SESSION_TRANSCRIPT_ROOT: /etc/onex/session-transcripts
+      ONEX_LEDGER_PATH: /etc/onex/work-ledger/ROLLING_WORK_LEDGER.md
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
       # Read-only: the container reads overlays and can never rewrite one.
       - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
+      # Read-only; the session transcripts and the work ledger the session source reads (OMN-21099).
+      - ${DEV_LANE_SESSION_TRANSCRIPT_DIR:-./session-transcripts}:/etc/onex/session-transcripts:ro
+      - ${DEV_LANE_WORK_LEDGER_DIR:-./work-ledger}:/etc/onex/work-ledger:ro
     healthcheck:
       test:
         - CMD

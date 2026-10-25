@@ -19,11 +19,23 @@ requirements:
       - id: AC2
         statement: |-
           AC2: the runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID value does not reference ONEX_TENANT_ID -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity_tenant_is_not_reused
+  - id: req-omn21099-ac3-session-source-paths
+    statement: "The dev-lane bundle gives runtime-effects ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on read-only operator-named mounts, and every pack-builder setting is present."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: the dev-lane bundle gives runtime-effects every pack-builder setting, including ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on read-only operator-named mounts -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q, which fails at the merge base naming ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH
+  - id: req-omn21099-ac4-borrower-overlays-blank
+    statement: "The four overlays that layer the dev-lane overlay and replace runtime-effects volumes explicitly blank both session-source path variables, because their volume overrides drop the mounts."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: each of the four overlays that layer docker/docker-compose.dev-lane.yml blanks ONEX_SESSION_TRANSCRIPT_ROOT and ONEX_LEDGER_PATH on runtime-effects -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k borrower_overlays
 evidence_requirements:
   - kind: tests
     description: "The dev-lane compose file delivers the context-source tenant to runtime-effects, separate from the lane identity tenant."
     command: |-
-      uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py tests/ci/test_dev_lane_estimator_key_omn20388.py -q
+      uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py tests/ci/test_dev_lane_estimator_key_omn20388.py tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q
   - kind: manual
     description: "Deploy validation command for the existing caller-contract deploy gate: parse the shipped dev-lane compose file and assert the runtime-effects tenant entry. Runnable on a hosted runner without lab access; it reads the committed file only and touches no running lane."
     command: "deploy: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant"
@@ -59,3 +71,30 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity_tenant_is_not_reused
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn21099-ac3-pack-builder-settings
+    description: >-
+      Parse the dev-lane compose bundle and assert runtime-effects has every pack-builder setting and read-only mounts for its session-source paths. Reads the committed files only; no running lane is touched. That the running container carries the paths is read on the lab after the deploy agent converges and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "every_pack_builder_setting or mounted_read_only"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21099-deploy-session-source-paths
+    description: >-
+      Deploy configuration probe, runnable on a hosted runner: read docker/docker-compose.dev-lane.yml through the GitHub contents API at the commit checked out in the tree under test (git rev-parse HEAD), the file the deploy agent converges the dev lane from, and require the runtime-effects session transcript root line. Reads the committed file only and goes red at the merge base, where that line is absent. That the running container carries the session-source paths is read on the lab after the converge and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -q 'ONEX_SESSION_TRANSCRIPT_ROOT: /etc/onex/session-transcripts'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21099-ac4-borrower-overlays
+    description: >-
+      Assert all four borrower overlays explicitly blank the runtime-effects session transcript root and ledger path when replacing its volumes. Reads the committed files only; no running lane is touched. The running container is read on the lab after the deploy agent converges and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k borrower_overlays
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
