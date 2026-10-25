@@ -1,52 +1,52 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21099
-title: "Developer principals may read the compaction reply topics the Claude Code hook awaits"
+title: "The dev lane gives runtime-effects the context-source tenant its compaction contract reads"
 summary: >-
-  Declares READ and DESCRIBE for a developer machine's lab dev-lane principal on the three compaction reply topics the Claude Code hook's compaction binding awaits and on the receipt-mode client's group prefix, in the developer-principal bindings, and regenerates the derived grants file from them. The declaration is delivered; applying the rows to the live dev broker is the lab principal issuer's apply step and is not part of this change.
+  The compose dev lane's runtime-effects service carries ONEX_CONTEXT_SOURCE_TENANT_ID, defaulting to lab and overridable from the operator env as DEV_LANE_CONTEXT_SOURCE_TENANT_ID. omnimarket's node_context_compaction_orchestrator binds its pack build from compaction_runtime.tenant_id = ${env.ONEX_CONTEXT_SOURCE_TENANT_ID:}, and the ledger and work-state context sources read the same variable; unset, every compaction command falls back pack_builder_unavailable. Delivering the value to the running dev lane is the deploy agent's converge step after merge and is not part of this change.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn21099-ac1-compaction-reply-read-grants
-    statement: "The derived developer-principal grants carry READ and DESCRIBE on the three compaction reply topics and the receipt-mode-client. group prefix, and no WRITE on any of them; WRITE and DESCRIBE on the compaction request topic only."
+  - id: req-omn21099-ac1-runtime-effects-context-source-tenant
+    statement: "The dev-lane compose file gives runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}."
     acceptance:
       - id: AC1
         statement: |-
-          AC1: the derived developer-principal grants carry READ and DESCRIBE on exactly onex.cmd.omniintelligence.context-compaction-package.v1, onex.evt.omnimarket.context-compaction-prepared.v1, onex.evt.omnimarket.context-compaction-fallback.v1 and the group prefix receipt-mode-client., no WRITE on any of them, and WRITE and DESCRIBE on the compaction command topic onex.cmd.omniintelligence.context-compaction-requested.v1 only -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies, which fails at the merge base where the bindings declare none of them
-  - id: req-omn21099-ac2-derived-file
-    statement: "The committed derived grants file deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, independently enumerated by TYPED_GRANTS, DECLARED_GRANTS and HOOK_EDGE_GRANTS in tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py, and is the derivation node's output for the shipped bindings."
+          AC1: services.runtime-effects.environment.ONEX_CONTEXT_SOURCE_TENANT_ID in docker/docker-compose.dev-lane.yml equals ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab} -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant, which fails with KeyError at the merge base where runtime-effects has no such variable
+  - id: req-omn21099-ac2-lane-identity-untouched
+    statement: "The context-source tenant does not reuse the lane identity ONEX_TENANT_ID."
     acceptance:
       - id: AC2
         statement: |-
-          AC2: the committed deploy/lab/developer-principal-derived-grants.json contains the independently expected developer permissions, including the three compaction replies and receipt-mode-client. group prefix, and equals the output of node_broker_grant_derive_compute for the shipped bindings -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
+          AC2: the runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID value does not reference ONEX_TENANT_ID -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity_tenant_is_not_reused
 evidence_requirements:
   - kind: tests
-    description: "The compaction reply rows are READ and DESCRIBE only, the committed derived grants are the node's output, and the discovery and issuer tests agree on the row count."
+    description: "The dev-lane compose file delivers the context-source tenant to runtime-effects, separate from the lane identity tenant."
     command: |-
-      uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q
+      uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py tests/ci/test_dev_lane_estimator_key_omn20388.py -q
   - kind: manual
-    description: "Deploy validation command for the existing caller-contract deploy gate: compare the shipped grant JSON with independently enumerated permissions and node output. Runnable on a hosted runner without broker access; this declares a probe, not a new workflow or a live broker apply."
-    command: "deploy: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived"
+    description: "Deploy validation command for the existing caller-contract deploy gate: parse the shipped dev-lane compose file and assert the runtime-effects tenant entry. Runnable on a hosted runner without lab access; it reads the committed file only and touches no running lane."
+    command: "deploy: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant"
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: dod-omn21099-ac1-compaction-reply-read-grants
+  - id: dod-omn21099-ac1-runtime-effects-context-source-tenant
     description: >-
-      Derive the grants from the shipped developer-principal bindings and assert READ and DESCRIBE on exactly the three compaction reply topics and the receipt-mode-client. group prefix, and no write. Reads the committed files only; no broker, credential or running lane is touched. Applying the rows to the live dev broker is the lab principal issuer's apply step and is not claimed.
+      Parse docker/docker-compose.dev-lane.yml and assert runtime-effects carries ONEX_CONTEXT_SOURCE_TENANT_ID as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}. Reads the committed file only; no running lane is touched. That the deployed dev lane then binds the compaction pack build is read after the deploy agent converges and is not claimed here.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k compaction_replies
+        check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn21099-ac2-derived-file
+  - id: dod-omn21099-ac2-lane-identity-untouched
     description: >-
-      Check the committed derived grants file against independently expected developer permissions, including the compaction replies and receipt-mode-client. group prefix, and compare it with the derivation node's output for the shipped bindings. Reads the committed files only; no broker or credential is touched.
+      Assert the runtime-effects context-source tenant value does not reference the lane identity ONEX_TENANT_ID. Reads the committed file only.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k committed_derived
+        check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity_tenant_is_not_reused
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
