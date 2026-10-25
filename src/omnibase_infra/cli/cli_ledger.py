@@ -14,7 +14,7 @@ issued dev credential and the lane's declared transport are resolved by the
 work-ledger handler. Every failed read is nonzero, with no answer on stdout.
 
 Neither command accepts a credential value on its command line. See
-``docs/operations/work_ledger_query.md`` for work-ledger ACLs and reader wiring.
+the root README for work-ledger ACLs and reader wiring.
 """
 
 from __future__ import annotations

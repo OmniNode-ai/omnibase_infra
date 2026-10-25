@@ -24,4 +24,4 @@ class ModelWorkLedgerQueryCliOptions(BaseModel):
     kinds: tuple[str, ...]
     limit: int | None
     read_stdin: bool
-    timeout_s: float = Field(gt=0)
+    timeout_s: float = Field(gt=0, allow_inf_nan=False)
