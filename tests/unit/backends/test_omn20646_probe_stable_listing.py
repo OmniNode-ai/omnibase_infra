@@ -9,10 +9,13 @@ from typing import Any
 
 import pytest
 from aiokafka.errors import (
+    GroupCoordinatorNotAvailableError,
+    GroupLoadInProgressError,
     IncompatibleBrokerVersion,
     KafkaConnectionError,
     KafkaTimeoutError,
     NodeNotReadyError,
+    NotCoordinatorForGroupError,
     RequestTimedOutError,
 )
 
@@ -177,6 +180,26 @@ def test_list_response_error_is_unknown_and_closes_the_client(admin: _Admin) -> 
     assert admin.closed
 
 
+@pytest.mark.parametrize("chain", [False, True])
+@pytest.mark.parametrize("error_code", [14, 15, 16])
+def test_list_response_coordinator_loading_is_transient(
+    admin: _Admin, chain: bool, error_code: int
+) -> None:
+    admin.error_code = error_code
+    with pytest.raises(ConsumerGroupLivenessUnknownError) as caught:
+        if chain:
+            backend_probe.live_chain_consumer_groups(
+                command_topic=_TOPIC,
+                subscribe_topics=(_TOPIC,),
+                bootstrap_servers=_BROKER,
+            )
+        else:
+            backend_probe.live_consumer_groups(topic=_TOPIC, bootstrap_servers=_BROKER)
+    assert isinstance(caught.value, ConsumerGroupLivenessTransientError)
+    assert admin.described == []
+    assert admin.closed
+
+
 def test_candidate_ids_are_sorted_and_unique_across_brokers(admin: _Admin) -> None:
     admin.states = {"z": "Stable", "a": "Stable", "empty": "Empty"}
     ids = asyncio.run(backend_probe._list_candidate_group_ids(admin, [1, 2]))
@@ -209,6 +232,9 @@ def test_chain_requires_stable_groups_on_every_footprint_topic(admin: _Admin) ->
         (KafkaConnectionError("dropped"), True),
         (KafkaTimeoutError("slow"), True),
         (NodeNotReadyError("unready"), True),
+        (GroupLoadInProgressError("loading"), True),
+        (GroupCoordinatorNotAvailableError("moving"), True),
+        (NotCoordinatorForGroupError("moved"), True),
         (TimeoutError("slow"), True),
         (ValueError("decode"), False),
     ],
