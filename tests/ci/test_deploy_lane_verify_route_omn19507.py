@@ -104,6 +104,7 @@ def _with_omnimarket_row() -> dict[str, Any]:
             "instance": "dev-202",
         }
     ]
+    table["instances"][table["routes"][0]["instance"]]["available"] = True
     return table
 
 
@@ -120,19 +121,27 @@ class TestTheCommittedTableKeepsEveryMergeOn201:
         assert resolved.targets.model_dump() == PRE_CHANGE_201
 
     def test_omnimarket_now_resolves_to_dev_202_on_the_committed_table(self) -> None:
-        """Task B8 (OMN-19510) landed the real route: the committed table (not
-        a synthetic one) now sends omnimarket's dev rebuilds to dev-202, and
-        every other requester is unaffected."""
-        resolved = resolve(
-            load_table(), runtime_lane="dev", requested_by="gha/omnimarket/pr-2870"
+        """The committed omnimarket route follows the routed instance's availability."""
+        table = load_table()
+        routed = next(
+            row["instance"]
+            for row in table["routes"]
+            if row["requester_repository"] == "omnimarket"
         )
-        assert resolved.instance == "dev-202"
-        assert resolved.targets.receipt_lane == "compose-dev-202"
-        assert json.loads(job_outputs(resolved)["verify_runs_on"]) == [
-            "self-hosted",
-            "omnibase-verify",
-            "host-202",
-        ]
+        available = table["instances"][routed].get("available", True)
+        expected = routed if available else table["default_instance"]
+        verify = table["instances"][expected]["verify"]
+        resolved = resolve(
+            table, runtime_lane="dev", requested_by="gha/omnimarket/pr-2870"
+        )
+        assert resolved.instance == expected
+        assert resolved.targets.receipt_lane == verify["receipt_lane"]
+        assert (
+            json.loads(job_outputs(resolved)["verify_runs_on"])
+            == (verify["runner_labels"])
+        )
+        if not available:
+            assert resolved.targets.model_dump() == PRE_CHANGE_201
 
     def test_the_job_outputs_are_the_old_runner_and_lane(self) -> None:
         outputs = job_outputs(

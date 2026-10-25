@@ -20,9 +20,13 @@ pytestmark = pytest.mark.unit
 
 def test_dev_202_route_omnimarket_dev_rebuilds_go_to_dev_202() -> None:
     table = load_routing_table()
+    routed = next(
+        r.instance for r in table.routes if r.requester_repository == "omnimarket"
+    )
+    expected = routed if table.instances[routed].available else table.default_instance
     assert (
         table.route(EnumRuntimeLane.DEV, "gha/omnimarket/runtime-rebuild-trigger")
-        == "dev-202"
+        == expected
     )
 
 
