@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19854"
+title: "The Hostile Review Thread Gate and CI Summary declare that they have no pre-commit twin, so the ruling audit counts the gate as wired"
+summary: >-
+  Operator RULING 2026-10-21T13:00:04Z (ticket OMN-17427) makes the Hostile Review Thread Gate required on dev. The ruling audit (ruling_mechanisms.py) counts a CI check as wired when a required CI job and a pre-commit hook both run it, unless the gate that owns the job declares pre_commit: not-applicable in .github/required-checks.yaml. The gate judges a PR's review threads and CI Summary aggregates CI conclusions, so neither judges a file a hook could read. This change declares pre_commit: not-applicable on those two rows and pins that no other row carries the key.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-no-precommit-twin-declared"
+    statement: "The Hostile Review Thread Gate row and the CI Summary row of .github/required-checks.yaml declare pre_commit: not-applicable, and no other row does."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the two rows declare pre_commit: not-applicable and no other gate row carries a pre_commit key -- falsifier: uv run pytest tests/ci/test_required_checks_no_precommit_twin_omn19854.py"
+evidence_requirements:
+  - kind: "tests"
+    description: "AC1: the test reads .github/required-checks.yaml and finds the declaration on exactly those two rows."
+    command: "uv run pytest tests/ci/test_required_checks_no_precommit_twin_omn19854.py -q -p no:randomly --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19854-ac1-no-twin-declared"
+    description: "AC1: the two gate rows declare pre_commit: not-applicable; the test fails on the tree before this change."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_required_checks_no_precommit_twin_omn19854.py -q -p no:randomly --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn19854-deploy-probe"
+    description: "Deploy probe. The hosted runner reads .github/required-checks.yaml at the checked-out commit through the GitHub contents API and requires the pre_commit declaration; the probe exits nonzero on a tree without it, so it fails at the merge base. This is package evidence, not a live deployment readback."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/.github/required-checks.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'pre_commit: not-applicable'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
