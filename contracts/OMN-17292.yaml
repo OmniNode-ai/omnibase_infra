@@ -13,8 +13,8 @@ requirements:
         statement: "AC1: the pin is a strict release tag; the resolver refuses a sha, a branch, a dev merge tag and a prerelease; the only writer is the train follower, triggered by the scheduled train run and never by a schedule or push of its own -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_sibling_reads_pinned_omn20331.py tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
       - id: AC8
         statement: "AC8: omnimarket dev moving past the pinned release does not move the derivation input, and the follower selects the newest strict release tag by numeric order, ignoring dev merge tags and prereleases -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
-      - id: AC6
-        statement: "AC6: staleness is bounded by one train cycle and every move stays forward-only; the legacy sha base bootstraps once and a tag-form base cannot skip a failed forward proof -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
+      - id: AC9
+        statement: "AC9: staleness is bounded by one train cycle and every move stays forward-only; the legacy sha base bootstraps once and a tag-form base cannot skip a failed forward proof -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
       - id: AC7
         statement: "AC7: OMN-17156 stays the upstream ordering gate and this keeps infra's verdict a function of committed state, stated in the follower's header -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
   - id: req-omn17292-dashboard-owner-lane
@@ -92,7 +92,7 @@ dod_evidence:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC6]
+    binds_ac: [AC9]
   - id: dod-omn-17292-train-tag-ac4
     description: The follower's header names OMN-17156 as the upstream ordering gate and the one-train-cycle staleness budget.
     source: manual
@@ -140,7 +140,7 @@ dod_evidence:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC1, AC8, AC6, AC7]
+    binds_ac: [AC1, AC8, AC9, AC7]
   - id: dod-omn-17292-ac5-hostile-reviewer-lan-label
     description: The hostile-review job's trusted fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
     source: manual
