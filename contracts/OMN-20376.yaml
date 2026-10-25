@@ -27,6 +27,12 @@ evidence_requirements:
   - kind: manual
     description: "Deploy validation command for the existing caller-contract deploy gate: run the probe classification tests against the committed source. Runnable on a hosted runner without broker access; it touches no broker and no running lane."
     command: "deploy: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k coordinator_loading"
+  - kind: tests
+    description: "The CLI retries decoded coordinator responses on both hops, dispatches only after recovery, and refuses exhausted retries or authorization failures."
+    command: "uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
+  - kind: manual
+    description: "Hosted-runner deploy check of the CLI and liveness probes together, with only broker admin responses and the terminal receipt writer replaced."
+    command: "deploy: uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -50,3 +56,12 @@ dod_evidence:
         check_value: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "list_response_error_is_unknown or transport_classification"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn20376-cli-coordinator-retry
+    description: >-
+      Decode ListGroups responses with codes 14, 15 and 16 through the real liveness probes and CLI retry gate on both hops. Require a live answer before dispatch, refuse after three failed attempts, and refuse code 31 immediately. Assert clients close and refusals never dispatch.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3, AC4]
