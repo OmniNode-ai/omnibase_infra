@@ -41,6 +41,15 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k carries_the_context_source_tenant
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21099-deploy-dev-compose-tenant
+    description: >-
+      Deploy probe, runnable on a hosted runner: read docker/docker-compose.dev-lane.yml from the dev branch the deploy agent converges the dev lane to, and require the runtime-effects context-source tenant line. It goes red while dev lacks the line. That the running runtime-effects container carries the variable is read on the lab after the converge and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=dev' --jq .content | base64 -d | grep -q 'ONEX_CONTEXT_SOURCE_TENANT_ID: .{DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn21099-ac2-lane-identity-untouched
     description: >-
       Assert the runtime-effects context-source tenant value does not reference the lane identity ONEX_TENANT_ID. Reads the committed file only.
