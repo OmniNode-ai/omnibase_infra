@@ -19,7 +19,6 @@ disabled (OMN-17502).
 from __future__ import annotations
 
 import asyncio
-import importlib.resources
 import json
 import os
 import re
@@ -68,6 +67,7 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 from omnibase_spi.protocols.services import ProtocolSecretStore
 
 _DEFAULT_TARGET_PATH = Path("/app/data/delegation/bifrost_delegation.yaml")
+_BASE_CONTRACT_PATH_ENV = "BIFROST_BASE_CONTRACT_PATH"
 _LANE_OVERLAY_PATH_ENV = "BIFROST_LANE_OVERLAY_PATH"
 _LANE_ENV = "ONEX_ENVIRONMENT"
 #: OMN-19214: a lane's overlay row in the config store is the same
@@ -95,25 +95,21 @@ _BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 EndpointProbe = Callable[[str, str, float], ModelBifrostEndpointProbeFailure | None]
 
 
-def _resolve_canonical_source_path() -> Path:
-    """Resolve the packaged omnimarket Bifrost base contract."""
-    try:
-        candidate = Path(
-            str(
-                importlib.resources.files("omnimarket").joinpath(
-                    "configs/bifrost_delegation.yaml"
-                )
-            )
-        )
-        if candidate.is_file():
-            return candidate
-    except (ModuleNotFoundError, TypeError, AttributeError) as exc:
+def _resolve_canonical_source_path(env: Mapping[str, str]) -> Path:
+    """Resolve the deploy-provided base contract at BIFROST_BASE_CONTRACT_PATH."""
+    configured = env.get(_BASE_CONTRACT_PATH_ENV, "").strip()
+    if not configured:
         raise ProtocolConfigurationError(
-            "Packaged omnimarket Bifrost base contract is unavailable"
-        ) from exc
-    raise ProtocolConfigurationError(
-        f"Packaged omnimarket Bifrost base contract is unavailable: {candidate}"
-    )
+            f"{_BASE_CONTRACT_PATH_ENV} is unset or blank; there is no default: "
+            "the deploy (the omnimarket composed image or the lane's compose) "
+            "provides the base contract. Fail fast."
+        )
+    candidate = Path(configured)
+    if not candidate.is_file():
+        raise ProtocolConfigurationError(
+            f"{_BASE_CONTRACT_PATH_ENV} is not an existing file: {candidate}"
+        )
+    return candidate
 
 
 def _load_mapping(path: Path, *, label: str) -> dict[str, object]:
@@ -737,7 +733,8 @@ def render_bifrost_delegation_contract_with_source(
     records which source supplied it. ``lane`` names the store row and defaults
     to ``ONEX_ENVIRONMENT``; it is read only when a store is given.
 
-    ``environ`` supplies the target path, the lane's overlay path pin
+    ``environ`` supplies the deploy-provided base contract path
+    (``BIFROST_BASE_CONTRACT_PATH``), the target path, the lane's overlay path pin
     (``BIFROST_LANE_OVERLAY_PATH``), the routing ladder path pin
     (``DELEGATION_ROUTING_TIERS_PATH``), and the endpoint-verification flag;
     endpoint, model, and local operational bindings always come from the
@@ -756,7 +753,7 @@ def render_bifrost_delegation_contract_with_source(
         return ModelBifrostRenderOutcome(
             path=None, overlay_source=None, overlay_source_ref=None
         )
-    source = source_path or _resolve_canonical_source_path()
+    source = source_path or _resolve_canonical_source_path(env)
     overlay, overlay_source, overlay_source_ref = _resolve_lane_overlay(
         overlay_path=overlay_path, env=env, store=overlay_store, lane=lane
     )
@@ -822,7 +819,10 @@ def _emit_config_provenance(*, rendered: Path, source_path: Path) -> None:
 
 
 def main() -> int:
-    source_path = _resolve_canonical_source_path()
+    env = os.environ
+    if _resolve_target_path(target_path=None, env=env) is None:
+        return 0
+    source_path = _resolve_canonical_source_path(env)
     outcome = render_bifrost_delegation_contract_with_source(source_path=source_path)
     rendered = outcome.path
     if rendered is None:

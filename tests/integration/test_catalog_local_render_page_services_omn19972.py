@@ -4,9 +4,9 @@
 
 The unit tests pin ``generate_compose`` directly. This drives the real
 ``omnibase_infra.docker.catalog.cli generate`` entry point in a subprocess, the
-way ``make up-local`` does, and reads the compose file it wrote: that file is
-what ``docker compose`` runs, so a service, port or dependency lost between the
-resolver and the written file fails here.
+way the laptop bundles are generated, and reads the compose file it wrote.
+That file is what ``docker compose`` runs, so a service, port or dependency
+lost between the resolver and the written file fails here.
 
 The ``runtime-observability-projections`` render is the control. It uses the
 same shared manifests, and the laptop-only port and dependency overrides must
@@ -29,8 +29,7 @@ _OVERLAY_TEMPLATE = (
     REPO_ROOT / "docker" / "lane-overlays" / "local.bifrost.example.yaml"
 )
 _PAGE_SERVICES = (
-    "projection-api",
-    "omnimarket-projection-llm-cost",
+    # OMN-21279: the projection API and LLM cost writer ship in local-market.
     "consumer-health-projection",
     # OMN-19972 (T3.6): the usage-by-model writer's carrier (RUNTIME_PROFILE
     # tenant-projection); the page's usage rows come from it.
@@ -80,23 +79,15 @@ def _render(bundle: str, tmp_path: Path) -> dict[str, dict[str, object]]:
 
 
 @pytest.mark.integration
-def test_cli_local_render_writes_the_page_services_healthy_and_ordered(
+@pytest.mark.parametrize("bundle", ["local", "local-market"])
+def test_cli_laptop_render_writes_the_page_services_healthy(
     tmp_path: Path,
+    bundle: str,
 ) -> None:
-    services = _render("local", tmp_path)
+    services = _render(bundle, tmp_path)
 
     assert [name for name in _PAGE_SERVICES if name not in services] == []
-    # The laptop's projection API is off the lab lanes' 3002 and on loopback.
-    assert services["projection-api"]["ports"] == ["127.0.0.1:3102:3002"]
-    # It starts only after the kernel that provisions its exposure topics is
-    # healthy; without that it waits 300 s for topic metadata and exits.
-    depends_on = services["projection-api"]["depends_on"]
-    assert isinstance(depends_on, dict)
-    assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
-    # It is told where the broker is; without it the API exits at startup.
-    env = services["projection-api"]["environment"]
-    assert isinstance(env, dict)
-    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
+    assert ("projection-api" in services) == (bundle == "local-market")
     # Every long-running service reports health, so the CI boot step can tell
     # a dead one from a live one.
     unwatched = sorted(
@@ -105,6 +96,27 @@ def test_cli_local_render_writes_the_page_services_healthy_and_ordered(
         if svc.get("restart") != "no" and "healthcheck" not in svc
     )
     assert unwatched == []
+
+
+@pytest.mark.integration
+def test_cli_local_market_projection_api_is_ordered_and_configured(
+    tmp_path: Path,
+) -> None:
+    services = _render("local-market", tmp_path)
+    # The laptop's projection API is off the lab lanes' 3002 and on loopback.
+    assert services["projection-api"]["ports"] == ["127.0.0.1:3102:3002"]
+    # It starts only after the kernel that provisions its exposure topics is
+    # healthy; without that it waits 300 s for topic metadata and exits.
+    depends_on = services["projection-api"]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+    assert depends_on.get("redpanda-local-sasl") == {
+        "condition": "service_completed_successfully"
+    }
+    # It is told where the broker is; without it the API exits at startup.
+    env = services["projection-api"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
 
 
 @pytest.mark.integration

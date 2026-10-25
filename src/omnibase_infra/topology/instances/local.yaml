@@ -229,6 +229,7 @@ databases:
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state
+              - delegation_capability_cells
               - delegation_dispositions
               - delegation_eval_item_verdicts
               - delegation_eval_items

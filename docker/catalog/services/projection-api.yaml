@@ -1,6 +1,9 @@
 name: projection-api
 description: OmniMarket projection API server for reducer-owned projection snapshots (OMN-11542)
-image: runtime:latest
+# OMN-21279: omnimarket-projection-api is an omnimarket console script; the
+# image is built by omnimarket FROM the infra runtime image, which carries no
+# omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-api
 required_env:

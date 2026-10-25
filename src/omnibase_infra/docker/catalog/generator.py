@@ -35,6 +35,9 @@ from omnibase_infra.models.docker.model_rendered_bundle import ModelRenderedBund
 
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 _RUNTIME_IMAGE = "runtime:latest"
+# OMN-21279: omnimarket's docker/Dockerfile.runtime builds this FROM this repo's
+# runtime image. It is project-scoped but never receives an infra build stanza.
+_MARKET_RUNTIME_IMAGE = "omnimarket-runtime:latest"
 _DEFAULT_NETWORK = "omnibase-infra-network"
 
 
@@ -213,7 +216,7 @@ def generate_compose(
 
         # Image. The locally built runtime image is project-scoped so a second
         # project's build never retags the image another project runs.
-        if manifest.image == _RUNTIME_IMAGE:
+        if manifest.image in {_RUNTIME_IMAGE, _MARKET_RUNTIME_IMAGE}:
             svc["image"] = _scoped(project, manifest.image)
         else:
             svc["image"] = manifest.image

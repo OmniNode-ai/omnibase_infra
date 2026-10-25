@@ -1,10 +1,8 @@
 name: omnimarket-projection-llm-cost
 description: Kafka-to-DB projection consumer for LLM cost events (OMN-7610)
-# OMN-19972: built from docker/Dockerfile.runtime, which installs omnimarket, as
-# omnimarket-projection-delegation is (OMN-19496). The former
-# omnimarket-projection:latest image was built only in the omnimarket repo, so
-# no catalog render could start this service.
-image: runtime:latest
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-llm-cost
 required_env:
