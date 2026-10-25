@@ -112,15 +112,20 @@ class ConsumerGroupLivenessTransientError(ConsumerGroupLivenessUnknownError):
 
 
 def _is_transient_liveness_failure(exc: BaseException) -> bool:
-    """A request that timed out or a connection that dropped (OMN-20646).
+    """A timeout, dropped connection, or loading/moving coordinator is transient.
 
-    Asking again may answer these. Everything else (a decode error, a broker
-    error code, a refused login) would answer the same way twice.
+    Asking again may answer a timeout or dropped connection (OMN-20646). A
+    coordinator that is loading or moving (Kafka codes 14, 15, 16) is retriable
+    by the protocol and is transient (OMN-20376). Other broker error codes,
+    decode errors, and refused logins would still answer the same way twice.
     """
     from aiokafka.errors import (
+        GroupCoordinatorNotAvailableError,
+        GroupLoadInProgressError,
         KafkaConnectionError,
         KafkaTimeoutError,
         NodeNotReadyError,
+        NotCoordinatorForGroupError,
         RequestTimedOutError,
     )
 
@@ -132,6 +137,9 @@ def _is_transient_liveness_failure(exc: BaseException) -> bool:
             RequestTimedOutError,
             KafkaConnectionError,
             NodeNotReadyError,
+            GroupLoadInProgressError,
+            GroupCoordinatorNotAvailableError,
+            NotCoordinatorForGroupError,
         ),
     )
 
