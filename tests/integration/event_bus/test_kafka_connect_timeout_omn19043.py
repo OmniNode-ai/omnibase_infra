@@ -10,9 +10,12 @@ cancel real network I/O, and cleanup must close every accepted connection.
 from __future__ import annotations
 
 import asyncio
+import re
+import socket
 import time
 
 import pytest
+from aiokafka.errors import KafkaConnectionError
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import InfraTimeoutError
@@ -80,9 +83,17 @@ async def test_silent_peer_exhausts_declared_retries_with_typed_timeout(
             bootstrap_servers=bootstrap_servers, timeout_seconds=1.0
         )
     )
+    if surface == "provider":
+        message = (
+            rf"Timeout connecting to Kafka after {retries + 1} attempts with "
+            r"1\.0s per-attempt deadline "
+            + re.escape(f"({policy.total_bound_seconds}s retry bound)")
+        )
+    else:
+        message = r"Timeout connecting to Kafka after 1s(?!\S)"
     try:
         started = time.monotonic()
-        with pytest.raises(InfraTimeoutError, match=r"1(?:\.0)?s") as raised:
+        with pytest.raises(InfraTimeoutError, match=message) as raised:
             async with asyncio.timeout(policy.total_bound_seconds + 5.0):
                 if surface == "provider":
                     await provider.create()
@@ -96,7 +107,9 @@ async def test_silent_peer_exhausts_declared_retries_with_typed_timeout(
         await asyncio.wait_for(asyncio.gather(*connections), timeout=2.0)
         assert len(requests) == retries + 1
         assert all(requests)
-        assert policy.total_bound_seconds <= elapsed < policy.total_bound_seconds + 5.0
+        # Upper bound only: attempt count is proven server-side above, and a
+        # lower wall-clock bound would race asyncio timer resolution.
+        assert elapsed < policy.total_bound_seconds + 5.0
         assert isinstance(raised.value.__cause__, TimeoutError)
         context = raised.value.model.context
         assert context["transport_type"] == EnumInfraTransportType.KAFKA
@@ -115,3 +128,33 @@ async def test_silent_peer_exhausts_declared_retries_with_typed_timeout(
             writer.close()
         if connections:
             await asyncio.gather(*connections, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retries", [0, 2])
+async def test_refused_connection_is_not_reported_as_a_timeout(
+    monkeypatch: pytest.MonkeyPatch, retries: int
+) -> None:
+    """Only an exhausted timeout becomes InfraTimeoutError on the provider.
+
+    A real closed port refuses the connection; that non-timeout failure must
+    reach the caller as the client's own KafkaConnectionError, unwrapped.
+    """
+    monkeypatch.setenv("KAFKA_MAX_RETRY_ATTEMPTS", str(retries))
+    monkeypatch.setenv("KAFKA_RETRY_BACKOFF_BASE", "0.01")
+    monkeypatch.setenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+
+    provider = ProviderKafkaProducer(
+        ModelKafkaProducerConfig(
+            bootstrap_servers=f"127.0.0.1:{port}", timeout_seconds=1.0
+        )
+    )
+    with pytest.raises(KafkaConnectionError) as raised:
+        async with asyncio.timeout(10.0):
+            await provider.create()
+
+    assert not isinstance(raised.value, InfraTimeoutError)
+    assert not isinstance(raised.value.__cause__, TimeoutError)

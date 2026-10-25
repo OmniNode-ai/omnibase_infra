@@ -2,17 +2,11 @@ schema_version: "1.0.0"
 ticket_id: "OMN-19043"
 title: "A transport-class dispatch failure emits no typed terminal, so the caller gets an exception instead of a receipt"
 summary: >-
-  Evidence for the transport terminal and shared connect retry introduced in omnibase_infra#3934, with a provider timeout correction in this PR. A delegate dispatch that cannot reach the broker writes a run directory whose receipt.json carries a typed transport refusal. Both Kafka connect surfaces retry with bounded backoff from one declared policy, and an unreachable broker is refused typed and inside the bound. The provider now translates an exhausted connect timeout into InfraTimeoutError with its per-attempt deadline and total retry bound; the shared-dial tests assert the awaited exponential backoff on both surfaces.
+  Evidence for the bounded shared Kafka connect retry from omnibase_infra#3934, with a provider timeout correction in this PR. Both Kafka connect surfaces retry with bounded backoff from one declared policy, and a broker that refuses or never answers is refused typed and inside the bound. The provider now translates an exhausted connect timeout into InfraTimeoutError with its per-attempt deadline and total retry bound; the shared-dial tests assert the awaited exponential backoff on both surfaces. AC1 (the delegate transport receipt) was delivered by omnibase_infra#3934 and is unchanged by this pull request, so this contract binds only the criteria its change can fail.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: "req-omn19043-typed-transport-terminal"
-    statement: "A dispatch that never reaches the broker leaves a typed transport-class receipt on disk."
-    acceptance:
-      - id: "AC1"
-        statement: >-
-          AC-1: A dispatch that cannot reach the broker writes a run directory with a `receipt.json` carrying a typed transport-class terminal cause, distinguishable from "still running" and from a model-quality failure.
   - id: "req-omn19043-bounded-connect-retry"
     statement: "Both producer connect paths retry with bounded backoff from one declaration and fail fast when unreachable."
     acceptance:
@@ -29,22 +23,12 @@ evidence_requirements:
   - kind: "tests"
     description: "Transport terminal and connect retry tests pass"
     command: >-
-      uv run pytest -q --no-cov tests/unit/cli/test_delegate_transport_terminal_omn18925.py tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/event_bus/test_connect_retry_one_declaration_omn19043.py
+      uv run pytest -q --no-cov tests/unit/cli/test_delegate_transport_terminal_omn18925.py tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/event_bus/test_connect_retry_one_declaration_omn19043.py tests/integration/event_bus/test_kafka_connect_timeout_omn19043.py
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: "dod-omn19043-ac1-transport-receipt-on-disk"
-    description: >-
-      A transport-class receipt is written through the CLI run writer: receipt.json, run.json and result.txt exist, the cause names the transport (not a provider), and the record is distinguishable from a running and from a quality failure. A non-transport unresolvable terminal still raises.
-    source: "manual"
-    binds_ac: ["AC1"]
-    checks:
-      - check_type: "test_passes"
-        check_value: >-
-          uv run pytest -q --no-cov tests/unit/cli/test_delegate_transport_terminal_omn18925.py -k "TestTransportFailureWritesTypedTerminal or TestRefusalModelRefusesAnUntruthfulRecord"
-        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-ac2-connect-survives-a-stall"
     description: >-
       Both connect surfaces (ProviderKafkaProducer and EventBusKafka.start) connect on the second attempt after a first attempt outruns its deadline, and the default bound exceeds the measured 17.222 s stall. Provider exhaustion reports InfraTimeoutError with the deadline, total bound and original TimeoutError cause. The shared helper continues to preserve the original exception for its caller to translate.
@@ -73,7 +57,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-ac4-unreachable-broker-fails-fast"
     description: >-
-      Against a real closed TCP port, EventBusKafka.start and ProviderKafkaProducer.create refuse with a typed error well inside the policy bound, and a locus-probe refusal still writes its receipt. A permanent (auth) failure is not retried.
+      Against a real closed TCP port, EventBusKafka.start and ProviderKafkaProducer.create refuse with a typed error well inside the policy bound, and a locus-probe refusal still writes its receipt. A permanent (auth) failure is not retried. Against a real peer that accepts but never answers, ProviderKafkaProducer.create refuses with InfraTimeoutError naming its attempts, deadline and bound, while a refused connection still surfaces as the unwrapped KafkaConnectionError.
     source: "manual"
     binds_ac: ["AC4"]
     checks:
@@ -81,9 +65,13 @@ dod_evidence:
         check_value: >-
           uv run pytest -q --no-cov tests/unit/event_bus/test_kafka_connect_retry_omn18925.py tests/unit/cli/test_delegate_transport_terminal_omn18925.py -k "TestUnreachableBrokerFailsFastAndTyped or TestAPermanentFailureIsNotRetried"
         cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: >-
+          uv run pytest -q --no-cov tests/integration/event_bus/test_kafka_connect_timeout_omn19043.py -k "provider or refused_connection"
+        cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn19043-real-client-timeout"
     description: >-
-      Real aiokafka producers on both surfaces connect to a local TCP peer that reads Kafka requests but never replies. Zero and two declared retries produce one and three observed connections respectively, each closed by client cleanup. Exhaustion raises InfraTimeoutError with the original timeout cause and deadline; the provider also reports the attempt count and total bound. No producer or retry helper is mocked.
+      Real aiokafka producers on both surfaces connect to a local TCP peer that reads Kafka requests but never replies. Zero and two declared retries produce one and three observed connections respectively, each closed by client cleanup. Exhaustion raises InfraTimeoutError with the original timeout cause and deadline; the provider also reports the attempt count and total bound, and a refused connection is not wrapped as a timeout. No producer or retry helper is mocked.
     source: "manual"
     binds_ac: ["AC2", "AC3"]
     checks:
