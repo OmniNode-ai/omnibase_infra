@@ -31,6 +31,7 @@ behaviour still fails.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -43,7 +44,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "hostile-reviewer.yml"
 REVIEW_JOB = "hostile-review"
 ENFORCE_STEP = "Enforce hostile-review verdict"
 DEDICATED_VARIABLE = "vars.OMNI_HOSTILE_REVIEW_RUNS_ON_JSON"
-LAN_FLEET_FALLBACK = """'["self-hosted","omnibase-ci"]'"""
+LAN_FLEET_FALLBACK = """'["self-hosted","omnibase-ci","arch-amd64"]'"""
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +73,18 @@ def test_trusted_branch_reads_the_dedicated_variable_with_the_lan_fallback() -> 
     assert f"{DEDICATED_VARIABLE} || {LAN_FLEET_FALLBACK}" in runs_on, (
         "the trusted branch must fall back to the LAN-attached fleet, where "
         "the local reviewer keys are reachable"
+    )
+
+
+def test_lan_fallback_requires_a_label_the_off_lan_runners_lack() -> None:
+    fallback_labels = json.loads(LAN_FLEET_FALLBACK.strip("'"))
+    assert "arch-amd64" in fallback_labels
+    h203_labels = {"self-hosted", "omnibase-ci", "h203-light", "linux", "x64"}
+    assert not {label.lower() for label in h203_labels}.issuperset(
+        label.lower() for label in fallback_labels
+    ), (
+        "OMN-17292: a job whose labels are a subset of an off-LAN runner's "
+        "labels can land there"
     )
 
 
