@@ -30,7 +30,8 @@ _OVERLAY_TEMPLATE = (
 )
 _PAGE_SERVICES = (
     "projection-api",
-    "omnimarket-projection-llm-cost",
+    # OMN-21279: the LLM cost writer runs on the omnimarket image and ships in
+    # the local-market bundle, not the infra-only local bundle.
     "consumer-health-projection",
     # OMN-19972 (T3.6): the usage-by-model writer's carrier (RUNTIME_PROFILE
     # tenant-projection); the page's usage rows come from it.
