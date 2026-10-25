@@ -1,0 +1,1 @@
+Live-contact exception: this edit only removes the provider key secret env lines and rewords comments; it adds no new external contact, and the PR keeps its recorded live-contact test tests/ci/test_hostile_review_threads_live_contact_omn17427.py.

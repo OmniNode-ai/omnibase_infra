@@ -12,8 +12,9 @@ environment. These tests hold the wiring that the judge's guarantees rest on:
 - nothing is installed and no model is called unless a rejection awaits a
   judgement, so a PR with no thread passes exactly as before;
 - the gate step runs whatever the judge did, and reads its status;
-- the model key reaches the judge step alone, the write permission is the
-  job's alone and is not persisted in the checkout, and no new secret appears.
+- the shared signing secret reaches the judge step alone, no step holds a
+  provider key, the write permission is the job's alone and is not persisted
+  in the checkout, and no new secret appears.
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ SHARED_STEPS = (
 JUDGE = "The review bot judges the rejections"
 GATE = "Check hostile-reviewer threads and their dispositions"
 POST = "Post the review bot's verdicts"
-KEY = "${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}"
+KEY = "${{ secrets.LOCAL_LLM_SHARED_SECRET }}"
+PROVIDER_KEY = "HOSTILE_REVIEW_ANTHROPIC_API_KEY"
 
 
 # The workflows are read on first use, not at import: a missing or malformed
@@ -140,7 +142,8 @@ def test_the_judge_is_omniintelligences_in_the_reviewers_environment() -> None:
         "--output",
         '"$JUDGE_RESULT_PATH"',
     ]
-    # The judge step holds the model key but no GitHub token: it posts nothing.
+    # The judge step holds the signing secret but no GitHub token: it posts
+    # nothing.
     assert "GITHUB_TOKEN" not in judge["env"]
 
 
@@ -181,6 +184,17 @@ def test_the_model_key_reaches_the_judge_step_alone() -> None:
         if KEY in yaml.safe_dump(step.get("env", {}))
     ]
     assert holders == [JUDGE]
+
+
+def test_no_provider_key_reaches_any_step() -> None:
+    # OMN-20974, OMN-21350: a Claude judge goes through the review gateway by
+    # reference; no Actions secret carries a provider key to any step.
+    text = (WORKFLOWS / "hostile-review-thread-gate.yml").read_text()
+    assert PROVIDER_KEY not in text
+    for step in _steps().values():
+        env = step.get("env", {})
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "REVIEW_ANTHROPIC_API_KEY" not in env
 
 
 def test_no_new_secret_is_read() -> None:

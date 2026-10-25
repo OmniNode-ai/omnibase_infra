@@ -33,9 +33,11 @@
 # reviewer's own model routing) to accept or refuse it with one sentence; and
 # the gate script posts each verdict as a reply under this job's own token
 # (--post-verdicts). The gate step honours only that identity's verdicts.
-# No override, no new credential: the model key is the reviewer's
-# HOSTILE_REVIEW_ANTHROPIC_API_KEY and the overlay read is the reviewer's
-# read-only app token. With no rejection to judge
+# No override, no new credential: the model call signs with the reviewer's
+# LOCAL_LLM_SHARED_SECRET, a Claude judge is reached through the dogfood tenant
+# by reference (OMN-20974, OMN-21350) with no provider key from an Actions
+# secret, and the overlay read is the reviewer's read-only app token. With no
+# rejection to judge
 # (including a PR the reviewer never ran on) the judge steps are skipped and
 # nothing is installed or called.
 
@@ -263,12 +265,10 @@ jobs:
         if: fromJSON(steps.pending.outputs.count || '0') > 0
         working-directory: ../omniintelligence
         env:
-          # The reviewer's own model credentials, for this step only. A judge
-          # the overlay declares with provider anthropic reads the variable its
-          # api_key_env names; the key is exported under both names the
-          # reviewer step uses. A lab judge signs with the shared secret.
-          ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
-          REVIEW_ANTHROPIC_API_KEY: ${{ secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY }}
+          # The reviewer's own model credential, for this step only: the judge
+          # signs with the shared secret, as the reviewer step does. No
+          # provider key is passed from an Actions secret (OMN-20974,
+          # OMN-21350); a Claude judge goes through the review gateway.
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
           JUDGE_PENDING_PATH: ${{ runner.temp }}/hostile-review-pending.json
           JUDGE_RESULT_PATH: ${{ runner.temp }}/hostile-review-judgements.json
