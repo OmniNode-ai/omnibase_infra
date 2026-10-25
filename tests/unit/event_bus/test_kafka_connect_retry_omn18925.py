@@ -24,6 +24,7 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from aiokafka.errors import KafkaConnectionError
 
 from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -135,17 +136,12 @@ class TestConnectRetriesAcrossAStall:
         assert producer.stop.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_exhaustion_reraises_the_original_exception_type(self) -> None:
-        """The caller's error contract is unchanged; only the timing moved.
-
-        Both call sites translate transport exceptions into their own typed
-        errors, so a wrapper in the retry helper would either duplicate that
-        or silently outrank it.
-        """
+    async def test_exhaustion_reports_a_typed_timeout_with_its_deadline(self) -> None:
+        """The provider translates the helper's timeout at its boundary."""
         producer = _StallThenSucceed(stall_seconds=_STALL_RATIO, failures=99)
 
         with patch("aiokafka.AIOKafkaProducer", return_value=producer):
-            with pytest.raises(asyncio.TimeoutError):
+            with pytest.raises(InfraTimeoutError, match=r"1\.0s") as raised:
                 await ProviderKafkaProducer(
                     ModelKafkaProducerConfig(
                         bootstrap_servers="stalled-broker:19092",
@@ -154,6 +150,8 @@ class TestConnectRetriesAcrossAStall:
                 ).create()
 
         assert producer.calls == 4  # 1 + the declared 3 retries
+        assert isinstance(raised.value.__cause__, TimeoutError)
+        assert raised.value.model.context["timeout_seconds"] == 1.0
 
 
 class TestBothSurfacesResolveOneRetryDeclaration:
@@ -331,7 +329,7 @@ class TestUnreachableBrokerFailsFastAndTyped:
         )
 
         started = time.monotonic()
-        with pytest.raises(Exception) as raised:
+        with pytest.raises(KafkaConnectionError):
             await ProviderKafkaProducer(
                 ModelKafkaProducerConfig(
                     bootstrap_servers=f"127.0.0.1:{port}",
@@ -340,7 +338,6 @@ class TestUnreachableBrokerFailsFastAndTyped:
             ).create()
         elapsed = time.monotonic() - started
 
-        assert not isinstance(raised.value, asyncio.CancelledError)
         assert elapsed < policy.total_bound_seconds
 
 

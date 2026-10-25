@@ -791,16 +791,15 @@ class DeployConsumer:
         # deployed (job 7b970ab9, 2026-09-30). The job runs instead. The
         # uncommitted record is redelivered after the group rejoin and is then
         # refused as the duplicate it really is.
-        try:
-            self._commit_through(runner_msg)
-        except CommitFailedError as e:
-            logger.error(  # noqa: TRY400
+        commit_error = self._commit_through(runner_msg)
+        if commit_error is not None:
+            logger.error(
                 "Accepted command %s but its offset commit was refused, "
                 "running it anyway; its redelivery after the group rejoin "
                 "will be refused as a duplicate: %s "
                 "friction_type=accept_commit_failed",
                 runner_cmd.correlation_id,
-                e,
+                commit_error,
             )
 
         # Step 10: Return accepted command
@@ -1083,7 +1082,7 @@ class DeployConsumer:
                 )
             )
 
-    def _commit_through(self, msg: Any) -> None:
+    def _commit_through(self, msg: Any) -> CommitFailedError | None:
         """Commit past THIS record and no further, and fetch from just after it.
 
         A bare ``self.consumer.commit()`` commits the consumer's POSITION for
@@ -1116,19 +1115,45 @@ class DeployConsumer:
         comment notes that re-reading a refused command forever "would stall
         every command behind it". What is bounded here is the reach of that
         advance, not its direction.
+
+        A REFUSED COMMIT IS A REJOIN, NOT A CRASH (OMN-17427). The agent does
+        not poll while a job runs, so a job longer than kafka-python's
+        ``max_poll_interval_ms`` costs the group membership and the next commit
+        of any kind raises ``CommitFailedError``. On 2026-10-22T00:13Z that was
+        a routing skip right after a 12-minute job, and the agent exited 1.
+        kafka-python has already reset the generation and requested the rejoin
+        when it raises, so the next ``poll()`` rejoins and re-reads the fetch
+        position from the committed offset: this record is redelivered and
+        decided again. So the refusal is logged and returned, never raised, and
+        nothing is sought or sampled, because nothing was committed. Returns
+        ``None`` when the commit landed.
         """
         topic_partition = TopicPartition(msg.topic, msg.partition)
-        self.consumer.commit(
-            {
-                topic_partition: OffsetAndMetadata(
-                    msg.offset + 1, PROCESSED_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
-                )
-            }
-        )
+        try:
+            self.consumer.commit(
+                {
+                    topic_partition: OffsetAndMetadata(
+                        msg.offset + 1, PROCESSED_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
+                    )
+                }
+            )
+        except CommitFailedError as e:
+            logger.warning(
+                "commit_refused_rejoin: the offset commit past %s@%d:%d was "
+                "refused (%s); the next poll rejoins the group and the record is "
+                "redelivered, so a refused or skipped record is refused or "
+                "skipped again and an accepted one is refused as a duplicate",
+                msg.topic,
+                msg.partition,
+                msg.offset,
+                e,
+            )
+            return e
         self.consumer.seek(topic_partition, msg.offset + 1)
         # OMN-18144: what the next lag sample measures against.
         if self.lag_sampler is not None:
             self.lag_sampler.note_commit(topic_partition, msg.offset + 1)
+        return None
 
     def _rewind_committed_offset_to(self, msg: Any) -> None:
         """Commit this message's own offset so it is re-read, not skipped.
@@ -1142,16 +1167,34 @@ class DeployConsumer:
         consumer is configured ``auto_offset_reset="latest"``, so a group with
         no committed offset yet -- the first command a freshly created group
         ever sees -- would resume past the message and lose it.
+
+        A refused rewind (OMN-17427) is logged and does not escape: the
+        replacement process then reads from the last committed offset, which is
+        this command's own offset when the record before it was committed, and
+        past it only for a group that has never committed one.
         """
         topic_partition = TopicPartition(msg.topic, msg.partition)
         self.consumer.seek(topic_partition, msg.offset)
-        self.consumer.commit(
-            {
-                topic_partition: OffsetAndMetadata(
-                    msg.offset, SELF_UPDATE_REWIND_METADATA, UNKNOWN_LEADER_EPOCH
-                )
-            }
-        )
+        try:
+            self.consumer.commit(
+                {
+                    topic_partition: OffsetAndMetadata(
+                        msg.offset, SELF_UPDATE_REWIND_METADATA, UNKNOWN_LEADER_EPOCH
+                    )
+                }
+            )
+        except CommitFailedError as e:
+            logger.warning(
+                "commit_refused_rejoin: the self-update rewind to %s@%d:%d was "
+                "refused (%s); the replacement process reads from the last "
+                "committed offset, which re-reads this command unless the group "
+                "never committed one",
+                msg.topic,
+                msg.partition,
+                msg.offset,
+                e,
+            )
+            return
         # OMN-18144: a rewind moves the committed offset BACK, and a lag
         # measured against the old value would under-report the record this
         # rewind exists to have re-read.
@@ -1182,6 +1225,7 @@ class DeployConsumer:
         being lost silently.
         """
         advanced: list[dict[str, Any]] = []
+        refused = False
         for tp in sorted(
             self.consumer.assignment(), key=lambda p: (p.topic, p.partition)
         ):
@@ -1190,13 +1234,31 @@ class DeployConsumer:
             if position is None or highwater is None or position >= highwater:
                 continue
             self.consumer.seek(tp, position + 1)
-            self.consumer.commit(
-                {
-                    tp: OffsetAndMetadata(
-                        position + 1, QUARANTINE_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
-                    )
-                }
-            )
+            try:
+                self.consumer.commit(
+                    {
+                        tp: OffsetAndMetadata(
+                            position + 1,
+                            QUARANTINE_COMMIT_METADATA,
+                            UNKNOWN_LEADER_EPOCH,
+                        )
+                    }
+                )
+            except CommitFailedError as e:
+                # OMN-17427: nothing advanced. The next poll rejoins, re-reads
+                # the position from the committed offset, fails this fetch
+                # again, and quarantines it as a live member.
+                logger.warning(
+                    "commit_refused_rejoin: the quarantine commit to %s@%d:%d was "
+                    "refused (%s); the next poll rejoins the group and this "
+                    "fetch is quarantined again",
+                    tp.topic,
+                    tp.partition,
+                    position + 1,
+                    e,
+                )
+                refused = True
+                continue
             # OMN-18144: a quarantined record has been dealt with, so the lag
             # must not keep counting it.
             if self.lag_sampler is not None:
@@ -1216,6 +1278,9 @@ class DeployConsumer:
             "reason": f"{type(exc).__name__}: {exc}",
             "advanced": advanced,
         }
+
+        if not advanced and refused:
+            return "undecodable_fetch_commit_refused"
 
         if not advanced:
             # Honest rather than silent: the stall was NOT cleared, and saying

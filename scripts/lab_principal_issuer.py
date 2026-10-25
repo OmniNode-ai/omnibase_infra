@@ -72,6 +72,9 @@ WHO HOLDS A PRINCIPAL (OMN-19975)
     instead of the ledger: ``apply-grants`` and ``audit-grants`` act on its principals,
     and ``serve`` issues only a (login, device) the document declares. The document
     carries no grant; the grants are the ones this file's grant declaration derives.
+    The grant declaration's ``principal_grants_from`` selects additional derived
+    read grants by exact principal, on dev only. Apply, issuance and audit resolve
+    the same shared plus principal-specific set; the digest covers both sources.
 
     With ``check --overlay FILE --ledger FILE`` the issuer names every machine its
     ledger issued that the overlay does not declare and exits 1. Run this check
@@ -182,6 +185,17 @@ class Declaration:
     allowed_login_domains: tuple[str, ...]
     grants: tuple[Grant, ...]
     digest: str
+    principal_grants: tuple[tuple[str, tuple[Grant, ...]], ...] = ()
+
+    def grants_for(self, principal: str) -> tuple[Grant, ...]:
+        """Shared grants plus only this exact principal's declared additions."""
+        additions = tuple(
+            grant
+            for owner, grants in self.principal_grants
+            if owner == principal
+            for grant in grants
+        )
+        return tuple(dict.fromkeys((*self.grants, *additions)))
 
 
 def load_declaration(path: Path) -> Declaration:
@@ -227,6 +241,31 @@ def load_declaration(path: Path) -> Declaration:
     if not isinstance(grants_raw, list) or not grants_raw:
         raise DeclarationError(f"{path}: grants must be a non-empty list")
     grants = tuple(_grant(path, i, g) for i, g in enumerate(grants_raw))
+    scoped = doc.get("principal_grants_from", {})
+    if not isinstance(scoped, dict):
+        raise DeclarationError(f"{path}: principal_grants_from must be a mapping")
+    if scoped and lane != "dev":
+        raise DeclarationError(f"{path}: principal additions are dev-only")
+    principal_grants: list[tuple[str, tuple[Grant, ...]]] = []
+    for principal, source in scoped.items():
+        if (
+            not isinstance(principal, str)
+            or not principal.startswith(prefix)
+            or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", principal)
+        ):
+            raise DeclarationError(
+                f"{path}: principal additions need an exact principal"
+            )
+        rows, derived = _derived_grants(path, source, lane, principal=principal)
+        additions = tuple(_grant(path, i, row) for i, row in enumerate(rows))
+        if not additions or any(
+            g.templated or "write" in g.operations for g in additions
+        ):
+            raise DeclarationError(
+                f"{path}: principal additions must be non-empty, concrete reads"
+            )
+        principal_grants.append((principal, additions))
+        digest.update(derived)
     return Declaration(
         lane=lane,
         principal_prefix=prefix,
@@ -234,11 +273,12 @@ def load_declaration(path: Path) -> Declaration:
         allowed_login_domains=tuple(d.lower() for d in domains),
         grants=grants,
         digest=digest.hexdigest(),
+        principal_grants=tuple(principal_grants),
     )
 
 
 def _derived_grants(
-    path: Path, grants_from: object, lane: str
+    path: Path, grants_from: object, lane: str, *, principal: str = "{principal}"
 ) -> tuple[list[dict[str, object]], bytes]:
     """Read the grants ``node_broker_grant_derive_compute`` derived (OMN-19975).
 
@@ -262,6 +302,8 @@ def _derived_grants(
         raise DeclarationError(
             f"{source}: holds exactly principal and grants, as the grant derivation emits"
         )
+    if doc["principal"] != principal:
+        raise DeclarationError(f"{source}: derived principal must be {principal}")
     folded: dict[tuple[str, str, str], set[str]] = {}
     for index, row in enumerate(doc["grants"]):
         if not isinstance(row, dict) or set(row) != {
@@ -499,7 +541,7 @@ def expected_acl_rows(declaration: Declaration, principal: str) -> frozenset[Acl
     """The exact rows the grant file derives for one principal."""
     return frozenset(
         AclRow(grant.resource, grant.name, grant.pattern, operation)
-        for declared in declaration.grants
+        for declared in declaration.grants_for(principal)
         for grant in [declared.for_principal(principal)]
         for operation in grant.operations
     )
@@ -833,7 +875,9 @@ class Issuer:
             try:
                 exists = self._broker.user_exists(principal)
                 self._broker.set_user(principal, password, exists=exists)
-                _apply_grants(self._broker, principal, self._declaration.grants)
+                _apply_grants(
+                    self._broker, principal, self._declaration.grants_for(principal)
+                )
             except urllib.error.URLError as exc:
                 raise IssuerError(
                     HTTPStatus.BAD_GATEWAY,
@@ -1105,7 +1149,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("lab_principal_issuer: --ledger needs --overlay", file=sys.stderr)
             return 2
         print(
-            f"{args.grants}: {len(declaration.grants)} grants for lane {declaration.lane}, sha256 {declaration.digest}"
+            f"{args.grants}: {len(declaration.grants)} shared grants for lane {declaration.lane}, "
+            f"{len(declaration.principal_grants)} principal-specific sets, sha256 {declaration.digest}"
         )
         if overlay is not None:
             print(f"{args.overlay}: {len(overlay.rows)} developer principals")
@@ -1153,7 +1198,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
                     )
             for principal in principals:
-                _apply_grants(broker, principal, declaration.grants)
+                grants = declaration.grants_for(principal)
+                _apply_grants(broker, principal, grants)
                 ledger.append(
                     {
                         "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -1163,7 +1209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "grants_sha256": declaration.digest,
                     }
                 )
-                print(f"applied {len(declaration.grants)} grants to {principal}")
+                print(f"applied {len(grants)} grants to {principal}")
         except (OSError, IssuerError, urllib.error.URLError) as exc:
             print(f"lab_principal_issuer: {exc}", file=sys.stderr)
             return 2

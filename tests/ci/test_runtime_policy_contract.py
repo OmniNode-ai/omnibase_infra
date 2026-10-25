@@ -187,6 +187,7 @@ def test_runtime_policy_env_has_expected_lane_values() -> None:
     assert env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
     assert env["DEV_RUNTIME_MAIN_PORT"] == "8085"
     assert env["STABILITY_TEST_RUNTIME_MAIN_PORT"] == "18085"
+    assert env["STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES"] == "effects"
     assert env["STABILITY_TEST_TOPIC_PROVISIONER_MAX_PARTITIONS"] == "1"
     assert env["JUDGE_RUNTIME_MAIN_PORT"] == "48085"
     assert env["JUDGE_RUNTIME_EFFECTS_PORT"] == "48086"

@@ -31,11 +31,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from omnibase_core.models.contracts.subcontracts import (
     ModelCorrelationConfig,
@@ -48,6 +50,12 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     InfraUnavailableError,
     ProtocolConfigurationError,
+)
+from omnibase_infra.event_bus.lane_client_transport_binding import (
+    bind_lane_client_transport,
+)
+from omnibase_infra.event_bus.model_lane_client_transport import (
+    ModelLaneClientTransport,
 )
 from omnibase_infra.protocols import ProtocolEventBusLike
 
@@ -1237,3 +1245,67 @@ class TestFailureTerminalReason:
             await future
         assert "Request failed: Request failed" not in str(exc_info.value)
         assert "no failure_reason" in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reply_consumer_authenticates_as_the_bound_lane_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_event_bus: MagicMock,
+    request_response_config: ModelRequestResponseConfig,
+) -> None:
+    """The reply consumer uses the bound lane auth without ambient credentials."""
+    import omnibase_infra.runtime.request_response_wiring as module
+
+    consumer_kwargs: dict[str, object] = {}
+
+    class FakeConsumer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            consumer_kwargs.update(kwargs)
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        def __aiter__(self) -> FakeConsumer:
+            return self
+
+        async def __anext__(self) -> object:
+            while True:
+                await asyncio.sleep(3600)
+
+    monkeypatch.setattr(module, "AIOKafkaConsumer", FakeConsumer)
+    for name in (
+        "KAFKA_SECURITY_PROTOCOL",
+        "KAFKA_SASL_MECHANISM",
+        "KAFKA_SASL_USERNAME",
+        "KAFKA_SASL_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    transport = ModelLaneClientTransport(
+        lane="dev",
+        bootstrap_servers="lane.invalid:19092",
+        security_protocol="SASL_PLAINTEXT",
+        sasl_mechanism="SCRAM-SHA-256",
+        sasl_username="dev-cli-host",
+        sasl_password=SecretStr("not-a-real-secret"),
+        declared_in=Path("omnimarket/config/ci_bus_lanes.yaml"),
+    )
+    with bind_lane_client_transport(transport):
+        wiring = module.RequestResponseWiring(
+            event_bus=mock_event_bus,
+            environment="test",
+            app_name="app",
+            bootstrap_servers="lane.invalid:19092",
+        )
+        try:
+            await wiring.wire_request_response(request_response_config)
+        finally:
+            await wiring.cleanup()
+
+    assert consumer_kwargs["security_protocol"] == "SASL_PLAINTEXT"
+    assert consumer_kwargs["sasl_mechanism"] == "SCRAM-SHA-256"
+    assert consumer_kwargs["sasl_plain_username"] == "dev-cli-host"

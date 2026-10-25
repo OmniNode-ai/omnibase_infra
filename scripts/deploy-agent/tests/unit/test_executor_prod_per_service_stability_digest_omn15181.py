@@ -42,6 +42,12 @@ from deploy_agent.executor import (
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def unfolded_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("deploy_agent.executor._load_runtime_policy_env", dict)
+
+
 _RUNTIME_DIGEST = "sha256:" + "a" * 64
 _EFFECTS_DIGEST = "sha256:" + "b" * 64
 

@@ -5182,6 +5182,14 @@ jobs:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
         run: uv run python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --base "${APPEND_ONLY_BASE}"
 
+      # OMN-18594: internal-sibling commit-sha pins may only fall (RULING
+      # 2026-10-23T12:01:59Z). The base ref is the baseline: a file that holds
+      # more sibling sha-pin lines than it held at the base fails.
+      - name: Check internal-sibling commit-sha pins only fall
+        env:
+          SHA_PIN_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
+        run: uv run python -m omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.runtime_sibling_sha_pin_ratchet --base "${SHA_PIN_BASE}"
+
       # OMN-17298: RLS enabled with no admitting policy is an outage, not a
       # stricter boundary -- PostgreSQL denies every row to every non-owner,
       # non-BYPASSRLS principal, and the resulting SQLSTATE 42501 reads at the

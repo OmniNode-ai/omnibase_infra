@@ -478,6 +478,21 @@ requirements:
     acceptance:
       - id: AC161
         statement: 'AC161: a first SIGTERM in the teardown or snap-post phase leaves both phases run, the lease released and restored true; one in the lease release still releases; one while the lease is taken leaves no lease and no phase run; a signal in the survey says nothing was leased and never torn down, and a lease lost to a peer says not torn down -- falsifier: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"'
+  - id: req-omn17427-consume-loop-rejoin
+    statement: While the bus runs and a subscription is registered, its consumer group has a polling member -- a consume loop survives any poll or dispatch failure, and a dead or parked consume task is restarted with a rebuilt consumer.
+    acceptance:
+      - id: AC17427526000
+        statement: 'AC17427526000: a poll raising a KafkaError or a RuntimeError once, and a batch raising once, leave the serial and concurrent loops running with the consumer rebuilt once and the later records dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"'
+      - id: AC17427526001
+        statement: 'AC17427526001: a subscriber raising CancelledError inside its own coroutine takes the handler-failure arm and the next record is dispatched -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"'
+      - id: AC17427526002
+        statement: 'AC17427526002: cancelling the loop task ends it promptly, also inside a failure backoff, and close() stops the consumer -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"'
+      - id: AC17427526003
+        statement: 'AC17427526003: the watchdog restarts a dead consume task within one interval with CONSUME_TASK_DEAD, cancels and restarts a parked one with CONSUME_TASK_PARKED, does not restart twice inside the cooldown and leaves an unsubscribed group alone -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"'
+      - id: AC17427526004
+        statement: 'AC17427526004: sync_status reports a group whose last poll is older than sync_unready_seconds as stalled with CONSUME_TASK_PARKED, and a recently polled group as before -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"'
+      - id: AC17427526005
+        statement: 'AC17427526005: get_readiness_status reports a topic dead when any one of its groups has a dead consume task -- falsifier: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"'
   - id: req-omn17427-satellite-lane-freeze-until-tenant
     statement: The satellite-host instance in config/deploy_lane_routing.yaml carries a freeze naming OMN-20530, so its deploy agent does not idle-restore, idle-converge or rebuild the full dev stack on that host while the runtime-only lab-tenant overlay waits on that ticket; no other committed instance carries a freeze.
     acceptance:
@@ -510,6 +525,11 @@ requirements:
     acceptance:
       - id: AC159
         statement: 'AC159: installed publishers under nested virtual environments are excluded, repository publishers without provenance still fail beside them, and a directory merely named venv remains checked -- falsifier: uv run pytest tests/unit/scripts/test_seed_provenance_check.py -q'
+  - id: req-omn17427-agent-commit-refused-rejoin
+    statement: The deploy agent treats a refused offset commit on every commit path (reject, skip, dedup, accept, quarantine and self-update rewind) as a group rejoin that redelivers the record, logged as commit_refused_rejoin, and never exits on it.
+    acceptance:
+      - id: AC17427525901
+        statement: 'AC17427525901: with a fake consumer whose commit raises CommitFailedError, a routed-elsewhere record returns (None, None) with no seek, lane_not_allowed and duplicate return their rejection, the accept returns the command and logs accept_commit_failed, the record and fetch quarantines and the rewind log a warning without raising, and the next poll handles the redelivered record and commits it -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q'
   - id: req-omn17427-dev-broker-image
     statement: The dev broker and its rpk services use Redpanda v24.3.18 consistently, while other lanes declare their own broker images instead of inheriting the upgraded dev image.
     acceptance:
@@ -528,6 +548,11 @@ requirements:
         statement: A failed configuration hash render after a compose error raises rather than accepting unknown convergence.
       - id: AC524904
         statement: A clean compose up makes no additional configuration hash or container label reads.
+  - id: req-omn17427-collaborator-writer-overlay
+    statement: Every service of the collaborator lane whose environment names BIFROST_LANE_OVERLAY_PATH mounts a file at that path, so the delegation writer's entrypoint can render the Bifrost contract.
+    acceptance:
+      - id: AC527201
+        statement: The rendered collaborator lane compose config has no service that names BIFROST_LANE_OVERLAY_PATH without a mount at that path, the delegation writer included.
   - id: req-omn17427-role-omnidash-lab-job-check-select
     statement: role_omnidash, the principal behind the dev lane runtime's OMNIDASH_ANALYTICS_DB_URL that the omnimarket lab job check store reads through, holds SELECT on omninode_internal.lab_job_state, omninode_internal.work_ledger_rows and omninode_internal.pr_state, each issued by a migration in its owning node's lineage and declared in every shipped topology instance.
     acceptance:
@@ -543,6 +568,21 @@ requirements:
     acceptance:
       - id: AC172
         statement: 'AC172: deploy-gate.yml lists edited in its pull_request types, every workflow that reads the body (directly or through a body-reading reusable) fires on edited unless it fires only on closed, ci.yml reads no body and keeps edited out, and the checker reports a synthetic body reader without edited -- falsifier: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q fails at the merge base, where deploy-gate.yml has no edited type'
+  - id: req-omn17427-runner-tmp-reaper
+    statement: The pre-job runner hook removes stale entries from its dedicated TMPDIR and warns when byte or inode use reaches the advisory threshold.
+    acceptance:
+      - id: AC17427523001
+        statement: 'AC17427523001: stale TMPDIR entries are removed while fresh entries and pytest retention roots survive; shared /tmp and an unset TMPDIR are not reaped; byte or inode use at the advisory threshold emits a warning naming the runner and both percentages -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py -q'
+  - id: req-omn17427-disk-watermark-inodes
+    statement: The disk watermark reports inode pressure as an advisory warning while preserving the free-space critical floor and handling unreadable inode use.
+    acceptance:
+      - id: AC17427523002
+        statement: 'AC17427523002: inode use at 85 percent or above warns with inode_used_pct_advisory and inode_used_pct in the event, 84 percent stays quiet, the critical free-space floor takes precedence, and unreadable inode use leaves byte checks active -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q'
+  - id: req-omn17427-scratch-watermark
+    statement: The hourly disk-gc unit checks /scratch as an optional mount without substituting the root filesystem when it is absent.
+    acceptance:
+      - id: AC17427523003
+        statement: 'AC17427523003: the hourly unit invokes the watermark with --mount /scratch --mount-optional and a missing optional mount returns quietly without an event -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py -q -k "optional_mount or hourly_unit"'
   - id: req-omn17427-issuer-overlay-coverage
     statement: Before the lab principal issuer is recreated under the developer.principal overlay, its check names every machine the issuance ledger holds that the overlay does not declare.
     acceptance:
@@ -587,6 +627,16 @@ requirements:
     acceptance:
       - id: AC189
         statement: 'AC189: the C28 script and the board-probe node search 5,000 lines for an error''s applied-topic boundary line, an error whose probe boundary sits 63 or 171 lines behind is the probe''s, and an unprefixed error stays natural -- falsifier: uv run pytest tests/integration/nodes/test_board_probe_consumer_flow_pairing_window_omn17427.py -q fails at the merge base, where the window is 60 lines'
+  - id: req-omn17427-dev-broker-restart-alarm
+    statement: The dev host system alert reports a dev-lane broker restart-policy restart and a dev broker running below its declared 12G memory.
+    acceptance:
+      - id: AC1742720266
+        statement: 'A restart-policy restart of omnibase-infra-redpanda reads CRITICAL for the hold window (two confirmation ticks), a recreate does not, and a running --memory below 12G reads WARNING -- falsifier: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q'
+  - id: req-omn17427-delegation-lab-job-runtime-grants
+    statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
+    acceptance:
+      - id: AC190
+        statement: "omninode_runtime holds SELECT, INSERT and UPDATE on delegation_lab_jobs and delegation_lab_job_outbox on every supported profile, and node_llm_delegation_call_effect 0000 is vendored byte-identical"
   - id: req-omn17427-c29-failed-receipt-layer
     statement: The C29 probe grades a failed delegation receipt from the layer that carries its key and attempts, and names a provider throttle as the first reason while the verdict stays FAIL.
     acceptance:
@@ -594,7 +644,26 @@ requirements:
         statement: 'AC17427231001: a failed receipt whose terminal payload names the stored key and three rate_limited attempts grades customer_key PASS and names_provider FAIL with "provider throttled" first, and never reports a key from None or no routing attempt -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py -q fails at the merge base'
       - id: AC17427231002
         statement: 'AC17427231002: mixed failure classes are not called a throttle, an env-sourced key still fails customer_key, and a successful receipt still passes -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py -q'
+  - id: req-omn17427-census-drift-pr-advisory
+    statement: The Lane Census Staleness + E-5 Env Drift (OMN-13034) check reports a nonzero_drift_count in the private overlay census as a warning on pull requests, because no pull request in this repository can move it, and still fails on push, workflow_dispatch and every other drift finding.
+    acceptance:
+      - id: AC17427240101
+        statement: 'AC17427240101: check_lane_census_drift.py exits 1 on the recorded omnibase_infra#5187 drift red (dev-lane oneshot_failed, census 2026-10-24T06:55:03Z) as a push, as a workflow_dispatch and with no event, and 0 with a LANE-CENSUS-DRIFT warning as a pull_request; a finding_count_mismatch still exits 1 on a pull request; the staleness workflow step does not override GITHUB_EVENT_NAME -- falsifier: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q fails at the merge base'
+      - id: AC17427240102
+        statement: 'AC17427240102: the direct checker reports nonzero census drift as advisory only for pull_request while the live system reporter keeps the same drift CRITICAL and lists it in Active issues even when invoked from a pull_request job; push, workflow_dispatch and unset event contexts retain the blocking checker and CRITICAL reporter verdicts -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q'
+  - id: req-omn17427-rr-reply-consumer-lane-transport
+    statement: The request-response reply consumer authenticates with the lane transport bound for its broker, as the producer does, and falls back to the environment's Kafka auth when nothing is bound for that address.
+    acceptance:
+      - id: AC17427610001
+        statement: 'AC17427610001: with a SASL_PLAINTEXT lane transport bound for the broker of the wiring and no KAFKA_SASL_* environment, the reply AIOKafkaConsumer is built with security_protocol SASL_PLAINTEXT, sasl_mechanism SCRAM-SHA-256 and the bound username -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport fails at the merge base'
+      - id: AC17427610002
+        statement: 'AC17427610002: the wiring still passes the auth kwargs it resolves for its broker to the reply consumer (the MSK direct-client coverage) -- falsifier: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring'
+      - id: AC17427610003
+        statement: 'AC17427610003: a request-response round trip under a bound SASL lane transport resolves with the reply consumer authenticated as that transport, and a transport bound for another broker leaves the consumer on the environment auth -- falsifier: uv run pytest tests/integration/runtime/test_request_response_wiring_integration.py -q -k LaneTransportAuth fails at the merge base'
 evidence_requirements:
+  - kind: tests
+    description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
+    command: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
     command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_verify_convergence_omn17427.py -q
@@ -785,14 +854,26 @@ evidence_requirements:
     description: CI Summary's dev-only assertion of the thread gate and the poster's line-only create-review payload; no live GitHub call.
     command: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"
   - kind: tests
+    description: A fake KafkaConsumer refuses commits with CommitFailedError on every commit path of the deploy agent's consumer; no broker is contacted.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+  - kind: tests
     description: The verify run's signal tests send a real signal to the test process during a build, a cleanup phase, the lease take and the lease release.
     command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py -q -k "verify_signal"
   - kind: tests
     description: The lab job check store's SELECT grants to role_omnidash are issued, asserted, ledger-bound and declared.
     command: uv run pytest tests/unit/db/test_role_omnidash_lab_job_check_select_grants_omn17427.py tests/unit/topology/test_role_omnidash_watermark_principal_omn19998.py -q -n 0
   - kind: tests
+    description: Fake consumers and an injectable clock drive the real consume loop, the consume-task watchdog, the supervisor's sync status and the readiness view; no broker is contacted.
+    command: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q
+  - kind: tests
     description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
     command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+  - kind: tests
+    description: The drift checker's pull-request advisory on the recorded red, read from GITHUB_EVENT_NAME, and its push and workflow_dispatch refusal.
+    command: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+  - kind: tests
+    description: A fake AIOKafkaConsumer records the reply consumer's constructor kwargs under a bound SASL lane transport with the Kafka auth environment cleared; no broker is contacted.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -848,6 +929,38 @@ dod_evidence:
       - AC181
       - AC182
       - AC183
+  - id: dod-omn17427-runner-tmp-reaper
+    description: Runs the real pre-job hook against temporary runner directories and controlled df responses, checking stale-entry removal, retained entries and byte or inode warning annotations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523001]
+  - id: dod-omn17427-disk-watermark-inodes
+    description: Runs the watermark shell script with controlled df responses and checks its event builder, including inode warnings, free-space priority and unreadable inode use.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523002]
+  - id: dod-omn17427-scratch-watermark
+    description: Reads the installed unit source and checks absent optional mounts, plain directories, real mounts and unreadable filesystems, refusing an emitted fallback event.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_disk_watermark_inodes_omn17427.py -q -k "optional_mount or hourly_unit"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523003]
+  - id: dod-omn17427-runner-tmp-deploy-check
+    description: Hosted-runner deploy check requires GNU realpath before exercising the real runner hook, watermark and event builder using temporary directories and fake df responses. Includes BSD inode parsing, mount identity, warning boundaries, ownership, symlink and timeout safety; reads the disk-gc unit without a Docker daemon, broker, credentials or live lane changes.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: bash -c 'realpath -m . >/dev/null && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_runner_job_started_tmp_reaper_omn17427.py tests/unit/scripts/test_disk_watermark_inodes_omn17427.py tests/unit/scripts/test_disk_watermark_event.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427523001, AC17427523002, AC17427523003]
   - id: dod-omn17427-ac180-thread-disposition
     description: The gate tests drive classify_threads, GitFixVerifier on a temporary git repository and run_gate with the thread fetch replaced; the live-contact tests replay GitHub's recorded 422 to the old create-review payload and the thread gate check-runs of the 20 latest merged dev heads. They fail on the merge base, whose gate ignores resolved threads and has no disposition rule.
     source: manual
@@ -2394,6 +2507,60 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC161
+  - id: dod-omn-17427-ac190-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "poll_that_raises_once or batch_that_raises"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526000
+  - id: dod-omn-17427-ac191-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelled_error_takes_the_handler_failure_path"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526001
+  - id: dod-omn-17427-ac192-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "cancelling_the_loop_task"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526002
+  - id: dod-omn-17427-ac193-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "watchdog"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526003
+  - id: dod-omn-17427-ac194-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "sync_status"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526004
+  - id: dod-omn-17427-ac195-consume-loop-rejoin
+    description: Fake consumers, no broker. Fails against the merge-base, where the consume loop ends on its first error and nothing restarts a consume task.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_consume_loop_survival_omn17427.py -q -k "readiness_reports_a_topic_dead"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427526005
   - id: dod-omn-17427-ac160-satellite-freeze
     description: Unit tests over the committed routing table read the satellite instance's freeze and feed it to the idle-restore decision. Does not claim a live readback of that host's deploy agent.
     source: manual
@@ -2473,6 +2640,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC159
+  - id: dod-omn-17427-ac154-agent-commit-rejoin
+    description: A fake KafkaConsumer whose commit raises CommitFailedError drives the deploy agent's skip, reject, accept, quarantine and rewind commit paths; each fails at the merge base by raising and passes at the head. No broker or lab host is contacted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
+  - id: dod-omn-17427-ac154-agent-commit-rejoin-ci
+    description: Hosted-runner deploy check of the same fakes; it does not claim an install on a live lane, which is the parent lane's.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_consumer_commit_refused_rejoin_omn17427.py scripts/deploy-agent/tests/unit/test_self_update_settle_eviction.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427525901
   - id: dod-omn-17427-ac146-dev-broker-image
     description: Reads all seven dev compose and catalog image declarations and requires v24.3.18. These tests fail against the merge base's v24.2.7 declarations.
     source: manual
@@ -2541,6 +2726,22 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest scripts/deploy-agent/tests/unit/test_compose_up_not_converged_fails_phase.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC524901, AC524902, AC524903, AC524904]
+  - id: dod-omn17427-ac527201-writer-overlay-mount
+    description: The collaborator lane render test refuses any service that names BIFROST_LANE_OVERLAY_PATH without mounting it; the delegation writer had no mount at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/infra/test_lakshman_compose_render.py -q -k every_service_naming_the_lane_overlay_mounts_it
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC527201]
+  - id: dod-omn17427-writer-overlay-deploy-check
+    description: Hosted-runner deploy check renders the collaborator lane compose file with docker compose config, without starting a container, and checks every service that names the lane overlay path mounts it. No credentials or live deployment are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/infra/test_lakshman_compose_render.py -q -k every_service_naming_the_lane_overlay_mounts_it
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC527201]
   - id: dod-omn-17427-ac160
     description: The three SELECT grant migrations grant role_omnidash SELECT only, assert it, are ledger-bound and classed expand-only, and the topology declares them.
     source: manual
@@ -2739,6 +2940,33 @@ dod_evidence:
       - AC527401
       - AC527402
       - AC527403
+  - id: dod-omn17427-dev-broker-restart-alarm
+    description: The dev broker restart and memory rows of the system alert, driven through their seams on a hosted runner; does not claim the deployed reporter has been updated on the host.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1742720266
+  - id: dod-omn17427-ac190-delegation-runtime-grants
+    description: Every supported profile grants the runtime role both delegation execution tables and the vendored migration matches the source sha256.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC190
+  - id: dod-omn17427-ac190-delegation-deploy
+    description: Hosted-runner check of both delegation tables' runtime grants in every shipped topology and the vendored source migration hash; no database, container, credentials or deployed lane is required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/topology/test_delegation_lab_job_runtime_grants_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC190
   - id: dod-omn17427-c29-failed-receipt-layer
     description: Synthetic failed and successful C29 receipts graded by the probe's own clause graders; no container, credential, provider call or live lane.
     source: manual
@@ -2759,3 +2987,67 @@ dod_evidence:
     binds_ac:
       - AC17427231001
       - AC17427231002
+  - id: dod-omn17427-census-drift-pr-advisory
+    description: Tests drive check_lane_census_drift.py on the recorded omnibase_infra#5187 drift red as a pull request, a push and a workflow_dispatch, in process and as a subprocess reading GITHUB_EVENT_NAME; the pull-request cases fail at the merge base, where drift refuses every event. Does not claim a refreshed census or a healed lab lane.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240101
+  - id: dod-omn17427-live-census-report-strict
+    description: Pairs the direct checker event-policy tests with the live reporter drift tests. The direct checker must make drift advisory only for pull_request, while the reporter must retain the CRITICAL row and actionable remedy in every context. The checker pull_request case fails at the merge base, which enforces drift for every event; the reporter pull_request case fails if event isolation is removed from the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102
+  - id: dod-omn17427-live-census-report-deploy
+    description: Hosted-runner deploy check pairs the real checker event-policy tests with the reporter using synthetic census inputs and local command stubs, requiring advisory pull_request checks alongside CRITICAL live drift and its Active issues entry. No Docker daemon, lane, credentials or Slack request is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102
+  - id: dod-omn17427-rr-reply-consumer-lane-transport
+    description: Fake consumer, no broker. Fails against the merge-base, where the reply consumer reads Kafka auth from the environment only and is built with no SASL kwargs under a bound lane transport.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+  - id: dod-omn17427-rr-reply-consumer-msk-kwargs
+    description: Fake consumer, no broker. The wiring passes the auth kwargs it resolves for its broker to the reply consumer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610002
+  - id: dod-omn17427-rr-reply-lane-transport-deploy
+    description: Hosted-runner deploy check of the reply consumer's lane transport auth. Runs the focused wiring tests without a container, credential or live broker; does not claim a live broker connection.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+      - AC17427610002
+  - id: dod-omn17427-rr-reply-lane-transport-integ
+    description: In-memory event bus and mock reply consumer, no broker. Fails against the merge-base, where the reply consumer under a bound SASL lane transport is built with no SASL kwargs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_request_response_wiring_integration.py -q -k LaneTransportAuth
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610003

@@ -127,10 +127,40 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen python -c "import importlib.metadata as m; assert m.version('omnibase-core') == '0.47.53', m.version('omnibase-core')"
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.53'), v"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-18595-core-0-47-55-runner-lock
+    description: The core 0.47.55 cascade (omnibase_infra#5324) pins omnibase-core 0.47.55, relocks with only that package moving, regenerates docker/runners/runner-image.lock.json, and judges the OMN-20696 change by the findings it adds over its parent under core 0.47.55's shell-script rule (OMN-21332).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.55'), v"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py tests/ci/test_omn20696_noncanonical_files.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-18595-core-0-47-56-runner-lock
+    description: The core 0.47.56 cascade (omnibase_infra#5340) pins omnibase-core 0.47.56, relocks with only that package moving, and regenerates docker/runners/runner-image.lock.json so the runner image identity matches the bumped uv.lock.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.56'), v"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
