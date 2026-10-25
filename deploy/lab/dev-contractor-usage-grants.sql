@@ -12,7 +12,7 @@ BEGIN
         RAISE EXCEPTION 'dev contractor grant runner and analytics database required';
     END IF;
     IF NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = 'lakshman_ro'
+        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'lakshman_ro'
         AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole
         AND NOT rolcreatedb AND NOT rolreplication
     ) THEN
