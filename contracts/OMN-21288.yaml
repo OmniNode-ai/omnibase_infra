@@ -109,7 +109,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
-  - id: dod-omn21288-ac3-runtime-ownership-and-refresh-readback
+  - id: dod-omn21288-ac3-ownership-refresh-readback
     description: >-
       Execute the committed stability effects fold through real runtime contract discovery and compare main's attached contracts with the separate main/effects union. Exercise the refresh readback's missing-log, leftover-container and unreadable-census failures, which must change SUCCESS to FAILED_FOLDED_EFFECTS without a destructive rollback. These hosted-runner checks require no running lane or credentials; a live lane rollout remains pending.
     source: manual
