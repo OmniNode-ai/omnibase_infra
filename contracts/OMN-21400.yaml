@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21400"
+title: "Developer principals hold the broker grants the morning friction sweep caller needs, so the 04:00 fire stops failing with TopicAuthorizationFailedError"
+summary: "After omnibase_infra#5334 the morning friction sweep caller (handler_friction_sweep_cli) authenticates its reply consumer and then stops at TopicAuthorizationFailedError on onex.evt.omnibase-internal.morning-friction-sweep-completed.v1, because deploy/lab/developer-principal-bindings.yaml declared no binding for the sweep. This change declares three bindings (produce on onex.cmd.omnibase-internal.morning-friction-sweep.v1, consume on the -completed and -failed terminals under group local.rr.friction-run-.call) and one group prefix (local.rr.friction-run-, the reply group prefix of the caller's per-call request_response instance friction-run-<correlation id>), and regenerates deploy/lab/developer-principal-derived-grants.json from node_broker_grant_derive_compute: eight added grants, none removed. The deriver is unchanged. Applying the grants on the dev lane broker and a live fire of the sweep are not part of this change and are not yet done; they follow the issuer image deploy of the merged head."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-friction-sweep-grants-declared"
+    statement: "The developer principal's bindings declare the morning friction sweep caller's start command, terminals and reply group prefix, and the committed derived grants are the derivation's output for them."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the developer-principal bindings and the derived grants JSON name the sweep's start command (produce), its completed and failed terminals (consume) and the local.rr.friction-run- group prefix, and no write on either terminal -- falsifier: uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k friction_sweep"
+      - id: "AC2"
+        statement: "AC2: the derived grants JSON equals the derivation over the bindings and the issuer's writable set gains the start command only -- falsifier: uv run pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+evidence_requirements:
+  - kind: "tests"
+    description: "The derivation tests pin the eight friction sweep grants, the committed derived file, the row count and the issuer's writable topic set."
+    command: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21400-ac1-friction-sweep-grants"
+    description: "The derivation yields exactly the sweep's start-command write, terminal reads and reply group prefix read, with no write on a terminal."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -k friction_sweep"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21400-ac2-derived-file-is-node-output"
+    description: "The committed derived file equals the node's output, the derived row count is 159, and the issuer's writable set lists the sweep start command."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21400-ac2-deploy-derived-grants-shipped"
+    description: "Hosted-runner artifact check: the derived grants the issuer image ships at the head carry the sweep start topic. The live broker ACL readback and a live fire need the issuer image deployed and are pending."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -cF onex.cmd.omnibase-internal.morning-friction-sweep.v1 deploy/lab/developer-principal-derived-grants.json"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

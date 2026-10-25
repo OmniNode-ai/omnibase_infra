@@ -634,6 +634,22 @@ requirements:
         statement: 'AC17427231001: a failed receipt whose terminal payload names the stored key and three rate_limited attempts grades customer_key PASS and names_provider FAIL with "provider throttled" first, and never reports a key from None or no routing attempt -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py -q fails at the merge base'
       - id: AC17427231002
         statement: 'AC17427231002: mixed failure classes are not called a throttle, an env-sourced key still fails customer_key, and a successful receipt still passes -- falsifier: uv run pytest tests/ci/test_c29_probe_failed_receipt_omn17427.py tests/ci/test_c29_probe_verdict_branches.py -q'
+  - id: req-omn17427-census-drift-pr-advisory
+    statement: The Lane Census Staleness + E-5 Env Drift (OMN-13034) check reports a nonzero_drift_count in the private overlay census as a warning on pull requests, because no pull request in this repository can move it, and still fails on push, workflow_dispatch and every other drift finding.
+    acceptance:
+      - id: AC17427240101
+        statement: 'AC17427240101: check_lane_census_drift.py exits 1 on the recorded omnibase_infra#5187 drift red (dev-lane oneshot_failed, census 2026-10-24T06:55:03Z) as a push, as a workflow_dispatch and with no event, and 0 with a LANE-CENSUS-DRIFT warning as a pull_request; a finding_count_mismatch still exits 1 on a pull request; the staleness workflow step does not override GITHUB_EVENT_NAME -- falsifier: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q fails at the merge base'
+      - id: AC17427240102
+        statement: 'AC17427240102: the direct checker reports nonzero census drift as advisory only for pull_request while the live system reporter keeps the same drift CRITICAL and lists it in Active issues even when invoked from a pull_request job; push, workflow_dispatch and unset event contexts retain the blocking checker and CRITICAL reporter verdicts -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q'
+  - id: req-omn17427-rr-reply-consumer-lane-transport
+    statement: The request-response reply consumer authenticates with the lane transport bound for its broker, as the producer does, and falls back to the environment's Kafka auth when nothing is bound for that address.
+    acceptance:
+      - id: AC17427610001
+        statement: 'AC17427610001: with a SASL_PLAINTEXT lane transport bound for the broker of the wiring and no KAFKA_SASL_* environment, the reply AIOKafkaConsumer is built with security_protocol SASL_PLAINTEXT, sasl_mechanism SCRAM-SHA-256 and the bound username -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport fails at the merge base'
+      - id: AC17427610002
+        statement: 'AC17427610002: the wiring still passes the auth kwargs it resolves for its broker to the reply consumer (the MSK direct-client coverage) -- falsifier: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring'
+      - id: AC17427610003
+        statement: 'AC17427610003: a request-response round trip under a bound SASL lane transport resolves with the reply consumer authenticated as that transport, and a transport bound for another broker leaves the consumer on the environment auth -- falsifier: uv run pytest tests/integration/runtime/test_request_response_wiring_integration.py -q -k LaneTransportAuth fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: The deploy-agent verification path replays the brief's reported transient-503 and slow-start sequences with a fake clock and Docker runner; no live lane is changed.
@@ -839,6 +855,12 @@ evidence_requirements:
   - kind: tests
     description: Every workflow that reads the pull request body fires on edited, and deploy-gate.yml does.
     command: uv run pytest tests/ci/test_body_reading_workflows_trigger_on_edit_omn17427.py -q
+  - kind: tests
+    description: The drift checker's pull-request advisory on the recorded red, read from GITHUB_EVENT_NAME, and its push and workflow_dispatch refusal.
+    command: uv run pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+  - kind: tests
+    description: A fake AIOKafkaConsumer records the reply consumer's constructor kwargs under a bound SASL lane transport with the Kafka auth environment cleared; no broker is contacted.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -2927,3 +2949,67 @@ dod_evidence:
     binds_ac:
       - AC17427231001
       - AC17427231002
+  - id: dod-omn17427-census-drift-pr-advisory
+    description: Tests drive check_lane_census_drift.py on the recorded omnibase_infra#5187 drift red as a pull request, a push and a workflow_dispatch, in process and as a subprocess reading GITHUB_EVENT_NAME; the pull-request cases fail at the merge base, where drift refuses every event. Does not claim a refreshed census or a healed lab lane.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240101
+  - id: dod-omn17427-live-census-report-strict
+    description: Pairs the direct checker event-policy tests with the live reporter drift tests. The direct checker must make drift advisory only for pull_request, while the reporter must retain the CRITICAL row and actionable remedy in every context. The checker pull_request case fails at the merge base, which enforces drift for every event; the reporter pull_request case fails if event isolation is removed from the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102
+  - id: dod-omn17427-live-census-report-deploy
+    description: Hosted-runner deploy check pairs the real checker event-policy tests with the reporter using synthetic census inputs and local command stubs, requiring advisory pull_request checks alongside CRITICAL live drift and its Active issues entry. No Docker daemon, lane, credentials or Slack request is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_lane_census_drift_pr_advisory_omn17427.py::test_the_script_reads_the_event_from_the_actions_environment tests/unit/scripts/test_lane_census_sink_omn18949.py::test_live_report_keeps_drift_critical_in_any_actions_context -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427240102
+  - id: dod-omn17427-rr-reply-consumer-lane-transport
+    description: Fake consumer, no broker. Fails against the merge-base, where the reply consumer reads Kafka auth from the environment only and is built with no SASL kwargs under a bound lane transport.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k bound_lane_transport
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+  - id: dod-omn17427-rr-reply-consumer-msk-kwargs
+    description: Fake consumer, no broker. The wiring passes the auth kwargs it resolves for its broker to the reply consumer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_msk_auth_direct_clients.py -q -k request_response_wiring
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610002
+  - id: dod-omn17427-rr-reply-lane-transport-deploy
+    description: Hosted-runner deploy check of the reply consumer's lane transport auth. Runs the focused wiring tests without a container, credential or live broker; does not claim a live broker connection.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610001
+      - AC17427610002
+  - id: dod-omn17427-rr-reply-lane-transport-integ
+    description: In-memory event bus and mock reply consumer, no broker. Fails against the merge-base, where the reply consumer under a bound SASL lane transport is built with no SASL kwargs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_request_response_wiring_integration.py -q -k LaneTransportAuth
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427610003
