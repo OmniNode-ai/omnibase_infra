@@ -180,10 +180,21 @@ def test_list_response_error_is_unknown_and_closes_the_client(admin: _Admin) -> 
     assert admin.closed
 
 
-def test_list_response_coordinator_loading_is_transient(admin: _Admin) -> None:
-    admin.error_code = 14
+@pytest.mark.parametrize("chain", [False, True])
+@pytest.mark.parametrize("error_code", [14, 15, 16])
+def test_list_response_coordinator_loading_is_transient(
+    admin: _Admin, chain: bool, error_code: int
+) -> None:
+    admin.error_code = error_code
     with pytest.raises(ConsumerGroupLivenessUnknownError) as caught:
-        backend_probe.live_consumer_groups(topic=_TOPIC, bootstrap_servers=_BROKER)
+        if chain:
+            backend_probe.live_chain_consumer_groups(
+                command_topic=_TOPIC,
+                subscribe_topics=(_TOPIC,),
+                bootstrap_servers=_BROKER,
+            )
+        else:
+            backend_probe.live_consumer_groups(topic=_TOPIC, bootstrap_servers=_BROKER)
     assert isinstance(caught.value, ConsumerGroupLivenessTransientError)
     assert admin.described == []
     assert admin.closed
