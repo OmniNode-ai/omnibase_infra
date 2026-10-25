@@ -179,7 +179,6 @@ def load_dev_boot_guard() -> ModuleType:
         "models/model_dev_boot_point.py",
         "models/model_dev_boot_request.py",
         "models/model_dev_boot_result.py",
-        "protocols/protocol_dev_boot_executor.py",
         "handlers/handler_dev_boot_guard.py",
     ):
         module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
@@ -218,8 +217,11 @@ def DevBootGuard(executor: DeployExecutor, state_dir: Path) -> HandlerDevBootGua
     return cast(
         "HandlerDevBootGuard",
         load_dev_boot_guard().HandlerDevBootGuard(
-            executor,
             state_dir,
+            config_hashes=lambda services: executor.dev_boot_config_hashes(services),
+            verify_recovery=lambda update: executor.verify_dev_boot_recovery(
+                on_phase_update=update
+            ),
             execution=sys.modules[__name__],
             reporting=dev_boot_report_config(),
         ),

@@ -17,20 +17,21 @@ import math
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import JsonValue, TypeAdapter
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.model_dev_boot_container import ModelDevBootContainer
 from omnibase_infra.models.model_dev_boot_point import ModelDevBootPoint
 from omnibase_infra.models.model_dev_boot_report_config import ModelDevBootReportConfig
 from omnibase_infra.models.model_dev_boot_request import ModelDevBootRequest
 from omnibase_infra.models.model_dev_boot_result import ModelDevBootResult
-from omnibase_infra.protocols.protocol_dev_boot_executor import ProtocolDevBootExecutor
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -152,20 +153,37 @@ def _window(container: ModelDevBootContainer) -> int:
     return math.ceil(float(nanos) / 1_000_000_000)
 
 
+def _unchanged_and_healthy(
+    point: ModelDevBootPoint,
+    read_containers: Callable[[], list[ModelDevBootContainer]],
+) -> bool:
+    try:
+        current = read_containers()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return False
+    return (
+        all(_healthy(c) for c in current)
+        and {c["Id"] for c in current} == set(point.container_ids)
+        and {c["Image"] for c in current} == set(point.images.values())
+    )
+
+
 class HandlerDevBootGuard:
     """Supervise only the selected DEV compose project under its caller's lock."""
 
     def __init__(
         self,
-        executor: ProtocolDevBootExecutor,
         state_dir: Path,
         *,
+        config_hashes: Callable[[Sequence[str]], dict[str, str]],
+        verify_recovery: Callable[[Callable[[StrEnum, StrEnum], None]], None],
         execution: ModuleType,
         reporting: ModelDevBootReportConfig,
     ) -> None:
         self.execution = execution
         self.reporting = reporting
-        self.executor = executor
+        self.config_hashes = config_hashes
+        self.verify_recovery = verify_recovery
         self.config = self.execution.lane_config_for(self.execution.EnumRuntimeLane.DEV)
         self.services = tuple(
             service
@@ -175,6 +193,16 @@ class HandlerDevBootGuard:
         self.root = state_dir / "dev-boot-guard" / self.config.compose_project
         self.snapshot_path = self.root / "last-healthy.json"
         self.point: ModelDevBootPoint | None = None
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure handler over the host's Docker compose project."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting: retags images and recreates dev runtime containers."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def handle(self, request: ModelDevBootRequest) -> ModelDevBootResult:
         if request.operation == "prepare":
@@ -191,17 +219,8 @@ class HandlerDevBootGuard:
             deliver_reports(self.root, execution=self.execution, config=self.reporting)
         return ModelDevBootResult(operation=request.operation, status="pass")
 
-    def _checked(
-        self,
-        argv: list[str],
-        timeout: int = DOCKER_READ_SECONDS,
-        *,
-        env: dict[str, str] | None = None,
-    ) -> str:
-        return _checked(argv, timeout, env=env, execution=self.execution)
-
     def _containers(self) -> list[ModelDevBootContainer]:
-        ids = self._checked(
+        ids = _checked(
             [
                 "docker",
                 "ps",
@@ -212,12 +231,13 @@ class HandlerDevBootGuard:
                 f"label=com.docker.compose.project={self.config.compose_project}",
                 "--filter",
                 "label=com.docker.compose.oneoff=False",
-            ]
+            ],
+            execution=self.execution,
         ).split()
         if not ids:
             raise DevBootFailedError("dev runtime containers are absent")
         raw = TypeAdapter(list[ModelDevBootContainer]).validate_json(
-            self._checked(["docker", "inspect", *ids])
+            _checked(["docker", "inspect", *ids], execution=self.execution)
         )
         containers: list[ModelDevBootContainer] = []
         for container in raw:
@@ -249,8 +269,9 @@ class HandlerDevBootGuard:
                 if _healthy(container):
                     continue
                 service = container["Config"]["Labels"]["com.docker.compose.service"]
-                logs = self._checked(
-                    ["docker", "logs", "--tail", "80", container["Id"]]
+                logs = _checked(
+                    ["docker", "logs", "--tail", "80", container["Id"]],
+                    execution=self.execution,
                 )
                 for exhausted in re.finditer(r"BOOT FAILED (\d+)/(\d+):[^\n]*", logs):
                     if int(exhausted[1]) >= int(exhausted[2]):
@@ -286,7 +307,7 @@ class HandlerDevBootGuard:
         if not all(_healthy(c) for c in containers):
             raise DevBootFailedError("cannot capture an unhealthy dev runtime")
         rendered = TypeAdapter(dict[str, JsonValue]).validate_json(
-            self._checked(
+            _checked(
                 [
                     "docker",
                     "compose",
@@ -303,9 +324,10 @@ class HandlerDevBootGuard:
                 ],
                 self.execution.CONFIG_HASH_TIMEOUT_SECONDS,
                 env=self.execution._compose_env(),
+                execution=self.execution,
             )
         )
-        hashes = self.executor.dev_boot_config_hashes(self.services)
+        hashes = self.config_hashes(self.services)
         for container in containers:
             labels = container["Config"]["Labels"]
             service = labels["com.docker.compose.service"]
@@ -398,7 +420,7 @@ class HandlerDevBootGuard:
             self.execution._tag_image(image_id, retained)
         path = self.root / "recovery-compose.json"
         self.execution._atomic_write_private_json(path, self.point.compose)
-        self._checked(
+        _checked(
             [
                 "docker",
                 "compose",
@@ -418,27 +440,15 @@ class HandlerDevBootGuard:
                 *self.services,
             ],
             self.execution.VERIFY_RECREATE_TIMEOUT_SECONDS,
+            execution=self.execution,
         )
         self.wait()
-        self.executor.verify_dev_boot_recovery(
+        self.verify_recovery(
             # Recovery has its own incident outcome. Updating the original
             # job's phase would turn its failed verdict back into in_progress.
-            on_phase_update=lambda phase, status: logger.info(
+            lambda phase, status: logger.info(
                 "Dev recovery phase=%s status=%s", phase.value, status.value
             ),
-        )
-
-    def _unchanged_and_healthy(self) -> bool:
-        if self.point is None:
-            return False
-        try:
-            current = self._containers()
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            return False
-        return (
-            all(_healthy(c) for c in current)
-            and {c["Id"] for c in current} == set(self.point.container_ids)
-            and {c["Image"] for c in current} == set(self.point.images.values())
         )
 
     @contextlib.contextmanager
@@ -458,8 +468,9 @@ class HandlerDevBootGuard:
             boot_causes: list[str] = []
             try:
                 for container in self._containers():
-                    logs = self._checked(
-                        ["docker", "logs", "--tail", "80", container["Id"]]
+                    logs = _checked(
+                        ["docker", "logs", "--tail", "80", container["Id"]],
+                        execution=self.execution,
                     )
                     # Some entrypoints summarize the counter as "preflight
                     # exited 1" and log the setting diagnosis separately.
@@ -495,7 +506,7 @@ class HandlerDevBootGuard:
             except (OSError, RuntimeError):
                 logger.exception("Cannot persist failed dev deploy before recovery")
             try:
-                unchanged = self._unchanged_and_healthy()
+                unchanged = _unchanged_and_healthy(self.point, self._containers)
                 if not unchanged:
                     self._restore()
                 incident["recovery_skipped_healthy"] = unchanged
