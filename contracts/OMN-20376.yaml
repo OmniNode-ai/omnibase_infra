@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20376
+title: "The delegate locus probe asks again when the group coordinator is loading or moving"
+summary: >-
+  Delivered under OMN-20376 as the carrier for making delegation work and escalate. The consumer-group liveness probe that gates onex delegate --locus deployed-lane classified a coordinator that is loading or moving (Kafka error codes 14 GroupLoadInProgress, 15 GroupCoordinatorNotAvailable, 16 NotCoordinatorForGroup) as an unknown answer, so the bounded transient retry of OMN-20646 never ran and the run was refused as a transport failure. Those three codes are retriable by the Kafka protocol; they are now transient, and every other broker error code is still unknown and refused. The ticket's own AC1 and AC2 (the C30 published-plugin walk with terminal_ok 1 and its negative control) are not delivered by this change and are not bound here; this contract covers AC3 and AC4 only. That fewer deployed-lane runs are refused after the CLI picks the change up is read from the run receipts afterwards and is not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20376-ac3-coordinator-codes-transient
+    statement: "A liveness listing that fails with GroupLoadInProgressError, GroupCoordinatorNotAvailableError or NotCoordinatorForGroupError raises ConsumerGroupLivenessTransientError, on both the single-topic and the chain probe, and a list response carrying error code 14 does too, after closing the admin client and describing nothing."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: the liveness probe classifies Kafka coordinator codes 14, 15 and 16 as transient on both probes, and a list response with error code 14 raises ConsumerGroupLivenessTransientError with the client closed -- falsifier: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "transport_classification or coordinator_loading", which fails at the merge base 26d49cec3 where these raise ConsumerGroupLivenessUnknownError
+  - id: req-omn20376-ac4-other-codes-unchanged
+    statement: "Every other broker error code and a decode error still raise ConsumerGroupLivenessUnknownError that is not transient, so an unknown answer still refuses."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a list response with error code 31 and a decode error still raise a non-transient ConsumerGroupLivenessUnknownError -- falsifier: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "list_response_error_is_unknown or transport_classification"
+evidence_requirements:
+  - kind: tests
+    description: "The probe classification tests and the delegate locus slow-path retry tests pass."
+    command: |-
+      uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py tests/unit/cli/test_delegate_locus_slow_path_omn20646.py -q
+  - kind: manual
+    description: "Deploy validation command for the existing caller-contract deploy gate: run the probe classification tests against the committed source. Runnable on a hosted runner without broker access; it touches no broker and no running lane."
+    command: "deploy: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k coordinator_loading"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn20376-ac3-coordinator-codes-transient
+    description: >-
+      Raise each coordinator code from a stubbed listing on both probes and from a stubbed list response, and assert the transient class, the closed client and no describe call. Reads the committed source only; no broker is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "transport_classification or coordinator_loading"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn20376-ac4-other-codes-unchanged
+    description: >-
+      Assert error code 31 and a decode error still raise a non-transient unknown answer. Reads the committed source only; no broker is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "list_response_error_is_unknown or transport_classification"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
