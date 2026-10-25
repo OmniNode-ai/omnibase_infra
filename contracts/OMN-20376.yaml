@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-20376
 title: "The delegate locus probe asks again when the group coordinator is loading or moving"
 summary: >-
-  Delivered under OMN-20376 as the carrier for making delegation work and escalate. The consumer-group liveness probe that gates onex delegate --locus deployed-lane classified a coordinator that is loading or moving (Kafka error codes 14 GroupLoadInProgress, 15 GroupCoordinatorNotAvailable, 16 NotCoordinatorForGroup) as an unknown answer, so the bounded transient retry of OMN-20646 never ran and the run was refused as a transport failure. Those three codes are retriable by the Kafka protocol; they are now transient, and every other broker error code is still unknown and refused. The ticket's own AC1 and AC2 (the C30 published-plugin walk with terminal_ok 1 and its negative control) are not delivered by this change and are not bound here; this contract covers AC3 and AC4 only. The follow-up for AC1 and AC2 is OMN-20376 itself: this pull request is Part of OMN-20376 and does not close it, so the ticket stays open with AC1 and AC2 unmet until a later change binds them in this same contract. That fewer deployed-lane runs are refused after the CLI picks the change up is read from the run receipts afterwards and is not claimed here.
+  Delivered under OMN-20376 as the carrier for making delegation work and escalate. The consumer-group liveness probe that gates onex delegate --locus deployed-lane classified a coordinator that is loading or moving (Kafka error codes 14 GroupLoadInProgress, 15 GroupCoordinatorNotAvailable, 16 NotCoordinatorForGroup) as an unknown answer, so the bounded transient retry of OMN-20646 never ran and the run was refused as a transport failure. Those three codes are retriable by the Kafka protocol; they are now transient, and every other broker error code is still unknown and refused. The ticket's own AC1 and AC2 (the C30 published-plugin walk with terminal_ok 1 and its negative control) are not delivered by this change and are not bound here; this contract covers AC3 and AC4 only. The follow-up for AC1 and AC2 is OMN-20376 itself: this pull request is Part of OMN-20376 and does not close it, so the ticket stays open with AC1 and AC2 unmet until a later change binds them in this same contract. The shared Done-write gate still refuses an all-verified receipt using these bindings while AC1/AC2 remain unbound, as exercised by tests/unit/backends/test_omn20376_partial_contract_closure.py. That fewer deployed-lane runs are refused after the CLI picks the change up is read from the run receipts afterwards and is not claimed here.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -30,6 +30,9 @@ evidence_requirements:
   - kind: tests
     description: "The CLI retries decoded coordinator responses on both hops, dispatches only after recovery, and refuses exhausted retries or authorization failures."
     command: "uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
+  - kind: tests
+    description: "Closure safety only: the real Done-write gate refuses the partial contract while AC1/AC2 remain unbound; neither is discharged."
+    command: "uv run pytest tests/unit/backends/test_omn20376_partial_contract_closure.py -q"
   - kind: manual
     description: "Hosted-runner deploy check of the CLI and liveness probes together, with only broker admin responses and the terminal receipt writer replaced."
     command: "deploy: uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
