@@ -42,6 +42,18 @@ The escape from a permanently-red gate is the one the ticket names: declare the
 container in the manifest, or file it. Both are declaration changes, which is
 also what AC-3 requires before a drift count may legitimately fall.
 
+PULL REQUESTS (OMN-17427). Since OMN-20934 the manifest and the census live in
+the private CI overlay, so no pull request in this repository can declare a
+container or change what the census observed: a nonzero drift count failed
+every pull request whose paths triggered this check for lab state none of them
+touched (omnibase_infra#5146, #5148, #5187, #5206 and #5207 on 2026-10-21;
+#5187 again on 2026-10-24, on a dev-lane ``oneshot_failed`` finding). On a pull
+request (``GITHUB_EVENT_NAME=pull_request``, which Actions sets and no workflow
+input can) ``nonzero_drift_count`` is reported as a warning and passes. This is
+still not a flag: no workflow file can reach it. Push to dev/main and
+workflow_dispatch still refuse on drift, and every other finding still fails a
+pull request. The staleness check made the same split for census age (#5014).
+
 The findings, in a fixed order:
 
 0. ``nonzero_drift_count`` -- the snapshot reports live drift. **This is AC-1.**
@@ -82,6 +94,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -286,7 +299,7 @@ def evaluate(
     return findings
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, event_name: str = "") -> int:
     parser = argparse.ArgumentParser(
         description="Fail when the committed lane census disagrees with the manifest (OMN-18949)"
     )
@@ -362,11 +375,17 @@ def main(argv: list[str] | None = None) -> int:
         orphans=orphan_map_entries(manifest),
     )
 
+    advisory: list[Finding] = []
+    if event_name == "pull_request":
+        advisory = [f for f in findings if f.kind == "nonzero_drift_count"]
+        findings = [f for f in findings if f.kind != "nonzero_drift_count"]
+
     container_total = sum(len(v) for v in declared_containers(manifest).values())
     if args.json:
         json.dump(
             {
                 "findings": [asdict(f) for f in findings],
+                "advisory_findings": [asdict(f) for f in advisory],
                 "manifest_lanes": len(lanes),
                 "manifest_containers": container_total,
                 "snapshot_findings": len(snapshot.get("findings", [])),
@@ -386,6 +405,15 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(snapshot.get('findings', []))} snapshot finding(s) emitted "
         f"{snapshot.get('emitted_at', 'at an unrecorded time')}"
     )
+
+    for f in advisory:
+        print(
+            f"::warning title=LANE-CENSUS-DRIFT::[{f.kind}] lane={f.lane} {f.detail}. "
+            "The drift is in the private overlay census, not in the pull request's "
+            "diff, so on a pull request it is reported, not enforced (push and "
+            "workflow_dispatch runs still enforce it).",
+            file=sys.stderr,
+        )
 
     if not findings:
         print("OK: the committed census and the manifest agree.")
@@ -408,4 +436,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(event_name=os.environ.get("GITHUB_EVENT_NAME", "")))

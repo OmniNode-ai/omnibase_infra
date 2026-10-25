@@ -112,12 +112,20 @@ jobs:
     # must cite a reachability proof, never a side effect of a seam migration.
     # Nothing here writes an Actions variable (CLAUDE.md rule 14). Fork PRs
     # keep the public path first and never reach the LAN fleet.
+    #
+    # OMN-17292: omnibase-ci is no longer LAN-only: h203-light runners joined
+    # on 2026-10-24 and cannot reach the review voters (job 120972923322 on
+    # h203-light-6; job 120975880158 on h203-light-3). The LAN amd64 action
+    # pools in docker-compose.runners.yml and
+    # docker-compose.runners-omnipc2-ci-runner.yml carry arch-amd64; h203 does
+    # not, so requiring it keeps this job on the LAN fleet. If an off-LAN
+    # runner ever gains arch-amd64, this pin needs a dedicated LAN label instead.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_HOSTILE_REVIEW_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_HOSTILE_REVIEW_RUNS_ON_JSON || '["self-hosted","omnibase-ci","arch-amd64"]')
       }}
     timeout-minutes: 35
 
