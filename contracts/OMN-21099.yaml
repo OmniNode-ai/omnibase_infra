@@ -32,11 +32,11 @@ requirements:
         statement: |-
           AC4: the runtime-effects ONEX_CONTEXT_SOURCE_TENANT_ID entry interpolates DEV_LANE_CONTEXT_SOURCE_TENANT_ID and no other variable, and still renders as lab when ONEX_TENANT_ID is set to a sentinel -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -k lane_identity
   - id: req-omn21099-ac5-pack-builder-settings
-    statement: "The dev-lane stack renders runtime-effects with ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set, the two settings omnimarket's compaction pack builder and live session source read."
+    statement: "The dev-lane stack renders runtime-effects with ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set, the two settings omnimarket's compaction pack builder and live session source read, and with neither retired session file path nor its mount."
     acceptance:
       - id: AC5
         statement: |-
-          AC5: docker compose config over the dev-lane stack renders runtime-effects with ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set, the two settings omnimarket's compaction pack builder and live session source (session_content and work_ledger_rows, omnimarket#4383) read -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "every_pack_builder_setting"
+          AC5: docker compose config over the dev-lane stack renders runtime-effects with ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set, the two settings omnimarket's compaction pack builder and live session source (session_content and work_ledger_rows, omnimarket#4383) read, and with neither ONEX_SESSION_TRANSCRIPT_ROOT nor ONEX_LEDGER_PATH nor their bind mounts -- falsifier: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "every_pack_builder_setting or retired", which fails at the merge base 85493fd67 where the retired entries are present
   - id: req-omn21099-ac6-no-retired-file-paths
     statement: "No committed overlay and no rendered dev-lane or borrower stack gives any service ONEX_SESSION_TRANSCRIPT_ROOT, ONEX_LEDGER_PATH, or a bind mount at /etc/onex/session-transcripts or /etc/onex/work-ledger."
     acceptance:
@@ -110,11 +110,11 @@ dod_evidence:
     binds_ac: [AC4]
   - id: dod-omn21099-ac5-pack-builder-settings
     description: >-
-      Render the dev-lane compose bundle and assert runtime-effects has ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set for the compaction pack builder and live session source, whose dsn_env reads session_content and work_ledger_rows (omnimarket#4383). No running lane is touched. The running container is read on the lab after the deploy agent converges and is not claimed here.
+      Render the dev-lane compose bundle and assert runtime-effects has ONEX_CONTEXT_SOURCE_TENANT_ID and OMNINODE_INTERNAL_DB_URL set for the compaction pack builder and live session source, whose dsn_env reads session_content and work_ledger_rows (omnimarket#4383), and that no retired session file path or bind mount remains; it fails at the merge base, where they are present. No running lane is touched. The running container is read on the lab after the deploy agent converges and is not claimed here.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "every_pack_builder_setting"
+        check_value: uv run pytest tests/ci/test_dev_lane_pack_builder_settings_omn21099.py -q -k "every_pack_builder_setting or retired"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
   - id: dod-omn21099-ac6-no-retired-file-paths
