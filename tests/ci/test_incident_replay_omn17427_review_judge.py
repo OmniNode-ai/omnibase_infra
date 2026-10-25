@@ -114,7 +114,7 @@ def _verdict(thread: dict[str, Any], author: str) -> dict[str, Any]:
             "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
             "**Review bot: rejection accepted**\n\n> the finding misreads the file\n"
         ),
-        "author": {"login": author},
+        "author": {"login": author, "__typename": "Bot"},
     }
 
 
@@ -132,7 +132,7 @@ def test_the_real_gate_keeps_both_rejected_findings_blocked() -> None:
 def test_the_same_findings_clear_once_the_judge_accepts() -> None:
     threads = _incident_threads()
     for thread in threads:
-        thread["comments"]["nodes"].append(_verdict(thread, "github-actions"))
+        thread["comments"]["nodes"].append(_verdict(thread, "onexbot"))
     blocking, cleared = gate.classify_threads(threads, _no_fix_check)
     assert blocking == []
     assert [v.judge_verdict for v in cleared] == ["accepted", "accepted"]

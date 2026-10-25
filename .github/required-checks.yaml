@@ -97,9 +97,12 @@ gates:
     # result.
     # Two workflows produce the same job name: hostile-reviewer.yml on each PR
     # push, and hostile-review-thread-gate.yml re-running it on every thread
-    # reply. The workflow field names hostile-reviewer.yml, the first.
+    # reply. The workflow field names hostile-reviewer.yml, the first. Both run
+    # the same script read-only and neither judges: the review bot runs in
+    # hostile-review-judge.yml (workflow_run, default-branch code only), which
+    # produces no PR context.
     skip_semantics: neutral_ok
-    rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or rejected: <reason>. Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
+    rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or a rejected: <reason> that the review bot accepted (hostile-review-judge.yml posts its verdict). Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
   - name: "call-reject-skip-token / scan / reject-skip-gate-token"
     mode: REQUIRED
     producer_kind: cross_repo

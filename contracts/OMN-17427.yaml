@@ -471,12 +471,14 @@ requirements:
       - id: AC17427523402
         statement: 'AC17427523402: CI Summary on a PR into dev is PENDING without the Hostile Review Thread Gate and FAILS on a skipped or red one, while a PR into main is not held by it, and the create-review call carries line comments only -- falsifier: uv run pytest tests/ci/test_ci_summary_gate.py tests/ci/test_post_hostile_review_threads.py -q -k "Omn17427"'
   - id: req-omn17427-review-bot-judges-rejections
-    statement: A rejected reply no longer clears a hostile-reviewer finding by itself. The review bot, run only inside the on-reply thread gate workflow, asks a model that is none of the voters (omniintelligence's cli_review judge-rejections with the CI overlay's rejection judge, called through the reviewer's own model routing and distinct by the quorum's reviewer identity) to accept or refuse the rejection with one sentence, and the gate posts the verdict under the workflow token; the gate honours only that identity's verdict bound to the rejection's id and body, fails closed when the judge is unavailable, and needs no judge on a PR with nothing to judge. There is no human override and no new credential.
+    statement: A rejected reply no longer clears a hostile-reviewer finding by itself. The review bot, run only in the base-branch workflow_run workflow hostile-review-judge.yml, asks a model that is none of the voters (omniintelligence's cli_review judge-rejections with the CI overlay's rejection judge, called through the reviewer's own model routing and distinct by the quorum's reviewer identity) to accept or refuse the rejection with one sentence, and posts the verdict under the onexbot App token while the on-reply gate runs PR-head code read-only with no secret; the gate honours only that identity's verdict bound to the rejection's id and body, fails closed when the judge is unavailable, and needs no judge on a PR with nothing to judge. There is no human override and no new credential.
     acceptance:
       - id: AC523702
         statement: 'AC523702: a rejection the judge refused keeps the gate red with its sentence, an accepted one clears it, a verdict reply any other account posts (or an edited or later rejection) is not accepted, the pending file carries the finding, the cited lines at the head and the rejection in the judge''s contract, an unconfigured judge, a judge step that wrote nothing, a judge note, a malformed verdict or a refused reply post fail closed with the reason in the gate, a PR with no rejection counts zero so nothing is installed or called, and the accuracy record counts bot-accepted rejections apart from fixes -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_incident_replay_omn17427_review_judge.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q'
       - id: AC523703
-        statement: 'AC523703: the on-reply workflow reads the CI overlay and omniintelligence through the reviewer job''s own steps (identical apart from their if), installs and calls nothing without a pending rejection, runs omniintelligence''s cli_review judge-rejections with no GitHub token, posts the verdicts and runs the gate step whatever the judge did, passes the model key to the judge step alone and reads no secret the reviewer does not -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q'
+        statement: 'AC523703: hostile-review-judge.yml reads the CI overlay and omniintelligence through the reviewer job''s own steps (identical apart from their if), installs and calls nothing without a pending rejection, runs omniintelligence''s cli_review judge-rejections with no GitHub token, posts the verdicts whatever the judge did while the on-reply gate reads the status and thread replies, passes the model key to the judge step alone and reads no secret the reviewer does not -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_workflow_omn17427.py -q'
+      - id: AC523704
+        statement: 'AC523704: no step of a workflow whose runs use PR-head files (pull_request, pull_request_review, pull_request_review_comment) can read ONEXBOT_APP_ID, ONEXBOT_APP_PRIVATE_KEY or LOCAL_LLM_SHARED_SECRET or holds a write permission; the judge runs only on workflow_run, checks out only the default branch, reads the gate''s artifact as data and holds the App key only in its mint steps -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q'
   - id: req-omn17427-runner-image-python-source
     statement: The runner image installs Python 3.12 as a uv-managed CPython fetched from GitHub releases, not from the deadsnakes Launchpad PPA, so a Launchpad outage no longer fails runner-image-build-smoke and runner-image-multiarch-smoke and with them CI Summary.
     acceptance:
@@ -929,7 +931,7 @@ dod_evidence:
     binds_ac:
       - AC523702
   - id: dod-omn17427-ac523703-judge-wiring
-    description: The on-reply workflow and the reviewer workflow are parsed and their overlay and omniintelligence steps compared. They fail on the merge base, whose on-reply workflow has no judge step.
+    description: The base-branch judge workflow and the reviewer workflow are parsed and their overlay and omniintelligence steps compared. They fail on the merge base, which has no hostile-review-judge.yml workflow.
     source: manual
     checks:
       - check_type: test_passes
@@ -946,6 +948,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC523703
+  - id: dod-omn17427-ac523704-secret-boundary
+    description: The workflow boundary tests fail on the merge base where the test file does not exist and on the old head shape the positive control embeds.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC523704
+  - id: dod-omn17427-ac523704-secret-boundary-deploy
+    description: Hosted-runner deploy check -- the workflow boundary tests; they do not claim a live run.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC523704
   - id: dod-omn17427-pr5263-staging-lock
     description: The real reconciler runs against temporary workspace shims with live, foreign and dead lock holders; the tests inspect staging contents, lock ownership and release.
     source: manual

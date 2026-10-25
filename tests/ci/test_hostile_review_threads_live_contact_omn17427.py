@@ -255,7 +255,7 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
             f"digest={digest[:16]} verdict=accepted "
             "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
         ),
-        "author": {"login": "github-actions"},
+        "author": {"login": "onexbot", "__typename": "Bot"},
     }
     thread["comments"]["nodes"].append(truncated)
     blocking, cleared = gate.classify_threads([thread], no_fix_check)
@@ -271,7 +271,7 @@ def test_the_gate_does_not_depend_on_resolving_a_thread(
                 "judge=rejection-judge identity=anthropic#id=claude-opus-5-5 -->\n"
                 "**Review bot: rejection accepted**\n\n> the gate reads git history\n"
             ),
-            "author": {"login": "github-actions"},
+            "author": {"login": "onexbot", "__typename": "Bot"},
         }
     )
     blocking, cleared = gate.classify_threads([thread], no_fix_check)

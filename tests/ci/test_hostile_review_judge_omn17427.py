@@ -7,7 +7,7 @@ omniintelligence's ``cli_review judge-rejections`` makes the judgement; this
 repository's thread gate (``check_hostile_review_threads.py``) owns the rest:
 ``--pending`` writes each rejection awaiting a verdict with the cited lines at
 the head, ``--post-verdicts`` turns the verdicts into replies under the
-workflow token, and the gate reads them back. These tests drive both modes
+onexbot App token, and the gate reads them back. These tests drive both modes
 with a recording GitHub and the judge's JSON output, then feed what was posted
 back through the gate itself, so the claim under test is the one the gate
 enforces: an accepted rejection clears, a refused one keeps the gate red, a
@@ -90,13 +90,13 @@ def _rejection(body: str = REJ, *, association: str = "MEMBER") -> dict[str, Any
     }
 
 
-def _as_read_back(body: str, login: str = "github-actions") -> dict[str, Any]:
+def _as_read_back(body: str, login: str = "onexbot") -> dict[str, Any]:
     """A posted reply as GraphQL returns it."""
     return {
         "databaseId": 33,
         "body": body,
         "url": "https://x/verdict",
-        "author": {"login": login},
+        "author": {"login": login, "__typename": "Bot"},
     }
 
 
@@ -439,4 +439,169 @@ class TestFailClosed:
         assert (
             "GitHub refused the verdict reply (403)"
             in _gate([thread], env)[0][0].reason
+        )
+
+
+class TestJudgeRequest:
+    def test_write_request_carries_exactly_the_three_fields(
+        self, env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("HEAD_SHA", "a" * 40)
+        monkeypatch.setenv("PENDING_COUNT", "2")
+        request = tmp_path / "request-dir" / "request.json"
+        assert gate.main(["--write-request", str(request)]) == 0
+        assert json.loads(request.read_text()) == {
+            "pr": 5234,
+            "head_sha": "a" * 40,
+            "count": 2,
+        }
+        assert not env["output"].exists()
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("PR_NUMBER", "0"), ("PENDING_COUNT", "-1"), ("HEAD_SHA", "abc")],
+    )
+    def test_write_request_fails_closed_on_invalid_environment(
+        self,
+        env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        field: str,
+        value: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("HEAD_SHA", "a" * 40)
+        monkeypatch.setenv("PENDING_COUNT", "0")
+        monkeypatch.setenv(field, value)
+        request = tmp_path / "request.json"
+        assert gate.run_write_request(request) == 1
+        assert not request.exists()
+        assert "::error::" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"pr": 5234, "head_sha": "a" * 40, "count": 1, "extra": "ignored?"},
+            {"pr": True, "head_sha": "a" * 40, "count": 1},
+            {"pr": 0, "head_sha": "a" * 40, "count": 1},
+            {"pr": "5234", "head_sha": "a" * 40, "count": 1},
+            {"pr": 5234, "head_sha": "abc", "count": 1},
+            {"pr": 5234, "head_sha": "A" * 40, "count": 1},
+            {"pr": 5234, "head_sha": "b" * 40, "count": 1},
+            {"pr": 5234, "head_sha": "a" * 40, "count": True},
+            {"pr": 5234, "head_sha": "a" * 40, "count": -1},
+            {"pr": 5234, "head_sha": "a" * 40, "count": 1.0},
+            {"pr": 5234, "head_sha": "a" * 40},
+            [],
+            None,
+        ],
+    )
+    def test_read_request_refuses_invalid_data_before_contacting_github(
+        self,
+        env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        data: object,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("WORKFLOW_RUN_HEAD_SHA", "a" * 40)
+        path = tmp_path / "request.json"
+        path.write_text(json.dumps(data))
+
+        def never(*args: Any) -> None:
+            raise AssertionError("invalid data must not reach GitHub")
+
+        assert gate.run_read_request(path, api=never, base=BASE) == 1
+        assert not env["output"].exists()
+        assert "::error::" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "pull",
+        [
+            {
+                "head": {
+                    "sha": "b" * 40,
+                    "repo": {"full_name": "OmniNode-ai/omnibase_infra"},
+                }
+            },
+            {"head": {"sha": "a" * 40, "repo": {"full_name": "fork/omnibase_infra"}}},
+            {"head": None},
+            {},
+        ],
+    )
+    def test_read_request_refuses_a_stale_fork_or_malformed_api_head(
+        self,
+        env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        pull: dict[str, Any],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("WORKFLOW_RUN_HEAD_SHA", "a" * 40)
+        path = tmp_path / "request.json"
+        path.write_text(json.dumps({"pr": 5234, "head_sha": "a" * 40, "count": 1}))
+        assert gate.run_read_request(path, api=lambda *args: pull, base=BASE) == 1
+        assert not env["output"].exists()
+        assert "::error::" in capsys.readouterr().out
+
+    def test_read_request_refuses_api_errors(
+        self,
+        env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("WORKFLOW_RUN_HEAD_SHA", "a" * 40)
+        path = tmp_path / "request.json"
+        path.write_text(json.dumps({"pr": 5234, "head_sha": "a" * 40, "count": 1}))
+
+        def unavailable(*args: Any) -> None:
+            raise urllib.error.URLError("unreachable")
+
+        assert gate.run_read_request(path, api=unavailable, base=BASE) == 1
+        assert not env["output"].exists()
+        assert "::error::" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("content", [None, "not JSON", "\xff"])
+    def test_read_request_refuses_missing_or_unreadable_files(
+        self,
+        env: dict[str, Path],
+        tmp_path: Path,
+        content: str | None,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        path = tmp_path / "request.json"
+        if content is not None:
+            path.write_bytes(content.encode("latin-1"))
+        assert gate.run_read_request(path, api=lambda *args: None, base=BASE) == 1
+        assert not env["output"].exists()
+        assert "::error::" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("count", [0, 2])
+    def test_read_request_accepts_only_the_verified_same_repo_head(
+        self,
+        env: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        count: int,
+    ) -> None:
+        monkeypatch.setenv("WORKFLOW_RUN_HEAD_SHA", "a" * 40)
+        path = tmp_path / "request.json"
+        path.write_text(json.dumps({"pr": 5234, "head_sha": "a" * 40, "count": count}))
+        calls: list[tuple[str, str, str]] = []
+
+        def api(method: str, url: str, token: str) -> dict[str, Any]:
+            calls.append((method, url, token))
+            return {
+                "head": {
+                    "sha": "a" * 40,
+                    "repo": {"full_name": "OmniNode-ai/omnibase_infra"},
+                }
+            }
+
+        assert gate.run_read_request(path, api=api, base=BASE) == 0
+        assert calls == [("GET", f"{BASE}/pulls/5234", "t")]
+        assert (
+            env["output"].read_text()
+            == f"pr=5234\nhead_sha={'a' * 40}\ncount={count}\n"
         )

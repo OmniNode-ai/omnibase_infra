@@ -40,23 +40,23 @@ A ``rejected:`` reply clears nothing by itself: every agent acts through the
 operator's own GitHub account, so who wrote a rejection proves nothing (on
 omnibase_infra#5234's own review an agent rejected 13 of 14 findings). The
 review bot decides instead (operator, 2026-10-21: "A bot to create the
-review"). It runs only inside the ``Hostile Review Thread Gate (on reply)``
-workflow, in three steps: ``--pending`` (this script) writes each rejection
+review"). It runs only inside the base-branch ``hostile-review-judge.yml``
+``workflow_run`` workflow, in three steps: ``--pending`` (this script) writes each rejection
 awaiting a verdict with the cited lines at the PR head; omniintelligence's
 ``cli_review judge-rejections`` (node_review_rejection_judge_compute, the
 reviewer's own overlay loader and model call) asks a model that is not one of
 the voters that raised the finding (by the quorum's reviewer identity) to
 accept or refuse it with one sentence; and ``--post-verdicts`` (this script)
-posts each verdict under the workflow's own token as a reply on the thread
+posts each verdict under the onexbot App token as a reply on the thread
 that begins with
 
     <!-- hostile-review-judge rejection=<comment id> digest=<sha256> verdict=accepted|refused judge=<voter> identity=<model> -->
 
 and this gate honours it only when all of these hold:
 
-  - the reply's author is the workflow identity (:data:`JUDGE_LOGINS`), a
-    login no user account can hold, so a reply any account posts cannot mark
-    a rejection accepted;
+  - the reply's author is the onexbot App bot (:data:`JUDGE_LOGINS`), so a
+    reply from a user or another workflow's GITHUB_TOKEN cannot mark a
+    rejection accepted;
   - it names the database id of the thread's LATEST rejection, and the
     digest of that rejection's body as it reads now, so a later or an edited
     rejection is judged again and an old acceptance never carries over.
@@ -125,13 +125,13 @@ MARKER = "hostile-reviewer-thread"
 DISPOSITION_LINE_PREFIX = "hostile-review-disposition: "
 MIN_REJECT_REASON_CHARS = 10
 
-# The review bot's verdict on a rejection (OMN-17427). Posted only by
-# this script's --post-verdicts mode under the workflow token, whose comments
-# GraphQL attributes to the Bot login ``github-actions`` (REST spells it
-# ``github-actions[bot]``). GitHub reserves both: no user account can hold
-# either, so a verdict another account posts is not a verdict.
+# The review bot's verdict on a rejection (OMN-17427). GraphQL spells the
+# App's bot ``onexbot``, REST ``onexbot[bot]``. Only the privileged base-branch
+# workflow hostile-review-judge.yml mints that token for verdict replies.
+# The workflow identity github-actions no longer counts: any workflow of the
+# repository can post as it.
 JUDGE_MARKER = "hostile-review-judge"
-JUDGE_LOGINS = frozenset({"github-actions", "github-actions[bot]"})
+JUDGE_LOGINS = frozenset({"onexbot", "onexbot[bot]"})
 # Only a rejection from an account GitHub associates with the repository as
 # OWNER, MEMBER or COLLABORATOR is judged. That is not a write-access check:
 # MEMBER is organization membership, and COLLABORATOR covers read and triage
@@ -185,7 +185,7 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
               url
               createdAt
               authorAssociation
-              author { login }
+              author { login __typename }
               originalCommit { oid }
             }
           }
@@ -321,7 +321,7 @@ def parse_judge_reply(body: str) -> dict[str, str] | None:
 def judge_verdict_for(
     thread: dict[str, Any], disposition: Disposition
 ) -> JudgeVerdict | None:
-    """The latest verdict the WORKFLOW IDENTITY posted on exactly this rejection.
+    """The latest verdict the onexbot App posted on exactly this rejection.
 
     A reply from any other login is ignored, whatever it claims. The verdict
     must name the rejection's comment id and the digest of its current body.
@@ -330,7 +330,14 @@ def judge_verdict_for(
         return None
     found: JudgeVerdict | None = None
     for comment in _comments(thread)[1:]:
-        if _login(comment.get("author")) not in JUDGE_LOGINS:
+        author = comment.get("author")
+        if _login(author) not in JUDGE_LOGINS:
+            continue
+        if (
+            isinstance(author, dict)
+            and "__typename" in author
+            and author["__typename"] != "Bot"
+        ):
             continue
         fields = parse_judge_reply(str(comment.get("body", "")))
         if fields is None:
@@ -922,11 +929,11 @@ def print_report(table: dict[str, dict[str, int]]) -> None:
 #
 # The judgement itself is omniintelligence's ``cli_review judge-rejections``
 # (node_review_rejection_judge_compute), run in the reviewer's own model
-# environment by hostile-review-thread-gate.yml. This script keeps what it has
+# environment by hostile-review-judge.yml on the base branch. This script keeps what it has
 # always owned, GitHub thread state and the PR's git history: ``--pending``
 # writes the rejections that await a verdict, with the cited lines at the
 # head, and ``--post-verdicts`` turns the verdicts into the judge replies this
-# gate reads, under the workflow token. A judgement model never touches
+# gate reads, under the onexbot App token. A judgement model never touches
 # GitHub, and nothing here calls a model.
 
 JUDGE_FINDING_CHARS = 4_000
@@ -969,7 +976,7 @@ def pending_rejections(
     """Rejections still to judge, and notes for those the bot will not judge.
 
     Only a thread's latest disposition counts, and a rejection that already
-    carries the workflow identity's verdict on its id and current body is done.
+    carries the onexbot App's verdict on its id and current body is done.
     """
     pending: list[PendingRejection] = []
     notes: dict[str, str] = {}
@@ -985,10 +992,8 @@ def pending_rejections(
         why = not_judgeable(disposition)
         top = _comments(thread)[0]
         top_id = top.get("databaseId")
-        if not why and not isinstance(top_id, int):
-            why = "the finding's first comment has no id to reply to"
-        if why:
-            notes[key] = why
+        if why or not isinstance(top_id, int):
+            notes[key] = why or "the finding's first comment has no id to reply to"
             continue
         first_body = str(top.get("body", ""))
         label = _LABEL_RE.search(first_body)
@@ -1066,6 +1071,79 @@ def _set_output(name: str, value: str) -> None:
     if out:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(f"{name}={value}\n")
+
+
+def _request_fields(data: object) -> tuple[int, str, int]:
+    """Validate the untrusted request's exact schema before using any field."""
+    if not isinstance(data, dict) or set(data) != {"pr", "head_sha", "count"}:
+        raise ValueError(
+            "the judge request must contain exactly pr, head_sha and count"
+        )
+    pr, head_sha, count = data["pr"], data["head_sha"], data["count"]
+    if type(pr) is not int or pr <= 0:
+        raise ValueError("the judge request pr must be a positive integer")
+    if not isinstance(head_sha, str) or re.fullmatch(r"[0-9a-f]{40}", head_sha) is None:
+        raise ValueError(
+            "the judge request head_sha must be 40 lowercase hex characters"
+        )
+    if type(count) is not int or count < 0:
+        raise ValueError("the judge request count must be a non-negative integer")
+    return pr, head_sha, count
+
+
+def run_write_request(path: Path) -> int:
+    """Write only the PR number, head SHA and pending count for the base judge."""
+    try:
+        data = {
+            "pr": int(os.environ["PR_NUMBER"]),
+            "head_sha": os.environ["HEAD_SHA"],
+            "count": int(os.environ["PENDING_COUNT"]),
+        }
+        _request_fields(data)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(path, data)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        print(f"::error::could not write the judge request (fail-closed): {exc}")
+        return 1
+    return 0
+
+
+def run_read_request(
+    path: Path,
+    *,
+    api: Callable[..., Any] | None = None,
+    base: str | None = None,
+) -> int:
+    """Read the gate artifact as data and verify its head against GitHub.
+
+    No output is emitted until the exact schema, triggering run's head and
+    current same-repository PR head all agree. A stale or forged request
+    fails closed before any PR objects are fetched or credentials minted.
+    """
+    try:
+        pr, head_sha, count = _request_fields(json.loads(path.read_text("utf-8")))
+        if head_sha != os.environ["WORKFLOW_RUN_HEAD_SHA"]:
+            raise ValueError(
+                "the judge request head_sha differs from WORKFLOW_RUN_HEAD_SHA"
+            )
+        repo = os.environ["REPO"]
+        if api is None or base is None:
+            import post_hostile_review_threads as poster
+
+            api = api or poster._api
+            base = base or poster.repo_api_base(repo)
+        pull = api("GET", f"{base}/pulls/{pr}", os.environ["GITHUB_TOKEN"])
+        if pull["head"]["sha"] != head_sha:
+            raise ValueError("the PR head.sha differs from the judge request")
+        if pull["head"]["repo"]["full_name"] != repo:
+            raise ValueError("the PR head repository differs from REPO (fork refused)")
+        _set_output("pr", str(pr))
+        _set_output("head_sha", head_sha)
+        _set_output("count", str(count))
+    except (OSError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+        print(f"::error::could not read the judge request (fail-closed): {exc}")
+        return 1
+    return 0
 
 
 def run_pending(
@@ -1184,7 +1262,7 @@ def run_post_verdicts(
     api: Callable[..., Any] | None = None,
     base: str | None = None,
 ) -> int:
-    """Post the judge's verdicts as replies under the workflow token.
+    """Post the judge's verdicts as replies under the onexbot App token.
 
     Fails closed: a missing or unreadable result, a malformed verdict or a
     reply GitHub refuses posts nothing for that rejection, and the reason is
@@ -1425,6 +1503,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
+        "--write-request",
+        type=Path,
+        metavar="FILE",
+        help="write the minimal request for the base-branch judge",
+    )
+    mode.add_argument(
+        "--read-request",
+        type=Path,
+        metavar="FILE",
+        help="validate the gate request against the triggering run and GitHub",
+    )
+    mode.add_argument(
         "--pending",
         type=Path,
         metavar="FILE",
@@ -1442,6 +1532,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.pending:
         return run_pending(args.pending)
+    if args.write_request:
+        return run_write_request(args.write_request)
+    if args.read_request:
+        return run_read_request(args.read_request)
     if args.post_verdicts:
         return run_post_verdicts(args.post_verdicts)
     return run_gate()

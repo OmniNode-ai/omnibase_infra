@@ -1,20 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-17427: how the review bot is wired into the on-reply thread gate.
+"""OMN-17427: the base-branch judge shares the reviewer's model environment.
 
-The judge runs only inside ``hostile-review-thread-gate.yml``, under the
-workflow's own token, with the reviewer's own overlay read and model
-environment. These tests hold the wiring that the judge's guarantees rest on:
-
-- the overlay and omniintelligence steps are the reviewer job's own steps,
-  byte for byte apart from their ``if:``, so the judge cannot drift onto a
-  parallel model path;
-- nothing is installed and no model is called unless a rejection awaits a
-  judgement, so a PR with no thread passes exactly as before;
-- the gate step runs whatever the judge did, and reads its status;
-- the shared signing secret reaches the judge step alone, no step holds a
-  provider key, the write permission is the job's alone and is not persisted
-  in the checkout, and no new secret appears.
+The read-only on-reply gate requests judgement; the workflow_run judge uses
+trusted code, the reviewer's overlay/install steps and the onexbot App token.
 """
 
 from __future__ import annotations
@@ -67,8 +56,18 @@ def _reviewer() -> dict[str, Any]:
 
 
 def _job() -> dict[str, Any]:
-    job: dict[str, Any] = _on_reply()["jobs"]["hostile-review-thread-gate"]
+    job: dict[str, Any] = _workflow("hostile-review-judge.yml")["jobs"][
+        "hostile-review-judge"
+    ]
     return job
+
+
+def _gate_job() -> dict[str, Any]:
+    return _on_reply()["jobs"]["hostile-review-thread-gate"]
+
+
+def _gate_steps() -> dict[str, dict[str, Any]]:
+    return {step["name"]: step for step in _gate_job()["steps"]}
 
 
 def _steps() -> dict[str, dict[str, Any]]:
@@ -108,7 +107,10 @@ def test_nothing_is_installed_or_called_without_a_pending_rejection(
 
 def test_the_pending_count_runs_first_and_stdlib_only() -> None:
     names = [step["name"] for step in _job()["steps"]]
-    assert names.index("Find rejections awaiting the review bot") == 1
+    assert names.index("Read the judge request as data") == 2
+    assert names.index("Fetch the PR's commits as data") == 3
+    assert names.index("Find rejections awaiting the review bot") == 4
+    assert list(_gate_steps()).index("Find rejections awaiting the review bot") == 1
     pending = _steps()["Find rejections awaiting the review bot"]
     assert pending["id"] == "pending"
     assert pending["run"] == (
@@ -150,12 +152,13 @@ def test_the_judge_is_omniintelligences_in_the_reviewers_environment() -> None:
 def test_the_verdicts_are_posted_whatever_the_judge_did_then_gated() -> None:
     names = [step["name"] for step in _job()["steps"]]
     post = _steps()[POST]
-    assert names.index(JUDGE) < names.index(POST) < names.index(GATE)
+    assert names.index(JUDGE) < names.index(POST)
+    assert GATE not in names
     assert post["if"] == "${{ !cancelled() && " + PENDING + " }}"
     assert post["run"] == (
         'python3 scripts/ci/check_hostile_review_threads.py --post-verdicts "$JUDGE_RESULT_PATH"'
     )
-    assert post["env"]["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert post["env"]["GITHUB_TOKEN"] == "${{ steps.verdict-token.outputs.token }}"
     assert (
         post["env"]["JUDGE_RESULT_PATH"] == _steps()[JUDGE]["env"]["JUDGE_RESULT_PATH"]
     )
@@ -166,15 +169,18 @@ def test_the_verdicts_are_posted_whatever_the_judge_did_then_gated() -> None:
 
 
 def test_the_gate_runs_whatever_the_judge_did_and_reads_its_status() -> None:
-    gate = _steps()[GATE]
+    gate = _gate_steps()[GATE]
     assert gate["if"] == "${{ !cancelled() }}"
     assert gate["run"] == "python3 scripts/ci/check_hostile_review_threads.py"
     assert (
         gate["env"]["JUDGE_STATUS_PATH"] == _steps()[POST]["env"]["JUDGE_STATUS_PATH"]
     )
-    uploaded = _steps()["Upload the disposition record"]["with"]["path"]
+    uploaded = _gate_steps()["Upload the disposition record"]["with"]["path"]
     assert "hostile-review-judge-status.json" in uploaded
-    assert "hostile-review-judgements.json" in uploaded
+    assert "hostile-review-judgements.json" not in uploaded
+    judged = _steps()["Upload the judgements"]["with"]["path"]
+    assert "hostile-review-judge-status.json" in judged
+    assert "hostile-review-judgements.json" in judged
 
 
 def test_the_model_key_reaches_the_judge_step_alone() -> None:
@@ -189,7 +195,7 @@ def test_the_model_key_reaches_the_judge_step_alone() -> None:
 def test_no_provider_key_reaches_any_step() -> None:
     # OMN-20974, OMN-21350: a Claude judge goes through the review gateway by
     # reference; no Actions secret carries a provider key to any step.
-    text = (WORKFLOWS / "hostile-review-thread-gate.yml").read_text()
+    text = (WORKFLOWS / "hostile-review-judge.yml").read_text()
     assert PROVIDER_KEY not in text
     for step in _steps().values():
         env = step.get("env", {})
@@ -206,29 +212,33 @@ def test_no_new_secret_is_read() -> None:
     judge_secrets = set(
         re.findall(
             r"secrets\.([A-Z_]+)",
-            (WORKFLOWS / "hostile-review-thread-gate.yml").read_text(),
+            (WORKFLOWS / "hostile-review-judge.yml").read_text(),
         )
     )
     assert judge_secrets <= reviewer_secrets
 
 
-def test_only_the_job_may_write_and_only_pull_requests() -> None:
+def test_the_gate_is_read_only_and_the_judge_has_only_read_permissions() -> None:
     assert _on_reply()["permissions"] == {"contents": "read", "pull-requests": "read"}
-    assert _job()["permissions"] == {"contents": "read", "pull-requests": "write"}
+    assert _gate_job()["permissions"] == {"contents": "read", "pull-requests": "read"}
+    assert _workflow("hostile-review-judge.yml")["permissions"] == {}
+    assert _job()["permissions"] == {"actions": "read", "contents": "read"}
 
 
 def test_the_write_token_is_not_persisted_in_the_checkout() -> None:
-    checkout = _steps()["Checkout (gate script and PR history)"]
+    checkout = _gate_steps()["Checkout (gate script and PR history)"]
     assert checkout["with"]["persist-credentials"] is False
 
 
 def test_the_job_is_hosted_and_keeps_the_required_context_name() -> None:
     assert _job()["runs-on"] == "ubuntu-latest"
-    assert _job()["name"] == "Hostile Review Thread Gate"
+    assert _job()["name"] == "Hostile Review Judge"
+    assert _gate_job()["runs-on"] == "ubuntu-latest"
+    assert _gate_job()["name"] == "Hostile Review Thread Gate"
 
 
 def test_every_action_is_pinned_by_commit() -> None:
-    for step in _job()["steps"]:
+    for step in _job()["steps"] + _gate_job()["steps"]:
         uses = step.get("uses")
         if uses:
             assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses

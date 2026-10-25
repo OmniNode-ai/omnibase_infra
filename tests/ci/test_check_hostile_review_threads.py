@@ -68,7 +68,7 @@ def _verdict(
     rejection_body: str,
     verdict: str = "accepted",
     *,
-    author: str = "github-actions",
+    author: str = "onexbot",
     sentence: str = "the guard on line 9 already rejects that input",
 ) -> dict[str, Any]:
     """A judge reply bound to the rejection at ``replies[rejection_index]``."""
@@ -81,7 +81,7 @@ def _verdict(
             f"**Review bot: rejection {verdict}**\n\n> {sentence}\n\ntail"
         ),
         "url": f"https://x/verdict{rejection_index}",
-        "author": {"login": author},
+        "author": {"login": author, "__typename": "Bot"},
         "authorAssociation": "NONE",
     }
 
@@ -320,6 +320,33 @@ class TestReviewBotVerdict:
         assert blocking[0].judge_verdict == "unjudged"
         # Nor is it a disposition of its own: the rejection is still the latest.
         assert blocking[0].disposition_url == "https://x/reply0"
+
+    @pytest.mark.parametrize("login", ["github-actions", "github-actions[bot]"])
+    def test_a_workflow_token_verdict_no_longer_counts(self, login: str) -> None:
+        forged = _verdict(0, REJ, author=login)
+        thread = _thread(replies=(REJ, forged))
+        blocking, cleared = gate.classify_threads([thread], _never)
+        assert cleared == []
+        assert blocking[0].judge_verdict == "unjudged"
+        assert len(gate.pending_rejections([thread])[0]) == 1
+
+    def test_an_onexbot_user_is_not_the_app_bot(self) -> None:
+        forged = _verdict(0, REJ)
+        forged["author"]["__typename"] = "User"
+        thread = _thread(replies=(REJ, forged))
+        blocking, cleared = gate.classify_threads([thread], _never)
+        assert cleared == []
+        assert blocking[0].judge_verdict == "unjudged"
+        assert len(gate.pending_rejections([thread])[0]) == 1
+
+    @pytest.mark.parametrize("login", ["onexbot", "onexbot[bot]"])
+    def test_both_app_login_spellings_count(self, login: str) -> None:
+        reply = _verdict(0, REJ, author=login)
+        thread = _thread(replies=(REJ, reply))
+        assert gate.classify_threads([thread], _never)[0] == []
+        assert gate.pending_rejections([thread])[0] == []
+        del reply["author"]["__typename"]
+        assert gate.classify_threads([thread], _never)[0] == []
 
     def test_a_rejection_carrying_the_marker_itself_is_not_a_verdict(self) -> None:
         # One reply that is both the rejection and a self-written verdict.
