@@ -31,6 +31,12 @@ requirements:
       - id: AC4
         statement: |-
           AC4: a folded role is never started by the deploy handler, its old container is retired before main is recreated, and a folded effects role resolves to the main runtime's container and digest while an unfolded one reads its own container -- falsifier: the two focused pytest files below
+  - id: req-omn21288-dev-broker-8g-step
+    statement: "The dev lane's Redpanda broker takes the second staged OMN-19077 step, its declared default reservation going from 12G to 8G in docker/docker-compose.infra.yml for both the broker command and the profile service that logs it, while the stability lane's broker keeps its own 12G dial."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: docker-compose.infra.yml declares --memory ${DEV_REDPANDA_MEMORY:-8G} and REDPANDA_PROFILE_MEMORY ${DEV_REDPANDA_MEMORY:-8G}, the stability lane still declares ${STABILITY_TEST_REDPANDA_MEMORY:-12G}, and no two lanes share a dial -- falsifier: uv run --frozen pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q --no-cov
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -133,5 +139,23 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k folded_effects_verification -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3, AC4]
+  - id: dod-omn21288-dev-broker-8g
+    description: >-
+      Unit tests read docker-compose.infra.yml and every lane's broker compose file; the dev broker command and its profile service both default to 8G, the stability lane keeps 12G, and no lane shares a dial. Red at the merge base, which declares 12G. Does not claim the live broker runs 8G; that is read from /proc after the dev-lane deploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21288-dev-broker-8g-deploy-check
+    description: >-
+      Hosted-runner deploy check: the published dev-lane compose declares the 8G dev broker default for the broker and its profile service. Reads repository files only; no Docker daemon, broker or lab host is used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/unit/infra/test_redpanda_memory_per_lane_dial_omn19085.py -q --no-cov -k "dev_broker_takes_the_staged_8g_step or dev_lane_reads_its_own_memory_dial"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
