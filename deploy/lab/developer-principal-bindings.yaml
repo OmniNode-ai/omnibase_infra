@@ -42,6 +42,10 @@
 # completed terminal. Query replies use `local.omnimarket.work_ledger_query_client.consume.v1.`
 # plus a per-call suffix, separate from runtime command-consumer groups. The caller
 # cannot consume query commands or produce query results.
+# OMN-20740: `onex ledger query --bus-lane dev --stdin` is the caller for
+# ONEX_LEDGER_BUS_READ_COMMAND (ledger-ask and catchup --source db). Its packaged
+# work_ledger_query_client.contract.yaml is checked against these six grants;
+# apply-grants can install them for an existing issued identity without rotation.
 #
 # PR HANDOFF: `onex work-ledger handoff` publishes one request and reads acceptance or
 # a terminal; its per-call group is `pr-handoff-request.<correlation_id prefix>`.

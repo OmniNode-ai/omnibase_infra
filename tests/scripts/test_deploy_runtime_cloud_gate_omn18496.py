@@ -65,6 +65,7 @@ def _invoke(
         "REQUIRED_PROJECTION_TABLES",
     )
     functions = (
+        "resolve_lane_folded_services",
         "resolve_lane_runtime_services",
         "refresh_one_migration_service",
         "run_runtime_migration_preflight",
