@@ -37,6 +37,12 @@ Behavior
   (``error``/``warning``) finding is being posted, else ``COMMENT``.
   Zero postable findings -> no review is posted at all.
 
+An unchanged PR diff gets no new review or threads (OMN-20910). Model wording
+drift defeats finding fingerprint dedupe on merge-only pushes, so a digest of
+the PR's added and removed lines identifies content already reviewed. Only
+the bot's own reviews count as evidence of a reviewed digest. Earlier threads
+and replies stand; the Hostile Review Thread Gate is unchanged.
+
 Failure posture
 ---------------
 Posting failures exit nonzero (the job must not report a review that was
@@ -59,6 +65,7 @@ import urllib.request
 from typing import Any
 
 MARKER = "hostile-reviewer-thread"
+DIFF_MARKER = "hostile-reviewer-diff"
 MAX_THREAD_COMMENTS = 25
 MAX_BODY_CHARS = 60_000
 MAX_FINDING_CHARS = 1_500
@@ -209,6 +216,44 @@ def finding_fingerprint(finding: dict[str, Any]) -> str:
     return hashlib.sha256(basis.encode()).hexdigest()[:12]
 
 
+def pr_diff_digest(files: list[dict[str, Any]]) -> str:
+    """Digest PR content without hunk positions or base-branch context."""
+    entries: list[str] = []
+    for file_info in sorted(files, key=lambda entry: str(entry.get("filename", ""))):
+        parts = [
+            str(file_info.get("filename", "")),
+            str(file_info.get("status", "")),
+            str(file_info.get("previous_filename", "")),
+        ]
+        patch = file_info.get("patch")
+        if isinstance(patch, str) and patch:
+            parts.extend(
+                line.rstrip()
+                for line in patch.splitlines()
+                if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+            )
+        else:
+            parts.append("nopatch:" + str(file_info.get("sha", "")))
+        entries.append("\n".join(parts))
+    return hashlib.sha256("\0".join(entries).encode()).hexdigest()[:12]
+
+
+def reviewed_diff_digests(reviews: list[dict[str, Any]]) -> set[str]:
+    """Read diff markers only from reviews posted by our GITHUB_TOKEN bot."""
+    digests: set[str] = set()
+    for review in reviews:
+        user = review.get("user")
+        if not isinstance(user, dict) or user.get("login") != "github-actions[bot]":
+            continue
+        digests.update(
+            re.findall(
+                rf"<!-- {DIFF_MARKER} digest=([0-9a-f]{{12}}) -->",
+                review.get("body") or "",
+            )
+        )
+    return digests
+
+
 def parse_right_side_lines(patch: str | None) -> set[int]:
     """RIGHT-side (new file) line numbers present in a unified diff patch.
 
@@ -296,6 +341,7 @@ def build_review(
     suppressed_hints: int,
     models_succeeded: list[str],
     models_failed: list[str],
+    diff_digest: str = "",
     below_quorum: list[dict[str, Any]] | None = None,
     max_thread_comments: int = MAX_THREAD_COMMENTS,
 ) -> tuple[dict[str, Any] | None, dict[str, int]]:
@@ -358,8 +404,10 @@ def build_review(
     ):
         return None, stats
 
-    body_parts = [
-        f"<!-- {MARKER} summary -->",
+    body_parts = [f"<!-- {MARKER} summary -->"]
+    if diff_digest:
+        body_parts.append(f"<!-- {DIFF_MARKER} digest={diff_digest} -->")
+    body_parts += [
         "## Hostile Reviewer — adversarial findings (OMN-17492)",
         "",
         f"Models succeeded: {', '.join(models_succeeded) or 'none'}  ",
@@ -463,17 +511,28 @@ def main() -> int:
             rf"{MARKER} fp=([0-9a-f]{{12}})", comment.get("body") or ""
         ):
             existing_fps.add(fp)
-    for review in _paginate(f"{base}/pulls/{pr_number}/reviews", token):
+    reviews = _paginate(f"{base}/pulls/{pr_number}/reviews", token)
+    for review in reviews:
         for fp in re.findall(
             rf"{MARKER} fp=([0-9a-f]{{12}})", review.get("body") or ""
         ):
             existing_fps.add(fp)
 
     changed_files: dict[str, set[int]] = {}
-    for file_info in _paginate(f"{base}/pulls/{pr_number}/files", token):
+    files = _paginate(f"{base}/pulls/{pr_number}/files", token)
+    for file_info in files:
         changed_files[str(file_info.get("filename"))] = parse_right_side_lines(
             file_info.get("patch")
         )
+
+    digest = pr_diff_digest(files)
+    if digest in reviewed_diff_digests(reviews):
+        print(
+            f"PR diff unchanged since an earlier hostile review (diff={digest}); "
+            "posting no new threads. The earlier review's threads and their "
+            "replies stand (OMN-20910)."
+        )
+        return 0
 
     payload, stats = build_review(
         postable,
@@ -482,6 +541,7 @@ def main() -> int:
         suppressed_hints=suppressed_hints,
         models_succeeded=list(review_result.get("models_succeeded", [])),
         models_failed=list(review_result.get("models_failed", [])),
+        diff_digest=digest,
         below_quorum=below_quorum,
     )
     print(f"thread-poster stats: {json.dumps(stats)}")

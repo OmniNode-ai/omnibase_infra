@@ -636,6 +636,14 @@ services:
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: "lakshman"
       PYTHONUNBUFFERED: "1"
+    # The writer merges this lane's runtime env, which names
+    # BIFROST_LANE_OVERLAY_PATH, and its entrypoint renders the Bifrost contract
+    # from that path before the writer starts. Without the mount every boot
+    # exits ONEX_CORE_041 "Bifrost lane overlay not found" and the entrypoint
+    # stops retrying after five (measured on a fresh bring-up of this lane,
+    # OMN-17427).
+    volumes:
+      - *lane-overlay-mount
     ports: !override []
     stop_grace_period: 60s
     healthcheck:
