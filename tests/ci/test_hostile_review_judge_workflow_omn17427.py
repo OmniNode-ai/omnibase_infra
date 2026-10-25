@@ -9,9 +9,13 @@ trusted code, the reviewer's overlay/install steps and the onexbot App token.
 from __future__ import annotations
 
 import functools
+import json
+import os
 import re
+import shlex
+import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -107,9 +111,10 @@ def test_nothing_is_installed_or_called_without_a_pending_rejection(
 
 def test_the_pending_count_runs_first_and_stdlib_only() -> None:
     names = [step["name"] for step in _job()["steps"]]
-    assert names.index("Read the judge request as data") == 2
-    assert names.index("Fetch the PR's commits as data") == 3
-    assert names.index("Find rejections awaiting the review bot") == 4
+    assert names.index("Find the judge request") == 1
+    assert names.index("Read the judge request as data") == 3
+    assert names.index("Fetch the PR's commits as data") == 4
+    assert names.index("Find rejections awaiting the review bot") == 5
     assert list(_gate_steps()).index("Find rejections awaiting the review bot") == 1
     pending = _steps()["Find rejections awaiting the review bot"]
     assert pending["id"] == "pending"
@@ -242,3 +247,148 @@ def test_every_action_is_pinned_by_commit() -> None:
         uses = step.get("uses")
         if uses:
             assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", uses), uses
+
+
+def test_missing_request_skips_download_and_read() -> None:
+    steps = _steps()
+    for name in ("Download the judge request", "Read the judge request as data"):
+        assert steps[name]["if"] == "steps.has-request.outputs.present == 'true'"
+    find = steps["Find the judge request"]
+    assert find["id"] == "has-request"
+    assert find["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert find["run"].splitlines()[0] == "set -euo pipefail"
+    assert (
+        "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts"
+        in find["run"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifacts", "expected"),
+    [
+        ([], "false"),
+        ([{"name": "hostile-review-judge-request", "expired": True}], "false"),
+        ([{"name": "hostile-review-judge-request-other", "expired": False}], "false"),
+        ([{"name": "hostile-review-judge-request", "expired": False}], "true"),
+    ],
+)
+def test_find_request_requires_an_exact_nonexpired_artifact(
+    tmp_path: Path, artifacts: list[dict[str, Any]], expected: str
+) -> None:
+    # gh --paginate --slurp emits an array of pages. Include a different
+    # artifact on page one to check that later pages are inspected too.
+    pages = [
+        {"artifacts": [{"name": "other", "expired": False}]},
+        {"artifacts": artifacts},
+    ]
+    gh = tmp_path / "gh"
+    gh.write_text(
+        "#!/bin/bash\nprintf '%s\\n' " + shlex.quote(json.dumps(pages)) + "\n"
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    run = _steps()["Find the judge request"]["run"]
+    run = run.replace("${{ github.repository }}", "owner/repo").replace(
+        "${{ github.event.workflow_run.id }}", "123"
+    )
+    result = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_OUTPUT": str(output),
+            "GH_TOKEN": "t",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.read_text() == f"present={expected}\n"
+
+
+def test_find_request_api_failure_fails_closed(tmp_path: Path) -> None:
+    gh = tmp_path / "gh"
+    # Even valid output must not hide a failed API call in the pipeline.
+    gh.write_text("#!/bin/bash\nprintf '%s\\n' '[{\"artifacts\": []}]'\nexit 1\n")
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    run = _steps()["Find the judge request"]["run"]
+    run = run.replace("${{ github.repository }}", "owner/repo").replace(
+        "${{ github.event.workflow_run.id }}", "123"
+    )
+    result = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_OUTPUT": str(output),
+            "GH_TOKEN": "t",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not output.exists()
+
+
+def _find_request_output(tmp_path: Path, pages: list[dict[str, Any]]) -> str:
+    gh = tmp_path / "gh"
+    gh.write_text(
+        "#!/bin/bash\nprintf '%s\\n' " + shlex.quote(json.dumps(pages)) + "\n"
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    run = _steps()["Find the judge request"]["run"]
+    run = run.replace("${{ github.repository }}", "owner/repo").replace(
+        "${{ github.event.workflow_run.id }}", "40189445988"
+    )
+    result = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_OUTPUT": str(output),
+            "GH_TOKEN": "t",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return output.read_text()
+
+
+@pytest.mark.live_contact(
+    "tests/fixtures/omn20910/infra-pr5237-run-40189445988-on-reply-artifacts.json"
+)
+def test_the_recorded_on_reply_run_carries_a_request_the_judge_finds(
+    tmp_path: Path, recorded_response: dict[str, object]
+) -> None:
+    """#5237's on-reply run 40189445988 uploaded a judge request.
+
+    The step reads the artifact listing GitHub returned for that run and finds
+    the request. The same listing without that artifact (an on-reply run that
+    uploaded the disposition record alone) makes the judge skip.
+    """
+    page = cast("dict[str, Any]", recorded_response["response"])
+    names = [artifact["name"] for artifact in page["artifacts"]]
+    assert "hostile-review-judge-request" in names
+    with_request = tmp_path / "with-request"
+    with_request.mkdir()
+    assert _find_request_output(with_request, [page]) == "present=true\n"
+
+    dispositions_only = {
+        "total_count": 1,
+        "artifacts": [
+            artifact
+            for artifact in page["artifacts"]
+            if artifact["name"] != "hostile-review-judge-request"
+        ],
+    }
+    without_request = tmp_path / "without-request"
+    without_request.mkdir()
+    assert _find_request_output(without_request, [dispositions_only]) == (
+        "present=false\n"
+    )

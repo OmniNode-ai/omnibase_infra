@@ -40,7 +40,19 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
+      - name: Find the judge request
+        id: has-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          present="$(gh api --paginate --slurp \
+            "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts" \
+            | jq -r 'any(.[].artifacts[]; .name == "hostile-review-judge-request" and .expired == false)')"
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+
       - name: Download the judge request
+        if: steps.has-request.outputs.present == 'true'
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4.1.8
         with:
           name: hostile-review-judge-request
@@ -49,6 +61,7 @@ jobs:
           path: ${{ runner.temp }}/hostile-review-judge-request
 
       - name: Read the judge request as data
+        if: steps.has-request.outputs.present == 'true'
         id: request
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
