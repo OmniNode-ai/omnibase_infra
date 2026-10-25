@@ -43,12 +43,13 @@ def _env_file(tmp_path: Path, *, skip: str | None = None, extra: str = "") -> Pa
 
 @pytest.mark.unit
 class TestRenderBundle:
-    def test_renders_local_bundle_and_bridges_ported_services(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("bundle", ["local", "local-market"])
+    def test_renders_laptop_bundle_and_bridges_ported_services(
+        self, tmp_path: Path, bundle: str
     ) -> None:
         out = tmp_path / "compose.yml"
         rendered = render_bundle(
-            ["local"],
+            [bundle],
             infra_root=_REPO_ROOT,
             env_file=_env_file(tmp_path),
             output_path=out,
@@ -62,8 +63,12 @@ class TestRenderBundle:
 
         topo = rendered.topology.local_services()
         ports = {name: svc.local.host_port for name, svc in topo.items() if svc.local}
-        # The bundle's port override wins over the manifest (3102, not 3002).
-        assert ports["projection-api"] == 3102
+        if bundle == "local-market":
+            # The bundle's port override wins over the manifest (3102, not 3002).
+            assert ports["projection-api"] == 3102
+        else:
+            assert "projection-api" not in rendered.services
+            assert "projection-api" not in ports
         assert ports["omninode-runtime"] == 8085
         assert ports["runtime-effects"] == 8086
         assert all(

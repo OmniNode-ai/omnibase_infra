@@ -79,28 +79,15 @@ local:
     - omninode-runtime
     - runtime-effects
     # OMN-19972 (plan T4.1, demo half): the six local pages read served
-    # exposures, so the laptop runs its own projection API and the
-    # consumer-health projection.
-    - projection-api
+    # exposures, so the laptop runs its own consumer-health projection.
+    # The projection API ships in local-market on the omnimarket image.
     - consumer-health-projection
     # OMN-19972 (T3.6): the runtime kernel under RUNTIME_PROFILE=tenant-projection
     # (OMN-18114). The usage-by-model-day writer and the other contracts pinned to
     # that profile are dropped from main and effects, so without it the laptop
     # discovers them and consumes them with nothing.
     - tenant-projection-writer
-  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
-  # answers on 3102 (loopback, by publish_host above).
-  port_overrides:
-    projection-api: 3102
-  # OMN-19972: the projection API refuses to start while any bus-backed
-  # exposure's topic is missing, and on a laptop the kernel's boot is what
-  # creates them (TopicProvisioner, from every installed contract). Measured on
-  # the lakshman lane 2026-09-30: started first, it waited 300 s, exited with
-  # "no partition metadata" and looped.
   extra_depends_on:
-    projection-api:
-      omninode-runtime: service_healthy
-      redpanda-local-sasl: service_completed_successfully
     # OMN-20820: every broker client of this bundle (each runtime-layer entry,
     # which is what `inject_env` below reaches) starts only after the one-shot
     # has created the superuser and turned SASL on, so none of them opens an
@@ -192,9 +179,10 @@ local:
     - TENANT_PROJECTION_WRITER_PASSWORD
     - REDPANDA_SUPERUSER_PASSWORD
 local-market:
-  description: "Laptop profile composed with omnimarket: `local` plus omnimarket's projection writers and the Bifrost render, all on the omnimarket-runtime image omnimarket builds (OMN-21279). Booted by omnimarket's composed-runtime-boot gate."
+  description: "Laptop profile composed with omnimarket: `local` plus omnimarket's projection API, projection writers and the Bifrost render, all on the omnimarket-runtime image omnimarket builds (OMN-21279). Booted by omnimarket's composed-runtime-boot gate."
   project: omnibase-infra-local
   services:
+    - projection-api
     - omnimarket-projection-delegation
     - omnimarket-projection-tenant-credentials
     - omnimarket-projection-llm-cost
@@ -202,7 +190,19 @@ local-market:
   # OMN-21279: these kernels run the omnimarket-runtime image.
   env_default_overrides:
     ONEX_LOCAL_RUNTIME_PACKAGES: "omnibase_infra,omnimarket"
+  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
+  # answers on 3102 (loopback, by publish_host inherited from local).
+  port_overrides:
+    projection-api: 3102
+  # OMN-19972: the projection API refuses to start while any bus-backed
+  # exposure's topic is missing, and on a laptop the kernel's boot is what
+  # creates them (TopicProvisioner, from every installed contract). Measured on
+  # a lab lane 2026-09-30: started first, it waited 300 s, exited with
+  # "no partition metadata" and looped.
   extra_depends_on:
+    projection-api:
+      omninode-runtime: service_healthy
+      redpanda-local-sasl: service_completed_successfully
     omnimarket-projection-delegation:
       redpanda-local-sasl: service_completed_successfully
     omnimarket-projection-tenant-credentials:

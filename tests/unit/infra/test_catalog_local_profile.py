@@ -154,7 +154,6 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
     assert sorted(runtime) == [
         "consumer-health-projection",
         "omninode-runtime",
-        "projection-api",
         "runtime-effects",
         "tenant-projection-writer",
     ]
@@ -834,10 +833,10 @@ def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> 
 #      CI run 36729468068 attempt 2: "projection-api requires Kafka bootstrap
 #      servers", 16 restarts, never healthy).
 
-_PAGE_SERVICES = (
-    "projection-api",
-    "consumer-health-projection",
-)
+_PAGE_SERVICES = {
+    "local": ("consumer-health-projection",),
+    "local-market": ("projection-api",),
+}
 _LAPTOP_PROJECTION_API_PORT = 3102
 
 
@@ -942,12 +941,18 @@ def test_local_tenant_registry_seed_skips_database_for_empty_or_invalid_tenant(
     assert not (tmp_path / "psql-calls").exists()
 
 
-def test_local_render_carries_the_services_the_pages_read() -> None:
-    assert set(_PAGE_SERVICES) <= set(_services(_render("local")))
+@pytest.mark.parametrize("bundle", _PAGE_SERVICES)
+def test_laptop_render_carries_the_services_the_pages_read(bundle: str) -> None:
+    assert set(_PAGE_SERVICES[bundle]) <= set(_services(_render(bundle)))
 
 
-def test_every_long_running_local_service_has_a_healthcheck() -> None:
-    services = _services(_render("local"))
+def test_infra_only_local_render_excludes_the_market_projection_api() -> None:
+    assert "projection-api" not in _services(_render("local"))
+
+
+@pytest.mark.parametrize("bundle", ["local", "local-market"])
+def test_every_long_running_laptop_service_has_a_healthcheck(bundle: str) -> None:
+    services = _services(_render(bundle))
     unwatched = sorted(
         name
         for name, svc in services.items()
@@ -956,8 +961,8 @@ def test_every_long_running_local_service_has_a_healthcheck() -> None:
     assert unwatched == []
 
 
-def test_local_projection_api_publishes_a_laptop_port_not_the_lab_port() -> None:
-    ports = _services(_render("local"))["projection-api"]["ports"]
+def test_local_market_projection_api_publishes_a_laptop_port_not_the_lab_port() -> None:
+    ports = _services(_render("local-market"))["projection-api"]["ports"]
     assert ports == [f"{_LOOPBACK}:{_LAPTOP_PROJECTION_API_PORT}:3002"]
 
 
@@ -968,10 +973,15 @@ def test_other_bundles_keep_the_projection_api_on_3002() -> None:
     assert ports == ["3002:3002"]
 
 
-def test_local_projection_api_waits_for_the_kernel_that_provisions_its_topics() -> None:
-    depends_on = _services(_render("local"))["projection-api"]["depends_on"]
+def test_local_market_projection_api_waits_for_the_kernel_that_provisions_its_topics() -> (
+    None
+):
+    depends_on = _services(_render("local-market"))["projection-api"]["depends_on"]
     assert isinstance(depends_on, dict)
     assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+    assert depends_on.get("redpanda-local-sasl") == {
+        "condition": "service_completed_successfully"
+    }
 
 
 def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
@@ -982,8 +992,8 @@ def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
     assert "omninode-runtime" not in depends_on
 
 
-def test_local_projection_api_is_given_the_compose_broker() -> None:
-    env = _services(_render("local"))["projection-api"]["environment"]
+def test_local_market_projection_api_is_given_the_compose_broker() -> None:
+    env = _services(_render("local-market"))["projection-api"]["environment"]
     assert isinstance(env, dict)
     assert env.get("KAFKA_BROKERS") == "redpanda:9092"
 
@@ -1021,7 +1031,9 @@ def test_two_bundles_overriding_one_service_port_differently_are_refused(
     }
     bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
     with pytest.raises(ValueError, match=r"[Pp]ort override conflict"):
-        CatalogResolver(catalog_dir=str(catalog)).resolve(["local", "other-laptop"])
+        CatalogResolver(catalog_dir=str(catalog)).resolve(
+            ["local-market", "other-laptop"]
+        )
 
 
 # The resolver's other override guards (hostile review, both models: each was
@@ -1056,7 +1068,7 @@ def test_two_bundles_waiting_differently_on_one_dependency_are_refused(
         },
     )
     with pytest.raises(ValueError, match="Extra dependency conflict"):
-        resolver.resolve(["local", "other-laptop"])
+        resolver.resolve(["local-market", "other-laptop"])
 
 
 def test_extra_dependency_on_a_service_the_stack_does_not_run_is_refused(
@@ -1192,12 +1204,12 @@ def test_local_kafka_clients_carry_the_four_sasl_variables_and_wait_sasl(
     expected = {
         "consumer-health-projection",
         "omninode-runtime",
-        "projection-api",
         "runtime-effects",
         "tenant-projection-writer",
     }
     if bundle == "local-market":
         expected |= {
+            "projection-api",
             "omnimarket-projection-delegation",
             "omnimarket-projection-tenant-credentials",
             "omnimarket-projection-llm-cost",
@@ -1357,11 +1369,11 @@ _OTHER_BUNDLE_DIGESTS = {
     "omnidash": "ee979a6b6fdd9e4ff22bd20909c7abd6cf6a0dbd98d9673cff1dcd921a720c4e",
     "omnimarket-projections": "9dc887c344ed076194a30883a35631b0843836fc58a05b16ec42c0dfe4df722b",
     "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
-    "runtime": "ac4a49f34ea8a3954c4a3cd72169d6054e678f00d3e84bda30976f3c8023b52c",
+    "runtime": "3598b4128ebc882c6299a688512bb07304bafacc7291b99afeb756365b262467",
     "runtime-core": "cc190a3e893c543d7238cce224cf7d8e92336e321cd0a61aa79f9369e06159f4",
     "runtime-infrastructure": "1d80324c04b0c8b9ab5bccb876f76a51e9c4e347d35c0f155682576dce9698ba",
     "runtime-integrations": "3b746380a10853a69199c77766571f6acd2d337531407f70be9185710d16470c",
-    "runtime-observability-projections": "d0937c309531243687b890a89f27f0578b78ef8e737126fdb00e2eefc83c10dc",
+    "runtime-observability-projections": "bd6d0738fed53508e3a7d4de1a3589ddcb6240b48285e884ba72ad35b78526e8",
     "secrets": "778e163982415736c1bceaf9f18c84792e91645687f2099bb349d6d43accb4d5",
     "tenant-path": "f6699ea972dfa5f1a608c8a452c38ff31119baa3f5864eda35bbcc02abe9db61",
     "tracing": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
@@ -1383,7 +1395,8 @@ def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_
     """
     bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
     # local-lane-mirror and local-market extend the laptop stack.
-    # OMN-21279: only market image tags changed in the three updated digests.
+    # OMN-21279: only market image tags (projection-api included) changed in the
+    # three updated digests.
     assert sorted(
         set(bundles) - {"local", "local-market", "local-lane-mirror"}
     ) == sorted(_OTHER_BUNDLE_DIGESTS)
@@ -1663,7 +1676,9 @@ def test_local_is_infra_only_and_does_not_enable_bifrost_render() -> None:
     )
 
 
-def test_local_market_adds_only_the_three_market_writers_and_bifrost_render() -> None:
+def test_local_market_adds_the_projection_api_market_writers_and_bifrost_render() -> (
+    None
+):
     local = _services(_render("local"))
     market = _services(_render("local-market"))
     writers = {
@@ -1671,8 +1686,8 @@ def test_local_market_adds_only_the_three_market_writers_and_bifrost_render() ->
         "omnimarket-projection-tenant-credentials",
         "omnimarket-projection-llm-cost",
     }
-    assert set(market) == set(local) | writers
-    for name in writers:
+    assert set(market) == set(local) | writers | {"projection-api"}
+    for name in (*sorted(writers), "projection-api"):
         assert market[name]["image"] == f"{_PROJECT}-omnimarket-runtime:latest"
         assert "build" not in market[name]
         assert market[name]["depends_on"]["redpanda-local-sasl"] == {
@@ -1690,7 +1705,7 @@ def test_local_market_adds_only_the_three_market_writers_and_bifrost_render() ->
 
 @pytest.mark.parametrize("project", [DEFAULT_PROJECT, "isolated-project"])
 @pytest.mark.parametrize(
-    ("bundle", "expected_count"), [("omnimarket-projections", 8), ("local-market", 3)]
+    ("bundle", "expected_count"), [("omnimarket-projections", 8), ("local-market", 4)]
 )
 def test_every_market_module_uses_the_project_scoped_market_image_without_build(
     project: str,
@@ -1703,7 +1718,11 @@ def test_every_market_module_uses_the_project_scoped_market_image_without_build(
     market_services = []
     for name, manifest in resolved.manifests.items():
         command = [*(manifest.command or []), *(manifest.entrypoint or [])]
-        if not any(str(part).startswith("omnimarket.") for part in command):
+        # A ``python -m omnimarket...`` module or an omnimarket console script
+        # (projection-api runs ``omnimarket-projection-api``).
+        if not any(
+            str(part).startswith(("omnimarket.", "omnimarket-")) for part in command
+        ):
             continue
         market_services.append(name)
         expected = (

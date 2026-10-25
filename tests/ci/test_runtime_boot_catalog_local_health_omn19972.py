@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Execute the laptop-profile health step against a stub Docker (OMN-19972).
 
-OMN-19972's demo half adds the projection API and the consumer-health
-projection to the ``local`` bundle (the LLM cost writer moved to
-``local-market`` under OMN-21279), and its acceptance says
+OMN-19972's demo half adds the consumer-health projection and the tenant
+projection writer to the ``local`` bundle (the projection API and LLM cost
+writer moved to ``local-market`` under OMN-21279), and its acceptance says
 the ``runtime-boot (mode=catalog-local)`` job asserts each added service
 healthy -- falsified by the step passing with a service stopped.
 
@@ -34,7 +34,6 @@ _JOB = "boot-catalog-local"
 _STEP = "Every health-checked laptop service reports healthy"
 _PROJECT = "omnibase-infra-local"
 _ADDED = (
-    "projection-api",
     "consumer-health-projection",
     # OMN-19972 (T3.6): the tenant-projection kernel carries the usage writer.
     "tenant-projection-writer",
@@ -127,9 +126,9 @@ def test_step_passes_and_checks_every_added_service(tmp_path: Path) -> None:
 
 
 def test_step_fails_when_an_added_service_is_unhealthy(tmp_path: Path) -> None:
-    result, _, _ = _run_step(tmp_path, unhealthy="projection-api")
+    result, _, _ = _run_step(tmp_path, unhealthy="consumer-health-projection")
     assert result.returncode == 1, _show(result)
-    assert "projection-api" in result.stdout
+    assert "consumer-health-projection" in result.stdout
 
 
 def test_step_fails_when_an_added_service_never_started(tmp_path: Path) -> None:
@@ -149,11 +148,11 @@ def test_two_stuck_services_share_one_wait_budget(tmp_path: Path) -> None:
     90 x 10 s, so N stuck services cost N x 15 minutes of shared CI. One budget of
     90 polls now covers the whole step."""
     result, _, polls = _run_step(
-        tmp_path, starting="consumer-health-projection projection-api"
+        tmp_path, starting="consumer-health-projection tenant-projection-writer"
     )
     assert result.returncode == 1, _show(result)
     assert "consumer-health-projection" in result.stdout
-    assert "projection-api" in result.stdout
+    assert "tenant-projection-writer" in result.stdout
     assert polls <= 90, polls
 
 
@@ -300,8 +299,13 @@ def test_negative_control_goes_red_if_a_stopped_service_still_reads_healthy(
     control must say so rather than pass."""
     result, log = _run_negative_control(tmp_path, STUB_STOPPED_KEEPS_HEALTHY="1")
     assert result.returncode == 1, _show(result)
-    assert "the health step passed with projection-api stopped" in result.stdout
-    assert f"start {_PROJECT}-projection-api" in log, "the service must be restored"
+    assert (
+        "the health step passed with consumer-health-projection stopped"
+        in result.stdout
+    )
+    assert f"start {_PROJECT}-consumer-health-projection" in log, (
+        "the service must be restored"
+    )
 
 
 def test_negative_control_goes_red_if_a_restored_service_never_recovers(
@@ -321,7 +325,7 @@ def test_negative_control_goes_red_if_the_step_fails_for_another_service(
         tmp_path, STUB_STOP_BREAKS_OTHER=f"{_PROJECT}-postgres"
     )
     assert result.returncode == 1, _show(result)
-    assert "but not because of projection-api" in result.stdout
+    assert "but not because of consumer-health-projection" in result.stdout
 
 
 def test_negative_control_goes_red_when_the_health_step_cannot_be_read(

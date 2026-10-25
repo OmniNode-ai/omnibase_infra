@@ -976,8 +976,9 @@ jobs:
   # ===========================================================================
   boot-catalog-local:
     # OMN-21279: the omnimarket half of this gate (delegate-skill consumer group,
-    # omnimarket projection services, omnimarket version in each kernel on the
-    # dev-lane class) moved to omnimarket .github/workflows/runtime-boot-composed.yml
+    # projection-api and omnimarket projection writers, omnimarket version in
+    # each kernel on the dev-lane class) moved to omnimarket
+    # .github/workflows/runtime-boot-composed.yml
     # job composed-runtime-boot, at least as strict; this job asserts only what
     # this repo's image owns.
     name: runtime-boot (mode=catalog-local)
@@ -1213,7 +1214,7 @@ jobs:
           sys.stdout.write(hits[0]["run"])
           PY
           [ -s "$step_file" ] || { echo "::error::could not read the health step text"; exit 1; }
-          for svc in projection-api consumer-health-projection tenant-projection-writer; do
+          for svc in consumer-health-projection tenant-projection-writer; do
             container="${LOCAL_PROJECT}-${svc}"
             before="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
             if [ "$before" != "healthy" ]; then
@@ -1436,7 +1437,7 @@ jobs:
         if: always()
         run: |
           docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
-          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap redpanda-local-sasl projection-api consumer-health-projection; do
+          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap redpanda-local-sasl consumer-health-projection; do
             echo "::group::${svc} logs (tail)"
             docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
             echo "::endgroup::"
