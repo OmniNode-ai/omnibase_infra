@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -38,27 +38,34 @@ _JUDGE_COMPOSE = DOCKER / "docker-compose.judge.yml"
 _COMPOSE_PROJECT = f"omnibase-infra-{_JUDGE_COMPOSE.stem.partition('.')[2]}"
 _RUNTIME_SERVICES = {"omninode-runtime", "runtime-effects"}
 _WORKER_SERVICES = {"runtime-worker", "tenant-projection-writer"}
+_DELEGATION_WRITER = "projection-delegation-writer"
 
 
-def _lane_mount_services(lane: str) -> set[str]:
+def _lane_mount_services(lane: str, services: Collection[str]) -> set[str]:
     """The services a lane recipe lists the overlay bind on.
 
     Layered worker lanes carry four runtimes. The prod recipe restates the
     volumes of main, effects and worker only; its tenant projection writer
-    inherits the base file's bind (OMN-17101).
+    inherits the base file's bind (OMN-17101). A two-runtime recipe that defines
+    the delegation writer lists the bind on it too: the writer merges the lane
+    runtime env, which names BIFROST_LANE_OVERLAY_PATH (OMN-21371).
     """
     if lane in {"infra", "prepr"} or lane.startswith(("dev-", "stability")):
         return _RUNTIME_SERVICES | _WORKER_SERVICES
     if lane == "prod":
         return _RUNTIME_SERVICES | {"runtime-worker"}
+    if _DELEGATION_WRITER in services:
+        return _RUNTIME_SERVICES | {_DELEGATION_WRITER}
     return set(_RUNTIME_SERVICES)
 
 
 #: Recipes declaring the shared bind, and the services each lists it on.
 _LANE_COMPOSE_MOUNTS = {
-    path.name: _lane_mount_services(path.stem.partition(".")[2])
+    path.name: _lane_mount_services(
+        path.stem.partition(".")[2], compose.get("services") or {}
+    )
     for path in sorted(DOCKER.glob("docker-compose*.yml"))
-    if "x-lane-overlay-mount" in load_compose(path)
+    if "x-lane-overlay-mount" in (compose := load_compose(path))
 }
 
 
@@ -86,7 +93,7 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 def test_all_lane_compose_recipes_are_covered() -> None:
     assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
-        [2] * 4 + [3] + [4] * 6
+        [2] * 3 + [3] * 2 + [4] * 6
     )
     assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 
