@@ -468,6 +468,15 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv-with-retry pip install "aiohttp>=3.14.3"
 
+# Security: upgrade filelock to clear CVE-2026-112940 (HIGH, arbitrary file
+# overwrite via insecure database file reopening, fixed in >=4.2.1). filelock is
+# not in the --no-dev lock set; the torch install above pulls it from the
+# PyTorch CPU index, whose newest mirrored filelock is 3.32.3. Flagged by
+# build-workspace-candidate-runtime.yml run 40115303998.
+# Force upgrade here from PyPI after all plugin installs.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv-with-retry pip install "filelock>=4.2.1"
+
 # OMN-15147: upgrade pyasn1 to clear CVE-2026-59885/CVE-2026-59886 (DoS via
 # crafted ASN.1 OBJECT IDENTIFIER / REAL values, fixed in >=0.6.4) and
 # transformers to clear CVE-2026-4372/CVE-2026-5241 (arbitrary code execution,
@@ -782,6 +791,9 @@ RUN set -eu; \
 #                            npm's node-gyp (dependency range ^6.25.0, satisfied
 #                            by 6.28.1); flat top-level entry, no nested duplicate
 #                            on npm 11.18.0; added OMN-20339.
+#   undici          6.28.1 -> CVE-2026-109869 (HIGH, DoS via unhandled stream
+#                            error, fixed 6.29.1) — same ^6.25.0 range; bumped
+#                            OMN-17292.
 #
 # Remediation is two-step because these are *bundled inside npm itself*:
 #   1. Upgrade npm to 11.18.0 (exact pin — reproducible + satisfies
@@ -814,7 +826,7 @@ RUN set -eu; \
         }; \
     done; \
     tmp="$(mktemp -d)"; \
-    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.21 brace-expansion@5.0.11 ip-address@10.3.1 undici@6.28.1; do \
+    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.21 brace-expansion@5.0.11 ip-address@10.3.1 undici@6.29.1; do \
         pkg="${spec%@*}"; \
         npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
         tb="$(ls "$tmp/${pkg}"-*.tgz)"; \

@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: "AC5: the hostile-review job's runs-on falls back to [self-hosted, omnibase-ci, arch-amd64], and that label set is not a subset of the h203-light runners' labels -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
+  - id: req-omn17292-runtime-image-cve-floors
+    statement: The runtime image upgrades filelock and npm's bundled undici past their HIGH CVEs, so the Trivy scan in Build runtime stability-candidate no longer fails on dev.
+    acceptance:
+      - id: AC6
+        statement: "AC6: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -47,6 +52,9 @@ evidence_requirements:
   - kind: tests
     description: The hostile-review job's trusted fallback requires arch-amd64, which the h203-light runners lack.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
+  - kind: tests
+    description: The runtime image upgrades filelock past CVE-2026-112940 and npm's bundled undici past CVE-2026-109869.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -92,3 +100,20 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_hostile_review_runner_and_degraded_omn17492.py -q -n 0"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
+  - id: dod-omn-17292-ac6-runtime-image-cve-floors
+    description: The builder stage upgrades filelock to >=4.2.1 after the torch install and the npm bundle loop patches undici to 6.29.1; the merge base has no filelock upgrade and patches undici at 6.28.1.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn-17292-ac6-deploy-runtime-image-cve-floors
+    description: Deploy-scope DoD for docker/Dockerfile.runtime. Reads the content of docker/Dockerfile.runtime at the checked-out commit of the tree under test through the GitHub content API and asserts the undici@6.29.1 pack spec and the "filelock>=4.2.1" upgrade are both present; it exits nonzero when run in the merge base's tree, which has neither.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
