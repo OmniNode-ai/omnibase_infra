@@ -63,3 +63,37 @@ def test_dry_run_never_applies() -> None:
     ):
         runner._dev_contractor_main([])
     psql.assert_not_called()
+
+
+def test_check_reads_back_without_applying() -> None:
+    with (
+        patch.object(runner, "validate_target") as target,
+        patch.object(runner, "psql", return_value="") as psql,
+    ):
+        runner._dev_contractor_main(["--check"])
+    target.assert_called_once_with()
+    assert [call.args[0] for call in psql.call_args_list] == [runner.readback_sql()]
+
+
+def test_execute_applies_the_tracked_sql_file_then_reads_back() -> None:
+    tracked = (ROOT / "deploy/lab/dev-contractor-usage-grants.sql").read_text()
+    assert runner.GRANTS.read_text() == tracked
+    with (
+        patch.object(runner, "validate_target") as target,
+        patch.object(runner, "psql", return_value="") as psql,
+    ):
+        runner._dev_contractor_main(["--execute"])
+    target.assert_called_once_with()
+    applied, readback = (call.args[0] for call in psql.call_args_list)
+    assert applied == "SET onex.dev_contractor_grants = 'dev';\n" + tracked
+    assert readback == runner.readback_sql()
+
+
+def test_psql_runs_inside_the_dev_container_against_analytics() -> None:
+    with patch.object(runner, "run", return_value="") as command:
+        runner.psql("SELECT 1;")
+    argv = command.call_args.args[0]
+    assert argv[:6] == [*runner.DOCKER, "exec", "-i", "omnibase-infra-postgres"]
+    assert argv[argv.index("-d") + 1] == "omnidash_analytics"
+    assert argv[argv.index("-v") + 1] == "ON_ERROR_STOP=1"
+    assert command.call_args.kwargs["body"] == "SELECT 1;"

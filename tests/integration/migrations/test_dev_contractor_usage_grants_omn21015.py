@@ -56,6 +56,37 @@ def test_grants_enable_only_select(ephemeral_postgres: EphemeralPostgres) -> Non
     )
     assert wrong_db.returncode != 0 and "analytics database required" in wrong_db.stderr
 
+    # Pre-existing write access is refused and the whole file rolls back.
+    first = statement(pg, "{}", TABLES[0])
+    for pre_grant in (
+        f"GRANT INSERT ON {first} TO lakshman_ro",
+        f"GRANT SELECT ON {first} TO lakshman_ro WITH GRANT OPTION",
+    ):
+        assert pg.psql("-c", pre_grant, dbname=DB).returncode == 0
+        broader = pg.psql(
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            "SET onex.dev_contractor_grants='dev';",
+            "-f",
+            str(GRANTS),
+            dbname=DB,
+        )
+        assert broader.returncode != 0 and "must end SELECT-only" in broader.stderr
+        assert (
+            pg.psql(
+                "-c", f"REVOKE ALL ON {first} FROM lakshman_ro", dbname=DB
+            ).returncode
+            == 0
+        )
+        rolled_back = pg.psql(
+            "-c",
+            statement(pg, "SELECT count(*) FROM {}", TABLES[1]),
+            user="lakshman_ro",
+            dbname=DB,
+        )
+        assert rolled_back.returncode != 0 and "permission denied" in rolled_back.stderr
+
     # Reapplying is safe. The real SQL is the proof surface, not a test copy.
     for _ in range(2):
         applied = pg.psql(

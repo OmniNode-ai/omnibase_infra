@@ -22,4 +22,21 @@ END
 $$;
 GRANT SELECT ON TABLE public.usage_by_model_day,
     public.usage_by_model_day_calls, public.llm_call_metrics TO lakshman_ro;
+-- GRANT is a no-op when SELECT is already held, but it never removes broader
+-- access. Refuse, and roll back, unless the end state is exactly read-only.
+DO $$
+DECLARE
+    tbl text;
+BEGIN
+    FOREACH tbl IN ARRAY ARRAY['public.usage_by_model_day',
+        'public.usage_by_model_day_calls', 'public.llm_call_metrics'] LOOP
+        IF NOT has_table_privilege('lakshman_ro', tbl, 'SELECT')
+           OR has_table_privilege('lakshman_ro', tbl,
+               'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+           OR has_table_privilege('lakshman_ro', tbl, 'SELECT WITH GRANT OPTION') THEN
+            RAISE EXCEPTION 'lakshman_ro must end SELECT-only on %', tbl;
+        END IF;
+    END LOOP;
+END
+$$;
 COMMIT;
