@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: CI Summary admits a successful rehearsal, refuses failure, skipped and neutral rehearsals, and waits on a missing rehearsal; the recorded watcher rows show the context reported before merge on sixteen recent dev PRs -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn20413-routing-audit-private-public-pr-shadow
+    statement: The runner-routing-audit / Runner Routing Audit live pass accepts a private repository's OMNI_PUBLIC_PR_RUNS_ON_JSON shadow equal to the trusted fleet value the policy declares for that repository, so the audit and that repository's own placement gate stop demanding opposite values of one variable.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: a private repository whose public-PR shadow equals its declared trusted override reports no finding, while the same shadow in a public repository, a different value, or a repository with no declared trusted override is still drift -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "public_pr_shadow or keeps_public_pr_drift"'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -52,6 +57,9 @@ evidence_requirements:
   - kind: tests
     description: The rehearsal workflow's sibling clone step is read from the workflow and run in bash with a stub git, and the deploy-scope resolver is run against the OMNI_HOME it exports.
     command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+  - kind: tests
+    description: The public-PR variable audit is driven with fake variable lists and a fake live visibility read for private, public and undeclared repositories.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "public_pr_shadow or keeps_public_pr_drift"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -111,3 +119,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn20413-ac7-private-public-pr-shadow
+    description: AC7 tests drive audit_github_variables with a private repository's public-PR shadow on its declared trusted fleet value; the positive control fails at the merge base, where that shadow is reported as drift.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runner_routing_audit.py -q -k 'public_pr_shadow or keeps_public_pr_drift'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
