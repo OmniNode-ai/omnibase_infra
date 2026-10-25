@@ -1,0 +1,70 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20376
+title: "The delegate locus probe asks again when the group coordinator is loading or moving"
+summary: >-
+  Delivered under OMN-20376 as the carrier for making delegation work and escalate. The consumer-group liveness probe that gates onex delegate --locus deployed-lane classified a coordinator that is loading or moving (Kafka error codes 14 GroupLoadInProgress, 15 GroupCoordinatorNotAvailable, 16 NotCoordinatorForGroup) as an unknown answer, so the bounded transient retry of OMN-20646 never ran and the run was refused as a transport failure. Those three codes are retriable by the Kafka protocol; they are now transient, and every other broker error code is still unknown and refused. The ticket's own AC1 and AC2 (the C30 published-plugin walk with terminal_ok 1 and its negative control) are not delivered by this change and are not bound here; this contract covers AC3 and AC4 only. The follow-up for AC1 and AC2 is OMN-20376 itself: this pull request is Part of OMN-20376 and does not close it, so the ticket stays open with AC1 and AC2 unmet until a later change binds them in this same contract. The shared Done-write gate still refuses an all-verified receipt using these bindings while AC1/AC2 remain unbound, as exercised by tests/unit/backends/test_omn20376_partial_contract_closure.py. That fewer deployed-lane runs are refused after the CLI picks the change up is read from the run receipts afterwards and is not claimed here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20376-ac3-coordinator-codes-transient
+    statement: "A liveness listing that fails with GroupLoadInProgressError, GroupCoordinatorNotAvailableError or NotCoordinatorForGroupError raises ConsumerGroupLivenessTransientError, on both the single-topic and the chain probe, and a list response carrying error code 14, 15 or 16 does too on both probes, after closing the admin client and describing nothing."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: the liveness probe classifies Kafka coordinator codes 14, 15 and 16 as transient on both probes, and a list response with error code 14, 15 or 16 raises ConsumerGroupLivenessTransientError on both probes with the client closed -- falsifier: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "transport_classification or coordinator_loading", which fails at the merge base 26d49cec3 where these raise ConsumerGroupLivenessUnknownError
+  - id: req-omn20376-ac4-other-codes-unchanged
+    statement: "Every other broker error code and a decode error still raise ConsumerGroupLivenessUnknownError that is not transient, so an unknown answer still refuses."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a list response with error code 31 and a decode error still raise a non-transient ConsumerGroupLivenessUnknownError -- falsifier: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "list_response_error_is_unknown or transport_classification"
+evidence_requirements:
+  - kind: tests
+    description: "The probe classification tests and the delegate locus slow-path retry tests pass."
+    command: |-
+      uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py tests/unit/cli/test_delegate_locus_slow_path_omn20646.py -q
+  - kind: manual
+    description: "Deploy validation command for the existing caller-contract deploy gate: run the probe classification tests against the committed source. Runnable on a hosted runner without broker access; it touches no broker and no running lane."
+    command: "deploy: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k coordinator_loading"
+  - kind: tests
+    description: "The CLI retries decoded coordinator responses on both hops, dispatches only after recovery, and refuses exhausted retries or authorization failures."
+    command: "uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
+  - kind: tests
+    description: "Closure safety only: the real Done-write gate refuses the partial contract while AC1/AC2 remain unbound; neither is discharged."
+    command: "uv run pytest tests/unit/backends/test_omn20376_partial_contract_closure.py -q"
+  - kind: manual
+    description: "Hosted-runner deploy check of the CLI and liveness probes together, with only broker admin responses and the terminal receipt writer replaced."
+    command: "deploy: uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn20376-ac3-coordinator-codes-transient
+    description: >-
+      Raise each coordinator code from a stubbed listing on both probes and from a stubbed list response on both probes, and assert the transient class, the closed client and no describe call. Reads the committed source only; no broker is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "transport_classification or coordinator_loading"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn20376-ac4-other-codes-unchanged
+    description: >-
+      Assert error code 31 and a decode error still raise a non-transient unknown answer. Reads the committed source only; no broker is touched.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/backends/test_omn20646_probe_stable_listing.py -q -k "list_response_error_is_unknown or transport_classification"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn20376-cli-coordinator-retry
+    description: >-
+      Decode ListGroups responses with codes 14, 15 and 16 through the real liveness probes and CLI retry gate on both hops. Require a live answer before dispatch, refuse after three failed attempts, and refuse code 31 immediately. Assert clients close and refusals never dispatch.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_coordinator_retry_omn20376.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3, AC4]
