@@ -140,8 +140,6 @@ def _resolve_consumer_source() -> Path:
        from that repo.
     2. ``$OMNI_HOME/omnimarket/<relpath>`` -- the canonical sibling clone, which
        is what a local pre-commit run resolves.
-    3. The installed ``omnimarket`` distribution, when one is importable.
-
     A miss is an error, never a skip.
     """
     tried: list[str] = []
@@ -161,23 +159,6 @@ def _resolve_consumer_source() -> Path:
         tried.append(f"${_SIBLING_ENV}/omnimarket/{_CONSUMER_RELPATH} (absent)")
     else:
         tried.append(f"${_SIBLING_ENV} is unset")
-
-    try:
-        import omnimarket
-    except ImportError:
-        tried.append("omnimarket is not importable in this interpreter")
-    else:
-        for root in getattr(omnimarket, "__path__", []):
-            candidate = (
-                Path(root)
-                / "nodes"
-                / "node_delegate_skill_orchestrator"
-                / "handlers"
-                / "handler_delegate_skill.py"
-            )
-            if candidate.is_file():
-                return candidate
-            tried.append(f"{candidate} (absent)")
 
     raise AssertionError(
         "cannot resolve the OmniMarket delegation consumer source, so keyword "

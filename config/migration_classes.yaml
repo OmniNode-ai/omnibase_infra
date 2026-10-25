@@ -275,6 +275,9 @@ migrations:
   forward/nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql: forward-only # DROP VIEW; CREATE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_delegation/0063_generation_events_cost_inference_usd_nullable.sql: forward-only # ALTER COLUMN DROP NOT NULL, DROP DEFAULT
   forward/nodes/node_projection_delegation/0064_delegation_events_data_source_experiment.sql: forward-only # DROP; ALTER TABLE public.delegation_events DROP CONSTRAINT IF; ALTER TABLE public.delegation_events ADD CONSTRAINT DELEGATION_EVENTS_DATA_SOURCE_CHECK (ADD CONSTRAINT class)
+  forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql: forward-only
+  forward/nodes/node_projection_delegation_capability_map/0001_grant_tenant_projection_writer_delegation_capability_cells.sql: expand-only
+  forward/nodes/node_projection_delegation_capability_map/0002_force_rls_delegation_capability_cells.sql: forward-only
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP

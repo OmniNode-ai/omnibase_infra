@@ -118,7 +118,7 @@ def test_byproducts_survive_until_the_last_build_has_consumed_them(
     monkeypatch.setattr(DeployExecutor, "_compose_build", compose_build)
     monkeypatch.setattr(DeployExecutor, "_build_dev_lane_only_services", dev_build)
     _rebuild(Scope.RUNTIME)
-    assert seen_by_dev_build == [_REAL, _REAL]
+    assert seen_by_dev_build == [_REAL] * len(SELF_UPDATE_KNOWN_BYPRODUCT_PATHS)
     assert _tracked_status(build_clone) == ""
 
 

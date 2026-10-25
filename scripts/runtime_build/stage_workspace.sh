@@ -537,6 +537,25 @@ done
 echo "workspace staging complete: ${#SIBLING_REPOS[@]} repos staged to ${STAGING_DIR}"
 echo "per-repo VCS provenance written to ${VCS_PROVENANCE_OUT}"
 
+# OMN-21279: the delegation routing ladder is owned by omnimarket, and the
+# runtime image installs no omnimarket, so the Dockerfile COPYs the ladder from
+# the build context instead of out of an installed wheel. Overwrite the committed
+# placeholder with the ladder from the staged omnimarket tree; a staged tree
+# without it is an unverifiable build and ABORTS.
+ROUTING_TIERS_OUT="workspace/routing_tiers.yaml"
+ROUTING_TIERS_SRC="${STAGING_DIR}/omnimarket/src/omnimarket/configs/routing_tiers.yaml"
+if [[ ! -f "${ROUTING_TIERS_SRC}" ]]; then
+    echo "ERROR: staged omnimarket tree has no ${ROUTING_TIERS_SRC}; refusing to build an image with no routing ladder (OMN-21279)" >&2
+    exit 3
+fi
+python3 - "${ROUTING_TIERS_SRC}" "${ROUTING_TIERS_OUT}" <<'PY'
+import shutil
+import sys
+
+shutil.copyfile(sys.argv[1], sys.argv[2])
+PY
+echo "delegation routing ladder staged to ${ROUTING_TIERS_OUT}"
+
 # ---------------------------------------------------------------------------
 # RT-1 (OMN-14438): HARD-ASSERT the vendored-SHA manifest equals the intended ref
 # for every sibling. This is the load-bearing gate: a behind/dirty clone that

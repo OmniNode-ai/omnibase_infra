@@ -1,0 +1,71 @@
+schema_version: 1.0.0
+ticket_id: OMN-21279
+title: omnibase_infra's runtime image, CI and tests never install or import omnimarket
+summary: >-
+  Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
+      - id: AC2
+        statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+evidence_requirements:
+  - kind: tests
+    description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
+    command: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
+    description: >-
+      AC1. The negative controls of the layering module feed the Dockerfile, workflow and test-module checkers fixture lines that name omnimarket (an ARG, a pip install, a COPY from the wheel, an editable sibling install, a heredoc-continued install, a function-scope import, an importorskip) and assert each one fires; clean and look-alike lines pass. Red first: before the change the module held no such checker and the three live-tree tests it added failed against the base (the Dockerfile named omnimarket, ci.yml installed it as a sibling, five test modules imported it). The check also runs the live-tree Dockerfile and CI install-step tests, which fail at the merge base.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly -k "dockerfile_checker or workflow_checker or fixture_checker or runtime_dockerfile_names_no_omnimarket or ci_install_steps_install_no_omnimarket"
+    binds_ac:
+      - "AC1"
+  - id: dod-omn-21279-ac2-dockerfile-no-omnimarket
+    description: >-
+      AC2, static half. The layering pytest reads the real docker/Dockerfile.runtime and finds no instruction line naming omnimarket, and the Dockerfile-derived tests agree: the foundation import smoke imports compat, core and infra, the routing ladder is COPYed from the tracked workspace/routing_tiers.yaml, and no git install of an ONEX package remains. The boot half of AC2 is the runtime-boot-smoke job on the pull request head, run by CI.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py tests/unit/docker/test_delegation_import_smoke_guard.py tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-deploy-probe-dockerfile
+    description: >-
+      AC2, deploy-scope probe. Reads docker/Dockerfile.runtime through the GitHub API at the commit that carries this contract and exits nonzero unless no instruction line outside a comment names omnimarket and the routing ladder is COPYed from the build context. At the merge base the file installs omnimarket and copies the ladder out of the wheel, so the probe prints false there; the runtime-boot-smoke job on the pull request head is the boot half of AC2 and runs on a hosted runner.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | split("\n") as $l | (($l | map(select(test("^\\s*#") | not) | select(test("omnimarket"; "i"))) | length) == 0) and ($l | map(contains("COPY --chown=omniinfra:omniinfra workspace/routing_tiers.yaml /app/config/delegation/routing_tiers.yaml")) | any)' | grep -qx true
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-local-kernels-infra-only
+    description: >-
+      AC2, laptop boot. The catalog-local boot on head 17272c32b failed because the local bundle's kernels, on the infra image without omnimarket, read ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra,omnimarket from docker/runtime-policy.env and runtime_local_ingress imported omnimarket (ModuleNotFoundError, BOOT FAILED 5/5). The local bundle now renders ONEX_ACTIVE_RUNTIME_PACKAGES as ${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra} and local-market restores omnibase_infra,omnimarket through env_default_overrides. These tests render both bundles and resolve the local value against the policy file; all three fail with the bundle file of 17272c32b.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "local_kernels_activate_only_omnibase_infra or local_market_kernels_activate_omnimarket or local_kernel_packages_resolve_without_omnimarket"
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-projection-api-market-only
+    description: >-
+      AC2, laptop boot. The catalog-local boot on head c17ecc7e0 failed with projection-api unhealthy after 6 restarts: its command is omnimarket's console script omnimarket-projection-api, which the infra-only image does not carry. projection-api now ships in local-market on omnimarket-runtime:latest with its 3102 port and its depends_on on omninode-runtime and redpanda-local-sasl, and the local bundle no longer renders it. These tests fail with the bundle and manifest files of c17ecc7e0.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
+    binds_ac:
+      - "AC2"
