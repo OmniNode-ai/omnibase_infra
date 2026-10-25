@@ -1,0 +1,1 @@
+Live-contact exception: The change wraps the docker buildx build call in a bash loop that retries once only when the log contains "qemu: uncaught target signal", contacting only the hosted runner's own docker buildx and QEMU, which a unit test cannot record.
