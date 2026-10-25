@@ -481,6 +481,66 @@ def test_the_base_pins_commit_sha_is_read_as_the_predecessor(
         resolver.resolve_pin(branch_pin, predecessor=True)
 
 
+def test_a_relative_committed_pin_path_is_not_a_predecessor_read(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292: a relative committed pin stays tag-only and publishes ref=."""
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(_RESOLVER),
+            "--pin-file",
+            ".github/omnimarket-contract-pin.yaml",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    ref = completed.stdout.strip()
+    assert _TAG_RE.fullmatch(ref)
+    assert output.read_text(encoding="utf-8") == f"ref={ref}\n"
+
+
+def test_a_symlink_to_the_committed_pin_is_not_a_predecessor_read(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292: a symlink to the committed pin stays tag-only and publishes ref=."""
+    pin = tmp_path / "pin-link.yaml"
+    pin.symlink_to(_ROOT / ".github" / "omnimarket-contract-pin.yaml")
+    output = tmp_path / "github-output"
+    completed = subprocess.run(
+        [sys.executable, str(_RESOLVER), "--pin-file", str(pin)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+    )
+    assert completed.returncode == 0, completed.stderr
+    ref = completed.stdout.strip()
+    assert _TAG_RE.fullmatch(ref)
+    assert output.read_text(encoding="utf-8") == f"ref={ref}\n"
+
+
+def test_a_predecessor_sha_pin_for_another_repository_is_refused(
+    tmp_path: Path,
+) -> None:
+    """OMN-17292: the repository check must run before the predecessor sha return."""
+    resolver = _resolver_module()
+    pin = tmp_path / "pin.yaml"
+    pin.write_text(
+        "repository: OmniNode-ai/not-omnimarket\n"
+        "omnimarket_contract_ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="expected 'OmniNode-ai/omnimarket'"):
+        resolver.resolve_pin(pin, predecessor=True)
+
+
 def test_the_resolver_publishes_the_tag_as_the_ref_output(
     tmp_path: Path,
 ) -> None:

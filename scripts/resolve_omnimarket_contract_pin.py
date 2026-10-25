@@ -127,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        ref = resolve_pin(args.pin_file, predecessor=args.pin_file != PIN_PATH)
+        # Compare resolved paths, so any spelling of the committed pin (relative,
+        # absolute or a symlink) is tag-only and publishes ref=.
+        committed = args.pin_file.resolve() == PIN_PATH
+        ref = resolve_pin(args.pin_file, predecessor=not committed)
     except (OSError, ValueError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1
@@ -137,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     # a `ref=` output, or the step that reads a base pin would advertise it as
     # though it were the ref this run derives from.
     github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output and args.pin_file == PIN_PATH:
+    if github_output and committed:
         with open(github_output, "a", encoding="utf-8") as output:
             output.write(f"ref={ref}\n")
     print(ref)
