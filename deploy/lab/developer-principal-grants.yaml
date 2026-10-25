@@ -8,7 +8,8 @@
 # the principal's wire bindings (`developer-principal-bindings.yaml`) into
 # `developer-principal-derived-grants.json`, which `grants_from` names. The issuer
 # `scripts/lab_principal_issuer.py` applies exactly those grants to every principal
-# it issues and refuses to start if they ask for more than the rules below allow. A
+# it issues, plus only the exact principal's `principal_grants_from` additions,
+# and refuses to start if they ask for more than the rules below allow. A
 # grant typed by hand on the broker, or in the derived file, is drift.
 #
 # RULES the issuer enforces on this file:
@@ -27,3 +28,7 @@ max_devices_per_login: 5
 # a user identity and are always refused.
 allowed_login_domains: []
 grants_from: developer-principal-derived-grants.json
+# OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204:
+# h105 only; dev only; terminal reads, no command writes or credential changes.
+principal_grants_from:
+  dev-jonah-omnibook: h105-scm-pr-create-derived-grants.json
