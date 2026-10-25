@@ -36,6 +36,16 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: CI Summary admits a successful rehearsal, refuses failure, skipped and neutral rehearsals, and waits on a missing rehearsal; the recorded watcher rows show the context reported before merge on sixteen recent dev PRs -- falsifier: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q'
+  - id: req-omn20413-routing-audit-private-public-pr-shadow
+    statement: The runner-routing-audit / Runner Routing Audit live pass accepts a private repository's OMNI_PUBLIC_PR_RUNS_ON_JSON shadow equal to the trusted fleet value the policy declares for that repository, so the audit and that repository's own placement gate stop demanding opposite values of one variable.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: a private repository whose public-PR shadow equals its declared trusted override reports no finding, while the same shadow in a public repository, a different value, or a repository with no declared trusted override is still drift -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "public_pr_shadow or keeps_public_pr_drift"'
+  - id: req-omn20413-multiarch-qemu-retry
+    statement: The runner-image-multiarch-smoke check retries its cross-build once when the build log carries a QEMU emulator crash, so a pull request that did nothing wrong is not failed by an emulator segfault, while every other build failure still fails on its first attempt.
+    acceptance:
+      - id: AC8
+        statement: 'AC8: run in bash against a stub docker, the cross-build step passes after a QEMU crash followed by a clean build, fails after a QEMU crash on both attempts, fails after one attempt on a failure without the QEMU signature, and builds linux/amd64 and linux/arm64 on every attempt -- falsifier: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -52,6 +62,12 @@ evidence_requirements:
   - kind: tests
     description: The rehearsal workflow's sibling clone step is read from the workflow and run in bash with a stub git, and the deploy-scope resolver is run against the OMNI_HOME it exports.
     command: uv run pytest tests/ci/test_hook_push_rehearsal_caller_omn17427.py -q
+  - kind: tests
+    description: The public-PR variable audit is driven with fake variable lists and a fake live visibility read for private, public and undeclared repositories.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "public_pr_shadow or keeps_public_pr_drift"
+  - kind: tests
+    description: The cross-build step's run script is executed in bash with a stub docker that plays a QEMU crash, a clean build and a non-QEMU failure.
+    command: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -111,3 +127,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn20413-ac7-private-public-pr-shadow
+    description: AC7 tests drive audit_github_variables with a private repository's public-PR shadow on its declared trusted fleet value; the positive control fails at the merge base, where that shadow is reported as drift.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runner_routing_audit.py -q -k 'public_pr_shadow or keeps_public_pr_drift'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn20413-ac8-multiarch-qemu-retry
+    description: AC8 tests run the runner-image-multiarch-smoke cross-build step in bash with a stub docker; the retry test fails at the merge base, where a QEMU crash fails the step on its first attempt.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8

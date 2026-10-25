@@ -1388,7 +1388,9 @@ PY
     # interpreter is overridable because this checker needs PyYAML and the
     # host's bare python3 may not have it.
     errfile=$(mktemp)
-    json=$(timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
+    # This probe reports LIVE lane health, even when invoked from a pull-request
+    # job. Do not inherit the CI checker's pull-request advisory policy here.
+    json=$(env -u GITHUB_EVENT_NAME timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
              --manifest "$manifest" --snapshot "$live" --json 2>"$errfile")
     rc=$?
     err=$(tail -n1 "$errfile" 2>/dev/null | tr -d '\r' | cut -c1-160)

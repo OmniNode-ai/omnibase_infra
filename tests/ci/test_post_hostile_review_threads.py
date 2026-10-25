@@ -13,6 +13,7 @@ posting path is proven live by the OMN-17492 canary run.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,87 @@ class TestFingerprint:
         int(fp, 16)
 
 
+class TestDiffDigest:
+    def test_diff_digest_ignores_base_merge_context_and_hunk_shifts(self) -> None:
+        original = {
+            "filename": "src/foo.py",
+            "status": "modified",
+            "sha": "before-merge",
+            "patch": "--- a/src/foo.py\n+++ b/src/foo.py\n@@ -1,3 +1,3 @@\n context\n-old\n+new  \n tail\n",
+        }
+        merged = dict(
+            original,
+            sha="after-merge",
+            patch="--- a/shifted.py\n+++ b/shifted.py\n@@ -20,3 +30,3 @@\n changed context\n-old\t\n+new\n changed tail\n",
+        )
+        digest = poster.pr_diff_digest([original])
+        assert digest == poster.pr_diff_digest([merged])
+        assert len(digest) == 12
+        int(digest, 16)
+
+    @pytest.mark.parametrize("patch", ["-old\n+changed", "-changed\n+new"])
+    def test_diff_digest_changes_with_added_or_removed_line(self, patch: str) -> None:
+        original = {"filename": "a.py", "status": "modified", "patch": "-old\n+new"}
+        assert poster.pr_diff_digest([original]) != poster.pr_diff_digest(
+            [dict(original, patch=patch)]
+        )
+
+    def test_diff_digest_changes_with_added_file_and_sorts_files(self) -> None:
+        first = {"filename": "a.py", "status": "modified", "patch": "+one"}
+        second = {"filename": "b.py", "status": "added", "patch": "+two"}
+        assert poster.pr_diff_digest([first]) != poster.pr_diff_digest([first, second])
+        assert poster.pr_diff_digest([first, second]) == poster.pr_diff_digest(
+            [second, first]
+        )
+
+    @pytest.mark.parametrize("field", ["filename", "status", "previous_filename"])
+    def test_diff_digest_includes_file_metadata(self, field: str) -> None:
+        original = {
+            "filename": "a.py",
+            "status": "renamed",
+            "previous_filename": "old.py",
+            "patch": "+new",
+        }
+        changed = dict(original)
+        changed[field] = "different"
+        assert poster.pr_diff_digest([original]) != poster.pr_diff_digest([changed])
+
+    @pytest.mark.parametrize("patch_fields", [{}, {"patch": None}, {"patch": ""}])
+    def test_diff_digest_uses_sha_when_patch_absent(
+        self, patch_fields: dict[str, Any]
+    ) -> None:
+        original = {
+            "filename": "image.png",
+            "status": "modified",
+            "sha": "old-sha",
+            **patch_fields,
+        }
+        assert poster.pr_diff_digest([original]) == poster.pr_diff_digest(
+            [dict(original, previous_filename="")]
+        )
+        assert poster.pr_diff_digest([original]) != poster.pr_diff_digest(
+            [dict(original, sha="new-sha")]
+        )
+
+    def test_reviewed_diff_digest_trusts_only_github_actions_bot(self) -> None:
+        bot_digest = "0123456789ab"
+        other_digest = "abcdef012345"
+        marker = f"<!-- {poster.DIFF_MARKER} digest={{}} -->"
+        reviews = [
+            {
+                "user": {"login": "github-actions[bot]"},
+                "body": "summary\n" + marker.format(bot_digest),
+            },
+            {"user": {"login": "someone-else"}, "body": marker.format(other_digest)},
+            {"body": marker.format(other_digest)},
+            {"user": None, "body": marker.format(other_digest)},
+            {"user": {"login": "github-actions[bot]"}, "body": None},
+        ]
+        assert poster.reviewed_diff_digests(reviews) == {bot_digest}
+        for review in reviews[1:4]:
+            assert poster.reviewed_diff_digests([review]) == set()
+
+
 class TestParseRightSideLines:
     def test_added_and_context_lines_counted_removed_skipped(self) -> None:
         patch = (
@@ -160,6 +242,25 @@ class TestResolveAnchor:
 
 class TestBuildReview:
     CHANGED = {"src/foo.py": {10, 11, 12}}
+
+    @pytest.mark.parametrize("digest", ["0123456789ab", ""])
+    def test_diff_digest_marker_in_review_body(self, digest: str) -> None:
+        payload, _ = poster.build_review(
+            [_finding()],
+            self.CHANGED,
+            set(),
+            suppressed_hints=0,
+            models_succeeded=["glm-review"],
+            models_failed=[],
+            diff_digest=digest,
+        )
+        assert payload is not None
+        lines = payload["body"].splitlines()
+        assert lines[0] == f"<!-- {poster.MARKER} summary -->"
+        if digest:
+            assert lines[1] == f"<!-- {poster.DIFF_MARKER} digest={digest} -->"
+        else:
+            assert poster.DIFF_MARKER not in payload["body"]
 
     def test_request_changes_posture_on_major(self) -> None:
         payload, stats = poster.build_review(
@@ -367,6 +468,101 @@ class TestQuorumSplit:
         )
         assert payload_agreed is not None
         assert payload_agreed["event"] == "REQUEST_CHANGES"
+
+
+class TestMainDiffDigest:
+    @pytest.mark.parametrize("review_login", ["github-actions[bot]", "someone-else"])
+    def test_main_diff_digest_skips_only_bot_review(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        review_login: str,
+    ) -> None:
+        files = [
+            {
+                "filename": "src/foo.py",
+                "status": "modified",
+                "patch": "@@ -12 +12 @@\n-old\n+new",
+            }
+        ]
+        digest = poster.pr_diff_digest(files)
+        marker = f"<!-- {poster.DIFF_MARKER} digest={digest} -->"
+        review_path = tmp_path / "review.json"
+        review_path.write_text(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "model": "glm-review",
+                            "success": True,
+                            "findings": [_finding()],
+                        }
+                    ],
+                    "models_succeeded": ["glm-review"],
+                    "models_failed": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        for key, value in {
+            "GITHUB_TOKEN": "test-token",
+            "REPO": "o/r",
+            "PR_NUMBER": "7",
+            "REVIEW_JSON_PATH": str(review_path),
+            "HOSTILE_REVIEW_IS_FORK": "false",
+            "HEAD_SHA": "h" * 40,
+        }.items():
+            monkeypatch.setenv(key, value)
+
+        endpoints = {
+            "files": files,
+            "reviews": [{"user": {"login": review_login}, "body": marker}],
+            "comments": [],
+        }
+        fetched: list[str] = []
+        published: list[dict[str, Any]] = []
+
+        def paginate(url: str, token: str) -> list[dict[str, Any]]:
+            assert token == "test-token"
+            assert url.startswith("https://api.github.com/repos/o/r/pulls/7/")
+            endpoint = url.rsplit("/", 1)[-1]
+            fetched.append(endpoint)
+            return endpoints[endpoint]
+
+        def unexpected_api(*args: Any, **kwargs: Any) -> None:
+            pytest.fail("main must use the mocked pagination and publishing seams")
+
+        def publish(payload: dict[str, Any], **kwargs: Any) -> int:
+            published.append(payload)
+            assert kwargs == {
+                "base": "https://api.github.com/repos/o/r",
+                "pr_number": 7,
+                "token": "test-token",
+                "head_sha": "h" * 40,
+            }
+            return 0
+
+        monkeypatch.setattr(poster, "_paginate", paginate)
+        monkeypatch.setattr(poster, "_api", unexpected_api)
+        monkeypatch.setattr(poster, "publish", publish)
+        if review_login == "github-actions[bot]":
+            monkeypatch.setattr(poster, "build_review", unexpected_api)
+
+        assert poster.main() == 0
+        assert sorted(fetched) == ["comments", "files", "reviews"]
+        output = capsys.readouterr().out
+        if review_login == "github-actions[bot]":
+            assert published == []
+            assert (
+                f"PR diff unchanged since an earlier hostile review (diff={digest}); "
+                "posting no new threads. The earlier review's threads and their "
+                "replies stand (OMN-20910).\n"
+            ) in output
+        else:
+            assert len(published) == 1
+            assert published[0]["body"].splitlines()[1] == marker
+            assert len(published[0]["comments"]) == 1
 
 
 class TestPublishOmn17427:
