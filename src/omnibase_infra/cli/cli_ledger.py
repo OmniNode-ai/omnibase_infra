@@ -40,13 +40,18 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import UTC, datetime
+from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, TextIO
 
 import click
+from pydantic import ValidationError
 
 from omnibase_core.errors.model_onex_error import ModelOnexError
+from omnibase_infra.cli.contract_registry import RegistryUnresolvedError
+from omnibase_infra.cli.delegate_lane import DelegateLaneSelectionError
+from omnibase_infra.cli.delegate_lane_credentials import DelegateLaneCredentialError
 from omnibase_infra.enums.enum_cloud_ledger_verdict import EnumCloudLedgerVerdict
 from omnibase_infra.gateway.client.cloud_ledger_reader import CloudLedgerReader
 from omnibase_infra.gateway.client.gateway_transport_httpx import (
@@ -56,6 +61,11 @@ from omnibase_infra.gateway.client.store_gateway_credential import (
     StoreGatewayCredential,
 )
 from omnibase_infra.gateway.models.model_cloud_ledger_read import ModelCloudLedgerRead
+from omnibase_infra.handlers.handler_work_ledger_query import (
+    WorkLedgerQueryError,
+    open_work_ledger_query_client,
+)
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 __all__ = ["ledger_group"]
 
@@ -76,7 +86,7 @@ def _emit(result: ModelCloudLedgerRead) -> NoReturn:
 
 @click.group("ledger")
 def ledger_group() -> None:  # stub-ok
-    """Read the ONEX cloud ledger projections."""
+    """Read cloud hook projections and the dev database work ledger."""
 
 
 @ledger_group.command("read")
@@ -131,3 +141,116 @@ def ledger_read(correlation_id: str, limit: int, include_payload: bool) -> None:
     if result.verdict is not EnumCloudLedgerVerdict.FOUND:
         click.echo(f"{result.verdict.value}: {result.detail}", err=True)
     _emit(result)
+
+
+def _bus_options[Command: Callable[..., object]](command: Command) -> Command:
+    # cli-own-vocabulary: this infrastructure client is intentionally dev-only.
+    command = click.option("--lane", required=True, type=click.Choice(["dev"]))(command)
+    command = click.option(
+        "--omnibase-path",
+        envvar="OMNIBASE_PATH",
+        type=click.Path(file_okay=False, path_type=Path),
+    )(command)
+    return click.option(
+        "--timeout",
+        "timeout_s",
+        type=click.FloatRange(min=0, min_open=True),
+        default=60.0,
+        show_default=True,
+    )(command)
+
+
+def _run(coroutine: Coroutine[None, None, dict[str, object]]) -> None:
+    try:
+        result = asyncio.run(coroutine)
+    except (
+        RegistryUnresolvedError,
+        DelegateLaneSelectionError,
+        DelegateLaneCredentialError,
+        WorkLedgerQueryError,
+        ValidationError,
+        TimeoutError,
+        ModelOnexError,
+    ) as exc:
+        raise click.ClickException(sanitize_error_message(exc)) from exc
+    click.echo(json.dumps(result, indent=2))
+
+
+@ledger_group.command("query")
+@_bus_options
+@click.option(
+    "--input",
+    "input_file",
+    required=True,
+    type=click.File("r"),
+    help="The read node's typed request JSON; use - for stdin. correlation_id is optional.",
+)
+def work_ledger_query_command(
+    lane: str, omnibase_path: Path | None, timeout_s: float, input_file: TextIO
+) -> None:
+    """Query work_ledger_rows for ledger-ask; return rows, freshness and parity."""
+    try:
+        payload = json.load(input_file)
+    except ValueError as exc:
+        raise click.BadParameter(
+            "input must be a JSON object", param_hint="--input"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise click.BadParameter("input must be a JSON object", param_hint="--input")
+
+    async def query() -> dict[str, object]:
+        async with open_work_ledger_query_client(
+            lane=lane, workspace_root=omnibase_path
+        ) as client:
+            return (await client.query(payload, timeout_s=timeout_s)).model_dump(
+                mode="json"
+            )
+
+    _run(query())
+
+
+@ledger_group.command("catchup")
+@_bus_options
+@click.option(
+    "--since",
+    type=click.DateTime(formats=["%Y-%m-%dT%H:%M:%SZ"]),
+    help="UTC window start; defaults to 12 hours before now.",
+)
+@click.option("--to", "recipient", help="Lane whose unanswered inbox is included.")
+def work_ledger_catchup_command(
+    lane: str,
+    omnibase_path: Path | None,
+    timeout_s: float,
+    since: datetime | None,
+    recipient: str | None,
+) -> None:
+    """Read a bounded catchup from the database, retaining each answer's metadata."""
+    now = datetime.now(UTC)
+    start = (
+        since.replace(tzinfo=UTC) if since is not None else now - timedelta(hours=12)
+    )
+
+    async def catchup() -> dict[str, object]:
+        async with open_work_ledger_query_client(
+            lane=lane, workspace_root=omnibase_path
+        ) as client:
+            sections: dict[str, object] = {}
+            for kind in ("open-claims", "holds", "rulings", "rows", "inbox"):
+                if kind == "inbox" and recipient is None:
+                    continue
+                request: dict[str, object] = {
+                    "query": kind,
+                    "since": start,
+                    "until": now,
+                    "now": now,
+                }
+                if kind == "rows":
+                    request["kinds"] = ("FRICTION", "CORRECTION", "STATUS")
+                if kind == "inbox":
+                    request["lane"] = recipient
+                sections[kind] = (
+                    await client.query(request, timeout_s=timeout_s)
+                ).model_dump(mode="json")
+            return sections
+
+    _run(catchup())

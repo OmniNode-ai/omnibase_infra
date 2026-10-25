@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20740
+title: Dev principals can query the database work ledger through the read node
+summary: >-
+  This is the query ACL and client prerequisite of the S8 cutover. The dev-only developer principal bindings already derive the six query ACL rows under OMN-21339; HandlerWorkLedgerQuery now uses their exact consumer group prefix and discovers the read node's topics and shared models from its installed contract. onex ledger query supplies the ledger-ask read and onex ledger catchup supplies the bounded catchup read. Both retain freshness and parity metadata and fail on a refused or unusable answer. No authority flip or append change is made. The parent ticket's seven exact days and post-flip claim-token test remain pending; passing the prerequisite tests does not satisfy them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-s8-authority-flip
+    statement: The authority flip remains gated by both original ticket criteria.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the daily parity receipt reads exact=yes for 7 consecutive UTC days before the flip -- falsifier: the lane=work-ledger-parity STATUS receipts"
+      - id: AC2
+        statement: "AC2: a concurrent append test still yields exactly one claim token per claim after the flip -- falsifier: uv run pytest tests -k flip_claim_token_unique"
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The client and CLI tests prove contract discovery, correlation, errors, concurrency and dev-only selection. The SCRAM broker tests apply the six derived query grants to non-superuser developer and lane principals, exchange queries with the real client, and refuse an authenticated outsider's publish and reply read. The broker is throwaway and its topics are renamed into the test namespace to honor the ledger test-write guard.
+    command: uv run --frozen pytest tests/unit/clients/test_work_ledger_query_client.py tests/unit/cli/test_cli_work_ledger_query.py tests/integration/bus_acl_boundary/test_work_ledger_query_acl.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20740-ac1-seven-days-pending
+    description: >-
+      Pending full-ticket evidence. The earliest candidate full UTC day is 2026-10-25. The lane measured 2026-10-25 00:00..02:28Z with the projection's own parity check: 526 file rows, 525 projection rows, missing 1, extra 0, state mismatches 0, unexplained 1, backfilled 0. This is not an exact day or seven exact days. No prerequisite test is bound as proof of AC1.
+    source: linear
+    linear_dod_text: "AC1: the daily parity receipt reads exact=yes for 7 consecutive UTC days before the flip -- falsifier: the lane=work-ledger-parity STATUS receipts"
+    status: pending
+    binds_ac: []
+    checks: []
+  - id: dod-omn20740-ac2-post-flip-test-pending
+    description: >-
+      Pending full-ticket evidence for the authority flip. This change neither flips authority nor alters the append path. Concurrent query correlation tests are not a claim-token uniqueness test and are not bound as AC2. Run the ticket's falsifier after the authority flip is implemented.
+    source: linear
+    linear_dod_text: "AC2: a concurrent append test still yields exactly one claim token per claim after the flip -- falsifier: uv run pytest tests -k flip_claim_token_unique"
+    status: pending
+    binds_ac: []
+    checks: []
+  - id: dod-omn20740-query-client-prerequisite
+    description: >-
+      Failing-first prerequisite proof. The client test first failed with ModuleNotFoundError for work_ledger_query_client. At the head, unit tests exercise the actual client and CLI and the isolated SCRAM broker enforces the shipped ACL operations and group prefix. These checks prove the query slice only and claim neither full-ticket criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/clients/test_work_ledger_query_client.py tests/unit/cli/test_cli_work_ledger_query.py -q
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/bus_acl_boundary/test_work_ledger_query_acl.py -q
+  - id: dod-omn20740-deploy-client-surface
+    description: >-
+      Hosted-runner artifact check for the client-side CLI: read the public module at the evaluated checkout's commit and require both command functions, then load the actual group and exercise its dev-only behavior. It needs no private lane declaration, broker or credentials and fails at the merge base without these commands. This does not claim a runtime rollout or an authority flip.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          set -euo pipefail;
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_ledger.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python3 -c 'import ast,sys; names={node.name for node in ast.parse(sys.stdin.read()).body if isinstance(node,ast.FunctionDef)}; assert {"work_ledger_query_command","work_ledger_catchup_command"} <= names'
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/cli/test_cli_work_ledger_query.py -q

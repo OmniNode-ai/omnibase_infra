@@ -39,7 +39,8 @@
 # plus a per-call suffix.
 #
 # THE LEDGER READ PATH: a machine publishes the query node's request and reads its
-# completed terminal. Query replies use `local.omnimarket.work_ledger_query_client.consume.v1.`
+# completed terminal. `onex ledger query` (ledger-ask) and `onex ledger catchup`
+# use HandlerWorkLedgerQuery. Query replies use `local.omnimarket.work_ledger_query_client.consume.v1.`
 # plus a per-call suffix, separate from runtime command-consumer groups. The caller
 # cannot consume query commands or produce query results.
 #
