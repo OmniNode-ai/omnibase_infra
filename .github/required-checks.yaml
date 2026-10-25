@@ -57,6 +57,8 @@ gates:
     workflow: ci.yml
     job_path: ["ci-summary"]
     skip_semantics: never
+    # OMN-19854: judges the PR's CI and review threads, not a file, so it has no pre-commit twin.
+    pre_commit: not-applicable
     rationale: "Umbrella fail-closed poller aggregating all ci.yml job conclusions (OMN-14127); job-level `if: always()`. Live required status check on omnibase_infra dev branch protection."
   - name: "Handler Contract Compliance"
     mode: REQUIRED
@@ -92,6 +94,8 @@ gates:
     # reviewer just posted, and `!cancelled()` runs it whatever the reviewer's
     # result, so a skipped, degraded or failed reviewer never holds a merge.
     skip_semantics: neutral_ok
+    # OMN-19854: judges the PR's CI and review threads, not a file, so it has no pre-commit twin.
+    pre_commit: not-applicable
     rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or rejected: <reason>. Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
   - name: "call-reject-skip-token / scan / reject-skip-gate-token"
     mode: REQUIRED
