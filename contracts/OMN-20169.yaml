@@ -1,0 +1,55 @@
+schema_version: 1.0.0
+ticket_id: OMN-20169
+title: Vendor the delegation_capability_cells migrations and their interim grant ahead of the omnimarket capability map node
+summary: 'Infra half only: vendors node_projection_delegation_capability_map/0000-0002 byte for byte from omnimarket#4380 (8f91988e9), with checksum-bound ledger rows and migration classes, fences the FORCE step, carries one interim grant declaration for delegation_capability_cells (named in the OMN-18863 expiry module) and adds the relation to the topology instances and rendered catalogs, so the cells table exists with its tenant writer grant on every lane the writer runs on. The fold, the writer and the cells written from the labelled items are the omnimarket half.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20169-ac4-infra-vendor
+    statement: The table the capability map writer upserts is deployed byte-identical to its omnimarket source, applies and reapplies on a real database, and grants the tenant projection writer exactly SELECT, INSERT and UPDATE under forced row-level security.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a pure fold turns verdict rows into one cell per model, backend, class and band with n, passes, the Wilson 95% interval and the range evaluator''s decision bound -- falsifier: uv run pytest tests/nodes/node_delegation_capability_map_compute -v in omnimarket'
+      - id: AC2
+        statement: 'AC2: a cell below its required sample reads REFUSED, and a band with no rows is absent, never zero -- falsifier: uv run pytest tests/nodes/node_delegation_capability_map_compute -k "underpowered_refused or absent_band_not_zero" -v in omnimarket'
+      - id: AC3
+        statement: 'AC3: a verdict whose identity differs from the serving assignment on any of the six [OMN-18537](https://linear.app/omninode/issue/OMN-18537) fields is refused as inadmissible for that cell -- falsifier: uv run pytest tests/nodes/node_delegation_capability_map_compute -k identity_mismatch_inadmissible -v in omnimarket'
+      - id: AC4
+        statement: 'AC4: the writer declares in-process dispatch and writes cells on the dev lane from the labelled items -- falsifier: uv run pytest tests/test_golden_chain_projection_delegation_capability_map.py -v in omnimarket, and a dev-lane count of delegation_capability_cells with a positive control on delegation_eval_items'
+      - id: AC5
+        statement: 'AC5: a verdict row carries its configuration identity and folds only into the cell of that configuration; a row with no configuration is inadmissible -- falsifier: uv run pytest tests/nodes/node_delegation_capability_map_compute -k configuration_in_cell_key -v in omnimarket'
+      - id: AC6
+        statement: 'AC6: an offline grid run over the labelled sets writes one verdict row per (item, model, configuration), and the best and next-best configuration per (model, class, band) is a deterministic read of MET cells ordered by lower bound, absent when none is MET -- falsifier: uv run pytest tests/nodes/node_delegation_capability_map_compute -k "best_configuration_deterministic or no_met_no_best" -v in omnimarket'
+      - id: AC7
+        statement: 'AC7: no configuration is chosen or tuned on a live request; routing reads only the stored map -- falsifier: uv run pytest tests/unit/delegation -k no_live_configuration_search -v in omnimarket'
+evidence_requirements:
+  - kind: tests
+    description: Source byte pins, ledger checksums, classes, the fence and the interim grant declaration.
+    command: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_cells_vendor.py -q
+  - kind: tests
+    description: Real migration apply, replay, the cell key, checks, forced RLS and the writer privileges.
+    command: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_capability_cells_omn20169.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20169-ac4-infra-vendor
+    description: Infra half only. Pins the source bytes of 0000-0002, their live ledger checksums and classes, that only 0002 (FORCE ROW LEVEL SECURITY) is fenced, and the interim read_write declaration under role delegation_capability_cells. It does not prove the fold or the writer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_cells_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20169-ac4-infra-live-apply
+    description: Applies the chain twice around a populated cell, proves the seven-column cell key, the band, verdict and count checks, forced RLS with a real non-superuser tenant writer, and exactly SELECT, INSERT and UPDATE for tenant_projection_writer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_capability_cells_omn20169.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

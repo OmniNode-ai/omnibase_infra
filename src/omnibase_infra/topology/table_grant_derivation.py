@@ -482,6 +482,33 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="local_environment",
         ),
     ),
+    # OMN-20169: the same infra-first window; this repo vendors
+    # node_projection_delegation_capability_map/0000-0002 ahead of the omnimarket
+    # node contract that declares the relation, which lands after this release
+    # (the node's wiring check refuses a contract whose table no release grants).
+    # The source declares access read_write, role delegation_capability_cells in
+    # omnimarket's scripts/application-relation-ownership.yaml; 0001 grants
+    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
+    # node_projection_delegation_capability_map contract merges and the pin
+    # advances past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_capability_cells",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+            "0000_create_delegation_capability_cells.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_capability_cells",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+                "0000_create_delegation_capability_cells.sql"
+            ),
+            access="read_write",
+            role="delegation_capability_cells",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
