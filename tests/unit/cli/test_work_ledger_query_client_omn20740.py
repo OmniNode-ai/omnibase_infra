@@ -171,7 +171,7 @@ def test_ledger_ask_query_reaches_the_client(
     monkeypatch: pytest.MonkeyPatch, wire: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.resolve_work_ledger_query_transport",
+        "omnibase_infra.cli.cli_ledger.resolve_work_ledger_query_transport",
         lambda lane: ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092"),
     )
     result = CliRunner().invoke(
@@ -200,7 +200,7 @@ def test_existing_reader_stdin_protocol_preserves_correlation_and_filters(
 ) -> None:
     """Both existing readers use handler_ledger_source.read_db_lines's protocol."""
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.resolve_work_ledger_query_transport",
+        "omnibase_infra.cli.cli_ledger.resolve_work_ledger_query_transport",
         lambda lane: ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092"),
     )
     cid = str(uuid4())
@@ -273,7 +273,7 @@ def test_cli_refusal_is_nonzero_and_cannot_leak_a_credential(
         raise RuntimeError("postgresql://user:synthetic-secret@invalid/db")
 
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.resolve_work_ledger_query_transport",
+        "omnibase_infra.cli.cli_ledger.resolve_work_ledger_query_transport",
         refused,
     )
     result = CliRunner().invoke(ledger_group, ["query"])
@@ -363,7 +363,7 @@ def test_cli_inbox_and_repeated_kinds_preserve_request(
     monkeypatch: pytest.MonkeyPatch, wire: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(
-        "omnibase_infra.handlers.handler_work_ledger_query.resolve_work_ledger_query_transport",
+        "omnibase_infra.cli.cli_ledger.resolve_work_ledger_query_transport",
         lambda lane: ModelKafkaEventBusConfig(bootstrap_servers="broker.invalid:9092"),
     )
     result = CliRunner().invoke(

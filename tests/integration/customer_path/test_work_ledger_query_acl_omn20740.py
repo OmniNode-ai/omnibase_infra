@@ -205,3 +205,24 @@ def test_developer_can_query_but_an_unrelated_principal_is_refused(
                 await task
 
     asyncio.run(exercise())
+
+    async def exercise_session() -> None:
+        async with HandlerWorkLedgerQuery(_transport(broker, developer)) as client:
+            correlations = set()
+            for _ in range(2):
+                ready = asyncio.Event()
+                responder = asyncio.create_task(_reply_once(broker, ready))
+                try:
+                    await asyncio.wait_for(ready.wait(), timeout=30)
+                    answer = await client.query({"query": "rows"}, timeout_s=30)
+                    assert answer["matched"] == 1
+                    assert answer["parity"]["status"] == "unmeasured"
+                    correlations.add(answer["correlation_id"])
+                    await responder
+                finally:
+                    responder.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await responder
+            assert len(correlations) == 2
+
+    asyncio.run(exercise_session())
