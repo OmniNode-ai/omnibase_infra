@@ -257,7 +257,7 @@ def _derive_deps_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.fixture(autouse=True)
 def _derive_image_build_budget_from_this_checkout(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """OMN-18072: derive the runtime image-build ceiling from THIS checkout.
 
@@ -286,7 +286,9 @@ def _derive_image_build_budget_from_this_checkout(
 
     OMN-21279: the composed recipe belongs to the staged omnimarket sibling,
     which unit tests do not stage. Count a small composed-recipe fixture for
-    that exact path while continuing to count the real infra Dockerfile.
+    that exact path while continuing to count the real infra Dockerfile. The
+    fixture lives in its own directory, never the test's ``tmp_path``, so a
+    test asserting that its ``tmp_path`` stays empty still observes that.
     """
     from deploy_agent import build_budget
     from deploy_agent import executor as executor_mod
@@ -296,7 +298,9 @@ def _derive_image_build_budget_from_this_checkout(
     market_dockerfile = (
         docker_dir.parent / "workspace/sibling-repos/omnimarket/Dockerfile.runtime"
     )
-    market_fixture = tmp_path / "omnimarket.Dockerfile.runtime"
+    market_fixture = (
+        tmp_path_factory.mktemp("omn21279-market") / "omnimarket.Dockerfile.runtime"
+    )
     market_fixture.write_text(
         "ARG INFRA_RUNTIME_IMAGE\n"
         "FROM ${INFRA_RUNTIME_IMAGE}\n"
