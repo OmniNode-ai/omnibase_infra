@@ -21,6 +21,20 @@ def statement(pg: EphemeralPostgres, template: str, table: str) -> str:
         return sql.SQL(template).format(sql.Identifier("public", table)).as_string(conn)
 
 
+def acl_snapshot(pg: EphemeralPostgres) -> str:
+    """Raw table and column ACLs, so a refused run can be shown to change none."""
+    return pg.psql(
+        "-Atc",
+        "SELECT c.relname, c.relacl::text, a.attname, a.attacl::text"
+        " FROM pg_catalog.pg_class c JOIN pg_catalog.pg_attribute a"
+        " ON a.attrelid = c.oid AND a.attnum > 0"
+        " WHERE c.relnamespace = 'public'::regnamespace AND c.relname IN"
+        " ('usage_by_model_day', 'usage_by_model_day_calls', 'llm_call_metrics')"
+        " ORDER BY 1, 3",
+        dbname=DB,
+    ).stdout
+
+
 def test_grants_enable_only_select(ephemeral_postgres: EphemeralPostgres) -> None:
     pg = ephemeral_postgres
     assert pg.psql("-c", f"CREATE DATABASE {DB}").returncode == 0
@@ -45,7 +59,9 @@ def test_grants_enable_only_select(ephemeral_postgres: EphemeralPostgres) -> Non
         assert before.returncode != 0 and "permission denied" in before.stderr
 
     refused = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(GRANTS), dbname=DB)
-    assert refused.returncode != 0 and "dev contractor grant runner" in refused.stderr
+    assert refused.returncode != 0
+    assert "dev contractor grant runner required" in refused.stderr
+    assert "omnidash_analytics database required" not in refused.stderr
     wrong_db = pg.psql(
         "-v",
         "ON_ERROR_STOP=1",
@@ -54,15 +70,19 @@ def test_grants_enable_only_select(ephemeral_postgres: EphemeralPostgres) -> Non
         "-f",
         str(GRANTS),
     )
-    assert wrong_db.returncode != 0 and "analytics database required" in wrong_db.stderr
+    assert wrong_db.returncode != 0
+    assert "omnidash_analytics database required" in wrong_db.stderr
+    assert "dev contractor grant runner required" not in wrong_db.stderr
 
     # Pre-existing write access is refused and the whole file rolls back.
     first = statement(pg, "{}", TABLES[0])
     for pre_grant in (
         f"GRANT INSERT ON {first} TO lakshman_ro",
         f"GRANT SELECT ON {first} TO lakshman_ro WITH GRANT OPTION",
+        f"GRANT UPDATE (id) ON {first} TO lakshman_ro",
     ):
         assert pg.psql("-c", pre_grant, dbname=DB).returncode == 0
+        before_acl = acl_snapshot(pg)
         broader = pg.psql(
             "-v",
             "ON_ERROR_STOP=1",
@@ -73,6 +93,8 @@ def test_grants_enable_only_select(ephemeral_postgres: EphemeralPostgres) -> Non
             dbname=DB,
         )
         assert broader.returncode != 0 and "must end SELECT-only" in broader.stderr
+        # Refusal neither widens nor revokes: the operator's grant is left as found.
+        assert acl_snapshot(pg) == before_acl
         assert (
             pg.psql(
                 "-c", f"REVOKE ALL ON {first} FROM lakshman_ro", dbname=DB
