@@ -44,3 +44,10 @@ def test_the_lane_identity_tenant_is_not_reused() -> None:
     value = _runtime_effects_env()["ONEX_CONTEXT_SOURCE_TENANT_ID"]
     assert isinstance(value, str)
     assert "ONEX_TENANT_ID" not in value
+    # The lane identity is set outside this file; the dev lane must not
+    # define or override ONEX_TENANT_ID for any service.
+    text = DEV_LANE.read_text().replace("!!merge ", "").replace("!override", "")
+    for name, service in yaml.safe_load(text)["services"].items():
+        env = service.get("environment") or {}
+        keys = env if isinstance(env, dict) else [e.split("=", 1)[0] for e in env]
+        assert "ONEX_TENANT_ID" not in keys, name
