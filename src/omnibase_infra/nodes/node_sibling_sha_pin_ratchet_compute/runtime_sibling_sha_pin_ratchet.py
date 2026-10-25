@@ -44,7 +44,7 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def sha_lines(repo_root: Path, ref: str | None) -> tuple[tuple[str, str], ...]:
     """(path, line) for every tracked line holding a 40-hex token, at ``ref`` or in the tree."""
-    args = ["grep", "-I", "--full-name", "--no-color", "-E", SHA_TOKEN]
+    args = ["grep", "-I", "-z", "--full-name", "--no-color", "-E", SHA_TOKEN]
     if ref:
         args.append(ref)
     args += ["--", "."]
@@ -56,9 +56,9 @@ def sha_lines(repo_root: Path, ref: str | None) -> tuple[tuple[str, str], ...]:
     prefix = f"{ref}:" if ref else ""
     out: list[tuple[str, str]] = []
     for raw in result.stdout.splitlines():
-        if prefix and raw.startswith(prefix):
-            raw = raw[len(prefix) :]
-        path, sep, line = raw.partition(":")
+        path, sep, line = raw.partition("\0")
+        if prefix and path.startswith(prefix):
+            path = path[len(prefix) :]
         if sep:
             out.append((path, line))
     return tuple(out)

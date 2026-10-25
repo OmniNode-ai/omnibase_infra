@@ -14,6 +14,7 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 from omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.handler import (
     NodeSiblingShaPinRatchetCompute,
     count_pins,
+    in_scope,
     is_pin_line,
 )
 from omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.models import (
@@ -77,6 +78,24 @@ def test_tests_docs_and_ticket_contracts_are_out_of_scope() -> None:
     lines = [("tests/ci/x.yml", PIN), ("docs/a.md", PIN), ("contracts/OMN-1.yaml", PIN)]
     assert count_pins(lines) == {}
     assert count_pins([(WF, PIN), (WF, PIN)]) == {WF: 2}
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (".github/actions/tests/action.yml", True),
+        (".github/fixtures/x.yml", True),
+        (".github/README.md", False),
+        ("tests/ci/x.yml", False),
+        ("src/test/x.yml", False),
+        ("docs/x.yml", False),
+        ("src/doc/x.yml", False),
+        ("src/fixtures/x.yml", False),
+        ("contracts/OMN-1.yaml", False),
+    ],
+)
+def test_in_scope(path: str, expected: bool) -> None:
+    assert in_scope(path) is expected
 
 
 def _status(base: list[tuple[str, str]], head: list[tuple[str, str]]) -> str:

@@ -45,14 +45,15 @@ _YAML_REF_PIN: Final = re.compile(
     rf"(?:^|[\s{{,])(?:(?:[\w-]*_)?ref|rev)\s*:\s*[\"']?{_SHA}(?![0-9a-f])"
 )
 
-_OUT_OF_SCOPE: Final = re.compile(
-    r"(^|/)(tests?|docs?|fixtures)/|\.md$|^contracts/OMN-[0-9]+\.ya?ml$"
-)
+_OUT_OF_SCOPE: Final = re.compile(r"\.md$|^contracts/OMN-[0-9]+\.ya?ml$")
+_OUT_OF_SCOPE_DIR: Final = re.compile(r"(^|/)(tests?|docs?|fixtures)/")
 
 
 def in_scope(path: str) -> bool:
     """Whether a tracked path can carry a pin the ratchet counts."""
-    return not _OUT_OF_SCOPE.search(path)
+    return not _OUT_OF_SCOPE.search(path) and (
+        path.startswith(".github/") or not _OUT_OF_SCOPE_DIR.search(path)
+    )
 
 
 def is_pin_line(path: str, line: str) -> bool:
