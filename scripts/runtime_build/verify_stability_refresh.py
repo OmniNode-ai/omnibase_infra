@@ -987,7 +987,6 @@ def run_consumer_group_audit(
 
 CORE_SERVICES: dict[str, str] = {
     "omninode-runtime": "omninode-stability-test-runtime",
-    "runtime-effects": "omninode-stability-test-runtime-effects",
     "runtime-worker": "omninode-stability-test-runtime-worker",
     "projection-api": "omnimarket-stability-test-projection-api",
 }

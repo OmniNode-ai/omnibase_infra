@@ -351,6 +351,8 @@ profiles:
     services:
       main:
         runtime_id: stability-test-main
+        # OMN-21288: effects run as nodes inside the main runtime.
+        folded_profiles: [effects]
         runtime_address: runtime://omninode-pc/stability-test/main
         capabilities:
           - market.skill-proof
