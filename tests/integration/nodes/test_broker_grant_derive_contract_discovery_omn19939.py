@@ -133,6 +133,12 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     policy = yaml.safe_load(policy_path.read_text())
     assert "grants" not in policy
     (tmp_path / policy["grants_from"]).write_text(result.model_dump_json())
+    scoped_bindings = yaml.safe_load(
+        (root / "deploy/lab/h105-scm-pr-create-bindings.yaml").read_text()
+    )
+    scoped_result = handler_class().handle(input_class.model_validate(scoped_bindings))
+    scoped_source = policy["principal_grants_from"][scoped_result.principal]
+    (tmp_path / scoped_source).write_text(scoped_result.model_dump_json())
     local_policy = tmp_path / policy_path.name
     local_policy.write_text(policy_path.read_text())
 
@@ -156,3 +162,17 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
     assert len(rows) == 151
     assert any(row.resource == "group" and row.pattern == "prefixed" for row in rows)
     assert {row.operation for row in rows if row.name == "*"} == {"describe"}
+    scoped_expected = {
+        lab_principal_issuer.AclRow(
+            resource=g.resource_type.lower(),
+            name=g.resource.replace("{principal}", scoped_result.principal),
+            pattern=g.pattern.lower(),
+            operation=g.operation.lower(),
+        )
+        for g in (*result.grants, *scoped_result.grants)
+    }
+    assert (
+        lab_principal_issuer.expected_acl_rows(declaration, scoped_result.principal)
+        == scoped_expected
+    )
+    assert len(scoped_expected) == len(rows) + 4

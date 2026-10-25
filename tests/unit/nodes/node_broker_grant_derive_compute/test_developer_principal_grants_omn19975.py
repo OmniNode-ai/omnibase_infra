@@ -897,3 +897,25 @@ def test_developer_principal_query_acl_prefix_is_the_derived_client_group() -> N
     for group in (query_node, f"{query_node}.worker"):
         assert not any(group.startswith(prefix) for prefix in dev_prefixes), group
     assert not f"{append_client}.call".startswith(f"{query_client}.")
+
+
+def test_h105_scm_pr_create_derived_file_is_exactly_the_nodes_output() -> None:
+    source = ROOT / "deploy/lab/h105-scm-pr-create-bindings.yaml"
+    bindings = ModelBrokerGrantBindings.model_validate(
+        yaml.safe_load(source.read_text())
+    )
+    derived = source.with_name("h105-scm-pr-create-derived-grants.json")
+    assert bindings.principal == "dev-jonah-omnibook"
+    assert (
+        derived.read_text()
+        == HandlerBrokerGrantDerive().handle(bindings).model_dump_json(indent=2) + "\n"
+    )
+    assert derive(bindings) == {
+        ("dev", resource_type, resource, pattern, operation)
+        for resource_type, resource, pattern in (
+            ("TOPIC", "onex.evt.omnimarket.github-repo-write-completed.v1", "LITERAL"),
+            ("TOPIC", "onex.evt.omnimarket.github-repo-write-failed.v1", "LITERAL"),
+            ("GROUP", "local.omnimarket.scm_command_client.consume.v1.", "PREFIXED"),
+        )
+        for operation in ("READ", "DESCRIBE")
+    }
