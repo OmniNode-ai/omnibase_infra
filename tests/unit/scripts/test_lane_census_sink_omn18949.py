@@ -227,6 +227,30 @@ def test_live_drift_is_reported_and_reaches_the_active_issues_list(
     assert "census" in issues and "CRITICAL" in issues
 
 
+@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch", ""])
+def test_live_report_keeps_drift_critical_in_any_actions_context(
+    tmp_path: Path, event: str
+) -> None:
+    snap = _snapshot(
+        tmp_path,
+        emitted=_fresh(),
+        findings=[
+            {
+                "lane": "dev",
+                "kind": "unexpected_container",
+                "container": "some-undeclared-container",
+            }
+        ],
+    )
+    report = _run(
+        tmp_path, OMNINODE_CENSUS_LIVE_SNAPSHOT=str(snap), GITHUB_EVENT_NAME=event
+    )
+    section = _census_section(report)
+    assert "CRITICAL" in section
+    assert "declare it in the lane manifest" in section
+    assert "census" in report.split("*Active issues*", 1)[1]
+
+
 def test_live_drift_and_a_manifest_contradiction_are_different_rows(
     tmp_path: Path,
 ) -> None:
