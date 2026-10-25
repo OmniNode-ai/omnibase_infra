@@ -27,11 +27,13 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
 
 from omnibase_core.models.contracts.subcontracts import (
     ModelReplyTopics,
@@ -40,6 +42,12 @@ from omnibase_core.models.contracts.subcontracts import (
 )
 from omnibase_infra.errors import InfraTimeoutError, ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.lane_client_transport_binding import (
+    bind_lane_client_transport,
+)
+from omnibase_infra.event_bus.model_lane_client_transport import (
+    ModelLaneClientTransport,
+)
 from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
 
 if TYPE_CHECKING:
@@ -1139,3 +1147,150 @@ class TestRequestResponseWiringEdgeCases:
 
             await wiring.cleanup()
             await event_bus.close()
+
+
+# =============================================================================
+# Lane Transport Auth (OMN-17427)
+# =============================================================================
+
+
+_KAFKA_AUTH_ENV = (
+    "KAFKA_SECURITY_PROTOCOL",
+    "KAFKA_SASL_MECHANISM",
+    "KAFKA_SASL_USERNAME",
+    "KAFKA_SASL_PASSWORD",
+)
+
+
+def _sasl_lane_transport(bootstrap_servers: str) -> ModelLaneClientTransport:
+    return ModelLaneClientTransport(
+        lane="dev",
+        bootstrap_servers=bootstrap_servers,
+        security_protocol="SASL_PLAINTEXT",
+        sasl_mechanism="SCRAM-SHA-256",
+        sasl_username="dev-cli-host",
+        sasl_password=SecretStr("not-a-real-secret"),
+        declared_in=Path("omnimarket/config/ci_bus_lanes.yaml"),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestRequestResponseWiringLaneTransportAuth:
+    """The reply consumer authenticates as the lane transport bound for its broker."""
+
+    async def test_round_trip_under_bound_lane_transport(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event_bus: EventBusInmemory,
+        environment: str,
+        app_name: str,
+        request_response_config: ModelRequestResponseConfig,
+    ) -> None:
+        """A bound SASL lane transport reaches the reply consumer and a reply resolves."""
+        for name in _KAFKA_AUTH_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        mock_consumer: MockAIOKafkaConsumer | None = None
+
+        def consumer_factory(*topics: str, **kwargs: object) -> MockAIOKafkaConsumer:
+            nonlocal mock_consumer
+            mock_consumer = MockAIOKafkaConsumer(*topics, **kwargs)
+            return mock_consumer
+
+        bootstrap = "lane.invalid:19092"
+        with (
+            bind_lane_client_transport(_sasl_lane_transport(bootstrap)),
+            patch(
+                "omnibase_infra.runtime.request_response_wiring.AIOKafkaConsumer",
+                side_effect=consumer_factory,
+            ),
+        ):
+            wiring = RequestResponseWiring(
+                event_bus=cast("ProtocolEventBusPublisher", event_bus),
+                environment=environment,
+                app_name=app_name,
+                bootstrap_servers=bootstrap,
+            )
+            await wiring.wire_request_response(request_response_config)
+            assert mock_consumer is not None
+            consumer = mock_consumer
+
+            async def respond(msg: object) -> None:
+                request_data = json.loads(getattr(msg, "value", b"").decode("utf-8"))
+                await consumer.inject_message(
+                    MockConsumerRecord(
+                        topic="onex.evt.test.completed.v1",
+                        value=json.dumps(
+                            {
+                                "correlation_id": request_data["correlation_id"],
+                                "result": {"status": "success"},
+                            }
+                        ).encode("utf-8"),
+                    )
+                )
+
+            from omnibase_infra.models import ModelNodeIdentity
+
+            identity = ModelNodeIdentity(
+                env=environment,
+                service="responder",
+                node_name="test-responder",
+                version="v1",
+            )
+            await event_bus.subscribe("onex.cmd.test.request.v1", identity, respond)
+
+            try:
+                response = await wiring.send_request(
+                    instance_name="test-rpc", payload={"action": "process"}
+                )
+            finally:
+                await wiring.cleanup()
+
+        assert consumer._kwargs["security_protocol"] == "SASL_PLAINTEXT"
+        assert consumer._kwargs["sasl_mechanism"] == "SCRAM-SHA-256"
+        assert consumer._kwargs["sasl_plain_username"] == "dev-cli-host"
+        result = response["result"]
+        assert isinstance(result, dict)
+        assert result["status"] == "success"
+
+    async def test_unbound_broker_falls_back_to_environment_auth(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event_bus: EventBusInmemory,
+        environment: str,
+        app_name: str,
+        request_response_config: ModelRequestResponseConfig,
+    ) -> None:
+        """A transport bound for another broker does not leak into this consumer."""
+        for name in _KAFKA_AUTH_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        mock_consumer: MockAIOKafkaConsumer | None = None
+
+        def consumer_factory(*topics: str, **kwargs: object) -> MockAIOKafkaConsumer:
+            nonlocal mock_consumer
+            mock_consumer = MockAIOKafkaConsumer(*topics, **kwargs)
+            return mock_consumer
+
+        with (
+            bind_lane_client_transport(_sasl_lane_transport("other.invalid:19092")),
+            patch(
+                "omnibase_infra.runtime.request_response_wiring.AIOKafkaConsumer",
+                side_effect=consumer_factory,
+            ),
+        ):
+            wiring = RequestResponseWiring(
+                event_bus=cast("ProtocolEventBusPublisher", event_bus),
+                environment=environment,
+                app_name=app_name,
+                bootstrap_servers="localhost:9092",
+            )
+            try:
+                await wiring.wire_request_response(request_response_config)
+            finally:
+                await wiring.cleanup()
+
+        assert mock_consumer is not None
+        assert "sasl_mechanism" not in mock_consumer._kwargs
+        assert "sasl_plain_username" not in mock_consumer._kwargs
