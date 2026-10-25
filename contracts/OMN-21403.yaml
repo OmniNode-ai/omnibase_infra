@@ -43,6 +43,16 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn21403-behavioral-tenant-isolation
+    description: Live PostgreSQL applies all three migrations, permits writer INSERT and UPDATE for its tenant, hides another tenant's rows, rejects cross-tenant writes and DELETE, and denies rows without tenant context for both writer and dashboard roles. Drift reconciliation restores CHECK enforcement and refuses unknown required values while preserving existing rows.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_capability_cells_omn21403.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
   - id: dod-omn21403-ac1-grant
     description: Every topology instance and rendered catalog carries the SELECT, INSERT, UPDATE grant on delegation_capability_cells for tenant_projection_writer; the test fails for each of the 12 files when the entry is removed.
     source: manual
