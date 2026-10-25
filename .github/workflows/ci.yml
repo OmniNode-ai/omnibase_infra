@@ -314,6 +314,8 @@ jobs:
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
       # OMN-19998: same focused module as the no-omnimarket-dependency pre-commit hook.
+      # OMN-21279: it also refuses omnimarket in docker/Dockerfile.runtime, in ci.yml
+      # and composite-action install steps, and in test imports.
       - name: omnibase_infra declares and imports no omnimarket (OMN-19998)
         run: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
 
@@ -1942,28 +1944,12 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnimarket (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
-          path: omnimarket
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout omnibase_compat (sibling)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
           ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout omnimarket (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
-          path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python and uv
@@ -2000,15 +1986,14 @@ jobs:
       - name: Install sibling repos as editable (boundary pair deps)
         working-directory: omnibase_infra
         # Install checked-out sibling packages without re-solving their transitive
-        # release pins. The infra venv is already synced; resolving
-        # omniintelligence -> omnimarket through package metadata wedges while
-        # omnimarket requires an unpublished omnibase-compat release.
+        # release pins. The infra venv is already synced. omnimarket is not
+        # installed here: it depends on infra, never the reverse (OMN-21279).
         run: |
           set -eu
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install schema-handshake sibling deps failed after ${attempt} attempt(s)"
@@ -4679,28 +4664,12 @@ jobs:
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout omnimarket (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
-          path: omnimarket
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout omnibase_compat (sibling)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
           ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout omnimarket (sibling)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
-          path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python and uv
@@ -4742,7 +4711,7 @@ jobs:
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
           attempt=1
           max_attempts=5
-          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory -e ../omniintelligence; do
+          until uv pip install --no-deps -e ../omnibase_compat -e ../omnimemory -e ../omniintelligence; do
             status=$?
             if [ "${attempt}" -ge "${max_attempts}" ]; then
               echo "::error::uv pip install sibling deps failed after ${attempt} attempt(s)"

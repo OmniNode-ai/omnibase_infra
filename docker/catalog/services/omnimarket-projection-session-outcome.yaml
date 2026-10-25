@@ -1,6 +1,8 @@
 name: omnimarket-projection-session-outcome
 description: Kafka-to-DB projection consumer for session outcome events (OMN-7610)
-image: omnimarket-projection:latest
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
 layer: runtime
 container_name: omnimarket-projection-session-outcome
 required_env:

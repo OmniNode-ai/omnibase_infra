@@ -42,8 +42,7 @@ runtime-core:
   inject_required_env: []
 # OMN-19496: the LAPTOP profile. One command (`make up-local`) boots postgres,
 # redpanda, valkey, the migrations and the migration gate, and the runtime main
-# and effects kernels built from docker/Dockerfile.runtime (which installs
-# omnimarket, so the delegate-skill command topic has a consumer). It renders
+# and effects kernels built from docker/Dockerfile.runtime. It renders
 # under its own compose project, so every container, network, volume and the
 # runtime image tag are prefixed `omnibase-infra-local-` and it can run beside
 # any other project on the same Docker host.
@@ -79,35 +78,16 @@ local:
     - local-tenant-registry-seed
     - omninode-runtime
     - runtime-effects
-    # The delegation_events writer. It is a standalone projection runner, not
-    # a kernel handler, on every lane that projects delegations.
-    - omnimarket-projection-delegation
-    # Projects registered credential references into the tenant routing overlay.
-    - omnimarket-projection-tenant-credentials
     # OMN-19972 (plan T4.1, demo half): the six local pages read served
-    # exposures, so the laptop runs its own projection API, the LLM call and
-    # cost writer behind the Usage page, and the consumer-health projection.
-    - projection-api
-    - omnimarket-projection-llm-cost
+    # exposures, so the laptop runs its own consumer-health projection.
+    # The projection API ships in local-market on the omnimarket image.
     - consumer-health-projection
     # OMN-19972 (T3.6): the runtime kernel under RUNTIME_PROFILE=tenant-projection
     # (OMN-18114). The usage-by-model-day writer and the other contracts pinned to
     # that profile are dropped from main and effects, so without it the laptop
     # discovers them and consumes them with nothing.
     - tenant-projection-writer
-  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
-  # answers on 3102 (loopback, by publish_host above).
-  port_overrides:
-    projection-api: 3102
-  # OMN-19972: the projection API refuses to start while any bus-backed
-  # exposure's topic is missing, and on a laptop the kernel's boot is what
-  # creates them (TopicProvisioner, from every installed contract). Measured on
-  # the lakshman lane 2026-09-30: started first, it waited 300 s, exited with
-  # "no partition metadata" and looped.
   extra_depends_on:
-    projection-api:
-      omninode-runtime: service_healthy
-      redpanda-local-sasl: service_completed_successfully
     # OMN-20820: every broker client of this bundle (each runtime-layer entry,
     # which is what `inject_env` below reaches) starts only after the one-shot
     # has created the superuser and turned SASL on, so none of them opens an
@@ -116,12 +96,6 @@ local:
       redpanda-local-sasl: service_completed_successfully
     runtime-effects:
       redpanda-local-sasl: service_completed_successfully
-    omnimarket-projection-delegation:
-      redpanda-local-sasl: service_completed_successfully
-    omnimarket-projection-tenant-credentials:
-      redpanda-local-sasl: service_completed_successfully
-    omnimarket-projection-llm-cost:
-      redpanda-local-sasl: service_completed_successfully
     consumer-health-projection:
       redpanda-local-sasl: service_completed_successfully
     tenant-projection-writer:
@@ -129,6 +103,10 @@ local:
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
+    # OMN-21279: the infra image carries no omnimarket; laptop kernels activate
+    # only omnibase_infra. The runtime policy's omnibase_infra,omnimarket is for
+    # composed-image kernels; local-market restores it via env_default_overrides.
+    ONEX_ACTIVE_RUNTIME_PACKAGES: "${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra}"
     # Non-secret lane identity; empty means this runtime has no lane tenant.
     ONEX_TENANT_ID: "${ONEX_TENANT_ID:-}"
     # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
@@ -150,12 +128,8 @@ local:
     # cannot construct is quarantined and reported, not fatal. Measured on the
     # first laptop boot (.105, 2026-09-24): with "1" the main kernel exits on
     # HandlerSavingsCorrelation's unresolvable pool parameter.
-    # Delegation routing: the rendered Bifrost contract, this profile's own
-    # typed lane overlay (mounted by inject_volumes), and the routing tiers the
-    # runtime image bakes from the installed omnimarket package.
-    BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
-    BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/local.bifrost.yaml
-    BIFROST_VERIFY_ENDPOINTS: "0"
+    # OMN-21279: the infra-only kernels do not render the Bifrost contract;
+    # entrypoint_preflight skips the render while BIFROST_CONTRACT_PATH is unset.
     DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
     # Database principals. The tenant and internal bindings connect as the same
     # non-superuser principals the lab runtimes use (docker-compose.infra.yml
@@ -204,6 +178,41 @@ local:
     - OMNINODE_RUNTIME_PASSWORD
     - TENANT_PROJECTION_WRITER_PASSWORD
     - REDPANDA_SUPERUSER_PASSWORD
+local-market:
+  description: "Laptop profile composed with omnimarket: `local` plus omnimarket's projection API, projection writers and the Bifrost render, all on the omnimarket-runtime image omnimarket builds (OMN-21279). Booted by omnimarket's composed-runtime-boot gate."
+  project: omnibase-infra-local
+  services:
+    - projection-api
+    - omnimarket-projection-delegation
+    - omnimarket-projection-tenant-credentials
+    - omnimarket-projection-llm-cost
+  includes: [local]
+  # OMN-21279: these kernels run the omnimarket-runtime image.
+  env_default_overrides:
+    ONEX_LOCAL_RUNTIME_PACKAGES: "omnibase_infra,omnimarket"
+  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
+  # answers on 3102 (loopback, by publish_host inherited from local).
+  port_overrides:
+    projection-api: 3102
+  # OMN-19972: the projection API refuses to start while any bus-backed
+  # exposure's topic is missing, and on a laptop the kernel's boot is what
+  # creates them (TopicProvisioner, from every installed contract). Measured on
+  # a lab lane 2026-09-30: started first, it waited 300 s, exited with
+  # "no partition metadata" and looped.
+  extra_depends_on:
+    projection-api:
+      omninode-runtime: service_healthy
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-delegation:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-tenant-credentials:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-llm-cost:
+      redpanda-local-sasl: service_completed_successfully
+  inject_env:
+    BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
+    BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/local.bifrost.yaml
+    BIFROST_VERIFY_ENDPOINTS: "0"
 # OMN-19983: the laptop profile plus a mirror-only forwarder that republishes the
 # delegation topics the operator's overlay declares onto the lab lane the overlay
 # names. Opt-in: `local` alone never reaches a lab broker. The lanes, the lab

@@ -130,9 +130,9 @@ def test_laptop_env_file_alone_validates_and_renders_the_local_stack(
         "migration-gate",
         "omninode-runtime",
         "runtime-effects",
-        "omnimarket-projection-delegation",
-        "omnimarket-projection-tenant-credentials",
     } <= set(services)
+    # OMN-21279: the omnimarket projection writers ship in local-market only.
+    assert not [name for name in services if name.startswith("omnimarket-")]
 
     published: list[str] = []
     for svc in services.values():

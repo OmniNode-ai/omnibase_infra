@@ -258,6 +258,13 @@ def test_vendored_set_is_an_ordered_subset_matching_the_provenance_check() -> No
     import json
 
     workspace_packages: dict[str, str] = json.loads(result.stdout)
+    # OMN-21279: omnimarket is still staged (stage_workspace.sh reads the
+    # consuming lock and the delegation routing ladder from it) but the image
+    # installs no omnimarket, so it is the one vendored repo the in-image
+    # provenance check does not verify as a local install.
+    staged_not_installed = ["omnimarket"]
+    assert staged_not_installed == [r for r in vendored if r not in workspace_packages]
+    vendored = [repo for repo in vendored if repo not in staged_not_installed]
     assert list(workspace_packages) == vendored
     dist_by_dir = dict(
         zip(
