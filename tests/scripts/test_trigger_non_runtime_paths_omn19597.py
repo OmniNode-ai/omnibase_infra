@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLASSIFIER_PATH = REPO_ROOT / "scripts" / "runtime_change_classifier.py"
@@ -274,15 +275,33 @@ def _compose_files_the_deploy_agent_runs() -> set[str]:
 
 
 def _dockerfiles_built_by(compose_files: set[str]) -> set[str]:
+    """Infra Dockerfiles, resolved against each build's context.
+
+    Staged sibling repositories supply their own Dockerfiles. Their paths are
+    relative to that sibling, not changes in omnibase_infra (OMN-21279).
+    """
     built: set[str] = set()
+    siblings = REPO_ROOT / "workspace" / "sibling-repos"
     for compose in compose_files:
         path = REPO_ROOT / compose
         if not path.is_file():
             continue
-        for match in re.finditer(
-            r"^\s*dockerfile:\s*(\S+)", path.read_text(encoding="utf-8"), re.M
-        ):
-            built.add(match.group(1).strip("'\""))
+        # Compose merge tags change overlay application, not build path ownership.
+        text = re.sub(
+            r"(?m)(:\s+|-\s+)!(?:override|reset)\b[ \t]*",
+            r"\1",
+            path.read_text(encoding="utf-8"),
+        )
+        model = yaml.safe_load(text)
+        for service in model.get("services", {}).values():
+            build = service.get("build")
+            if not isinstance(build, dict) or "dockerfile" not in build:
+                continue
+            context = (path.parent / build.get("context", ".")).resolve()
+            if context.is_relative_to(siblings):
+                continue
+            dockerfile = (context / build["dockerfile"]).resolve()
+            built.add(dockerfile.relative_to(REPO_ROOT).as_posix())
     return built
 
 
@@ -302,6 +321,42 @@ class TestNothingTheDeployAgentRunsIsExcluded:
             assert classifier.classify_runtime_paths(
                 [compose], _canonical_like, source_repo="omnibase_infra"
             ) == [compose], compose
+
+    def test_dockerfile_scan_resolves_context_and_keeps_infra_exclusions(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, classifier: Any
+    ) -> None:
+        monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
+        compose = tmp_path / "docker" / "docker-compose.fixture.yml"
+        compose.parent.mkdir()
+        compose.write_text(
+            "x-market-build: &market-build\n"
+            "  context: ../workspace/sibling-repos/omnimarket\n"
+            "  dockerfile: Dockerfile.runtime\n"
+            "services:\n"
+            "  market:\n"
+            "    build: *market-build\n"
+            "    ports: !override []\n"
+            "  infra:\n"
+            "    build:\n"
+            "      context: ..\n"
+            "      dockerfile: docker/Dockerfile.runtime\n"
+            "  excluded-infra:\n"
+            "    build:\n"
+            "      context: .\n"
+            "      dockerfile: Dockerfile.gate-runner\n",
+            encoding="utf-8",
+        )
+        built = _dockerfiles_built_by({"docker/docker-compose.fixture.yml"})
+        assert built == {"docker/Dockerfile.runtime", "docker/Dockerfile.gate-runner"}
+        # A real infra exclusion still fails the guard's equality assertion.
+        assert (
+            classifier.classify_runtime_paths(
+                ["docker/Dockerfile.gate-runner"],
+                _canonical_like,
+                source_repo="omnibase_infra",
+            )
+            == []
+        )
 
     def test_no_dockerfile_those_compose_files_build_is_excluded(
         self, classifier: Any

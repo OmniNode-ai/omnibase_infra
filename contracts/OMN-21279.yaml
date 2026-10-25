@@ -97,3 +97,12 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("context: ../workspace/sibling-repos/omnimarket") and contains("infra-runtime: \"service:dev-lane-infra-runtime-image\""))' | grep -qx true
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-context-classification
+    description: >-
+      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. On 389b7933 the live-tree guard fails on the bare sibling Dockerfile.runtime; origin/dev at 5bb5f114 passes 39 tests on h101 through lab-run lw-f79c867d6e8a40e6. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
