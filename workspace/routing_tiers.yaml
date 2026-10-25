@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Placeholder committed so the Dockerfile COPY always resolves (OMN-21279). The
+# delegation routing ladder is owned by omnimarket, which the runtime image no
+# longer installs, and it holds lab-private endpoints that do not belong in this
+# public repository. In workspace mode, stage_workspace.sh overwrites this file
+# with the ladder staged from the omnimarket sibling. A release-mode image keeps
+# this empty ladder, so a lane placement that names a tier fails loudly in
+# render_bifrost_delegation_contract instead of validating against stale data.
+tiers: []

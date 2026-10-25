@@ -486,7 +486,7 @@ _CLOUD_ENDPOINT = (
 def _write_mixed_base_contract(
     path: Path, *, cloud_endpoint: str | None = _CLOUD_ENDPOINT
 ) -> None:
-    """A base contract shaped like the packaged omnimarket one: local backends
+    """A deploy-provided base contract at BIFROST_BASE_CONTRACT_PATH: local backends
     unbound (``endpoint_url: null`` + an env hint), cloud backends carrying a
     complete URL, and routing rules that REFERENCE the local ids."""
     path.write_text(

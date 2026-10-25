@@ -555,22 +555,22 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
     for job_name in ("schema-handshake", "kafka-boundary-compat"):
         job = ci_workflow["jobs"][job_name]
         assert job["timeout-minutes"] >= 45
-        checkout_names = {step.get("name") for step in job["steps"]}
-        assert "Checkout omnimarket (sibling)" in checkout_names
+        checkout_names = {str(step.get("name", "")) for step in job["steps"]}
+        # OMN-21279: omnimarket depends on infra, never the reverse -- these
+        # jobs neither check it out nor install it.
+        assert "Checkout omnimarket (sibling)" not in checkout_names
+        assert "Checkout omniintelligence (sibling)" in checkout_names
 
         install_step = next(
             step
             for step in job["steps"]
             if str(step.get("name", "")).startswith("Install sibling repos as editable")
         )
-        checkout_names = {str(step.get("name", "")) for step in job["steps"]}
-        assert "Checkout omnimarket (sibling)" in checkout_names
-
         run_script = install_step["run"]
         assert "max_attempts=5" in run_script
         assert "until uv pip install --no-deps" in run_script
         assert "-e ../omnibase_compat" in run_script
-        assert "-e ../omnimarket" in run_script
+        assert "omnimarket" not in run_script
         assert "-e ../omnimemory" in run_script
         assert "-e ../omniintelligence" in run_script
         assert "sibling deps attempt" in run_script
@@ -582,7 +582,8 @@ def test_heavy_cross_repo_boundary_installs_retry_and_have_timeout_budget() -> N
             if step.get("uses")
             == "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
         }
-        assert "omnimarket" in checkout_paths
+        assert "omnimarket" not in checkout_paths
+        assert {"omnibase_compat", "omnimemory", "omniintelligence"} <= checkout_paths
 
 
 def test_heavy_cross_repo_jobs_use_cpu_torch_for_sibling_install() -> None:
