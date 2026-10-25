@@ -1,0 +1,73 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21403
+title: omnibase_infra grants and vendors the delegation capability cells table, so the capability map writer can write on the dev lane
+summary: >-
+  Vendors the three node_projection_delegation_capability_map migrations from omnimarket#4380 (OMN-20169) byte for byte, with checksum-bound ledger rows, migration classes and the fence on the FORCE ROW LEVEL SECURITY step. Grants tenant_projection_writer SELECT, INSERT and UPDATE on delegation_capability_cells in the three topology instances that carry the application database and the nine rendered catalogs, with one interim table-grant declaration listed in the OMN-18863 expiry module. This is the infrastructure half of OMN-20169 AC-4; omnimarket#4380 still needs an omnibase_infra release that carries it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21403-grant
+    statement: >-
+      The role the capability-map writer connects as, tenant_projection_writer, holds SELECT, INSERT and UPDATE on public.delegation_capability_cells in every shipped topology instance and rendered catalog.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: tenant_projection_writer can SELECT, INSERT and UPDATE delegation_capability_cells, and a test fails when the grant is removed from an instance or a catalog -- falsifier: uv run pytest tests/unit/test_delegation_capability_cells_grant.py -q in omnibase_infra
+  - id: req-omn21403-migrations
+    statement: >-
+      The three capability-map migrations are vendored with their pinned bytes, each has one checksum-bound ledger row, and the application migration manifest check refuses a tree from which one is missing.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the three capability-map migrations are vendored in omnibase_infra and the migration-tree manifest check fails when one is missing -- falsifier: uv run pytest tests/unit -k delegation_capability_cells_migrations -q in omnibase_infra
+  - id: req-omn21403-release-input
+    statement: >-
+      This change is the omnibase_infra input that omnimarket#4380's database checks need; they pass only against an omnibase_infra release that carries it.
+    acceptance:
+      - id: AC3
+        statement: >-
+          AC3: omnimarket#4380's database checks pass against an omnibase_infra release that carries this change -- falsifier: uv run pytest tests/test_golden_chain_projection_delegation_capability_map.py -v in omnimarket against that release
+evidence_requirements:
+  - kind: tests
+    description: The shipped grant in every topology instance and rendered catalog.
+    command: uv run pytest tests/unit/test_delegation_capability_cells_grant.py -q
+  - kind: tests
+    description: The vendored migrations, their ledger rows and the manifest check on a tree missing one.
+    command: uv run pytest tests/unit -k delegation_capability_cells_migrations -q
+  - kind: tests
+    description: Source byte pins, ledger checksums, classes, the fence and the interim grant declaration.
+    command: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_map_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21403-ac1-grant
+    description: Every topology instance and rendered catalog carries the SELECT, INSERT, UPDATE grant on delegation_capability_cells for tenant_projection_writer; the test fails for each of the 12 files when the entry is removed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_delegation_capability_cells_grant.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21403-ac2-migrations
+    description: The three vendored migrations have ledger rows and files, and the manifest validator exits 1 naming the missing artifact when any one is removed from a copy of the tree.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit -k delegation_capability_cells_migrations -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21403-ac3-release-input
+    description: >-
+      Pins the bytes, ledger checksums, classes, fence and interim grant declaration that an omnibase_infra release must carry for omnimarket#4380. The omnimarket run against that release is read after the release and is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20169_delegation_capability_map_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
