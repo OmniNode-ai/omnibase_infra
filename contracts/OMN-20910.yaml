@@ -87,3 +87,10 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC7"]
+  - id: "dod-omn20910-deploy-issuer-image-h105-grants"
+    description: "Deploy check for the docker/Dockerfile.principal-issuer change, runnable on the hosted runner with no lab route, broker or credentials: build the issuer image from the checkout and read the h105 derived grant file inside it. It names dev-jonah-omnibook and READ on the github-repo-write completed and failed terminal topics. Fails at the merge base, whose image does not copy the file."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker build -q -f docker/Dockerfile.principal-issuer -t omn20910-principal-issuer-probe . && docker run --rm --entrypoint python omn20910-principal-issuer-probe -c \"import json; d = json.load(open('/app/h105-scm-pr-create-derived-grants.json')); reads = {g['resource'] for g in d['grants'] if g['resource_type'] == 'TOPIC' and g['operation'] == 'READ'}; assert d['principal'] == 'dev-jonah-omnibook', d['principal']; assert reads == {'onex.evt.omnimarket.github-repo-write-completed.v1', 'onex.evt.omnimarket.github-repo-write-failed.v1'}, reads\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
