@@ -108,6 +108,11 @@ def _api(
     return json.loads(body) if body else None
 
 
+def repo_api_base(repo: str) -> str:
+    """The REST base of ``repo``: the thread poster's and the review bot's replies (OMN-17427)."""
+    return f"https://api.github.com/repos/{repo}"  # url-authority-ok: GitHub REST API base for the CI thread poster; runs only inside GitHub Actions with GITHUB_TOKEN, same fixed origin every gh CLI call in this repo resolves
+
+
 def _paginate(url: str, token: str) -> list[dict[str, Any]]:
     """Fetch every page of a list endpoint (per_page=100, page=N)."""
     results: list[dict[str, Any]] = []
@@ -501,7 +506,7 @@ def main() -> int:
     # that reached cross-model agreement get one.
     postable, below_quorum = split_by_quorum(review_result, postable)
 
-    base = f"https://api.github.com/repos/{repo}"  # url-authority-ok: GitHub REST API base for the CI thread poster; runs only inside GitHub Actions with GITHUB_TOKEN, same fixed origin every gh CLI call in this repo resolves
+    base = repo_api_base(repo)
 
     # Existing hostile-reviewer fingerprints on this PR: review comments
     # (threads) AND review bodies (summary/body-only findings live there).
