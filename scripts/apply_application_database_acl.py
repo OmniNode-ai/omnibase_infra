@@ -20,6 +20,14 @@ Usage::
         --snapshot-out evidence/prechange-acl.json \\
         --execute
 
+Dev contractor usage grants (OMN-21015)::
+
+    uv run python scripts/apply_application_database_acl.py dev-contractor-usage --execute
+
+This isolated mode accepts no DSN or target override. It verifies the
+local dev container, applies deploy/lab/dev-contractor-usage-grants.sql and counts
+the tables as lakshman_ro. No credential is read; psql uses the local socket.
+
 Without ``--execute`` the run is a dry run: it resolves consent, refuses an
 ineligible matrix, writes the durable pre-change snapshot, and prints the probe
 plan -- but mutates nothing.
@@ -32,6 +40,7 @@ per-principal probe DSN is read from its own environment variable, named by
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -322,6 +331,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["dev-contractor-usage"]:
+        return _dev_contractor_main(sys.argv[2:])
     args = _parse_args()
     admin_dsn = os.environ.get("ADMIN_DSN")
     if not admin_dsn:
@@ -357,6 +368,100 @@ def main() -> int:
     )
     for description in report.probe_descriptions:
         print(f"  probe {description}")
+    return 0
+
+
+# OMN-21015: isolated dev-only table-grant mode; the matrix mode is unchanged.
+CONTAINER = "omnibase-infra-postgres"
+DATABASE = "omnidash_analytics"
+DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
+GRANTS = (
+    Path(__file__).resolve().parents[1] / "deploy/lab/dev-contractor-usage-grants.sql"
+)
+TABLES = ("usage_by_model_day", "usage_by_model_day_calls", "llm_call_metrics")
+
+
+def run(command: list[str], *, body: str | None = None) -> str:
+    """Capture output; never dump container metadata or connection diagnostics."""
+    result = subprocess.run(
+        command, input=body, text=True, capture_output=True, check=False, timeout=120
+    )
+    if result.returncode:
+        raise RuntimeError("dev grant operation failed; no credentials were logged")
+    return result.stdout.strip()
+
+
+def validate_target() -> None:
+    """Use the local Docker socket and refuse every non-dev compose target."""
+    identity = run(
+        [
+            *DOCKER,
+            "inspect",
+            "--format",
+            '{{ index .Config.Labels "com.docker.compose.project" }} '
+            '{{ index .Config.Labels "com.docker.compose.service" }} '
+            "{{json .NetworkSettings.Ports}}",
+            CONTAINER,
+        ]
+    )
+    project, service, ports = identity.split(maxsplit=2)
+    bindings = json.loads(ports).get("5432/tcp") or []
+    if (
+        project != "omnibase-infra"
+        or service != "postgres"
+        or not bindings
+        or any(binding["HostPort"] != "5436" for binding in bindings)
+    ):
+        raise RuntimeError("target must be the dev compose postgres on port 5436")
+
+
+def psql(body: str) -> str:
+    return run(
+        [
+            *DOCKER,
+            "exec",
+            "-i",
+            CONTAINER,
+            "psql",
+            "-X",
+            "-qAt",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            DATABASE,
+        ],
+        body=body,
+    )
+
+
+def readback_sql() -> str:
+    return """SET SESSION AUTHORIZATION lakshman_ro;
+BEGIN READ ONLY;
+SELECT current_user, current_database();
+SELECT 'usage_by_model_day', count(*) FROM public.usage_by_model_day;
+SELECT 'usage_by_model_day_calls', count(*) FROM public.usage_by_model_day_calls;
+SELECT 'llm_call_metrics', count(*) FROM public.llm_call_metrics;
+COMMIT;
+"""
+
+
+def _dev_contractor_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Dev-only contractor SELECT grants (OMN-21015)"
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--check", action="store_true")
+    args = parser.parse_args(argv)
+    validate_target()
+    if args.execute:
+        psql("SET onex.dev_contractor_grants = 'dev';\n" + GRANTS.read_text())
+    elif not args.check:
+        print(f"DRY RUN: dev {DATABASE}: SELECT on {', '.join(TABLES)} to lakshman_ro")
+        return 0
+    print(psql(readback_sql()))
     return 0
 
 
