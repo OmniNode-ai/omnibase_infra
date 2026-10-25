@@ -57,7 +57,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          uv run --project scripts/deploy-agent --extra dev python -c 'from deploy_agent.events import EnumRuntimeLane; from deploy_agent.routing import load_routing_table; t = load_routing_table(); routed = next(x.instance for x in t.routes if x.requester_repository == "omnimarket"); r = t.route(EnumRuntimeLane.DEV, "gha/omnimarket/runtime-rebuild-trigger"); assert t.instances[routed].available is False and r == t.default_instance, r; print("omnimarket dev rebuilds route to", r)'
+          uv run --project scripts/deploy-agent --extra dev python -c 'import sys; sys.path.insert(0, "scripts/deploy-agent"); from deploy_agent.events import EnumRuntimeLane; from deploy_agent.routing import load_routing_table; t = load_routing_table(); routed = next(x.instance for x in t.routes if x.requester_repository == "omnimarket"); r = t.route(EnumRuntimeLane.DEV, "gha/omnimarket/runtime-rebuild-trigger"); assert t.instances[routed].available is False and r == t.default_instance, r; print("omnimarket dev rebuilds route to", r)'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
