@@ -1554,6 +1554,232 @@ def test_public_pr_runner_variable_drift_is_reported_at_undeclared_repo_scope(
     ), findings
 
 
+_FLEET = '["self-hosted","omnibase-ci"]'
+
+
+def _private_fleet_shadow_policy() -> dict[str, Any]:
+    gate = dict.fromkeys(
+        (
+            "sustained_samples",
+            "sustained_min_span_seconds",
+            "capacity_budget",
+            "maintenance_roll_convergence",
+            "evidence_companion_fate_isolation",
+            "positive_control_acceptance",
+        ),
+        "x",
+    )
+    return {
+        "trusted_runner_variable": {
+            "name": "OMNI_TRUSTED_CI_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+            "repository_overrides": {
+                "repo_a": {
+                    "expected_json": _FLEET,
+                    "revert_when": "when repo_a is public",
+                    "activation_gate": gate,
+                },
+            },
+        },
+        "public_pr_runner_variable": {
+            "name": "OMNI_PUBLIC_PR_RUNS_ON_JSON",
+            "expected_json": '["ubuntu-latest"]',
+        },
+        "repositories": ["repo_a", "repo_b"],
+    }
+
+
+def _patch_private_fleet_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+    module: Any,
+    shadows: dict[str, str],
+    private: dict[str, bool],
+) -> list[int]:
+    def fake_variables(args: list[str]) -> list[dict[str, str]]:
+        if args == ["--org", "OmniNode-ai"]:
+            return [
+                {"name": "OMNI_TRUSTED_CI_RUNS_ON_JSON", "value": '["ubuntu-latest"]'},
+                {"name": "OMNI_PUBLIC_PR_RUNS_ON_JSON", "value": '["ubuntu-latest"]'},
+            ]
+        repo = args[1].removeprefix("OmniNode-ai/")
+        values = []
+        if repo in shadows:
+            values.append(
+                {"name": "OMNI_PUBLIC_PR_RUNS_ON_JSON", "value": shadows[repo]}
+            )
+        if repo == "repo_a":
+            values.append({"name": "OMNI_TRUSTED_CI_RUNS_ON_JSON", "value": _FLEET})
+        return values
+
+    reads: list[int] = []
+
+    def fake_visibility() -> list[tuple[str, bool]]:
+        reads.append(1)
+        return list(private.items())
+
+    monkeypatch.setattr(module, "_variables", fake_variables)
+    monkeypatch.setattr(module, "_live_repository_visibility", fake_visibility)
+    return reads
+
+
+def test_private_repo_public_pr_shadow_on_its_trusted_fleet_is_not_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20413 positive control: a private repository's public-PR shadow that
+    equals its declared trusted fleet value is the private-repo placement
+    (RULING 2026-10-16T07:07:09Z), not drift. Before the fix this is the
+    '... drifted to ...; expected ...' finding that failed every pull request.
+    """
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_a": _FLEET}, {"repo_a": True, "repo_b": False}
+    )
+
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+
+    assert findings == []
+    assert reads == [1]
+
+
+def test_public_repo_public_pr_shadow_on_the_fleet_is_still_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20413: the same value in a PUBLIC repository is the OMN-16683 shape
+    (fork pull requests on the self-hosted fleet) and stays a finding."""
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_a": _FLEET}, {"repo_a": False, "repo_b": False}
+    )
+
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+
+    assert [f.scope for f in findings] == ["repo_a"], findings
+    assert "OMNI_PUBLIC_PR_RUNS_ON_JSON drifted" in findings[0].message
+    assert reads == [1]
+
+
+def test_private_repo_public_pr_shadow_off_its_trusted_value_is_still_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20413: only the repository's own declared fleet value is accepted."""
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch,
+        module,
+        {"repo_a": '["self-hosted","omnibase-ci-mq"]'},
+        {"repo_a": True, "repo_b": True},
+    )
+
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+
+    assert [f.scope for f in findings] == ["repo_a"], findings
+    assert reads == []
+
+
+def test_private_repo_without_a_trusted_override_keeps_public_pr_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20413: a private repository with no declared trusted fleet value has
+    nothing to match, so its public-PR shadow is drift and no visibility is read."""
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_b": _FLEET}, {"repo_a": True, "repo_b": True}
+    )
+
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+
+    assert [f.scope for f in findings] == ["repo_b"], findings
+    assert reads == []
+
+
+@pytest.mark.parametrize("repositories", [["repo_a", "repo_b"], ["repo_b", "repo_a"]])
+def test_public_pr_shadow_visibility_is_cached_per_audit_not_between_audits(
+    monkeypatch: pytest.MonkeyPatch, repositories: list[str]
+) -> None:
+    module = _load_script()
+    policy = _private_fleet_shadow_policy()
+    policy["repositories"] = repositories
+    overrides = policy["trusted_runner_variable"]["repository_overrides"]
+    overrides["repo_b"] = dict(overrides["repo_a"])
+    private = {"repo_a": True, "repo_b": True}
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, dict.fromkeys(repositories, _FLEET), private
+    )
+    variables = module._variables
+
+    def with_second_trusted_shadow(args: list[str]) -> list[dict[str, str]]:
+        values = variables(args)
+        if args == ["--repo", "OmniNode-ai/repo_b"]:
+            values.append({"name": "OMNI_TRUSTED_CI_RUNS_ON_JSON", "value": _FLEET})
+        return values
+
+    monkeypatch.setattr(module, "_variables", with_second_trusted_shadow)
+    assert module.audit_github_variables(policy) == []
+    assert reads == [1]
+
+    private["repo_a"] = False
+    findings = module.audit_github_variables(policy)
+    assert [f.scope for f in findings] == ["repo_a"], findings
+    assert "OMNI_PUBLIC_PR_RUNS_ON_JSON drifted" in findings[0].message
+    assert reads == [1, 1]
+
+
+def test_public_pr_shadow_acceptance_uses_policy_not_live_trusted_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_a": _FLEET}, {"repo_a": True}
+    )
+    variables = module._variables
+
+    def drifted_trusted_shadow(args: list[str]) -> list[dict[str, str]]:
+        return [
+            {**value, "value": '["ubuntu-latest"]'}
+            if value["name"] == "OMNI_TRUSTED_CI_RUNS_ON_JSON"
+            else value
+            for value in variables(args)
+        ]
+
+    monkeypatch.setattr(module, "_variables", drifted_trusted_shadow)
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+    assert [f.scope for f in findings] == ["repo_a"], findings
+    assert "OMNI_TRUSTED_CI_RUNS_ON_JSON drifted" in findings[0].message
+    assert reads == [1]
+
+
+def test_public_pr_shadow_invalid_json_is_drift_without_visibility_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    reads = _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_a": "{"}, {"repo_a": True}
+    )
+    findings = module.audit_github_variables(_private_fleet_shadow_policy())
+    assert [f.scope for f in findings] == ["repo_a"], findings
+    assert "OMNI_PUBLIC_PR_RUNS_ON_JSON is not valid JSON" in findings[0].message
+    assert reads == []
+
+
+@pytest.mark.parametrize("error_name", ["GitHubReadError", "GitHubRateLimitError"])
+def test_public_pr_shadow_visibility_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch, error_name: str
+) -> None:
+    module = _load_script()
+    _patch_private_fleet_shadow(
+        monkeypatch, module, {"repo_a": _FLEET}, {"repo_a": True}
+    )
+    error = getattr(module, error_name)("visibility unavailable")
+
+    def unreadable() -> list[tuple[str, bool]]:
+        raise error
+
+    monkeypatch.setattr(module, "_live_repository_visibility", unreadable)
+    with pytest.raises(type(error), match="visibility unavailable") as raised:
+        module.audit_github_variables(_private_fleet_shadow_policy())
+    assert raised.value is error
+
+
 RUNNER_ROUTING_AUDIT_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "runner-routing-audit.yml"
 )
