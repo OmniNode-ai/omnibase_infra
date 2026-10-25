@@ -51,3 +51,12 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | split("\n") as $l | (($l | map(select(test("^\\s*#") | not) | select(test("omnimarket"; "i"))) | length) == 0) and ($l | map(contains("COPY --chown=omniinfra:omniinfra workspace/routing_tiers.yaml /app/config/delegation/routing_tiers.yaml")) | any)' | grep -qx true
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-laptop-kernels-activate-infra-only
+    description: >-
+      AC2, laptop boot. The catalog-local boot on head 17272c32b failed because the local bundle's kernels, on the infra image without omnimarket, read ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra,omnimarket from docker/runtime-policy.env and runtime_local_ingress imported omnimarket (ModuleNotFoundError, BOOT FAILED 5/5). The local bundle now renders ONEX_ACTIVE_RUNTIME_PACKAGES as ${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra} and local-market restores omnibase_infra,omnimarket through env_default_overrides. These tests render both bundles and resolve the local value against the policy file; all three fail with the bundle file of 17272c32b.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "local_kernels_activate_only_omnibase_infra or local_market_kernels_activate_omnimarket or local_kernel_packages_resolve_without_omnimarket"
+    binds_ac:
+      - "AC2"

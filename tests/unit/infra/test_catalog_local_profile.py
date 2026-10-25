@@ -31,6 +31,7 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
 )
+from omnibase_infra.runtime.runtime_local_ingress import parse_active_runtime_packages
 
 pytestmark = pytest.mark.unit
 
@@ -1612,6 +1613,45 @@ def test_status_local_group_listing_authenticates_as_the_local_superuser_sasl(
     assert "rpk group list user=onex-local" in calls
     assert "node_delegate_skill_orchestrator" in result.stdout
     assert "stub-secret" not in result.stdout + result.stderr + calls
+
+
+def test_local_kernels_activate_only_omnibase_infra() -> None:
+    services = _services(_render("local"))
+    for name in ("omninode-runtime", "runtime-effects", "tenant-projection-writer"):
+        env = services[name]["environment"]
+        value = env["ONEX_ACTIVE_RUNTIME_PACKAGES"]
+        assert value == "${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra}"
+        assert "omnimarket" not in value.split(":-", 1)[1].removesuffix("}").split(",")
+
+
+def test_local_market_kernels_activate_omnimarket() -> None:
+    services = _services(_render("local-market"))
+    for name in ("omninode-runtime", "runtime-effects"):
+        env = services[name]["environment"]
+        assert (
+            env["ONEX_ACTIVE_RUNTIME_PACKAGES"]
+            == "${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra,omnimarket}"
+        )
+
+
+def test_local_kernel_packages_resolve_without_omnimarket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(os, "environ", {})
+    catalog_cli._load_env_file(_REPO / "docker" / "runtime-policy.env")
+    monkeypatch.delenv("ONEX_LOCAL_RUNTIME_PACKAGES", raising=False)
+    assert os.environ["ONEX_ACTIVE_RUNTIME_PACKAGES"] == "omnibase_infra,omnimarket"
+
+    env = _services(_render("local"))["omninode-runtime"]["environment"]
+    value = env["ONEX_ACTIVE_RUNTIME_PACKAGES"]
+    reference = re.fullmatch(r"\$\{([^:}]+):-([^}]+)\}", value)
+    assert reference is not None
+    resolved = os.environ.get(reference[1]) or reference[2]
+    packages = parse_active_runtime_packages(
+        ("omnibase_infra",), env={"ONEX_ACTIVE_RUNTIME_PACKAGES": resolved}
+    )
+    assert packages == ("omnibase_infra",)
+    assert "omnimarket" not in packages
 
 
 def test_local_is_infra_only_and_does_not_enable_bifrost_render() -> None:

@@ -116,6 +116,10 @@ local:
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
+    # OMN-21279: the infra image carries no omnimarket; laptop kernels activate
+    # only omnibase_infra. The runtime policy's omnibase_infra,omnimarket is for
+    # composed-image kernels; local-market restores it via env_default_overrides.
+    ONEX_ACTIVE_RUNTIME_PACKAGES: "${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra}"
     # Non-secret lane identity; empty means this runtime has no lane tenant.
     ONEX_TENANT_ID: "${ONEX_TENANT_ID:-}"
     # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
@@ -195,6 +199,9 @@ local-market:
     - omnimarket-projection-tenant-credentials
     - omnimarket-projection-llm-cost
   includes: [local]
+  # OMN-21279: these kernels run the omnimarket-runtime image.
+  env_default_overrides:
+    ONEX_LOCAL_RUNTIME_PACKAGES: "omnibase_infra,omnimarket"
   extra_depends_on:
     omnimarket-projection-delegation:
       redpanda-local-sasl: service_completed_successfully
