@@ -21,8 +21,8 @@ decisions, each pinned here:
   NoConvergeAtProbe violated), and so does a guard that looks only forward;
 * it stages each omnimarket head at most once.
 
-The committed routing table routes omnimarket to dev-202, so the .201 idle
-converge fires under the default router
+Idle converge on the default instance fires only while the omnimarket route's
+instance is available under the default router
 (``test_idle_converge_fires_under_the_committed_table``).
 """
 
@@ -302,12 +302,18 @@ def _agent(
         routed = table.model_copy(
             update={
                 "routes": (
-                    ModelRoute(
+                    route := ModelRoute(
                         runtime_lane=EnumRuntimeLane.DEV,
                         requester_repository="omnimarket",
                         instance="dev-202",
                     ),
-                )
+                ),
+                "instances": {
+                    **table.instances,
+                    route.instance: table.instances[route.instance].model_copy(
+                        update={"available": True}
+                    ),
+                },
             }
         )
         agent._router = DeployRouter(
@@ -365,7 +371,7 @@ class TestIdleConvergeInTheAgent:
     def test_idle_converge_fires_under_the_committed_table(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The committed table routes omnimarket to dev-202."""
+        """An unavailable routed instance needs no idle converge on the default instance."""
         agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=False)
 
         agent._maybe_idle_converge()
@@ -374,13 +380,19 @@ class TestIdleConvergeInTheAgent:
             JobStore(tmp_path / "jobs").load(UUID(p.stem))
             for p in (tmp_path / "jobs").glob("*.json")
         ]
-        assert len(jobs) == 1
-        job = jobs[0]
-        assert job is not None
-        assert job.command["requested_by"] == IDLE_CONVERGE_REQUESTER
-        assert job.command["runtime_lane"] == "dev"
-        assert job.status == "success"
-        assert "rebuild_scope" in agent.executor.calls  # type: ignore[attr-defined]
+        table = load_routing_table()
+        routed = next(
+            r.instance for r in table.routes if r.requester_repository == "omnimarket"
+        )
+        available = table.instances[routed].available
+        assert len(jobs) == (1 if available else 0)
+        if available:
+            job = jobs[0]
+            assert job is not None
+            assert job.command["requested_by"] == IDLE_CONVERGE_REQUESTER
+            assert job.command["runtime_lane"] == "dev"
+            assert job.status == "success"
+            assert "rebuild_scope" in agent.executor.calls  # type: ignore[attr-defined]
 
     def test_idle_converge_only_on_the_poll_loops_idle_branch(self) -> None:
         """QueuedFirst and SingleWriter201 hold because the converge is called

@@ -1,0 +1,63 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21402
+title: "Dev redeploys route to the default instance while the omnimarket route's host is out: its instance is declared unavailable in the deploy routing table"
+summary: config/deploy_lane_routing.yaml routes (dev, omnimarket) rebuilds to a second instance whose host is out for hardware repair, so the default instance's agent skipped omnimarket's redeploy for 9a36de7af as routed elsewhere and no agent accepted it. An instance may now declare available false; a route naming it resolves to the default instance in the deploy agent router and in the CI verify-route resolver alike. The omnimarket route's instance is declared available false; setting it true restores the route.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21402-unavailable-instance-route
+    statement: A dev rebuild whose route names an unavailable instance runs on the default instance, and the routing table that says so is data read at the command's ref.
+    acceptance:
+      - id: AC1
+        statement: "AC1: a dev rebuild requested by omnimarket resolves to the default instance in the deploy agent router and in the CI verify-route resolver while the omnimarket route's instance is declared unavailable, and to that instance when it is available, with exactly one instance accepting -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py fails against the merge-base routing code"
+      - id: AC2
+        statement: "AC2: a routing table whose available value is not a bool, or whose default instance is declared unavailable, refuses -- falsifier: uv run pytest -k refuses over the same two test files fails against the merge-base routing code"
+      - id: AC3
+        statement: "AC3: after the merge, a default-instance deploy-agent job accepts the next omnimarket-requested dev redeploy and the default instance's runtime runs omnimarket at or after 9a36de7af -- falsifier: the default instance's deploy agent job store holds no job for an omnimarket command published after the merge, or git merge-base --is-ancestor 9a36de7af against the running omnimarket revision exits 1"
+evidence_requirements:
+  - kind: tests
+    description: The deploy agent's availability tests drive parse_routing_table, ModelRoutingTable.route and DeployRouter.is_mine on synthetic and committed tables.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py scripts/deploy-agent/tests/unit/test_deploy_lane_routing_omn19506.py scripts/deploy-agent/tests/unit/test_dev_202_omnimarket_route_omn19510.py scripts/deploy-agent/tests/unit/test_idle_converge_omn19509.py -q
+  - kind: tests
+    description: The CI verify-route tests resolve the routed instance's runner and receipt lane and check the CI resolver agrees with the agent's router.
+    command: uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py tests/ci/test_deploy_lane_verify_route_omn19507.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21402-ac1-route-follows-availability
+    description: Both resolvers send an omnimarket dev rebuild to the default instance while the routed instance is unavailable and to the routed instance when it is available; these tests fail against the merge-base routing code.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py -q -k "follows_availability or only_default_agent_accepts or committed_route"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py -q --no-cov -k "follow_availability or agrees_with_agent"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21402-ac2-refusals
+    description: A non-bool available value and an unavailable default each refuse, in the agent and in the CI resolver.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_instance_unavailable_omn20376.py -q -k refuses
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_deploy_lane_verify_route_unavailable_omn20376.py -q --no-cov -k refuses
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21402-deploy-table-shipped
+    description: The routing table at the merged head, parsed by the deploy agent's own router, sends an omnimarket dev rebuild to the default instance, which is the table every deploy agent reads at that command's ref. The live job and running omnimarket revision are read on the lab after the merge and recorded on the ticket; a hosted runner cannot reach the lab agent.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --project scripts/deploy-agent --extra dev python -c 'from deploy_agent.events import EnumRuntimeLane; from deploy_agent.routing import load_routing_table; t = load_routing_table(); routed = next(x.instance for x in t.routes if x.requester_repository == "omnimarket"); r = t.route(EnumRuntimeLane.DEV, "gha/omnimarket/runtime-rebuild-trigger"); assert t.instances[routed].available is False and r == t.default_instance, r; print("omnimarket dev rebuilds route to", r)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

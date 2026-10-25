@@ -33,6 +33,10 @@ the table, takes the DEFAULT instance. The default is pinned by a test to
 ``dev-201``, so every version of the table agrees on it, which keeps that case a
 pure function of the command too.
 
+An instance may declare ``available: false`` (OMN-21402). A route naming it
+takes the default instance, which must remain available. An absent key means
+available. The switch is read at the command's ref, like the route itself.
+
 RESIDUAL, STATED
 ----------------
 A sha the clone cannot resolve even after a fetch takes the default, with a
@@ -92,6 +96,7 @@ class ModelAgentInstance(BaseModel):
     name: str
     hostnames: tuple[str, ...]
     consumer_group: str
+    available: bool = True
 
 
 class ModelRoute(BaseModel):
@@ -113,13 +118,18 @@ class ModelRoutingTable(BaseModel):
     excluded_hosts: dict[str, str] = Field(default_factory=dict)
 
     def route(self, runtime_lane: EnumRuntimeLane, requested_by: str) -> str:
-        """The instance that runs a command, from this table alone."""
+        """The instance that runs a command, from this table alone.
+
+        A route naming an unavailable instance takes the default instance.
+        """
         repository = requester_repository(requested_by)
         for route in self.routes:
             if (
                 route.runtime_lane is runtime_lane
                 and route.requester_repository == repository
             ):
+                if self.instances[route.instance].available is False:
+                    return self.default_instance
                 return route.instance
         return self.default_instance
 
@@ -149,6 +159,9 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
     for name, spec in raw_instances.items():
         if not isinstance(spec, dict):
             raise RoutingTableError(f"instance {name!r} must be a mapping")
+        available = spec.get("available", True)
+        if not isinstance(available, bool):
+            raise RoutingTableError(f"instance {name!r} available must be a bool")
         group = str(spec.get("consumer_group") or "").strip()
         if not group:
             raise RoutingTableError(f"instance {name!r} declares no consumer_group")
@@ -169,7 +182,7 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
                 raise RoutingTableError(f"hostname {host!r} names two instances")
             hostnames.add(host)
         instances[str(name)] = ModelAgentInstance(
-            name=str(name), hostnames=names, consumer_group=group
+            name=str(name), hostnames=names, consumer_group=group, available=available
         )
 
     default = str(raw.get("default_instance") or "").strip()
@@ -181,6 +194,11 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
         )
     if default not in instances:
         raise RoutingTableError(f"default_instance {default!r} is not an instance")
+    if instances[default].available is False:
+        raise RoutingTableError(
+            f"default_instance {default!r} is declared unavailable; "
+            "a command must always have an instance"
+        )
 
     routes: list[ModelRoute] = []
     seen: set[tuple[EnumRuntimeLane, str]] = set()
