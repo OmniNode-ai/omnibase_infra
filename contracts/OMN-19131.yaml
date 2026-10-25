@@ -11,6 +11,24 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: a runtime refusal names --timeout, requested_timeout_seconds, the document task ceiling and the lower-or-omit guidance in human and JSON modes -- falsifier: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q'
+  - id: req-added-criteria-2026-10-24
+    statement: >-
+      The criteria AC2 to AC6, added to the ticket after this contract was first accepted, transcribed from the ticket body (the part before each falsifier). The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: If the chosen fix is refusal rather than support, the refusal is typed, exits non-zero, names `--timeout` and the installed `omnimarket` version, and happens before any run directory is created
+      - id: AC3
+        statement: 'AC3: No invocation that fails before publish reports "no resolvable delegation terminal"'
+      - id: AC4
+        statement: >-
+          AC4: The operator-visible error for a pre-publish validation failure names the offending field, the rejecting model's import path, and the capture log path
+      - id: AC5
+        statement: >-
+          AC5: A regression test dispatches with `--timeout` against the installed request model and fails if that model forbids the field
+      - id: AC6
+        statement: >-
+          AC6: Re-measuring the capture logs after the fix shows zero runs with an unreported pre-publish validation error
 evidence_requirements:
   - kind: tests
     description: The real click command, RuntimeLocal and in-memory bus carry a ceiling-checking fixture handler's refusal into stderr and the persisted receipt; the ceiling value itself completes as a positive control.
@@ -38,3 +56,57 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-19131-ac2-support-not-refusal
+    description: >-
+      AC2 binding (2026-10-24, lane C16 closeout). AC2 is conditional on a refusal fix; the chosen fix is support: omnimarket's request model declares requested_timeout_seconds (omnimarket#2718 and #2777), and a --timeout within the task-class ceiling completes. The only refusals left are the task-class ceiling refusal and a pre-publish field refusal from a model lacking the field, and both name --timeout. Neither happens before a run directory exists: the run directory and its receipt are written by design, so AC2's run-directory clause does not hold for them; it applies only to a refusal fix, which was not chosen.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py tests/integration/cli/test_delegate_pre_publish_failure_omn19131.py tests/unit/cli/test_delegate_pre_publish_failure.py -q -k "test_runtime_refusal_names_timeout_flag_and_ceiling or test_stderr_names_field_model_and_capture_log or test_extra_field_is_named_without_its_private_value_or_missing_defaults"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19131-ac3-no-terminal-before-publish
+    description: >-
+      AC3 binding (2026-10-24, lane C16 closeout). The real onex delegate command, RuntimeLocal and the in-memory bus, driven with --timeout into a request model that forbids the field, exit non-zero without the sentence "no resolvable delegation terminal" on stderr or stdout; a run that did publish and lost its terminal keeps that sentence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/integration/cli/test_delegate_pre_publish_failure_omn19131.py -q -k "test_the_terminal_sentence_never_reaches_the_operator or test_published_run_without_a_terminal_keeps_the_terminal_sentence"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19131-ac4-field-model-capture-log
+    description: >-
+      AC4 binding (2026-10-24, lane C16 closeout). For the same forced pre-publish refusal, stderr and the typed receipt on stdout both name the refused field requested_timeout_seconds, the rejecting model's import path and the capture log path, and the named capture log holds the runtime's own extra_forbidden refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/integration/cli/test_delegate_pre_publish_failure_omn19131.py -q -k "test_stderr_names_field_model_and_capture_log or test_the_receipt_on_stdout_carries_the_same_cause"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn-19131-ac5-forbidding-model-fails
+    description: >-
+      AC5 binding (2026-10-24, lane C16 closeout), infra half. The installed-model half is omnimarket's tests/unit/delegation/test_omn19131_cli_timeout_payload_validates.py (omnimarket#2815), which validates the payload this repository's CLI writes for --timeout 300 against the request model resolved from omnimarket's packaged contract through RuntimeLocal._build_initial_payload; it passed on 2026-10-24 and its falsifier (field removed from the model, 1 failed with extra_forbidden) is recorded on the ticket. It cannot run from this repository, which must not depend on omnimarket. This check runs the infra half: the same dispatch with --timeout against a model that forbids the field fails before publish, and without --timeout it completes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/integration/cli/test_delegate_pre_publish_failure_omn19131.py -q -k "test_positive_control_without_the_field_completes or test_stderr_names_field_model_and_capture_log"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn-19131-ac6-validation-reaches-stderr
+    description: >-
+      AC6 binding (2026-10-24, lane C16 closeout). The re-measurement is a readback: on the lab, 10836 node_delegate_skill_orchestrator capture logs written 2026-09-30 to 2026-10-15 held 0 ValidationError tracebacks (item dod-omn-19131-lab-readback); on the operator's Mac on 2026-10-24, 272 such logs written after the fix merged held 0 pre-publish refusals (no _build_initial_payload or "does not validate against" line), and their 195 ValidationError tracebacks are all the post-terminal ModelMeteringSummaryRow refresh, not a pre-publish validation error. This check holds the mechanism: every location, error type and model the forced refusal's capture log names reaches stderr, and a run the model accepts logs no ValidationError.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_capture_validation_reaches_stderr_omn19131.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
