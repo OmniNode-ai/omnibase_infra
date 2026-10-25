@@ -264,13 +264,36 @@ jobs:
       # rather than two independent builds that happen to have run. No push and
       # no --load: the output is discarded, which is what keeps this a gate and
       # not a publish step.
+      #
+      # OMN-20413: QEMU user-mode emulation can crash on its own. On 2026-10-25
+      # omnibase_infra#5312 (a one-line pyproject.toml change) went red here when
+      # the arm64 libc-bin trigger died with `qemu: uncaught target signal 11`,
+      # on the same binfmt digest and runner image that built green on #5230
+      # eleven hours earlier. An emulator crash says nothing about the
+      # Dockerfile, so the build is retried ONCE, and only when the log carries
+      # that QEMU signature. Any other failure (a 404, a checksum, an apt
+      # package with no arm64 build) fails on the first attempt, and a crash on
+      # both attempts still fails. The retry reuses the builder's cache, so
+      # only the layer that crashed runs again.
       - name: Cross-build the architecture-sensitive stage for amd64 + arm64
         run: |
           set -euo pipefail
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --target toolchain \
-            --output type=cacheonly \
-            --progress plain \
-            docker/runners
-          echo "multi-arch smoke PASSED: linux/amd64 and linux/arm64 both built."
+          log="${RUNNER_TEMP}/runner-image-multiarch-build.log"
+          for attempt in 1 2; do
+            if docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --target toolchain \
+              --output type=cacheonly \
+              --progress plain \
+              docker/runners 2>&1 | tee "${log}"; then
+              echo "multi-arch smoke PASSED: linux/amd64 and linux/arm64 both built."
+              exit 0
+            fi
+            if ! grep -q "qemu: uncaught target signal" "${log}"; then
+              echo "::error::multi-arch build failed (attempt ${attempt}); not a QEMU emulator crash, so it is not retried."
+              exit 1
+            fi
+            echo "::warning::multi-arch build attempt ${attempt}: the QEMU emulator crashed (qemu: uncaught target signal)."
+          done
+          echo "::error::the QEMU emulator crashed on both attempts of the multi-arch build."
+          exit 1
