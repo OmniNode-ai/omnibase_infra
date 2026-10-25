@@ -203,26 +203,30 @@ def test_the_convergence_job_runs_on_the_lane_host_fleet() -> None:
     hosts that cannot see this lane.
     """
     workflow = _load()
-    # OMN-19507 AC2: the runner is the routed instance's. Task B8 (OMN-19510)
-    # landed the real route for this exact caller: the committed table now
-    # sends an omnimarket merge to dev-202, whose runner is the host-202
-    # verify runner asserted below (tests/ci/test_deploy_lane_verify_route_
-    # omn19507.py pins the committed table itself; here we only need this
-    # job's own `runs-on` to read the routed instance's runner, whatever it
-    # is).
+    # OMN-19507 AC2: the runner is the routed instance's. When unavailable,
+    # verification follows the default instance (OMN-21402). The job must
+    # read that instance's runner from its output.
     from scripts.ci.deploy_lane_verify_route import job_outputs, load_table, resolve
 
     assert workflow["jobs"]["verify-sibling-converged"]["runs-on"] == (
         "${{ fromJSON(needs.trigger-rebuild.outputs.verify_runs_on) }}"
     )
-    routed = job_outputs(
-        resolve(load_table(), runtime_lane="dev", requested_by="gha/omnimarket/pr-1")
+    table = load_table()
+    routed = next(
+        row["instance"]
+        for row in table["routes"]
+        if row["requester_repository"] == "omnimarket"
     )
-    assert json.loads(routed["verify_runs_on"]) == [
-        "self-hosted",
-        "omnibase-verify",
-        "host-202",
-    ]
+    available = table["instances"][routed].get("available", True)
+    expected = routed if available else table["default_instance"]
+    outputs = job_outputs(
+        resolve(table, runtime_lane="dev", requested_by="gha/omnimarket/pr-1")
+    )
+    assert outputs["routed_instance"] == expected
+    assert (
+        json.loads(outputs["verify_runs_on"])
+        == (table["instances"][expected]["verify"]["runner_labels"])
+    )
 
 
 def test_the_convergence_job_only_runs_for_a_published_dev_command() -> None:

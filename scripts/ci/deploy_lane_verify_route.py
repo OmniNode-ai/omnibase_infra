@@ -29,7 +29,8 @@ table routes the merge to, declared in that instance's ``verify:`` block:
 THE ROUTE IS THE AGENT'S ROUTE
 ------------------------------
 :func:`route` is the same rule as ``deploy_agent.routing.ModelRoutingTable.route``
-(a ``(runtime_lane, requester_repository)`` row, else the default), and
+(a ``(runtime_lane, requester_repository)`` row, else the default; a row naming
+an unavailable instance also takes the default, OMN-21402), and
 ``tests/ci/test_deploy_lane_verify_route_omn19507.py`` checks the two agree on
 the committed table and on a table with a dev-202 row. It is re-stated rather
 than imported because the deploy agent is a separate package with its own
@@ -116,13 +117,27 @@ def route(table: dict[str, Any], runtime_lane: str, repository: str | None) -> s
     default = str(table.get("default_instance") or "").strip()
     if not default:
         raise VerifyRouteError("routing table declares no default_instance")
+    instances = table.get("instances")
+    availability: dict[str, bool] = {}
+    if isinstance(instances, dict):
+        for name, spec in instances.items():
+            available = spec.get("available", True) if isinstance(spec, dict) else True
+            if not isinstance(available, bool):
+                raise VerifyRouteError(f"instance {name!r} available must be a bool")
+            availability[name] = available
+    if availability.get(default, True) is False:
+        raise VerifyRouteError(
+            f"default_instance {default!r} is declared unavailable; "
+            "a command must always have an instance"
+        )
     for row in table.get("routes") or ():
         if (
             isinstance(row, dict)
             and str(row.get("runtime_lane")) == runtime_lane
             and str(row.get("requester_repository")) == repository
         ):
-            return str(row.get("instance"))
+            instance = str(row.get("instance"))
+            return default if availability.get(instance, True) is False else instance
     return default
 
 
