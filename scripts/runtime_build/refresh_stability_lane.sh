@@ -107,6 +107,11 @@
 #      every service it deployed, so restoring the subset would leave the lane
 #      on a revision combination nothing has ever run. The lane is left as
 #      found; see rollback.missing_rollback_anchors in the receipt.
+#
+#      FAILED_FOLDED_EFFECTS (OMN-21288): health gate passed but the main runtime
+#      did not log its folded roles or a runtime-effects container remains. The
+#      lane is left as found with no rollback and its preflight tags kept as
+#      rollback anchors; see the log lines and receipt result.
 #   64 usage / precondition error
 
 set -euo pipefail
@@ -851,6 +856,12 @@ if [[ "${GATE1_OVERALL}" == "PASS" && "${ANCESTRY_OK}" == true ]]; then
         RESULT="FAILED_FOLDED_EFFECTS"
     fi
     log "folded effects verification: ${RESULT}"
+    if [[ "${RESULT}" == FAILED_FOLDED_EFFECTS ]]; then
+        err "STOP AND REPORT: the lane is SERVING and was NOT rolled back."
+        err "Preflight tags were kept as rollback anchors. Read the main runtime"
+        err "log for the folded-roles marker and the runtime-effects census"
+        err "before re-running."
+    fi
     if [[ "${RESULT}" == SUCCESS ]]; then
         log "=== SUCCESS: health-gate PASS, ancestry OK, folded effects verified ==="
     fi
@@ -1149,5 +1160,7 @@ case "${RESULT}" in
     # restored; FAILED_BUILD_PROVENANCE got there by never being touched
     # (OMN-18061).
     FAILED_ROLLED_BACK|FAILED_BUILD_PROVENANCE) exit 1 ;;
+    # OMN-21288: folded-effects verification failed; no rollback, anchors kept.
+    FAILED_FOLDED_EFFECTS) exit 2 ;;
     *) exit 2 ;;
 esac
