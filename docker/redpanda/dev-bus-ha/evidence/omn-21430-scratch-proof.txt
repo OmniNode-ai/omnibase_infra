@@ -1,0 +1,56 @@
+== 1. one broker, RF1 (today's shape)
+topic create non-OK lines: 8
+topics on broker: 377
+TOPIC                                                   PARTITION  CURRENT-OFFSET  LOG-START-OFFSET  LOG-END-OFFSET  LAG   MEMBER-ID  CLIENT-ID  HOST
+onex.cmd.omnibase-infra.baseline-comparison-request.v1  0          5               0                 10              5                           
+== 2. two brokers join; RF raised to 3 in place
+ID    HOST                  PORT   RACK  CORES  MEMBERSHIP  IS-ALIVE  VERSION  UUID
+0     omn21430-scratch-rp1  33145  -     1      active      true      24.3.18  45a0aeb7-7731-4ea2-803d-0306dba1877d
+1     omn21430-scratch-rp2  33145  -     1      active      true      24.3.18  b526b157-5ccd-46c3-9e64-0ab746ca7508
+2     omn21430-scratch-rp3  33145  -     1      active      true      24.3.18  d8657f43-1452-4de9-af8f-d4f430eeeddf
+RF raise settled in 339 s
+CLUSTER HEALTH OVERVIEW
+=======================
+Healthy:                          true
+Unhealthy reasons:                []
+Controller ID:                    0
+All nodes:                        [0 1 2]
+Nodes down:                       []
+Leaderless partitions (0):        []
+Under-replicated partitions (0):  []
+onex.cmd/evt topics: 377; topics (incl. __consumer_offsets) with RF below 3: 0
+__consumer_offsets                                               3           3
+== 3. committed offset survived the move
+TOPIC                                                   PARTITION  CURRENT-OFFSET  LOG-START-OFFSET  LOG-END-OFFSET  LAG   MEMBER-ID  CLIENT-ID  HOST
+onex.cmd.omnibase-infra.baseline-comparison-request.v1  0          5               0                 10              5                           
+== 4. stop the ORIGINAL broker; write, group commit, reply
+ID    HOST                  PORT   RACK  CORES  MEMBERSHIP  IS-ALIVE  VERSION  UUID
+0     omn21430-scratch-rp1  33145  -     1      active      false     -        45a0aeb7-7731-4ea2-803d-0306dba1877d
+1     omn21430-scratch-rp2  33145  -     1      active      true      24.3.18  b526b157-5ccd-46c3-9e64-0ab746ca7508
+2     omn21430-scratch-rp3  33145  -     1      active      true      24.3.18  d8657f43-1452-4de9-af8f-d4f430eeeddf
+Produced to partition 0 at offset 13 with timestamp 1792982468881.
+Produced to partition 0 at offset 14 with timestamp 1792982468881.
+one-down-cmd-3
+one-down-cmd-4
+one-down-cmd-5
+Produced to partition 0 at offset 0 with timestamp 1792982469130.
+COORDINATOR  1
+STATE        Empty
+TOPIC                                                   PARTITION  CURRENT-OFFSET  LOG-START-OFFSET  LOG-END-OFFSET  LAG   MEMBER-ID  CLIENT-ID  HOST
+onex.cmd.omnibase-infra.baseline-comparison-request.v1  0          15              0                 15              0                           
+reply-for-one-down-cmd
+== 5. negative control: two of three stopped, acks=all write must fail
+negative control held: write refused or timed out with two brokers stopped (rc=124)
+== 6. brokers back; cluster healthy
+CLUSTER HEALTH OVERVIEW
+=======================
+Healthy:                          true
+Unhealthy reasons:                []
+Controller ID:                    2
+All nodes:                        [0 1 2]
+Nodes down:                       []
+Leaderless partitions (0):        []
+Under-replicated partitions (0):  []
+PROOF COMPLETE
+== cleanup
+cleanup done

@@ -1,0 +1,9 @@
+# OMN-21430: the three members of the dev bus. One broker per host; never two on one host.
+# Addresses are tailnet addresses, written here as <hN-address> placeholders: the values come
+# from the lab host table, never from this repository. h202 is down for repair (lab host table, 2026-10-23):
+# its address is read from the lab host table when it is back, and its env file stays unset until then.
+# kafka = external listener (the client bootstrap list); internal = transition listener; rpc = Raft.
+#name	os	tailnet_ip	kafka	internal	rpc	admin	memory	mem_limit	role
+h201	linux	<h201-address>	19092	19093	33145	127.0.0.1:9644	12G	14g	existing dev broker, keeps its data volume and node id; seed
+h202	linux	<h202-address>	19092	19093	33145	127.0.0.1:9644	12G	14g	joins through h201
+h200	darwin	<h200-address>	19092	19093	33145	127.0.0.1:9644	12G	14g	joins through h201; Docker Desktop VM must be raised from 16 GiB first
