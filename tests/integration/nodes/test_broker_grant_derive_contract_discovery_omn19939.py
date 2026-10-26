@@ -175,4 +175,4 @@ def test_discovered_derivation_feeds_the_developer_principal_issuer(
         lab_principal_issuer.expected_acl_rows(declaration, scoped_result.principal)
         == scoped_expected
     )
-    assert len(scoped_expected) == len(rows) + 4
+    assert len(scoped_expected) == len(rows) + 6
