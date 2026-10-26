@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19565
+title: "Lab proof registry: one proof profile per registry repository as data, a typed validator and a derived exemption classifier"
+summary: >-
+  The registry, its typed models, the validator script and the docs-only and bot change-control companion exemptions landed in omnibase_infra#4133. This change adds the decision D3 slice (operator ruling 2026-09-25T17:30:10Z, OMN-19612): the exemption classifier sends a diff whose changed paths are all under .github/ to proof_kind script_replay and never exempt, a .github/ path never counts as documentation, and the registry models refuse an exempt variant whose match rule includes a .github/-scoped glob and a docs_only profile whose docs_globs include one. The committed registry is unchanged; it declares 17 registry repositories, one more than the 16 the ticket names, because one repository joined the registry after the ticket was written.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19565-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the committed registry declares a row for each of the 16 registry repositories, two of them exempt -- falsifier: uv run python scripts/ci/validate_lab_proof_profiles.py exits 0 on the committed file and non-zero naming omnidash on a copy with the omnidash row removed'
+      - id: AC2
+        statement: 'AC2: the validator refuses a row whose step names no existing node or handler, and a row with enforce true and no bar record -- falsifier: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py'
+      - id: AC3
+        statement: 'AC3: the exemption classifier marks a documentation-only diff and a bot change-control companion exempt, and refuses exemption to the same documentation diff plus one source file and to a human-authored change-control contract PR -- falsifier: uv run pytest over the four classifier fixtures'
+      - id: AC4
+        statement: 'AC4: per decision D3 (plan section 9, was question Q3, settled by the operator''s accepted answers, rolling ledger RULING 2026-09-25T17:30:10Z ticket OMN-19612): a PR whose changed paths are `.github/`-only classifies to `handler_kind: script_replay`, never `exempt`, and the registry validator refuses a committed match rule that resolves a `.github/`-only path pattern to `handler_kind: exempt` -- falsifier: uv run pytest over a workflow-only-diff classifier fixture, plus uv run python scripts/ci/validate_lab_proof_profiles.py exits non-zero on a copy of the registry with a `.github/`-only row set to `exempt`'
+evidence_requirements:
+  - kind: tests
+    description: The committed registry validates, the omnidash-removed copy and the .github/-only exempt copy are refused by the script, the step, enforce and exemption-class rules refuse their rows, and the classifier fixtures cover docs-only, docs plus source, the bot companion, the human-authored contract and the workflow-only diffs.
+    command: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q
+  - kind: manual
+    description: "Deploy validation command for the existing caller-contract deploy gate: the validator over the committed registry file. Runnable on a hosted runner; it reads committed files only and touches no lab host or running lane."
+    command: "deploy: uv run python scripts/ci/validate_lab_proof_profiles.py"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19565-ac1-one-row-per-repo
+    description: validate_lab_proof_profiles.py exits 0 on the committed registry and non-zero naming OmniNode-ai/omnidash on a copy without the omnidash row; the two documentation repositories carry the exempt rows.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "committed_registry or omnidash or two_exempt"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19565-ac2-steps-and-enforce
+    description: A row whose step names no existing node or no routed operation, and a row with enforce true, are refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "step or enforce"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19565-ac3-exemption-classifier
+    description: The documentation-only diff and the bot companion are exempt; the documentation diff plus one source file and the human-authored change-control contract are not.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "documentation_only_diff_is_exempt or plus_one_source_file or bot_change_control_companion_is_exempt or human_authored"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn19565-ac4-workflow-only-not-exempt
+    description: A .github/-only diff classifies to script_replay and not exempt, including in a repository whose docs_globs are ["**"]; the models and the script refuse a registry copy whose exempt row matches .github/** and a docs_only profile whose docs_globs include a .github/ glob.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_validate_lab_proof_profiles.py -q -k "workflow or github"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
