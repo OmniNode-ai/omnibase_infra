@@ -25,11 +25,11 @@ emergency_bypass:
 dod_evidence:
   - id: dod-omn-21279-ac2-pre-swap-boot-contract
     description: >-
-      AC2, dev deployment safety. The 2026-10-25 scrubbed crash-loop reason BIFROST_BASE_CONTRACT_PATH unset is returned by a candidate-image probe. Runtime and full rebuilds must fail before any compose up, retain the running containers and persist the boot reason on a failed job. Positive controls permit a readable contract and preserve post-swap verification; timeout controls refuse the swap and clean only the disposable probe. Red first: the original four regressions failed at the base because no probe ran and the job was recorded successful. This hosted-runner check exercises the deploy agent without Docker or live runtime dependencies; it does not claim a full runtime boot or replace runtime-boot-smoke.
+      AC2, dev deployment safety. The 2026-10-25 scrubbed crash-loop reason BIFROST_BASE_CONTRACT_PATH unset is returned by a candidate-image probe. Runtime and full rebuilds must fail before any compose up, retain the running containers and persist the boot reason on a failed job. Positive controls permit a readable contract and preserve post-swap verification; timeout controls refuse the swap and clean only the disposable probe. Red first: the original four regressions failed at the base because no probe ran and the job was recorded successful. This hosted-runner check uses the repository lockfile and the verifier-prepared root environment, with the deploy-agent and runtime source paths from this head, and exercises the deploy agent without Docker or live runtime dependencies; it does not claim a full runtime boot or replace runtime-boot-smoke.
     source: generated
     checks:
       - check_type: command
-        check_value: uv run --project scripts/deploy-agent --extra dev pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
+        check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
     binds_ac:
       - "AC2"
   - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
