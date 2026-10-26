@@ -76,12 +76,19 @@ jobs:
   trigger-rebuild:
     name: Trigger node_redeploy Start
     if: github.event.pull_request.merged == true
+    # OMN-21279: omnibase-ci is no longer LAN-only: h203-light runners joined
+    # on 2026-10-24 and carry no uv on PATH, so this job fails at "Set up CI
+    # Python environment" there (omnimarket run 40266107998, job 121388869072
+    # on h203-light-4) and the merge gets no lab-pass receipt.
+    # Requiring arch-amd64 keeps the publisher on the LAN amd64 pools.
+    # If an off-LAN runner ever gains arch-amd64, this pin needs a dedicated
+    # LAN label instead.
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+        || fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci","arch-amd64"]')
       }}
     # OMN-18200 AC3 -- 5 -> 15, and the number comes from a measurement rather
     # than from rounding up.

@@ -130,6 +130,11 @@ requirements:
         statement: 'AC25: the workflow binds GH_TOKEN and checkout to github.token, binds RUNNER_AUDIT_ORG_TOKEN to the existing org reader, and selects the run token for same-repository content while variable metadata and sibling content use the privileged reader.'
       - id: AC26
         statement: 'AC26: quota, transport and malformed-response failures produce a named infrastructure refusal and nonzero audit result; CI Summary reports the failed infrastructure marker separately and still fails, while real drift findings remain visible.'
+  - id: req-omn19998-hostile-line-one-anchor
+    statement: A hostile-reviewer finding cited at line 1 alone is a whole-file finding, so the thread poster anchors it to the file and the Hostile Review Thread Gate verifies a fixed-in reply on such a thread as file-level (the fix commit changes the file) instead of requiring an edit to line 1, which in this repository is the SPDX header.
+    acceptance:
+      - id: AC29
+        statement: 'AC29: cited_lines reads a thread cited at line 1 alone as file-level while ranges 1-5 and 20 keep their lines, GitFixVerifier accepts a fix elsewhere in the cited file and refuses a fix to another file, and resolve_anchor posts a path:1 finding as a file anchor -- falsifier: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py -q -n 0 fails 4 of 7 cases against the merge-base scripts'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -194,6 +199,9 @@ evidence_requirements:
   - kind: tests
     description: The placement tests read every workflow file for the fleet fallback, the ci.yml job, .pre-commit-config.yaml and the CI Summary gate list.
     command: uv run pytest tests/ci/test_public_runner_placement_omn19998.py -q -n 0
+  - kind: tests
+    description: The line-one tests drive cited_lines and resolve_anchor directly and run GitFixVerifier against a temporary git repository with a reviewed commit and fix commits.
+    command: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_post_hostile_review_threads.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -540,3 +548,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC28
+  - id: dod-omn19998-ac29-hostile-line-one-anchor
+    description: AC29 tests read a line-1 thread as file-level, verify a fixed-in commit that changes the cited file elsewhere, and post a path:1 finding as a file anchor.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC29

@@ -114,8 +114,16 @@ jobs:
     # dedicated variable is deliberately left UNSET so the self-hosted literal
     # operates, and the script refuses a LAN publish from hosted compute by NAME
     # rather than timing out against an unresolvable bootstrap host.
+    #
+    # OMN-21279: omnibase-ci is no longer LAN-only: h203-light runners joined
+    # on 2026-10-24 and carry no uv on PATH, so this job fails at "Set up CI
+    # Python environment" there (omnimarket run 40266107998, job 121388869072
+    # on h203-light-4) and the merge gets no lab-pass receipt.
+    # Requiring arch-amd64 keeps the publisher on the LAN amd64 pools.
+    # If an off-LAN runner ever gains arch-amd64, this pin needs a dedicated
+    # LAN label instead.
     runs-on: >-
-      ${{ fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+      ${{ fromJSON(vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON || '["self-hosted","omnibase-ci","arch-amd64"]') }}
     # Matches the two sibling triggers' ceiling and for the same measured reason
     # (OMN-18200 AC3): the shared CI env is bimodal and a cold build after a
     # lockfile bump cost 4m01s on a run whose 5-minute ceiling cancelled it.

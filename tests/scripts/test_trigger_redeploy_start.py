@@ -350,7 +350,7 @@ def test_workflow_pins_the_publisher_to_the_lan_fleet() -> None:
 
     # A dedicated knob, deliberately left unset so the self-hosted literal wins.
     assert "vars.OMNI_RUNTIME_REBUILD_RUNS_ON_JSON" in publisher
-    assert '\'["self-hosted","omnibase-ci"]\'' in publisher
+    assert '\'["self-hosted","omnibase-ci","arch-amd64"]\'' in publisher
     # The shared seam is what moved this LAN-bound publisher onto hosted compute.
     assert "OMNI_TRUSTED_CI_RUNS_ON_JSON" not in publisher
     # Fork PRs still route to hosted compute, untrusted code never reaches the
