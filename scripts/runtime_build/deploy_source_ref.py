@@ -189,6 +189,43 @@ def _git(repo_path: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _refresh_origin_head(repo_path: Path) -> None:
+    """Re-read the remote's default branch into ``refs/remotes/origin/HEAD``.
+
+    OMN-20266: the symref is a local copy nothing else refreshed here, and the
+    remote-lane clone parity check reads it as the default branch. h105's still
+    named ``main`` after the remote default moved to ``dev``, so every omnimarket
+    lane placed there was refused with "checked out dev, not the default branch
+    main". ``git remote set-head origin --auto`` asks the remote over the git
+    transport; it moves a symref, so it runs through the ``ONEX_CANONICAL_CONVERGE``
+    door the canonical-clone ref guard keeps for ``pull-all.sh``. A refresh that
+    fails is reported and never fails the sync: the clone has already landed.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_path}",
+            "-C",
+            str(repo_path),
+            "remote",
+            "set-head",
+            "origin",
+            "--auto",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "ONEX_CANONICAL_CONVERGE": "1"},
+        check=False,
+    )
+    if result.returncode != 0:
+        print(
+            f"reconcile: {repo_path.name}: origin/HEAD not refreshed "
+            f"(rc={result.returncode}): {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+
+
 def _git_raw(repo_path: Path, *args: str) -> str:
     """Like :func:`_git` but returns stdout UNSTRIPPED.
 
@@ -813,6 +850,9 @@ def reconcile_clone(
             f"reports {after_branch!r} -- refusing to report this repo as synced.",
             SYNC_NOT_CONVERGED,
         )
+
+    if fetch and "origin" in _git(repo_path, "remote").split():
+        _refresh_origin_head(repo_path)
 
     return RepoSyncResult(
         repo=repo_path.name,

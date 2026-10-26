@@ -55,6 +55,7 @@ __all__ = [
     "node_contract",
     "node_contract_path",
     "node_input_model",
+    "node_provider_distribution",
 ]
 
 #: Entry-point group mapping a node name to its package (and its contract).
@@ -93,6 +94,25 @@ def _single_entry(group: str, name: str) -> EntryPoint:
             f"({sources}); uninstall the conflicting one"
         )
     return matches[0]
+
+
+def node_provider_distribution(node_name: str) -> str | None:
+    """The installed distribution that advertises ``node_name``, or ``None``.
+
+    The name is normalized (lower case, ``_`` as ``-``) so a caller compares
+    it against a project name. ``None`` when no single distribution advertises
+    the node, or the entry point carries no distribution: an unresolved node may
+    be one a stale install lacks, which is the caller's to treat as unknown.
+    """
+    try:
+        entry = _single_entry(NODE_GROUP, node_name)
+    except RegistryUnresolvedError:
+        return None
+    dist = entry.dist
+    if dist is None:
+        return None
+    name = dist.metadata["Name"] if dist.metadata else getattr(dist, "name", "")
+    return str(name).strip().lower().replace("_", "-") or None
 
 
 def node_contract_path(node_name: str) -> Path:
