@@ -951,21 +951,21 @@ class TestBootstrap:
         )
         order: list[str] = []
 
-        async def prefetch() -> None:
+        async def prefetch(**kwargs: object) -> str:
             order.append("prefetch")
             if prefetched_value is not None:
                 monkeypatch.setenv("GITHUB_TOKEN", prefetched_value)
-            mock_runtime_host.return_value._config_prefetch_status = (
-                "degraded_error" if prefetched_value is None else "ok"
-            )
-
-        mock_runtime_host.return_value.prefetch_config = AsyncMock(side_effect=prefetch)
+            return "degraded_error" if prefetched_value is None else "ok"
 
         async def wire(**kwargs: object) -> ModelAutoWiringReport:
             order.append("wire")
             return await real_wire_from_manifest(**kwargs)
 
         with (
+            patch(
+                "omnibase_infra.runtime.service_kernel.prefetch_runtime_config",
+                new=prefetch,
+            ),
             patch(
                 "omnibase_infra.runtime.service_kernel.load_runtime_profile",
                 return_value=profile,
@@ -1001,6 +1001,9 @@ class TestBootstrap:
             assert skips[0].membership[0].joined is False
             assert skips[0].membership[0].token == "absent"
         assert order == ["prefetch", "wire"]
+        assert mock_runtime_host.call_args.kwargs["config_prefetch_status"] == (
+            "degraded_error" if prefetched_value is None else "ok"
+        )
 
     @pytest.mark.parametrize("selection", ["profile", "node"])
     async def test_required_secret_gate_ignores_excluded_contracts(

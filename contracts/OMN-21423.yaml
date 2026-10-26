@@ -54,3 +54,15 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/discovery.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("def gate_manifest_on_required_secrets(") and contains("reason=\"required_secret_absent\""))' | grep -cx true > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" -H "Accept: application/vnd.github.raw" | grep -cF "manifest = gate_manifest_on_required_secrets(" > /dev/null
     binds_ac:
       - AC3
+  - id: dod-omn21423-prefetch-health-order
+    description: >-
+      Required-secret gating retains prefetched configuration without moving runtime construction ahead of health bind. The kernel cases cover absent, blank, whitespace and present tokens and transfer the prefetch outcome. The native integration starts a real HTTP handler and reads healthy, running status over HTTP with that outcome; the existing startup-order regression checks freeze, health bind, runtime construction and subscription order. No catalog Docker boot or broker membership is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_kernel.py -q --no-cov -k required_secret_gate_after_infisical_prefetch
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/test_omn_9741_service_kernel_health_ordering.py tests/integration/test_runtime_prefetch_health_omn21423.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

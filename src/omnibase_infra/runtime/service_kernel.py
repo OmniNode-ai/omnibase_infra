@@ -199,7 +199,10 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import (
+    RuntimeHostProcess,
+    prefetch_runtime_config,
+)
 from omnibase_infra.runtime.runtime_profile import (
     load_runtime_profile,
     resolve_runtime_profile_name,
@@ -3599,219 +3602,9 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
-        # Construct the runtime before auto-wiring so Infisical prefetch can
-        # populate the environment before required-secret presence is decided.
-        # 5. Resolve RegistryProtocolBinding from container or create new instance
-        # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
-        # The handler registry is optional for basic runtime operation - core event
-        # processing continues even without explicit handler bindings. However,
-        # ProtocolConfigurationError should NOT be masked as it indicates invalid
-        # configuration that would cause undefined behavior.
-        handler_registry: RegistryProtocolBinding | None = None
-
-        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
-        if container.service_registry is not None:
-            try:
-                handler_registry = await container.service_registry.resolve_service(
-                    RegistryProtocolBinding
-                )
-            except ServiceResolutionError as e:
-                # Service not registered - expected in minimal configurations.
-                # Create a new instance directly as fallback.
-                logger.warning(
-                    "DEGRADED_MODE: RegistryProtocolBinding not registered in container, "
-                    "creating new instance (correlation_id=%s): %s",
-                    correlation_id,
-                    e,
-                    extra={
-                        "error_type": type(e).__name__,
-                        "correlation_id": correlation_id,
-                        "degraded_mode": True,
-                        "degraded_reason": "service_not_registered",
-                        "component": "handler_registry",
-                    },
-                )
-                handler_registry = RegistryProtocolBinding()
-            except (RuntimeError, AttributeError) as e:
-                # Unexpected resolution failure - container internals issue.
-                # Log with more diagnostic context but still allow degraded operation.
-                logger.warning(
-                    "DEGRADED_MODE: Unexpected error resolving RegistryProtocolBinding, "
-                    "creating new instance (correlation_id=%s): %s",
-                    correlation_id,
-                    e,
-                    extra={
-                        "error_type": type(e).__name__,
-                        "correlation_id": correlation_id,
-                        "degraded_mode": True,
-                        "degraded_reason": "resolution_error",
-                        "component": "handler_registry",
-                    },
-                )
-                handler_registry = RegistryProtocolBinding()
-            # NOTE: ProtocolConfigurationError is NOT caught here - configuration
-            # errors should propagate and stop startup to prevent undefined behavior.
-        else:
-            # ServiceRegistry not available, create a new RegistryProtocolBinding directly
-            logger.warning(
-                "DEGRADED_MODE: ServiceRegistry not available, creating RegistryProtocolBinding directly (correlation_id=%s)",
-                correlation_id,
-                extra={
-                    "error_type": "NoneType",
-                    "correlation_id": correlation_id,
-                    "degraded_mode": True,
-                    "degraded_reason": "service_registry_unavailable",
-                    "component": "handler_registry",
-                },
-            )
-            handler_registry = RegistryProtocolBinding()
-
-        # 6. Create runtime host process with config and pre-resolved registry
-        # RuntimeHostProcess accepts config as dict; cast model_dump() result to
-        # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
-        # returns dict[str, Any] but all our model fields are strongly typed)
-        #
-        # NOTE: RuntimeHostProcess expects 'service_name' and 'node_name' keys,
-        # but ModelRuntimeConfig uses 'name'. Map 'name' -> 'service_name'/'node_name'
-        # for compatibility. (OMN-1602)
-        #
-        # INVARIANT: In the current runtime model, `ModelRuntimeConfig.name` represents
-        # both `service_name` and `node_name` by design; multi-node services require
-        # schema expansion.
-        #
-        # TRIGGER FOR SPLIT: Split when ServiceKernel supports registering multiple
-        # node contracts under one service runtime.
-        #
-        # Why both fields get the same value:
-        # - For services using simplified config with just 'name', there's no semantic
-        #   distinction between service and node - a single service hosts a single node
-        # - RuntimeHostProcess uses these to construct ModelNodeIdentity for Kafka
-        #   consumer group IDs and event routing
-        # - The introspection consumer group format is:
-        #   {env}.{service_name}.{node_name}.{purpose}.{version}
-        #   e.g., "local.my-service.my-service.introspection.v1"
-        # - When service_name == node_name, the format is intentionally redundant but
-        #   maintains consistency with multi-node deployments where they would differ
-        runtime_create_start_time = time.time()
-        runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
-        if not config.name:
-            # OMN-17287: fail here, naming the ACTUAL cause. Without this the
-            # boot dies two frames later in RuntimeHostProcess.__init__ with
-            # "requires 'service_name' in config", which points at the runtime
-            # constructor and sends the reader hunting for caller drift. The
-            # real cause is always upstream: `name` is unset on the loaded
-            # runtime config, which in a container means the contracts
-            # bind-mount resolved to a directory with no runtime_config.yaml
-            # in it (an empty or wrongly-targeted ONEX_CONTRACTS_DIR). That is
-            # what happened on the lab dev lane host when a failed deploy's
-            # rollback removed the deployed tree out from under the running
-            # containers and Docker re-created the bind source empty.
-            #
-            # This is a diagnostic, not a default: `service_name` is still
-            # required and is still never inferred (no-defensive-defaults).
-            _runtime_config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
-            raise ProtocolConfigurationError(
-                f"Runtime config has no 'name', so service_name/node_name cannot "
-                f"be resolved. Expected config at {_runtime_config_path} "
-                f"(exists={_runtime_config_path.is_file()}); contracts_dir="
-                f"{contracts_dir} (exists={contracts_dir.is_dir()}). If the "
-                f"contracts directory is empty, the ONEX_CONTRACTS_DIR mount is "
-                f"not resolving to the deployed contracts tree.",
-                context=ModelInfraErrorContext.with_correlation(
-                    correlation_id=correlation_id,
-                    operation="resolve_service_name",
-                    target_name=str(_runtime_config_path),
-                ),
-                config_path=str(_runtime_config_path),
-            )
-        runtime_config_dict["service_name"] = config.name
-        runtime_config_dict["node_name"] = config.name
-
-        # 6.1 Create introspection service (OMN-5609)
-        # Wire contract data into introspection so published events include
-        # metadata.description, event_bus topics, and contract_capabilities.
-        # Without this, RuntimeHostProcess receives introspection_service=None
-        # and silently skips all introspection publishing.
-        #
-        # The registration orchestrator contract is used as the primary
-        # contract source because it is the principal node in the kernel
-        # and declares all subscribe/publish topics.
-        introspection_service = None
-        if config.name:
-            try:
-                from omnibase_infra.services.service_node_introspection import (
-                    ServiceNodeIntrospection,
-                )
-
-                # Use registration orchestrator contract (primary kernel node)
-                _registration_contract_dir = (
-                    Path(__file__).resolve().parent.parent
-                    / "nodes"
-                    / "node_registration_orchestrator"
-                )
-                introspection_service = ServiceNodeIntrospection.from_contract_dir(
-                    contracts_dir=_registration_contract_dir,
-                    event_bus=event_bus,
-                    node_name=config.name,
-                    environment=environment,
-                )
-                logger.info(
-                    "Introspection service created for node '%s' (correlation_id=%s)",
-                    config.name,
-                    correlation_id,
-                )
-            except Exception as intro_err:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Failed to create introspection service, introspection "
-                    "will be disabled: %s (correlation_id=%s)",
-                    intro_err,
-                    correlation_id,
-                    extra={"error_type": type(intro_err).__name__},
-                )
-
-        runtime = RuntimeHostProcess(
-            container=container,
-            event_bus=event_bus,
-            input_topic=config.input_topic,
-            output_topic=config.output_topic,
-            config=runtime_config_dict,
-            handler_registry=handler_registry,
-            # Pass contracts directory for handler discovery (OMN-1317)
-            # This enables contract-based handler registration instead of
-            # falling back to wire_handlers() with an empty registry
-            contract_paths=[str(contracts_dir)],
-            # OMN-2050: Wire dispatch engine so RuntimeHostProcess skips the
-            # legacy _on_message subscription and routes through
-            # EventBusSubcontractWiring instead.
-            dispatch_engine=dispatch_engine,
-            # OMN-5609: Wire introspection service so the runtime publishes
-            # introspection events with metadata, capabilities, and event_bus
-            # fields from the contract.
-            # NOTE(OMN-5609): ServiceNodeIntrospection structurally satisfies
-            # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
-            # cannot verify structural protocol conformance across mixin chains.
-            # Why: Runtime wiring validates and narrows this payload shape before use.
-            introspection_service=introspection_service,  # type: ignore[arg-type]
-            # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
-            # uses contract values instead of DEFAULT_* constants.
-            runtime_node_graph_config=node_graph_config,
-            # OMN-10587: Wire prefetch policy from runtime profile.
-            prefetch_policy=kernel_profile.prefetch_policy,
-            # OMN-15418: Thread the same checked-in topology used by cold boot
-            # into post-freeze Kafka contract materialization.
-            deployment_topology=deployment_topology,
-        )
-        runtime_create_duration = time.time() - runtime_create_start_time
-        logger.debug(
-            "Runtime host process created in %.3fs (correlation_id=%s)",
-            runtime_create_duration,
-            correlation_id,
-            extra={
-                "duration_seconds": runtime_create_duration,
-                "input_topic": config.input_topic,
-                "output_topic": config.output_topic,
-            },
-        )
+        # Prefetch configuration without constructing the runtime before health
+        # bind (OMN-9741/13768). Preserve its outcome for runtime startup.
+        config_prefetch_status = "pending"
 
         # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
         #
@@ -3912,10 +3705,15 @@ async def bootstrap() -> int:
                 # Select profile/lane/nodes before probing required secrets.
                 # Infisical prefetch must finish before the env presence check;
                 # a failed best-effort prefetch never bypasses this gate.
-                if not env_secret_store_is_authoritative(
-                    kernel_profile.prefetch_policy, os.environ.get("INFISICAL_ADDR", "")
+                if config.name and not env_secret_store_is_authoritative(
+                    kernel_profile.prefetch_policy,
+                    os.environ.get("INFISICAL_ADDR", ""),
                 ):
-                    await runtime.prefetch_config()
+                    config_prefetch_status = await prefetch_runtime_config(
+                        container=container,
+                        service_slug=config.name,
+                        prefetch_policy=kernel_profile.prefetch_policy,
+                    )
                 manifest = gate_manifest_on_required_secrets(
                     manifest,
                     drop_blank_secret_names(
@@ -4342,9 +4140,9 @@ async def bootstrap() -> int:
         )
 
         # Start HTTP health server before long Kafka subscription work. At this
-        # point RuntimeHostProcess is not attached yet, so ServiceHealth serves
+        # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
         # startup liveness with runtime_attached=false. The runtime is
-        # attached immediately below (OMN-13768), still before the
+        # constructed and attached immediately below (OMN-13768), still before the
         # long-running Kafka subscription work further down.
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
@@ -4399,6 +4197,219 @@ async def bootstrap() -> int:
                 "duration_seconds": health_start_duration,
                 "port": http_port,
                 "runtime_attached": False,
+            },
+        )
+
+        # 5. Resolve RegistryProtocolBinding from container or create new instance
+        # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
+        # The handler registry is optional for basic runtime operation - core event
+        # processing continues even without explicit handler bindings. However,
+        # ProtocolConfigurationError should NOT be masked as it indicates invalid
+        # configuration that would cause undefined behavior.
+        handler_registry: RegistryProtocolBinding | None = None
+
+        # Check if service_registry is available (may be None in omnibase_core 0.6.x)
+        if container.service_registry is not None:
+            try:
+                handler_registry = await container.service_registry.resolve_service(
+                    RegistryProtocolBinding
+                )
+            except ServiceResolutionError as e:
+                # Service not registered - expected in minimal configurations.
+                # Create a new instance directly as fallback.
+                logger.warning(
+                    "DEGRADED_MODE: RegistryProtocolBinding not registered in container, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "service_not_registered",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = RegistryProtocolBinding()
+            except (RuntimeError, AttributeError) as e:
+                # Unexpected resolution failure - container internals issue.
+                # Log with more diagnostic context but still allow degraded operation.
+                logger.warning(
+                    "DEGRADED_MODE: Unexpected error resolving RegistryProtocolBinding, "
+                    "creating new instance (correlation_id=%s): %s",
+                    correlation_id,
+                    e,
+                    extra={
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                        "degraded_mode": True,
+                        "degraded_reason": "resolution_error",
+                        "component": "handler_registry",
+                    },
+                )
+                handler_registry = RegistryProtocolBinding()
+            # NOTE: ProtocolConfigurationError is NOT caught here - configuration
+            # errors should propagate and stop startup to prevent undefined behavior.
+        else:
+            # ServiceRegistry not available, create a new RegistryProtocolBinding directly
+            logger.warning(
+                "DEGRADED_MODE: ServiceRegistry not available, creating RegistryProtocolBinding directly (correlation_id=%s)",
+                correlation_id,
+                extra={
+                    "error_type": "NoneType",
+                    "correlation_id": correlation_id,
+                    "degraded_mode": True,
+                    "degraded_reason": "service_registry_unavailable",
+                    "component": "handler_registry",
+                },
+            )
+            handler_registry = RegistryProtocolBinding()
+
+        # 6. Create runtime host process with config and pre-resolved registry
+        # RuntimeHostProcess accepts config as dict; cast model_dump() result to
+        # dict[str, object] to avoid implicit Any typing (Pydantic's model_dump()
+        # returns dict[str, Any] but all our model fields are strongly typed)
+        #
+        # NOTE: RuntimeHostProcess expects 'service_name' and 'node_name' keys,
+        # but ModelRuntimeConfig uses 'name'. Map 'name' -> 'service_name'/'node_name'
+        # for compatibility. (OMN-1602)
+        #
+        # INVARIANT: In the current runtime model, `ModelRuntimeConfig.name` represents
+        # both `service_name` and `node_name` by design; multi-node services require
+        # schema expansion.
+        #
+        # TRIGGER FOR SPLIT: Split when ServiceKernel supports registering multiple
+        # node contracts under one service runtime.
+        #
+        # Why both fields get the same value:
+        # - For services using simplified config with just 'name', there's no semantic
+        #   distinction between service and node - a single service hosts a single node
+        # - RuntimeHostProcess uses these to construct ModelNodeIdentity for Kafka
+        #   consumer group IDs and event routing
+        # - The introspection consumer group format is:
+        #   {env}.{service_name}.{node_name}.{purpose}.{version}
+        #   e.g., "local.my-service.my-service.introspection.v1"
+        # - When service_name == node_name, the format is intentionally redundant but
+        #   maintains consistency with multi-node deployments where they would differ
+        runtime_create_start_time = time.time()
+        runtime_config_dict = cast("dict[str, object]", config.model_dump(mode="json"))
+        if not config.name:
+            # OMN-17287: fail here, naming the ACTUAL cause. Without this the
+            # boot dies two frames later in RuntimeHostProcess.__init__ with
+            # "requires 'service_name' in config", which points at the runtime
+            # constructor and sends the reader hunting for caller drift. The
+            # real cause is always upstream: `name` is unset on the loaded
+            # runtime config, which in a container means the contracts
+            # bind-mount resolved to a directory with no runtime_config.yaml
+            # in it (an empty or wrongly-targeted ONEX_CONTRACTS_DIR). That is
+            # what happened on the lab dev lane host when a failed deploy's
+            # rollback removed the deployed tree out from under the running
+            # containers and Docker re-created the bind source empty.
+            #
+            # This is a diagnostic, not a default: `service_name` is still
+            # required and is still never inferred (no-defensive-defaults).
+            _runtime_config_path = contracts_dir / DEFAULT_RUNTIME_CONFIG
+            raise ProtocolConfigurationError(
+                f"Runtime config has no 'name', so service_name/node_name cannot "
+                f"be resolved. Expected config at {_runtime_config_path} "
+                f"(exists={_runtime_config_path.is_file()}); contracts_dir="
+                f"{contracts_dir} (exists={contracts_dir.is_dir()}). If the "
+                f"contracts directory is empty, the ONEX_CONTRACTS_DIR mount is "
+                f"not resolving to the deployed contracts tree.",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    operation="resolve_service_name",
+                    target_name=str(_runtime_config_path),
+                ),
+                config_path=str(_runtime_config_path),
+            )
+        runtime_config_dict["service_name"] = config.name
+        runtime_config_dict["node_name"] = config.name
+
+        # 6.1 Create introspection service (OMN-5609)
+        # Wire contract data into introspection so published events include
+        # metadata.description, event_bus topics, and contract_capabilities.
+        # Without this, RuntimeHostProcess receives introspection_service=None
+        # and silently skips all introspection publishing.
+        #
+        # The registration orchestrator contract is used as the primary
+        # contract source because it is the principal node in the kernel
+        # and declares all subscribe/publish topics.
+        introspection_service = None
+        if config.name:
+            try:
+                from omnibase_infra.services.service_node_introspection import (
+                    ServiceNodeIntrospection,
+                )
+
+                # Use registration orchestrator contract (primary kernel node)
+                _registration_contract_dir = (
+                    Path(__file__).resolve().parent.parent
+                    / "nodes"
+                    / "node_registration_orchestrator"
+                )
+                introspection_service = ServiceNodeIntrospection.from_contract_dir(
+                    contracts_dir=_registration_contract_dir,
+                    event_bus=event_bus,
+                    node_name=config.name,
+                    environment=environment,
+                )
+                logger.info(
+                    "Introspection service created for node '%s' (correlation_id=%s)",
+                    config.name,
+                    correlation_id,
+                )
+            except Exception as intro_err:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Failed to create introspection service, introspection "
+                    "will be disabled: %s (correlation_id=%s)",
+                    intro_err,
+                    correlation_id,
+                    extra={"error_type": type(intro_err).__name__},
+                )
+
+        runtime = RuntimeHostProcess(
+            container=container,
+            event_bus=event_bus,
+            input_topic=config.input_topic,
+            output_topic=config.output_topic,
+            config=runtime_config_dict,
+            handler_registry=handler_registry,
+            # Pass contracts directory for handler discovery (OMN-1317)
+            # This enables contract-based handler registration instead of
+            # falling back to wire_handlers() with an empty registry
+            contract_paths=[str(contracts_dir)],
+            # OMN-2050: Wire dispatch engine so RuntimeHostProcess skips the
+            # legacy _on_message subscription and routes through
+            # EventBusSubcontractWiring instead.
+            dispatch_engine=dispatch_engine,
+            # OMN-5609: Wire introspection service so the runtime publishes
+            # introspection events with metadata, capabilities, and event_bus
+            # fields from the contract.
+            # NOTE(OMN-5609): ServiceNodeIntrospection structurally satisfies
+            # ProtocolNodeIntrospection via MixinNodeIntrospection, but mypy
+            # cannot verify structural protocol conformance across mixin chains.
+            # Why: Runtime wiring validates and narrows this payload shape before use.
+            introspection_service=introspection_service,  # type: ignore[arg-type]
+            # OMN-6334: Pass contract-driven runtime config so RuntimeHostProcess
+            # uses contract values instead of DEFAULT_* constants.
+            runtime_node_graph_config=node_graph_config,
+            # OMN-10587: Wire prefetch policy from runtime profile.
+            prefetch_policy=kernel_profile.prefetch_policy,
+            config_prefetch_status=config_prefetch_status,
+            # OMN-15418: Thread the same checked-in topology used by cold boot
+            # into post-freeze Kafka contract materialization.
+            deployment_topology=deployment_topology,
+        )
+        runtime_create_duration = time.time() - runtime_create_start_time
+        logger.debug(
+            "Runtime host process created in %.3fs (correlation_id=%s)",
+            runtime_create_duration,
+            correlation_id,
+            extra={
+                "duration_seconds": runtime_create_duration,
+                "input_topic": config.input_topic,
+                "output_topic": config.output_topic,
             },
         )
 
