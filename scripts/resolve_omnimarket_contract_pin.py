@@ -127,9 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        # Compare resolved paths, so any spelling of the committed pin (relative,
-        # absolute or a symlink) is tag-only and publishes ref=.
-        committed = args.pin_file.resolve() == PIN_PATH
+        # Compare fully resolved paths on both sides, so any spelling of the
+        # committed pin (relative, absolute, a symlink, or the pin itself being a
+        # symlink) is tag-only and publishes ref=.
+        committed = args.pin_file.resolve() == PIN_PATH.resolve()
         ref = resolve_pin(args.pin_file, predecessor=not committed)
     except (OSError, ValueError) as exc:
         print(f"::error::{exc}", file=sys.stderr)

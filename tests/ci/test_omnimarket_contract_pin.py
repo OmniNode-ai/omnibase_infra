@@ -526,6 +526,24 @@ def test_a_symlink_to_the_committed_pin_is_not_a_predecessor_read(
     assert output.read_text(encoding="utf-8") == f"ref={ref}\n"
 
 
+def test_a_symlinked_committed_pin_is_not_a_predecessor_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-17292: when the committed pin is itself a symlink, its target stays tag-only."""
+    resolver = _resolver_module()
+    target = tmp_path / "pin-target.yaml"
+    target.write_text(
+        "repository: OmniNode-ai/omnimarket\n"
+        "omnimarket_contract_ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0\n",
+        encoding="utf-8",
+    )
+    committed_link = tmp_path / "omnimarket-contract-pin.yaml"
+    committed_link.symlink_to(target)
+    monkeypatch.setattr(resolver, "PIN_PATH", committed_link)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert resolver.main(["--pin-file", str(target)]) == 1
+
+
 def test_a_predecessor_sha_pin_for_another_repository_is_refused(
     tmp_path: Path,
 ) -> None:
