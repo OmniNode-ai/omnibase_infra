@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import click
-import httpx
 
 from omnibase_infra.handlers.lease.handler_lease_store import (
     HandlerLeaseStore,
@@ -72,10 +71,11 @@ def _run(
         raise click.UsageError(f"lease kind {kind!r} is not declared")
 
     async def execute() -> Sequence[ModelLeaseReply]:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            adapter = HandlerPlacementEtcd(endpoint, client)
-            store = HandlerLeaseStore(adapter, policies)
-            return await action(store)
+        adapter = await HandlerPlacementEtcd.connect(endpoint, 5.0)
+        try:
+            return await action(HandlerLeaseStore(adapter, policies))
+        finally:
+            await adapter.aclose()
 
     replies = asyncio.run(execute())
     for reply in replies:

@@ -45,7 +45,7 @@ def _contract() -> dict[str, object]:
     return loaded
 
 
-def _lease_store_from_contract() -> HandlerLeaseStore:
+async def _lease_store_from_contract() -> HandlerLeaseStore:
     """Build the store from the contract's overlay-resolved descriptor values."""
     descriptor = _contract().get("descriptor")
     if not isinstance(descriptor, dict):
@@ -60,7 +60,7 @@ def _lease_store_from_contract() -> HandlerLeaseStore:
                 f"Contract {_CONTRACT} descriptor.{key} resolved empty; "
                 "set the environment variable it references"
             )
-    return lease_store_from_config(
+    return await lease_store_from_config(
         resolved["lease_etcd_endpoint"], resolved["lease_kinds"]
     )
 
@@ -90,10 +90,9 @@ class HandlerLeaseOrchestratorBase:
     def __init__(self, store: HandlerLeaseStore | None = None) -> None:
         self._store = store
 
-    @property
-    def _lease_store(self) -> HandlerLeaseStore:
+    async def _lease_store(self) -> HandlerLeaseStore:
         if self._store is None:
-            self._store = _lease_store_from_contract()
+            self._store = await _lease_store_from_contract()
         return self._store
 
     def _output(
@@ -131,7 +130,7 @@ class HandlerLeaseAcquire(HandlerLeaseOrchestratorBase):
         self, envelope: ModelEventEnvelope[object]
     ) -> ModelHandlerOutput[None]:
         request = ModelLeaseAcquireRequest.model_validate(envelope.payload)
-        store = self._lease_store
+        store = await self._lease_store()
         try:
             reply = await store.acquire(request)
         except ValueError as exc:
@@ -153,7 +152,7 @@ class HandlerLeaseRenew(HandlerLeaseOrchestratorBase):
         self, envelope: ModelEventEnvelope[object]
     ) -> ModelHandlerOutput[None]:
         request = ModelLeaseRenewRequest.model_validate(envelope.payload)
-        reply = await self._lease_store.renew(
+        reply = await (await self._lease_store()).renew(
             request.kind, request.resource, request.lease_id
         )
         return self._output(envelope, reply)
@@ -166,7 +165,7 @@ class HandlerLeaseRelease(HandlerLeaseOrchestratorBase):
         self, envelope: ModelEventEnvelope[object]
     ) -> ModelHandlerOutput[None]:
         request = ModelLeaseReleaseRequest.model_validate(envelope.payload)
-        reply = await self._lease_store.release(
+        reply = await (await self._lease_store()).release(
             request.kind, request.resource, request.lease_id
         )
         return self._output(envelope, reply)

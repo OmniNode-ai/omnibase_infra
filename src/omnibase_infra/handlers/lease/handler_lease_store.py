@@ -21,8 +21,6 @@ import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
-import httpx
-
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -57,14 +55,14 @@ def lease_kinds_from_spec(spec: str) -> tuple[ModelLeaseKindPolicy, ...]:
     return tuple(policies)
 
 
-def lease_store_from_config(endpoint: str, kinds_spec: str) -> HandlerLeaseStore:
+async def lease_store_from_config(endpoint: str, kinds_spec: str) -> HandlerLeaseStore:
     """Build the lease store from a resolved etcd endpoint and kind list."""
     if not endpoint.strip():
         raise ValueError("the lease etcd endpoint resolved empty")
     if not kinds_spec.strip():
         raise ValueError("the lease kinds resolved empty")
     kinds = lease_kinds_from_spec(kinds_spec)
-    adapter = HandlerPlacementEtcd(endpoint.strip(), httpx.AsyncClient(timeout=5.0))
+    adapter = await HandlerPlacementEtcd.connect(endpoint.strip(), 5.0)
     return HandlerLeaseStore(adapter, kinds)
 
 

@@ -22,6 +22,10 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.runtime.models.model_http_client_config import (
+    ModelHttpClientConfig,
+)
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 _JsonObject = dict[str, object]
 
@@ -51,6 +55,12 @@ class HandlerPlacementEtcd:
     def __init__(self, endpoint: str, client: httpx.AsyncClient) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._client = client
+
+    @classmethod
+    async def connect(cls, endpoint: str, timeout_s: float) -> HandlerPlacementEtcd:
+        """Build the handler over a provider-made client bounded by ``timeout_s``."""
+        provider = ProviderHttpClient(ModelHttpClientConfig(timeout_seconds=timeout_s))
+        return cls(endpoint, await provider.create())
 
     @property
     def handler_type(self) -> EnumHandlerType:
