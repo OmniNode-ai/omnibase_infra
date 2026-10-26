@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Lease orchestrator handlers: acquire, renew, release over the etcd store (OMN-21424).
+"""Lease handlers: acquire, renew, release and reconcile over etcd (OMN-21424).
 
 Each returns the reply the orchestrator publishes; no handler touches the bus.
 """
@@ -11,6 +11,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.lease.handler_lease_store import HandlerLeaseStore
 from omnibase_infra.models.lease import (
     ModelLeaseAcquireRequest,
+    ModelLeaseProjectionRow,
     ModelLeaseReleaseRequest,
     ModelLeaseRenewRequest,
     ModelLeaseReply,
@@ -18,7 +19,7 @@ from omnibase_infra.models.lease import (
 
 
 class HandlerLeaseOrchestratorBase:
-    """Shared construction and classification of the three lease handlers."""
+    """Shared construction and classification of the lease handlers."""
 
     def __init__(self, store: HandlerLeaseStore) -> None:
         self._store = store
@@ -55,4 +56,16 @@ class HandlerLeaseRelease(HandlerLeaseOrchestratorBase):
         )
 
 
-__all__ = ["HandlerLeaseAcquire", "HandlerLeaseRelease", "HandlerLeaseRenew"]
+class HandlerLeaseReconcile(HandlerLeaseOrchestratorBase):
+    """Read back a held projection row and publish its observed grant or expiry."""
+
+    async def handle(self, request: ModelLeaseProjectionRow) -> ModelLeaseReply:
+        return await self._store.reconcile(request)
+
+
+__all__ = [
+    "HandlerLeaseAcquire",
+    "HandlerLeaseReconcile",
+    "HandlerLeaseRelease",
+    "HandlerLeaseRenew",
+]

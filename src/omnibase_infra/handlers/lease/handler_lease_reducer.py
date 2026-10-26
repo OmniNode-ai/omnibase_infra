@@ -12,6 +12,11 @@ The lease ID comes from the higher-ranked state (equal fences identify the same
 grant). Lower-ranked events can still supply a missing holder without changing
 state. An unchanged merged row emits no intent, so replaying events in any order
 reaches the same rows.
+
+The lease.reconcile operation supplies expiry events from held projection rows
+and an etcd readback, retaining the grant's original lease ID and fence after
+TTL deletion. Unfenced renew/release replies cannot identify a projection
+version and remain excluded from this join.
 """
 
 from __future__ import annotations

@@ -9,6 +9,7 @@ from omnibase_infra.handlers.lease.handler_lease_kinds import (
 )
 from omnibase_infra.handlers.lease.handler_lease_orchestrator import (
     HandlerLeaseAcquire,
+    HandlerLeaseReconcile,
     HandlerLeaseRelease,
     HandlerLeaseRenew,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "HandlerLeaseFence",
     "HandlerLeaseKinds",
     "HandlerLeaseProjection",
+    "HandlerLeaseReconcile",
     "HandlerLeaseReducer",
     "HandlerLeaseRelease",
     "HandlerLeaseRenew",

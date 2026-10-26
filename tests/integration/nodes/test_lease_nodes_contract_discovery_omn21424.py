@@ -17,6 +17,7 @@ NODES = {
         "HandlerLeaseAcquire",
         "HandlerLeaseRenew",
         "HandlerLeaseRelease",
+        "HandlerLeaseReconcile",
     },
     "node_lease_reducer": {"HandlerLeaseReducer"},
     "node_projection_lease": {"HandlerLeaseProjection"},

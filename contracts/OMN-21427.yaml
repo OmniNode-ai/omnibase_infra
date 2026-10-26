@@ -43,6 +43,15 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: dod-omn21427-expiry-projection
+    description: >-
+      Reconcile a TTL-expired slot grant from its held projection row through the lease.reconcile handler, without a successful renewal. The expiry event retains the original identity, holder and fence, marks the reducer row expired, and cannot overwrite a newer grant. An unreachable etcd raises instead of emitting an expiry event. This is an explicit reconciliation port; periodic scheduling and deployed runtime wiring remain outside this change.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/placement/test_lease_expiry_reconciliation_omn21427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21427-ac1-slot-leases
     description: >-
       Two placers on one loopback etcd race 30 placements over two hosts of capacity 2 and 3: exactly 5 grants, each host at its capacity, 25 refusals, 5 distinct fences; a retried request_id replays its grant on the other placer; a release frees a slot for the other placer at a higher fence. The placement handler's source has no fcntl, flock, .lock, getpid, kill(, open( or mkdir. Covers the omnibase_infra placement only; the placement lock, slot markers and placing receipts outside this repository are not deleted by this change.

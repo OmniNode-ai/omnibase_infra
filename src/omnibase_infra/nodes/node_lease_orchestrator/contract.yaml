@@ -7,7 +7,7 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: ORCHESTRATOR_GENERIC
 description: >
-  Acquire, renew and release a lease on one resource of a declared kind. A grant is one etcd transaction and its fence is the etcd revision of that transaction (OMN-21418 GenericLease model). No topic is declared yet: the lease command and event topics, and placing this node as a primary, wait on the contract placement read of OMN-21421.
+  Acquire, renew, release and reconcile a lease on one resource of a declared kind. A grant is one etcd transaction and its fence is the etcd revision of that transaction (OMN-21418 GenericLease model). Reconciliation reads held projection rows without renewing their grants and retains their original fences in expiry events. No topic is declared yet: the lease command and event topics, and placing this node as a primary, wait on the contract placement read of OMN-21421.
 
 input_model:
   name: ModelLeaseAcquireRequest
@@ -24,6 +24,8 @@ capabilities:
     description: Keep a grant alive at the same fence.
   - name: lease.release
     description: Give a grant back.
+  - name: lease.reconcile
+    description: Observe a held projection row without renewing its grant and emit expiry when absent.
 handler_routing:
   routing_strategy: operation_match
   handlers:
@@ -57,6 +59,16 @@ handler_routing:
         name: ModelLeaseReleaseRequest
         module: omnibase_infra.models.lease.model_lease_release_request
         description: Give a grant back.
+    - operation: lease.reconcile
+      handler:
+        name: HandlerLeaseReconcile
+        module: omnibase_infra.handlers.lease.handler_lease_orchestrator
+      description: Read back the original grant and emit its identity and fence even after TTL expiry.
+      supported_operations: [lease.reconcile]
+      input_model:
+        name: ModelLeaseProjectionRow
+        module: omnibase_infra.models.lease.model_lease_projection_row
+        description: A known held projection row whose grant should be reconciled against etcd.
 metadata:
   description: Generic lease orchestrator over etcd.
   author: OmniNode Team

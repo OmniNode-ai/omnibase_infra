@@ -31,6 +31,7 @@ from omnibase_infra.handlers.placement.handler_placement_etcd import (
 from omnibase_infra.models.lease import (
     ModelLeaseAcquireRequest,
     ModelLeaseKindPolicy,
+    ModelLeaseProjectionRow,
     ModelLeaseReply,
 )
 
@@ -209,6 +210,32 @@ class HandlerLeaseStore:
             lease_id=lease_id,
             fence=slot[1],
             ttl_s=ttl,
+        )
+
+    async def reconcile(self, known: ModelLeaseProjectionRow) -> ModelLeaseReply:
+        """Observe a projected grant without renewing it.
+
+        Callers reconcile held projection rows periodically. A linearizable
+        etcd read determines whether that exact grant still exists; absence
+        produces an expiry event with the original fence, even after another
+        holder has acquired the resource. Read failures propagate rather than
+        fabricating expiry. This operation does not allocate or keep alive a
+        lease and does not depend on a process-local grant cache.
+        """
+        self._policy(known.kind)
+        if known.state != "held":
+            raise ValueError("only held projection rows need reconciliation")
+        slot = await self._slot_of(known.kind, known.resource, known.lease_id)
+        if slot is not None and slot[1] != known.fence:
+            raise ValueError("projected grant fence does not match etcd")
+        return ModelLeaseReply(
+            outcome="lease-expired" if slot is None else "lease-granted",
+            kind=known.kind,
+            resource=known.resource,
+            lease_id=known.lease_id,
+            fence=known.fence,
+            holder=known.holder,
+            reason="reconciled projected grant",
         )
 
     async def release(
