@@ -83,7 +83,7 @@ def _reconcile(clone: Path, receipt: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_reconcile_refreshes_a_stale_origin_head_symref(tmp_path: Path) -> None:
-    _, clone = _origin_whose_default_moved_to_dev(tmp_path)
+    origin, clone = _origin_whose_default_moved_to_dev(tmp_path)
     assert _git(clone, "symbolic-ref", "refs/remotes/origin/HEAD") == (
         "refs/remotes/origin/main"
     )
@@ -92,6 +92,7 @@ def test_reconcile_refreshes_a_stale_origin_head_symref(tmp_path: Path) -> None:
 
     assert done.returncode == 0, done.stderr
     assert _git(clone, "symbolic-ref", "--short", "HEAD") == "dev"
+    assert _git(clone, "rev-parse", "HEAD") == _git(origin, "rev-parse", "dev")
     assert _git(clone, "symbolic-ref", "refs/remotes/origin/HEAD") == (
         "refs/remotes/origin/dev"
     )
@@ -103,10 +104,13 @@ def test_reconcile_still_syncs_when_the_symref_refresh_cannot_run(
     """A failed refresh is not a failed sync: the clone still lands on the tip."""
     origin, clone = _origin_whose_default_moved_to_dev(tmp_path)
     # ``set-head --auto`` asks the remote for its HEAD; a remote with a detached
-    # HEAD names no branch, so the refresh has nothing to set.
+    # HEAD at a commit that no branch names leaves the refresh nothing to set.
+    # Detaching at dev itself is insufficient: Git can still infer dev.
     _git(origin, "checkout", "-q", "--detach")
+    _commit(origin, "detached-only")
 
     done = _reconcile(clone, tmp_path / "receipt.json")
 
     assert done.returncode == 0, done.stderr
+    assert "origin/HEAD not refreshed" in done.stderr
     assert _git(clone, "rev-parse", "HEAD") == _git(origin, "rev-parse", "dev")
