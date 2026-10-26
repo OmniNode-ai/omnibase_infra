@@ -30,7 +30,8 @@ replaces an earlier one. A marker thread blocks when:
     cited lines. The cited lines are the thread's original range at the
     commit the review was posted on, carried forward through the PR's own
     history to the fix commit's parent; a file-level thread needs the fix
-    commit to touch the file;
+    commit to touch the file. A thread cited at line 1 alone is read as
+    file-level because reviewers cite ``:1`` for whole-file findings;
   - its disposition is ``rejected: <reason>`` and the review bot has not
     ACCEPTED that rejection (below).
 
@@ -125,6 +126,7 @@ from typing import Any
 MARKER = "hostile-reviewer-thread"
 DISPOSITION_LINE_PREFIX = "hostile-review-disposition: "
 MIN_REJECT_REASON_CHARS = 10
+_WHOLE_FILE_LINE = 1
 
 # The review bot's verdict on a rejection (OMN-17427). GraphQL spells the
 # App's bot ``onexbot``, REST ``onexbot[bot]``. Only the privileged base-branch
@@ -507,6 +509,8 @@ def cited_lines(thread: dict[str, Any]) -> CitedLines:
     if str(thread.get("subjectType", "")).upper() == "FILE" or end is None:
         return CitedLines(path, original_commit, None, None)
     start = thread.get("originalStartLine") or end
+    if start == end == _WHOLE_FILE_LINE:
+        return CitedLines(path, original_commit, None, None)
     return CitedLines(path, original_commit, int(start), int(end))
 
 

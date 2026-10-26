@@ -29,6 +29,12 @@ requirements:
       - id: AC4
         statement: >-
           A signed, declared rollback to a dev tag is selected ahead of queued forward jobs for the same lane and instance in the fetched partition; earlier forwards remain uncommitted for replay and the durable rollback job is deduplicated. Single-flight and acceptance checks stand.
+  - id: req-rebuild-trigger-lan-label
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. The runtime-rebuild publishers' fallback runner set requires arch-amd64 so the job cannot land on h203-light runners that carry no uv.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the trigger-rebuild jobs of runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml and the trigger-delivery job of onex-api-lab-delivery-reusable.yml fall back to [self-hosted, omnibase-ci, arch-amd64], a label set the h203-light runners do not satisfy -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -36,6 +42,9 @@ evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
     command: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+  - kind: tests
+    description: The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -190,3 +199,12 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
     binds_ac:
       - "AC3"
+  - id: dod-omn-21279-ac6-rebuild-trigger-lan-label
+    description: >-
+      The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]

@@ -2695,11 +2695,11 @@ repos:
     hooks:
       - id: scheduled-script-unit-drift
         name: Scheduled scripts are covered by unit drift (OMN-20037)
-        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
         language: system
         pass_filenames: false
         require_serial: true
-        files: ^(deploy/unit-drift-manifest\.yaml|scripts/deploy-agent/(deploy_agent/unit_drift\.py|tests/unit/test_unit_drift\.py|deploy/.*\.service)|deploy/(disk-gc|systemd)/.*\.service|scripts/systemd/.*\.service)$
+        files: ^(deploy/unit-drift-manifest\.yaml|scripts/deploy-agent/(deploy_agent/unit_drift\.py|tests/unit/test_unit_drift\.py|tests/unit/test_unit_installers_omn21288\.py|tests/unit/fixtures/unit_drift_dev201_omn21288\.json|deploy/.*\.service)|deploy/(disk-gc|systemd)/.*\.service|scripts/systemd/.*\.service|docker/runners/systemd/.*\.(service|timer)|deploy/disk-gc/install-host-maintenance\.sh|deploy/maintenance/omninode-host-maintenance-sync\.sh)$
         stages: [pre-commit]
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]

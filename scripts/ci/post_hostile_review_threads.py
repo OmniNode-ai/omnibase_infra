@@ -30,7 +30,8 @@ Behavior
 - Anchors each finding to the PR diff when it can:
   line-anchored (``path:line`` parsed from the finding location and present
   in the patch's RIGHT side) > file-anchored (``subject_type: file`` for a
-  changed file) > review body (everything else).
+  changed file) > review body (everything else). Line 1 denotes a whole-file
+  finding and uses a file anchor.
 - Caps thread comments per run (:data:`MAX_THREAD_COMMENTS`); the overflow is
   listed in the review body under a LOUD truncation banner.
 - Review event: ``REQUEST_CHANGES`` when any critical/major
@@ -69,6 +70,7 @@ DIFF_MARKER = "hostile-reviewer-diff"
 MAX_THREAD_COMMENTS = 25
 MAX_BODY_CHARS = 60_000
 MAX_FINDING_CHARS = 1_500
+_WHOLE_FILE_LINE = 1
 
 # Severity values as emitted by review_pairing (EnumFindingSeverity.value),
 # already mapped from the prompt's critical/major/minor/nit scale.
@@ -296,6 +298,8 @@ def resolve_anchor(
 ) -> tuple[str, str | None, int | None]:
     """Classify a finding's diff anchor.
 
+    Line 1 on a changed file denotes a whole-file finding.
+
     Returns:
         ("line", path, line) — line-anchored comment;
         ("file", path, None) — file-level comment on a changed file;
@@ -306,7 +310,11 @@ def resolve_anchor(
     if match:
         path = match.group("path")
         line = int(match.group("line"))
-        if path in changed_files and line in changed_files[path]:
+        if (
+            path in changed_files
+            and line != _WHOLE_FILE_LINE
+            and line in changed_files[path]
+        ):
             return ("line", path, line)
         if path in changed_files:
             return ("file", path, None)

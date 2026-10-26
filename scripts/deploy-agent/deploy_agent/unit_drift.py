@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -46,12 +47,15 @@ class ModelUnitEntry(BaseModel):
     tracked: str
     installed: str
     hosts: list[str]
+    # Committed repair entry point, relative to the repository root.
+    installer: str | None = None
+    installer_args: list[str] = Field(default_factory=list)
     render_script: str | None = None
     render_args: list[str] = Field(default_factory=list)
     # An installer that writes the registry root over this Environment= default.
     render_registry_root_env: str | None = None
 
-    @field_validator("tracked", "render_script")
+    @field_validator("tracked", "render_script", "installer")
     @classmethod
     def repo_relative(cls, value: str | None) -> str | None:
         """Keep declared sources relative to the repository root."""
@@ -79,6 +83,7 @@ class ModelUnitResult(BaseModel):
     installed_path: Path
     tracked_sha256: str | None = None
     installed_sha256: str | None = None
+    repair: str | None = None
 
 
 class _ModelManifest(BaseModel):
@@ -166,6 +171,11 @@ def check_units(
     """Compare raw bytes on this host without modifying either copy."""
     results: list[ModelUnitResult] = []
     for entry in entries:
+        repair = (
+            shlex.join(["bash", entry.installer, *entry.installer_args])
+            if entry.installer is not None
+            else None
+        )
         applicable = _hostname(hostname) in {_hostname(host) for host in entry.hosts}
         installed = (overrides or {}).get(entry.name)
         if installed is None:
@@ -176,6 +186,7 @@ def check_units(
                     name=entry.name,
                     status=EnumUnitStatus.NOT_APPLICABLE,
                     installed_path=installed,
+                    repair=repair,
                 )
             )
             continue
@@ -196,6 +207,7 @@ def check_units(
                 name=entry.name,
                 status=status,
                 installed_path=installed,
+                repair=repair,
                 tracked_sha256=hashlib.sha256(tracked).hexdigest()[:12],
                 installed_sha256=(
                     hashlib.sha256(actual).hexdigest()[:12]
@@ -306,9 +318,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(report(results, args.hostname)))
     else:
         for result in results:
+            repair = (
+                f" repair={result.repair}"
+                if result.status in (EnumUnitStatus.DRIFT, EnumUnitStatus.MISSING)
+                and result.repair
+                else ""
+            )
             print(
                 f"UNIT-DRIFT {result.status.value} {result.name} "
-                f"installed={result.installed_path}"
+                f"installed={result.installed_path}{repair}"
             )
         counts = {
             status: sum(r.status == status for r in results)
