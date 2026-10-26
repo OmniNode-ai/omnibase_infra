@@ -15,6 +15,8 @@ import asyncio
 import sys
 import time
 
+import httpx
+
 from omnibase_infra.handlers.lease import HandlerLeaseStore
 from omnibase_infra.handlers.lease.handler_lane_work_lease import (
     HandlerLaneWorkLease,
@@ -35,7 +37,7 @@ def _write(reply: ModelLeaseReply) -> None:
 
 
 async def _main(args: argparse.Namespace) -> None:
-    adapter = HandlerPlacementEtcd(args.endpoint, timeout_s=5.0)
+    adapter = HandlerPlacementEtcd(args.endpoint, httpx.AsyncClient(timeout=5.0))
     store = HandlerLeaseStore(
         adapter, [ModelLeaseKindPolicy(kind=LANE_WORK_KIND, ttl_s=args.ttl_s)]
     )

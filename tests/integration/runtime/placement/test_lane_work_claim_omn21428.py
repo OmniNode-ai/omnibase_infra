@@ -21,6 +21,7 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 import pytest
 
 from omnibase_infra.handlers.lease import HandlerLeaseStore
@@ -62,7 +63,7 @@ def _rows(ledger_file: Path) -> list[dict[str, str]]:
 
 @pytest.fixture
 async def store(etcd: EtcdProcess) -> AsyncIterator[HandlerLeaseStore]:
-    adapter = HandlerPlacementEtcd(etcd.endpoint, timeout_s=10.0)
+    adapter = HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=10.0))
     try:
         yield HandlerLeaseStore(
             adapter, [ModelLeaseKindPolicy(kind=LANE_WORK_KIND, ttl_s=TTL_S)]
