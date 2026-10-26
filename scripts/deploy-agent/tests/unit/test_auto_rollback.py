@@ -62,6 +62,22 @@ def _point(
 @pytest.fixture
 def command_runner(monkeypatch: pytest.MonkeyPatch) -> Mock:
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[:2] == ["docker", "ps"]:
+            for lane in (EnumRuntimeLane.DEV, EnumRuntimeLane.STABILITY_TEST):
+                config = executor_mod.lane_config_for(lane)
+                if f"label=com.docker.compose.project={config.compose_project}" in argv:
+                    for (
+                        service,
+                        index,
+                    ) in executor_mod.SERVICE_HEALTH_TARGET_INDEX.items():
+                        if f"label=com.docker.compose.service={service}" in argv:
+                            return subprocess.CompletedProcess(
+                                argv,
+                                0,
+                                stdout=config.runtime_health_targets[index][0],
+                                stderr="",
+                            )
+            raise AssertionError(argv)
         stdout = (
             (_IMAGE_ID if argv[3] == "{{.Image}}" else "runtime:latest")
             if argv[:2] == ["docker", "inspect"]
@@ -428,26 +444,113 @@ def test_agent_passing_verify_never_restores_and_capture_is_scoped(
     assert job is not None and job.status == "success"
 
 
-def test_agent_failed_verify_without_point_keeps_original_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("scope", [Scope.RUNTIME, Scope.FULL])
+def test_agent_refuses_rebuild_without_rollback_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: Scope
 ) -> None:
     cmd = ModelRebuildRequested(
         correlation_id=uuid4(),
         requested_by="test",
-        scope=Scope.RUNTIME,
-        runtime_lane=EnumRuntimeLane.DEV,
+        scope=scope,
+        runtime_lane=EnumRuntimeLane.STABILITY_TEST,
     )
     agent, executor = _agent(tmp_path, monkeypatch, cmd)
-    monkeypatch.setattr(agent_mod, "capture_rollback_point", Mock(return_value=None))
+    monkeypatch.setattr(
+        agent_mod, "capture_rollback_point", executor_mod.capture_rollback_point
+    )
+    executor._probe_runtime_health.return_value = (_check("runtime"), None)
+    executor._compose_service_container.return_value = ""
     restore = Mock()
     monkeypatch.setattr(agent_mod, "restore_rollback_point", restore)
-    failure = VerificationFailedError([_check("runtime-effects", healthy=False)])
-    executor.verify.side_effect = failure
     agent._run_deploy(cmd)
+    executor.rebuild_scope.assert_not_called()
+    executor.verify.assert_not_called()
     restore.assert_not_called()
     job = agent.job_store.load(cmd.correlation_id)
     assert job is not None and job.status == "failed"
-    assert job.errors == [str(failure)]
+    assert "rollback point" in job.errors[0]
+
+
+@pytest.mark.parametrize("lookup", ["found", "missing", "ambiguous", "failed"])
+def test_capture_resolves_dev_effects_by_compose_labels(
+    monkeypatch: pytest.MonkeyPatch, lookup: str
+) -> None:
+    """00:37Z case: runtime-effects is a service, not its container's name."""
+    executor = DeployExecutor()
+    monkeypatch.setattr(
+        executor, "_probe_runtime_health", Mock(return_value=(_check("runtime"), None))
+    )
+    containers = {
+        "omninode-runtime": "omninode-runtime",
+        "runtime-effects": "effects-container-id",
+    }
+    commands: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(argv)
+        if argv[:2] == ["docker", "ps"]:
+            assert "label=com.docker.compose.project=omnibase-infra" in argv
+            service = next(
+                value.removeprefix("label=com.docker.compose.service=")
+                for value in argv
+                if value.startswith("label=com.docker.compose.service=")
+            )
+            stdout = containers[service]
+            if service == "runtime-effects":
+                stdout = {"missing": "", "ambiguous": "id-one\nid-two"}.get(
+                    lookup, stdout
+                )
+                if lookup == "failed":
+                    return subprocess.CompletedProcess(
+                        argv, 1, stdout="", stderr="daemon error"
+                    )
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+        if argv[:2] == ["docker", "inspect"]:
+            # No object named runtime-effects exists. Only the resolved IDs work.
+            assert argv[-1] in containers.values(), argv
+            stdout = _IMAGE_ID if argv[3] == "{{.Image}}" else "runtime:latest"
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+        assert argv[:2] == ["docker", "tag"]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    point = executor_mod.capture_rollback_point(executor, EnumRuntimeLane.DEV)
+    if lookup == "found":
+        assert point is not None
+        assert [(image.service, image.container) for image in point.images] == list(
+            containers.items()
+        )
+        assert any(argv[:2] == ["docker", "tag"] for argv in commands)
+    else:
+        assert point is None
+        assert not any(argv[:2] == ["docker", "tag"] for argv in commands)
+
+
+def test_capture_folded_effects_resolves_the_main_service(
+    monkeypatch: pytest.MonkeyPatch, command_runner: Mock
+) -> None:
+    monkeypatch.setattr(
+        executor_mod, "lane_folded_profiles", lambda lane: frozenset({"effects"})
+    )
+    executor = DeployExecutor()
+    monkeypatch.setattr(
+        executor, "_probe_runtime_health", Mock(return_value=(_check("runtime"), None))
+    )
+    point = executor_mod.capture_rollback_point(
+        executor, EnumRuntimeLane.STABILITY_TEST
+    )
+    assert point is not None
+    assert len(point.images) == 2
+    assert point.images[0].container == point.images[1].container
+    lookups = [
+        call.args[0]
+        for call in command_runner.call_args_list
+        if call.args[0][:2] == ["docker", "ps"]
+    ]
+    assert len(lookups) == 2
+    assert all(
+        "label=com.docker.compose.service=omninode-runtime" in argv for argv in lookups
+    )
 
 
 def test_rollback_error_preserves_verification_failure_and_outcome() -> None:

@@ -40,7 +40,7 @@ from deploy_agent import executor as executor_mod
 from deploy_agent import trigger as trigger_mod
 from deploy_agent.agent import DeployAgent
 from deploy_agent.events import (
-    DEV_LANE_ONLY_BUILDABLE_SERVICES,
+    DEV_LANE_BUILD_SERVICES,
     BuildSource,
     EnumRuntimeLane,
     ModelRebuildRequested,
@@ -302,7 +302,7 @@ def test_rebuild_scope_threads_lane_and_ref_into_compose_build(
     assert captured[1]["build_source"] == BuildSource.WORKSPACE
     assert captured[1]["runtime_lane"] == EnumRuntimeLane.DEV
     assert captured[1]["git_ref"] == "origin/dev"
-    assert captured[1]["services"] == DEV_LANE_ONLY_BUILDABLE_SERVICES
+    assert captured[1]["services"] == DEV_LANE_BUILD_SERVICES
     assert captured[1]["stage_workspace"] is False
 
 
