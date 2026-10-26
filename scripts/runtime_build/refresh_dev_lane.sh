@@ -271,6 +271,9 @@ readonly REFRESH_BUILD_SERVICES=(
     # everywhere except here, which left it declared, censused as critical
     # drift, and never running on either lab lane.
     tenant-projection-writer
+    # OMN-21279 -- build-only infra half of the composed runtime image;
+    # scale 0 in the overlay, so up starts no container for it.
+    dev-lane-infra-runtime-image
 )
 # The clones this refresh records prior HEADs for and moves to the deployed
 # ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single

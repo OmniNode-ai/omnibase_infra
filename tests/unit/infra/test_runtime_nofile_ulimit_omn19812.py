@@ -43,6 +43,7 @@ def _runtime_image_services(lane: str) -> list[str]:
         if str((service.get("build") or {}).get("dockerfile", "")).endswith(
             "Dockerfile.runtime"
         )
+        and service.get("scale") != 0
     )
 
 
