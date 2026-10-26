@@ -51,6 +51,6 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/discovery.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("def gate_manifest_on_required_secrets(") and contains("reason=\"required_secret_absent\""))' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" -H "Accept: application/vnd.github.raw" | grep -q "manifest = gate_manifest_on_required_secrets("
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/discovery.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("def gate_manifest_on_required_secrets(") and contains("reason=\"required_secret_absent\""))' | grep -cx true > /dev/null && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" -H "Accept: application/vnd.github.raw" | grep -cF "manifest = gate_manifest_on_required_secrets(" > /dev/null
     binds_ac:
       - AC3
