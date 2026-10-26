@@ -3622,6 +3622,7 @@ async def bootstrap() -> int:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
                 discover_contracts,
+                drop_blank_secret_names,
                 filter_manifest_for_runtime_profile,
                 gate_manifest_on_required_secrets,
                 required_secret_names,
@@ -3640,10 +3641,14 @@ async def bootstrap() -> int:
             # does not hold is not wired, so this runtime never joins its group;
             # the skip carries a token=absent membership record into the
             # introspection manifest. Names only: list_keys(), never a value.
+            # A name set to a blank value counts as absent.
             manifest = gate_manifest_on_required_secrets(
                 manifest,
-                await resolve_present_secret_names(
-                    AdapterEnvSecretStore(), required_secret_names(manifest)
+                drop_blank_secret_names(
+                    await resolve_present_secret_names(
+                        AdapterEnvSecretStore(), required_secret_names(manifest)
+                    ),
+                    os.environ,
                 ),
             )
             auto_wiring_manifest_discovered = (

@@ -29,6 +29,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract 
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.models.model_secret_gated_membership import (
     ModelSecretGatedMembership,
@@ -983,6 +984,8 @@ def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:
 #
 # A runtime whose secret store holds no value for a contract's required secret
 # must not wire that contract, so it never joins the contract's consumer group.
+# A store error fails closed; a name whose value is blank counts as absent
+# (``drop_blank_secret_names``, given the env mapping by the kernel).
 # The probe is typed against names only (``list_keys``), so it cannot read a
 # value.
 
@@ -997,11 +1000,31 @@ def required_secret_names(manifest: ModelAutoWiringManifest) -> frozenset[str]:
 async def resolve_present_secret_names(
     store: ProtocolSecretNameLister, names: frozenset[str]
 ) -> frozenset[str]:
-    """Resolve presence with one names-only listing, or none when unnecessary."""
+    """Resolve presence with one names-only listing, or none when unnecessary.
+
+    A store error (``OSError``, ``RuntimeError`` or an infra
+    ``RuntimeHostError``) logs only its type and returns an empty set, failing
+    closed so contracts requiring secrets do not join consumer groups.
+    """
     if not names:
         return frozenset()
-    keys = await store.list_keys()
+    try:
+        keys = await store.list_keys()
+    except (OSError, RuntimeError, RuntimeHostError) as exc:
+        logger.warning("Required-secret listing failed: %s", type(exc).__name__)
+        return frozenset()
     return names & frozenset(keys)
+
+
+def drop_blank_secret_names(
+    names: frozenset[str], values: Mapping[str, str]
+) -> frozenset[str]:
+    """Keep only names whose value in ``values`` is not empty or whitespace.
+
+    A listed name set to ``""`` (``GITHUB_TOKEN: ${GITHUB_TOKEN:-}`` in a
+    compose file) holds no usable secret, so it counts as absent.
+    """
+    return frozenset(name for name in names if values.get(name, "").strip())
 
 
 def gate_manifest_on_required_secrets(

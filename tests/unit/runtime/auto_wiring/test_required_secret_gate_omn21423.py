@@ -16,6 +16,7 @@ from omnibase_infra.models.model_secret_gated_membership import (
 )
 from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
+    drop_blank_secret_names,
     gate_manifest_on_required_secrets,
     required_secret_names,
     resolve_present_secret_names,
@@ -140,6 +141,58 @@ async def test_absent_secret_excludes_contract_with_membership(
     assert membership.secret_ref == "GITHUB_TOKEN"
     assert "token=absent" in membership.render()
     assert membership.render() in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_store_error_fails_closed(
+    manifest: ModelAutoWiringManifest, caplog: pytest.LogCaptureFixture
+) -> None:
+    sentinel = "ghp_SENTINEL_never_print"
+
+    class _FailingStore:
+        async def list_keys(self, prefix: str | None = None) -> list[str]:
+            raise RuntimeError(sentinel)
+
+    present = await resolve_present_secret_names(
+        _FailingStore(), required_secret_names(manifest)
+    )
+    assert present == frozenset()
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    assert "RuntimeError" in record.getMessage()
+    assert record.exc_info is None
+
+    gated = gate_manifest_on_required_secrets(manifest, present)
+    assert [c.name for c in gated.contracts] == [_PLAIN_CONTRACT]
+    assert len(gated.skips) == 1
+    assert gated.skips[0].reason == "required_secret_absent"
+    assert gated.skips[0].membership[0].joined is False
+    assert sentinel not in caplog.text
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_blank_secret_value_counts_as_absent(value: str) -> None:
+    names = frozenset({"GITHUB_TOKEN", "OTHER"})
+    values = {"GITHUB_TOKEN": value, "OTHER": "x"}
+    assert drop_blank_secret_names(names, values) == frozenset({"OTHER"})
+
+
+@pytest.mark.asyncio
+async def test_blank_env_secret_gates_contract(
+    manifest: ModelAutoWiringManifest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "")
+    present = drop_blank_secret_names(
+        await resolve_present_secret_names(
+            AdapterEnvSecretStore(), required_secret_names(manifest)
+        ),
+        {"GITHUB_TOKEN": ""},
+    )
+    assert present == frozenset()
+    gated = gate_manifest_on_required_secrets(manifest, present)
+    assert [c.name for c in gated.contracts] == [_PLAIN_CONTRACT]
+    assert gated.skips[0].reason == "required_secret_absent"
 
 
 @pytest.mark.asyncio

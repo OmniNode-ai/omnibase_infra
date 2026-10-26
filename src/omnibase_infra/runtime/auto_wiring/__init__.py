@@ -14,6 +14,7 @@ from omnibase_infra.runtime.auto_wiring.context import ModelAutoWiringContext
 from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_from_paths,
+    drop_blank_secret_names,
     gate_manifest_on_required_secrets,
     required_secret_names,
     resolve_present_secret_names,
@@ -90,6 +91,7 @@ __all__ = [
     "gate_manifest_on_required_secrets",
     "reattach_not_ready_contracts",
     "required_secret_names",
+    "drop_blank_secret_names",
     "resolve_present_secret_names",
     "run_not_ready_reconciliation_loop",
     "subscribe_wired_contract_topics",
