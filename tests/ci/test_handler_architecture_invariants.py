@@ -70,6 +70,10 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         # classes (no envelope, never dispatched; OMN-21015)
         "handler_projection_derived_write.py",
         "handler_projection_write_cursor.py",
+        # Placement rebuild fold and serving-count read: module-level
+        # functions, not ONEX handler classes (OMN-21421)
+        "handler_placement_rebuild.py",
+        "handler_placement_serving.py",
     }
 )
 
