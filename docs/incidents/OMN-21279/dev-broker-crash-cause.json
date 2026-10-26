@@ -169,5 +169,84 @@
       "delete_groups": 0
     },
     "note": "The dev healthcheck onex-broker-readiness-probe runs rpk group describe -r '.*' about every 33 s (ListGroups, then DescribeGroups and one OffsetFetch per group), so it walks the whole group map; the race itself is on the group expiry side. offset_delete is 0, so the racing erase is reached through expiry, not the OffsetDelete API."
+  },
+  "arena_exhaustion_since_cap": {
+    "read_at": "2026-10-26T21:44Z to 21:56Z, lane fill-defect-dev-broker-crash-cause-20261026T2139Z, from docker logs omnibase-infra-redpanda on the dev broker host (h201)",
+    "config": "container created 2026-10-26T18:57:22Z by #5385: redpandadata/redpanda:v24.3.18, --smp 1 --memory 3G --set topic_partitions_per_shard=7000, mem_limit 4g (HostConfig.Memory 4294967296), the 2-4 GiB range of OPERATOR-CONSENT 2026-10-25T17:53:44Z",
+    "result": "12 seastar allocation-failure aborts (\"seastar - Failed to allocate N bytes\", then \"Aborting on shard 0\", then a SIGSEGV with si_code 128 inside libc in the abort path) in the 2 h 50 min from the 18:57:22Z container creation to 21:47:43Z. The abort reason in each is the failed allocation, not a ListGroups fault. Before the cap the crashes in crashes[] ran at 5 in the 17 h from 2026-10-25T20:56:59Z to 2026-10-26T14:00:12Z.",
+    "aborts": [
+      {
+        "at": "2026-10-26T18:59:32Z",
+        "shard_task": "fetch",
+        "failed_bytes": 2031616
+      },
+      {
+        "at": "2026-10-26T19:48:24Z",
+        "shard_task": "fetch",
+        "failed_bytes": 669024
+      },
+      {
+        "at": "2026-10-26T19:59:05Z",
+        "shard_task": "fetch",
+        "failed_bytes": 1127160
+      },
+      {
+        "at": "2026-10-26T20:04:06Z",
+        "shard_task": "main",
+        "failed_bytes": 28672
+      },
+      {
+        "at": "2026-10-26T20:06:21Z",
+        "shard_task": "fetch",
+        "failed_bytes": 2031616
+      },
+      {
+        "at": "2026-10-26T20:08:10Z",
+        "shard_task": "fetch",
+        "failed_bytes": 2031616
+      },
+      {
+        "at": "2026-10-26T20:09:30Z",
+        "shard_task": "fetch",
+        "failed_bytes": 1152208
+      },
+      {
+        "at": "2026-10-26T20:33:19Z",
+        "shard_task": "fetch",
+        "failed_bytes": 1015808
+      },
+      {
+        "at": "2026-10-26T20:41:45Z",
+        "shard_task": "fetch",
+        "failed_bytes": 2031616
+      },
+      {
+        "at": "2026-10-26T21:37:40Z",
+        "shard_task": "fetch",
+        "failed_bytes": 1152208
+      },
+      {
+        "at": "2026-10-26T21:42:42Z",
+        "shard_task": "main",
+        "failed_bytes": 28672
+      },
+      {
+        "at": "2026-10-26T21:47:43Z",
+        "shard_task": "main",
+        "failed_bytes": 28672
+      }
+    ],
+    "memory_diagnostic_21_42_41Z": {
+      "used": "3071M of 3G total, 864K free, hard failures 1",
+      "top_alloc_sites_nearest_dynamic_symbol": "nm -D nearest preceding dynamic symbol of the binary copied from the running container; no debug info, so each is a pointer, not a proof: kafka Metadata response partition vector (metadata_memory_estimator, fragmented_vector<metadata_response_partition>) 330 MB in 110 samples; storage chunk and segment allocations (storage::internal::chunks, open_segment) 312 MB and 186 MB; storage::hash_key_offset_map (compaction) 156 MB; rm_stm producer state (cluster::rm_stm_factory::create, maybe_create_producer, tx::producer_state) 141 MB, 126 MB and 69 MB"
+    },
+    "load_on_the_arena": {
+      "topics_partitions": "4605 topics and 4593 partition entries from the admin API /v1/partitions at 21:4xZ; OMN-20266's broker-memory-proposal-2312 read 4604 topics and 4630 partitions, with a non-reclaimable seastar peak of about 4.4 GB inside a 12G arena over a 30 min window",
+      "kafka_connections": "8100 active at 21:48:13Z, 22 s after the 21:47:51Z start; established connections to the Kafka listener by client container: the pre-PR lane runtime 3455, the pre-PR lane runtime-effects 2689, the dev runtime 896, the dev runtime-effects 615, the pre-PR tenant projection writer 253, the pre-PR runtime worker 66, the dev runtime worker 19 (8015 counted from /proc/net/tcp in the broker container at the same read)",
+      "requests_in_22s_after_start": "metadata 36052, fetch 36411, produce 428, offset_commit 3; memory allocated 930 MB of the 3G arena at that read",
+      "declared_floor": "docker/docker-compose.dev-bus-ha.yml records 12G as the floor OMN-20266 measured: 6G crashed 12 times in 32 h at 2,409 partitions"
+    },
+    "reading": "The 3G arena is below what this volume's 4605 topics and the 8100 client connections need: the broker aborts on allocation failure at the cap, in fetch handling and in start-up recovery, where it did not at 12G. The cap replaced a crash about every 3.4 h (5 in 17 h, three of them with ListGroups frames) with an allocation-failure abort about every 14 min (12 in 170 min). The ListGroups fix path in fix_path is unchanged and still pending. Not measured: the smallest arena this volume survives (no copy of the 51 GB volume was started on the loaded h201: load average 57, swap in use), and which client calls drive the metadata volume.",
+    "decision_needed": "OPERATOR-CONSENT 2026-10-25T17:53:44Z approved a 2-4 GB cap and scripts/preflight_required_compose_env.py refuses anything outside 2-4 GiB, so this lane did not move the arena. Options for the operator: restore the 12G arena (the floor docker-compose.dev-bus-ha.yml records), set an arena between 4 GiB and 12G with a matching container limit, or cut the topic and connection count first (deleting topics is destructive and needs a named list)."
   }
 }
