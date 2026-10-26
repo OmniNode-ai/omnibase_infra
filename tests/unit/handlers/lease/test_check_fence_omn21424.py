@@ -9,7 +9,7 @@ import socket
 import httpx
 import pytest
 
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
+from omnibase_infra.handlers.lease.handler_lease_fence import HandlerLeaseFence
 from omnibase_infra.handlers.placement import HandlerPlacementEtcd
 from omnibase_infra.models.lease import EnumLeaseFenceStatus
 
@@ -24,7 +24,9 @@ async def test_ac6_unreachable_etcd_is_unknown() -> None:
         f"http://127.0.0.1:{port}", httpx.AsyncClient(timeout=0.5)
     )
     try:
-        status = await check_fence(adapter, kind="k", resource="r", fence=5)
+        status = await HandlerLeaseFence(adapter).check_fence(
+            kind="k", resource="r", fence=5
+        )
     finally:
         await adapter.aclose()
     assert status is EnumLeaseFenceStatus.UNKNOWN

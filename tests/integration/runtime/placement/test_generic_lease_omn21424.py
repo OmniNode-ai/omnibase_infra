@@ -25,7 +25,7 @@ import httpx
 import pytest
 
 from omnibase_infra.handlers.lease import HandlerLeaseStore
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
+from omnibase_infra.handlers.lease.handler_lease_fence import HandlerLeaseFence
 from omnibase_infra.handlers.placement import HandlerPlacementEtcd
 from omnibase_infra.models.lease import (
     EnumLeaseFenceStatus,
@@ -145,37 +145,38 @@ async def test_ac6_check_fence_stale_expired_and_ok(
 ) -> None:
     a, b = two_stores
     adapter = HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=5.0))
+    fences = HandlerLeaseFence(adapter)
     try:
         old = await a.acquire(_request("fenced", "old", "pair"))
         released = await a.release("pair", "fenced", old.lease_id)
         assert released.outcome == "lease-released"
         assert (
-            await check_fence(adapter, kind="pair", resource="fenced", fence=old.fence)
+            await fences.check_fence(kind="pair", resource="fenced", fence=old.fence)
             is EnumLeaseFenceStatus.EXPIRED
         )
         new = await b.acquire(_request("fenced", "new", "pair"))
         assert new.fence > old.fence
-        lower = await check_fence(
-            adapter, kind="pair", resource="fenced", fence=old.fence
+        lower = await fences.check_fence(
+            kind="pair", resource="fenced", fence=old.fence
         )
         assert lower is EnumLeaseFenceStatus.STALE
         assert (
-            await check_fence(adapter, kind="pair", resource="fenced", fence=new.fence)
+            await fences.check_fence(kind="pair", resource="fenced", fence=new.fence)
             is EnumLeaseFenceStatus.OK
         )
         assert (
-            await check_fence(adapter, kind="pair", resource="absent", fence=new.fence)
+            await fences.check_fence(kind="pair", resource="absent", fence=new.fence)
             is EnumLeaseFenceStatus.EXPIRED
         )
         assert (
-            await check_fence(
-                adapter, kind="pair", resource="fenced", fence=new.fence + 1000
+            await fences.check_fence(
+                kind="pair", resource="fenced", fence=new.fence + 1000
             )
             is EnumLeaseFenceStatus.UNKNOWN
         )
         etcd.stop()
-        unreachable = await check_fence(
-            adapter, kind="pair", resource="fenced", fence=new.fence
+        unreachable = await fences.check_fence(
+            kind="pair", resource="fenced", fence=new.fence
         )
         assert unreachable is EnumLeaseFenceStatus.UNKNOWN
     finally:
@@ -239,6 +240,7 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
                     f"--ready={ready}",
                 ],
                 env=env,
+                start_new_session=True,
             ),
             etcd_cluster.members[i],
         )
@@ -250,7 +252,7 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
         primary = str(first["runtime"])
         proc, member = hosts[primary]
         # The whole host goes: its runtime and its etcd member.
-        proc.send_signal(signal.SIGKILL)
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait(timeout=10)
         member.stop()
         lost_at = time.time()
@@ -287,5 +289,5 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
     finally:
         for proc, _ in hosts.values():
             if proc.poll() is None:
-                proc.send_signal(signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=10)

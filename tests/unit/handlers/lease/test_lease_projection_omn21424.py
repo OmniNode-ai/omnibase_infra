@@ -130,13 +130,14 @@ def test_ac4_reducer_is_pure_and_emits_no_intent_for_a_lower_fence() -> None:
 
 def _sqlite_with_migration() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
+    db.execute("ATTACH DATABASE ':memory:' AS public")
     ddl = MIGRATION.read_text()
     table = re.search(
-        r"CREATE TABLE IF NOT EXISTS lease_projection \((.*?)\n\);", ddl, re.S
+        r"CREATE TABLE IF NOT EXISTS public\.lease_projection \((.*?)\n\);", ddl, re.S
     )
     assert table is not None, "the migration creates lease_projection"
     body = re.sub(r"TIMESTAMPTZ NOT NULL DEFAULT now\(\)", "TEXT", table.group(1))
-    db.execute(f"CREATE TABLE lease_projection ({body}\n)")
+    db.execute(f"CREATE TABLE public.lease_projection ({body}\n)")
     return db
 
 
@@ -159,6 +160,6 @@ def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:
         for row in order:
             db.execute(sql, lease_projection_params(row))
         found = db.execute(
-            "SELECT kind, resource, fence, holder FROM lease_projection"
+            "SELECT kind, resource, fence, holder FROM public.lease_projection"
         ).fetchall()
         assert found == [("k", "r", 23, "h23")], order

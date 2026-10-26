@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Generic lease: etcd store, pure projection reducer, projection writer (OMN-21424)."""
 
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
+from omnibase_infra.handlers.lease.handler_lease_fence import HandlerLeaseFence
 from omnibase_infra.handlers.lease.handler_lease_kinds import (
     LAB_LEASE_KINDS_PATH,
-    load_lease_kinds,
+    HandlerLeaseKinds,
 )
 from omnibase_infra.handlers.lease.handler_lease_orchestrator import (
     HandlerLeaseAcquire,
@@ -15,7 +15,6 @@ from omnibase_infra.handlers.lease.handler_lease_orchestrator import (
 from omnibase_infra.handlers.lease.handler_lease_projection import (
     UPSERT_LEASE_PROJECTION_SQL,
     HandlerLeaseProjection,
-    ProtocolLeaseProjectionExecutor,
     lease_projection_params,
 )
 from omnibase_infra.handlers.lease.handler_lease_reducer import (
@@ -37,6 +36,8 @@ __all__ = [
     "LEASE_PREFIX",
     "UPSERT_LEASE_PROJECTION_SQL",
     "HandlerLeaseAcquire",
+    "HandlerLeaseFence",
+    "HandlerLeaseKinds",
     "HandlerLeaseProjection",
     "HandlerLeaseReducer",
     "HandlerLeaseRelease",
@@ -44,10 +45,7 @@ __all__ = [
     "HandlerLeaseSlotPlacement",
     "HandlerLeaseStore",
     "LeaseProjectionState",
-    "ProtocolLeaseProjectionExecutor",
-    "check_fence",
     "lease_projection_params",
-    "load_lease_kinds",
     "reduce_lease_event",
     "resource_prefix",
 ]

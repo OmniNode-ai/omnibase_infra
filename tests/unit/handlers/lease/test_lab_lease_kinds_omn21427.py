@@ -15,7 +15,7 @@ import pytest
 
 from omnibase_infra.handlers.lease.handler_lease_kinds import (
     LAB_LEASE_KINDS_PATH,
-    load_lease_kinds,
+    HandlerLeaseKinds,
 )
 from omnibase_infra.models.lease import ModelLeaseKindPolicy
 
@@ -36,7 +36,7 @@ INVENTORY_KINDS = {
 
 
 def test_every_lab_lock_row_is_a_declared_kind_with_an_expiry() -> None:
-    declared = load_lease_kinds(LAB_LEASE_KINDS_PATH)
+    declared = HandlerLeaseKinds().load_lease_kinds(LAB_LEASE_KINDS_PATH)
     by_kind = {entry.policy.kind: entry for entry in declared}
     assert set(by_kind) == set(INVENTORY_KINDS.values())
     for row, kind in INVENTORY_KINDS.items():
@@ -50,7 +50,7 @@ def test_every_lab_lock_row_is_a_declared_kind_with_an_expiry() -> None:
 def test_slot_capacity_is_per_host() -> None:
     slot = next(
         e.policy
-        for e in load_lease_kinds(LAB_LEASE_KINDS_PATH)
+        for e in HandlerLeaseKinds().load_lease_kinds(LAB_LEASE_KINDS_PATH)
         if e.policy.kind == "slot"
     )
     assert slot.capacity_of("slot:unlisted-host") == slot.capacity
@@ -69,4 +69,4 @@ def test_a_duplicate_kind_is_refused(tmp_path: Path) -> None:
         "  - {kind: slot, inventory_row: B2, replaces: y, capacity: 1, ttl_s: 30}\n"
     )
     with pytest.raises(ValueError, match="declared twice"):
-        load_lease_kinds(path)
+        HandlerLeaseKinds().load_lease_kinds(path)

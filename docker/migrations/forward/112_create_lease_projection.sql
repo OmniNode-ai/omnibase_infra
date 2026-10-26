@@ -2,7 +2,7 @@
 -- The writer upserts on (kind, resource) and never lowers fence: fence is the
 -- etcd revision of the grant and rises with every grant of a resource.
 
-CREATE TABLE IF NOT EXISTS lease_projection (
+CREATE TABLE IF NOT EXISTS public.lease_projection (
     kind        TEXT NOT NULL,
     resource    TEXT NOT NULL,
     lease_id    UUID NOT NULL,

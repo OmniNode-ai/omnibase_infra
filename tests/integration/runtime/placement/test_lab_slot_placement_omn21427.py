@@ -131,6 +131,7 @@ async def test_ac3_losing_the_slot_holding_host_frees_its_slots_at_expiry(
             f"--ready={ready}",
         ],
         env=env,
+        start_new_session=True,
     )
     adapter = HandlerPlacementEtcd(
         etcd_cluster.members[1].endpoint, httpx.AsyncClient(timeout=2.0)
@@ -148,7 +149,7 @@ async def test_ac3_losing_the_slot_holding_host_frees_its_slots_at_expiry(
             "lease-refused"
         )
         # The whole host goes: its placer and its etcd member.
-        holder.send_signal(signal.SIGKILL)
+        os.killpg(holder.pid, signal.SIGKILL)
         holder.wait(timeout=10)
         etcd_cluster.members[0].stop()
         lost_at = time.monotonic()
@@ -178,6 +179,6 @@ async def test_ac3_losing_the_slot_holding_host_frees_its_slots_at_expiry(
         assert min(r.fence for r in placed) > max(int(g["fence"]) for g in held)
     finally:
         if holder.poll() is None:
-            holder.send_signal(signal.SIGKILL)
+            os.killpg(holder.pid, signal.SIGKILL)
             holder.wait(timeout=10)
         await adapter.aclose()
