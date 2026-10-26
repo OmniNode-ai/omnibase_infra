@@ -1,0 +1,1 @@
+Live-contact exception: this change edits only the self-hosted runner label fallback of three runs-on expressions; no external service is contacted by the edited lines, so there is no response to record or replay.
