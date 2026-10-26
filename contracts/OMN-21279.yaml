@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-21279
 title: omnibase_infra's runtime image, CI and tests never install or import omnimarket
 summary: >-
-  Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
+  The dev deploy agent now checks the candidate image's Bifrost boot-contract path and readability before any container replacement, refusing the candidate and recording a failed job while preserving the running containers. The post-swap health gate and rollback remain intact. Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -14,6 +14,11 @@ requirements:
         statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
       - id: AC2
         statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-restore-point-protection
+    statement: Restore-point protection for non-prod runtime rebuilds, declared by this pull request (OmniNode-ai/omnibase_infra#5360) under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
 evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
@@ -23,6 +28,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-21279-ac2-pre-swap-boot-contract
+    description: >-
+      AC2, dev deployment safety. The 2026-10-25 scrubbed crash-loop reason BIFROST_BASE_CONTRACT_PATH unset is returned by a candidate-image probe. Runtime and full rebuilds must fail before any compose up, retain the running containers and persist the boot reason on a failed job. Positive controls permit a readable contract and preserve post-swap verification; timeout controls refuse the swap and clean only the disposable probe. Red first: the original four regressions failed at the base because no probe ran and the job was recorded successful. This hosted-runner check uses the repository lockfile and the verifier-prepared root environment, with the deploy-agent and runtime source paths from this head, and exercises the deploy agent without Docker or live runtime dependencies; it does not claim a full runtime boot or replace runtime-boot-smoke.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
+    binds_ac:
+      - "AC2"
   - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
     description: >-
       AC1. The negative controls of the layering module feed the Dockerfile, workflow and test-module checkers fixture lines that name omnimarket (an ARG, a pip install, a COPY from the wheel, an editable sibling install, a heredoc-continued install, a function-scope import, an importorskip) and assert each one fires; clean and look-alike lines pass. Red first: before the change the module held no such checker and the three live-tree tests it added failed against the base (the Dockerfile named omnimarket, ci.yml installed it as a sibling, five test modules imported it). The check also runs the live-tree Dockerfile and CI install-step tests, which fail at the merge base.
@@ -69,3 +83,67 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-dev-lane-composed-image
+    description: >-
+      AC2, dev-lane boot. At 03ea9377f the dev lane built omninode-runtime, runtime-effects and runtime-worker from the infra Dockerfile.runtime, which sets no BIFROST_BASE_CONTRACT_PATH, and each exhausted 5 boots on ProtocolConfigurationError ONEX_CORE_041. docker/docker-compose.dev-lane.yml now builds every dev-lane runtime-image service from the staged omnimarket sibling's Dockerfile.runtime FROM a build-only infra image. The check refuses a dev-lane service on the infra-only image that renders Bifrost without a base contract or runs an omnimarket command; over the 03ea9377f overlay it flags 11 services.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-names-composed
+    description: >-
+      AC2, dev-lane build. The deploy agent's lane-agnostic runtime build passes only docker-compose.infra.yml; its dev-lane build now names DEV_LANE_BUILD_SERVICES, the lane-only buildable services plus the base services the overlay composes, so they are rebuilt on the composed image. Fails at 03ea9377f, where DEV_LANE_BUILD_SERVICES does not exist.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_composed_build_omn21279.py scripts/deploy-agent/tests/unit/test_executor_build_path_omn16442.py -q -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-deploy-probe-dev-overlay
+    description: >-
+      AC2, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the composed build context on the staged omnimarket sibling and the build-only infra image it builds FROM. At the merge base neither line exists.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("context: ../workspace/sibling-repos/omnimarket") and contains("infra-runtime: \"service:dev-lane-infra-runtime-image\""))' | grep -qx true
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-context-classification
+    description: >-
+      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile. Run the composed-image regression alongside the exclusion guard: the guard alone also passes on the merge base, whose dev overlay still builds market workloads on the infra-only image. The composed-image tests read that product overlay and fail there, binding this item to the AC2 runtime-image change.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-deploy-boot-recovery
+    description: >-
+      AC2, dev deployment guard. Replays the 2026-10-25 c37f6142 incident's BOOT FAILED 5/5 with BIFROST_BASE_CONTRACT_PATH unset. All three dev runtime services must become Docker healthy within their declared health window. Compose errors, exhausted boots and probe timeouts keep the job failed and forward-redeploy the retained healthy image revision and its resolved compose settings, with no git revert, image build, pull or deps restart. Candidate setting/package checks run before runtime replacement. STATUS and exception reports name the failed commit and boot cause and remain durable until their independent deliveries are acknowledged. Non-dev jobs never construct this guard. These are isolated replays; the live runtime-boot-smoke job remains the boot gate on the PR head.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+    binds_ac:
+      - "AC2"
+  - id: dod-omn21279-restore-point-labels-and-refusal
+    description: >-
+      Restore-point lane regression evidence. Replays service runtime-effects in project omnibase-infra with a differently named container, missing and ambiguous matches and failed Docker lookup; runtime/full rebuilds must refuse when capture returns no point. It binds AC3, the restore-point criterion this pull request declares under req-restore-point-protection, and claims neither layering criterion AC1 nor AC2.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q
+    binds_ac:
+      - "AC3"
+  - id: dod-omn21279-restore-point-hosted-deploy-check
+    description: >-
+      Hosted-runner check of the deploy agent's restore capture and rebuild refusal. Docker is faked and all state is temporary; no live lane or credentials are needed. Falsified by the base implementation, which inspects service names and rebuilds without a retained point.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
+    binds_ac:
+      - "AC3"
