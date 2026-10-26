@@ -201,3 +201,95 @@ async def blackhole_proxy(etcd: EtcdProcess) -> AsyncIterator[BlackholeProxy]:
         yield proxy
     finally:
         await proxy.close()
+
+
+def _etcd_binary() -> str:
+    return (
+        os.environ.get("ONEX_TEST_ETCD_BIN") or shutil.which("etcd") or _download_etcd()
+    )
+
+
+class EtcdClusterMember:
+    """One member of a loopback etcd cluster; one per simulated host (OMN-21424)."""
+
+    def __init__(self, binary: str, name: str, data_dir: Path) -> None:
+        self.binary = binary
+        self.name = name
+        self.data_dir = data_dir
+        self.client_port = _free_port()
+        self.peer_port = _free_port()
+        self.endpoint = f"http://127.0.0.1:{self.client_port}"
+        self.peer_url = f"http://127.0.0.1:{self.peer_port}"
+        self._proc: subprocess.Popen[bytes] | None = None
+
+    def launch(self, initial_cluster: str) -> None:
+        log = (self.data_dir.parent / f"{self.name}.log").open("ab")
+        self._proc = subprocess.Popen(
+            [
+                self.binary,
+                f"--name={self.name}",
+                f"--data-dir={self.data_dir}",
+                f"--listen-client-urls={self.endpoint}",
+                f"--advertise-client-urls={self.endpoint}",
+                f"--listen-peer-urls={self.peer_url}",
+                f"--initial-advertise-peer-urls={self.peer_url}",
+                f"--initial-cluster={initial_cluster}",
+                "--initial-cluster-state=new",
+                "--initial-cluster-token=lease-test",
+                "--heartbeat-interval=100",
+                "--election-timeout=1000",
+            ],
+            stdout=log,
+            stderr=log,
+        )
+
+    def stop(self) -> None:
+        if self._proc is not None:
+            self._proc.terminate()
+            self._proc.wait(timeout=10)
+            self._proc = None
+
+
+class EtcdCluster:
+    """Three etcd members on loopback ports, so losing one keeps a quorum."""
+
+    def __init__(self, members: list[EtcdClusterMember]) -> None:
+        self.members = members
+
+    def start(self) -> None:
+        initial = ",".join(f"{m.name}={m.peer_url}" for m in self.members)
+        for member in self.members:
+            member.launch(initial)
+        deadline = time.monotonic() + 30
+        pending = list(self.members)
+        while pending and time.monotonic() < deadline:
+            with contextlib.suppress(httpx.HTTPError):
+                if (
+                    httpx.get(f"{pending[0].endpoint}/health", timeout=0.5).status_code
+                    == 200
+                ):
+                    pending.pop(0)
+                    continue
+            time.sleep(0.1)
+        if pending:
+            raise RuntimeError("test etcd cluster did not become healthy within 30 s")
+
+    def stop(self) -> None:
+        for member in self.members:
+            member.stop()
+
+
+@pytest.fixture
+def etcd_cluster(tmp_path: Path) -> Iterator[EtcdCluster]:
+    binary = _etcd_binary()
+    cluster = EtcdCluster(
+        [
+            EtcdClusterMember(binary, f"host{i}", tmp_path / f"etcd-host{i}")
+            for i in range(3)
+        ]
+    )
+    cluster.start()
+    try:
+        yield cluster
+    finally:
+        cluster.stop()

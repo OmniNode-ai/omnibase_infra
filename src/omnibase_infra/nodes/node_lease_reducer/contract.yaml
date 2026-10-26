@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_lease_reducer
+contract_name: node_lease_reducer
+node_name: node_lease_reducer
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: REDUCER_GENERIC
+description: >
+  Pure fold of lease events into one row per (kind, resource), keeping the highest fence seen; emits one lease.projection.upsert intent per changed row. No topic is declared yet (see node_lease_orchestrator).
+
+input_model:
+  name: ModelLeaseReply
+  module: omnibase_infra.models.lease.model_lease_reply
+  description: One lease event.
+output_model:
+  name: ModelPayloadLeaseProjectionUpsert
+  module: omnibase_infra.models.lease.model_payload_lease_projection_upsert
+  description: The upsert intent for the changed row.
+capabilities:
+  - name: lease.project
+    description: Fold lease events; never lower a row's fence.
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - event_model:
+        name: ModelLeaseReply
+        module: omnibase_infra.models.lease.model_lease_reply
+      handler:
+        name: HandlerLeaseReducer
+        module: omnibase_infra.handlers.lease.handler_lease_reducer
+      output_events:
+        - ModelPayloadLeaseProjectionUpsert
+metadata:
+  description: Generic lease projection reducer.
+  author: OmniNode Team
+  license: MIT
+  tags: [reducer, lease, projection]
+  related_tickets: [OMN-21424]

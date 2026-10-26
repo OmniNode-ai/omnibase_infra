@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Minimal etcd v3 client over the JSON gRPC gateway (OMN-21421).
 
-Covers the calls placement needs: lease grant, single keepalive, revoke, an
-atomic create-if-absent transaction, key and prefix reads. The gateway takes
+Covers the calls placement and the generic lease (OMN-21424) need: lease
+grant, single keepalive, revoke, an atomic create-if-absent transaction, a
+general transaction, key and prefix reads. The gateway takes
 base64 keys and values and returns 64-bit integers as JSON strings.
 """
 
@@ -153,5 +154,59 @@ class HandlerPlacementEtcd:
             if isinstance(entry, dict)
         }
 
+    async def txn(
+        self,
+        *,
+        compare: list[_JsonObject],
+        success: list[_JsonObject],
+        failure: list[_JsonObject],
+    ) -> tuple[bool, int, list[_JsonObject]]:
+        """Run one etcd transaction; returns ``(succeeded, revision, responses)``."""
+        payload = await self._post(
+            "/v3/kv/txn",
+            {"compare": compare, "success": success, "failure": failure},
+        )
+        header = payload.get("header")
+        revision = (
+            int(str(header.get("revision", "0"))) if isinstance(header, dict) else 0
+        )
+        responses = payload.get("responses")
+        return (
+            bool(payload.get("succeeded", False)),
+            revision,
+            [r for r in responses if isinstance(r, dict)]
+            if isinstance(responses, list)
+            else [],
+        )
 
-__all__ = ["HandlerPlacementEtcd"]
+    async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
+        """Read a prefix; returns ``(key, value, create_revision, lease_id)`` per key."""
+        payload = await self._post(
+            "/v3/kv/range", {"key": _b64(prefix), "range_end": _prefix_end(prefix)}
+        )
+        kvs = payload.get("kvs")
+        if not isinstance(kvs, list):
+            return []
+        return [
+            (
+                _unb64(entry.get("key")),
+                _unb64(entry.get("value")),
+                int(str(entry.get("create_revision", "0"))),
+                int(str(entry.get("lease", "0"))),
+            )
+            for entry in kvs
+            if isinstance(entry, dict)
+        ]
+
+
+def b64(text: str) -> str:
+    """Base64 of ``text`` as the JSON gateway takes keys and values."""
+    return _b64(text)
+
+
+def unb64(text: object) -> str:
+    """Decode a base64 key or value from a JSON gateway reply."""
+    return _unb64(text)
+
+
+__all__ = ["HandlerPlacementEtcd", "b64", "unb64"]
