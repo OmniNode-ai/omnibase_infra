@@ -25,7 +25,8 @@ ON CONFLICT (kind, resource) DO UPDATE SET
     lease_id = EXCLUDED.lease_id,
     fence = EXCLUDED.fence,
     holder = EXCLUDED.holder,
-    state = EXCLUDED.state
+    state = EXCLUDED.state,
+    updated_at = now()
 WHERE lease_projection.fence <= EXCLUDED.fence
 """.strip()
 

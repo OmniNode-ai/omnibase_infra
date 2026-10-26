@@ -130,15 +130,47 @@ def test_ac4_reducer_is_pure_and_emits_no_intent_for_a_lower_fence() -> None:
 
 def _sqlite_with_migration() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
+    db.create_function("now", 0, lambda: "initial")
     db.execute("ATTACH DATABASE ':memory:' AS public")
     ddl = MIGRATION.read_text()
     table = re.search(
         r"CREATE TABLE IF NOT EXISTS public\.lease_projection \((.*?)\n\);", ddl, re.S
     )
     assert table is not None, "the migration creates lease_projection"
-    body = re.sub(r"TIMESTAMPTZ NOT NULL DEFAULT now\(\)", "TEXT", table.group(1))
+    body = re.sub(
+        r"TIMESTAMPTZ NOT NULL DEFAULT now\(\)",
+        "TEXT NOT NULL DEFAULT (now())",
+        table.group(1),
+    )
     db.execute(f"CREATE TABLE public.lease_projection ({body}\n)")
     return db
+
+
+def test_upsert_refreshes_updated_at_only_in_the_guarded_conflict_update() -> None:
+    insert, update = UPSERT_LEASE_PROJECTION_SQL.split("DO UPDATE SET")
+    assignments, guard = update.split("WHERE")
+    assert "updated_at" not in insert
+    assert re.search(r"\bupdated_at\s*=\s*now\(\)", assignments)
+    assert guard.strip() == "lease_projection.fence <= EXCLUDED.fence"
+
+
+def test_updated_at_changes_for_accepted_updates_only() -> None:
+    db = _sqlite_with_migration()
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    for fence, clock, expected in (
+        (17, "inserted", "inserted"),
+        (17, "renewed", "renewed"),
+        (23, "regranted", "regranted"),
+        (10, "stale", "regranted"),
+    ):
+        db.create_function("now", 0, lambda clock=clock: clock)
+        row = ModelLeaseProjectionRow(
+            kind="k", resource="r", lease_id=_L1, fence=fence, holder="h", state="held"
+        )
+        db.execute(sql, lease_projection_params(row))
+        assert db.execute(
+            "SELECT updated_at FROM public.lease_projection"
+        ).fetchone() == (expected,)
 
 
 def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:

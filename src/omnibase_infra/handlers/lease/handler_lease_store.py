@@ -17,6 +17,7 @@ the same ``request_id`` reads back the grant it made.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
@@ -91,53 +92,67 @@ class HandlerLeaseStore:
         if replay is not None:
             return replay
         etcd_lease, ttl = await self._adapter.lease_grant(request.ttl_s or policy.ttl_s)
-        lease_id = uuid4()
-        value = json.dumps(
-            {
-                "lease_id": str(lease_id),
-                "holder": request.holder,
-                "request_id": str(request.request_id),
-            },
-            sort_keys=True,
-        )
-        slots = resource_prefix(request.kind, request.resource, prefix=self._prefix)
-        for slot in range(policy.capacity_of(request.resource)):
-            slot_key = f"{slots}{slot}"
-            succeeded, revision, responses = await self._adapter.txn(
-                compare=[
-                    _absent(slot_key),
-                    _absent(request_key),
-                ],
-                success=[
-                    _put(slot_key, value, etcd_lease),
-                    _put(request_key, value, etcd_lease),
-                ],
-                failure=[{"requestRange": {"key": b64(request_key)}}],
+        txn_pending = False
+        committed = False
+        try:
+            lease_id = uuid4()
+            value = json.dumps(
+                {
+                    "lease_id": str(lease_id),
+                    "holder": request.holder,
+                    "request_id": str(request.request_id),
+                },
+                sort_keys=True,
             )
-            if succeeded:
-                return ModelLeaseReply(
-                    outcome="lease-granted",
-                    kind=request.kind,
-                    resource=request.resource,
-                    holder=request.holder,
-                    lease_id=lease_id,
-                    fence=revision,
-                    request_id=request.request_id,
-                    ttl_s=ttl,
+            slots = resource_prefix(request.kind, request.resource, prefix=self._prefix)
+            for slot in range(policy.capacity_of(request.resource)):
+                slot_key = f"{slots}{slot}"
+                txn_pending = True
+                succeeded, revision, responses = await self._adapter.txn(
+                    compare=[
+                        _absent(slot_key),
+                        _absent(request_key),
+                    ],
+                    success=[
+                        _put(slot_key, value, etcd_lease),
+                        _put(request_key, value, etcd_lease),
+                    ],
+                    failure=[{"requestRange": {"key": b64(request_key)}}],
                 )
-            existing = _range_entry(responses)
-            if existing is not None:
-                await self._adapter.lease_revoke(etcd_lease)
-                return self._replayed(request, existing[0], existing[1])
-        await self._adapter.lease_revoke(etcd_lease)
-        return ModelLeaseReply(
-            outcome="lease-refused",
-            kind=request.kind,
-            resource=request.resource,
-            holder=request.holder,
-            request_id=request.request_id,
-            reason=f"all {policy.capacity_of(request.resource)} slot(s) held",
-        )
+                txn_pending = False
+                committed = succeeded
+                if succeeded:
+                    return ModelLeaseReply(
+                        outcome="lease-granted",
+                        kind=request.kind,
+                        resource=request.resource,
+                        holder=request.holder,
+                        lease_id=lease_id,
+                        fence=revision,
+                        request_id=request.request_id,
+                        ttl_s=ttl,
+                    )
+                existing = _range_entry(responses)
+                if existing is not None:
+                    await self._adapter.lease_revoke(etcd_lease)
+                    return self._replayed(request, existing[0], existing[1])
+            await self._adapter.lease_revoke(etcd_lease)
+            return ModelLeaseReply(
+                outcome="lease-refused",
+                kind=request.kind,
+                resource=request.resource,
+                holder=request.holder,
+                request_id=request.request_id,
+                reason=f"all {policy.capacity_of(request.resource)} slot(s) held",
+            )
+        except Exception:
+            if txn_pending:
+                with contextlib.suppress(Exception):
+                    committed = await self._adapter.get(request_key) is not None
+            if not committed:
+                with contextlib.suppress(Exception):
+                    await self._adapter.lease_revoke(etcd_lease)
+            raise
 
     async def free(self, kind: str, resource: str) -> int:
         """The resource's capacity minus its live grants."""

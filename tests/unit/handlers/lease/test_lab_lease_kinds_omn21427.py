@@ -70,3 +70,91 @@ def test_a_duplicate_kind_is_refused(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="declared twice"):
         HandlerLeaseKinds().load_lease_kinds(path)
+
+
+@pytest.fixture(
+    params=[
+        ("", "kinds"),
+        ("{}", "kinds"),
+        ("[]", "kinds"),
+        ("kinds: []", "kinds"),
+        ("kinds: null", "kinds"),
+        ("kinds: slot", "kinds"),
+        ("kinds: {}", "kinds"),
+        ("kinds: [null]", r"kinds\[0\]"),
+        ("kinds: [slot]", r"kinds\[0\]"),
+        ("kinds: [[]]", r"kinds\[0\]"),
+        ("kinds: [{}]", r"kinds\[0\].*inventory_row"),
+        (
+            "kinds: [{kind: slot, replaces: x}]",
+            r"kinds\[0\].*slot.*inventory_row",
+        ),
+        (
+            "kinds: [{kind: slot, inventory_row: B2}]",
+            r"kinds\[0\].*slot.*replaces",
+        ),
+        (
+            "kinds: [{kind: slot, inventory_row: '', replaces: x}]",
+            r"kinds\[0\].*slot.*inventory_row",
+        ),
+        (
+            "kinds: [{kind: slot, inventory_row: row-2, replaces: x}]",
+            r"kinds\[0\].*slot.*inventory_row",
+        ),
+        (
+            "kinds: [{kind: slot, inventory_row: 2, replaces: x}]",
+            r"kinds\[0\].*slot.*inventory_row",
+        ),
+        (
+            "kinds: [{kind: slot, inventory_row: B2, replaces: null}]",
+            r"kinds\[0\].*slot.*replaces",
+        ),
+        (
+            "kinds: [{inventory_row: B2, replaces: x}]",
+            r"kinds\[0\].*kind",
+        ),
+    ],
+    ids=[
+        "empty-file",
+        "missing-kinds",
+        "outer-list",
+        "empty-kinds",
+        "null-kinds",
+        "string-kinds",
+        "mapping-kinds",
+        "null-entry",
+        "string-entry",
+        "list-entry",
+        "empty-entry",
+        "missing-inventory-row",
+        "missing-replaces",
+        "empty-inventory-row",
+        "malformed-inventory-row",
+        "numeric-inventory-row",
+        "null-replaces",
+        "missing-kind",
+    ],
+)
+def invalid_declaration(request: pytest.FixtureRequest) -> tuple[str, str]:
+    return request.param
+
+
+def test_invalid_declaration_names_the_entry(
+    tmp_path: Path, invalid_declaration: tuple[str, str]
+) -> None:
+    content, message = invalid_declaration
+    path = tmp_path / "kinds.yaml"
+    path.write_text(content)
+    with pytest.raises(ValueError, match=message):
+        HandlerLeaseKinds().load_lease_kinds(path)
+
+
+def test_duplicate_is_checked_before_policy_validation(tmp_path: Path) -> None:
+    path = tmp_path / "kinds.yaml"
+    path.write_text(
+        "kinds:\n"
+        "  - {kind: slot, inventory_row: B2, replaces: x}\n"
+        "  - {kind: slot, inventory_row: B2, replaces: y, ttl_s: 0}\n"
+    )
+    with pytest.raises(ValueError, match=r"kinds\[1\].*slot.*declared twice"):
+        HandlerLeaseKinds().load_lease_kinds(path)

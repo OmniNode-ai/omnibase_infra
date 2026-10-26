@@ -15,7 +15,7 @@ class ModelLeaseKindDeclaration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     policy: ModelLeaseKindPolicy
-    inventory_row: str
+    inventory_row: str = Field(pattern=r"^[A-Z][1-9][0-9]*$")
     replaces: str = Field(min_length=1)
 
 
