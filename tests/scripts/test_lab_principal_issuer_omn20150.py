@@ -1883,14 +1883,39 @@ def test_h105_scoped_source_cannot_change_owner_lane_or_add_writes(
         lpi.load_declaration(path)
 
 
-def test_h105_scoped_write_is_only_the_command_topic(tmp_path: Path) -> None:
+# ORCHESTRATOR DERIVATION (basis=orchestrator-derivation), OMN-21279: the hook topics the
+# shared developer set already produces, which the operator's two other host logins
+# hold live. h105's addition repeats them, produce only.
+HOOK_EVENT_TOPICS = frozenset(
+    binding["physical_topic"]
+    for binding in yaml.safe_load(
+        (GRANTS.parent / "developer-principal-bindings.yaml").read_text()
+    )["bindings"]
+    if binding["direction"] == "produce"
+    and binding["physical_topic"].startswith("onex.evt.omniclaude.")
+)
+HOOK_COMMAND_TOPIC = "onex.cmd.omniintelligence.claude-hook-event.v1"
+
+
+def test_h105_scoped_write_is_only_the_command_topic_and_the_hook_events(
+    tmp_path: Path,
+) -> None:
     path, _ = _h105_policy_copy(tmp_path)
     source = tmp_path / H105_DERIVED.name
     doc = json.loads(source.read_text())
+    assert len(HOOK_EVENT_TOPICS) == 29
     writes = {row["resource"] for row in doc["grants"] if row["operation"] == "WRITE"}
-    assert writes == {SCM_WRITE_REQUESTED}
+    assert writes == {SCM_WRITE_REQUESTED, *HOOK_EVENT_TOPICS}
+    assert writes == lpi.SCOPED_WRITE_TOPICS
+    hook_rows = [row for row in doc["grants"] if row["resource"] in HOOK_EVENT_TOPICS]
+    assert {row["operation"] for row in hook_rows} == {"WRITE", "DESCRIBE"}
+    assert not any(row["resource"] == HOOK_COMMAND_TOPIC for row in doc["grants"])
     assert lpi.load_declaration(path)
-    for field, value in (("pattern", "PREFIXED"), ("resource", SCM_WRITE_TERMINALS[0])):
+    for field, value in (
+        ("pattern", "PREFIXED"),
+        ("resource", SCM_WRITE_TERMINALS[0]),
+        ("resource", HOOK_COMMAND_TOPIC),
+    ):
         write = next(row for row in doc["grants"] if row["operation"] == "WRITE")
         changed = {**doc, "grants": [{**write, field: value}]}
         source.write_text(json.dumps(changed))
