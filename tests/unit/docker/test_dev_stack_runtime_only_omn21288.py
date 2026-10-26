@@ -109,7 +109,11 @@ def dev_stack_services() -> dict[str, dict[str, Any]]:
 def _built_from_runtime_image(service: Mapping[str, Any]) -> bool:
     build = service.get("build")
     dockerfile = build.get("dockerfile") if isinstance(build, Mapping) else build
-    return str(dockerfile or "").endswith(_RUNTIME_DOCKERFILE)
+    return str(dockerfile or "").endswith(_RUNTIME_DOCKERFILE) or (
+        isinstance(build, Mapping)
+        and str(build.get("context", "")).endswith("sibling-repos/omnimarket")
+        and dockerfile == "Dockerfile.runtime"
+    )
 
 
 def find_out_of_runtime_workloads(
