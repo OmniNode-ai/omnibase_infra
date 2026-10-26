@@ -155,6 +155,7 @@ from omnibase_infra.models.delegation.model_omnimarket_registry_stamp import (
 __all__ = [
     "CanonicalCloneAttachment",
     "DRIFT_OVERRIDE_ENV",
+    "GUARD_EXEMPT_PROVIDER",
     "EnumOffRegistryReason",
     "EnumOffRegistryVerdict",
     "ModelOffRegistryCheck",
@@ -171,6 +172,9 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: OMN-21436: the distribution whose own nodes the guard never applies to.
+GUARD_EXEMPT_PROVIDER = "omnibase-infra"
 
 # The single supported way past a drift refusal (OMN-13930). Named in every
 # refusal message so the escape hatch is discoverable from the failure alone.
@@ -835,9 +839,17 @@ def check_omnimarket_drift(
     *,
     allow_drift: bool = False,
     reconcile: ReconcileFn | None = None,
+    node_provider: str | None = None,
 ) -> ProtocolDriftGuardVerdict | None:
     """Fail fast if the current venv's omnimarket is missing or has drifted
     from its reference point.
+
+    OMN-21436: a node this package itself provides (``node_provider`` names
+    :data:`GUARD_EXEMPT_PROVIDER`) cannot be affected by omnimarket, so the
+    guard does not apply to it and returns ``None`` with a logged reason. The
+    ``ci-live-contact`` pre-commit hook starts such a node from a worktree venv
+    that correctly carries no omnimarket, and was refused on every commit. A
+    caller that cannot name the provider passes ``None`` and stays guarded.
 
     Refusal is the DEFAULT and is never silently skipped. Two ways past it,
     both deliberate:
@@ -894,6 +906,12 @@ def check_omnimarket_drift(
             successfully and left the venv still drifted -- in both cases the
             message names the exact command to reproduce.
     """
+    if node_provider == GUARD_EXEMPT_PROVIDER:
+        logger.info(
+            "omnimarket drift guard: not applied to a node %s provides",
+            node_provider,
+        )
+        return None
     canonical = canonical_local_omnimarket_commit(omni_home=omni_home)
     if canonical is None:
         # OMN-17255. No canonical clone: this is a customer machine (or a CI

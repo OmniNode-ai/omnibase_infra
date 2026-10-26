@@ -63,6 +63,13 @@ requirements:
       - id: AC10
         statement: >-
           The dev overlay renders Redpanda --memory 3G and mem_limit 4g even with stale DEV_REDPANDA_MEMORY=12G; deploy preflight refuses a flag or limit outside 2-4 GiB or an arena larger than its limit.
+  - id: req-pr-time-criterion-label-check
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. Green omnibase_infra#5370 was removed from the merge queue three times because its AC7 repeated a label dev already held, which only the full suite checked.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: every pull request CI run executes the ticket-contract criterion-label check by name in one test split, whatever the change-aware selector picks -- falsifier: tests/ci/test_contract_criterion_labels_wired_omn21279.py over .github/workflows/ci.yml
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -318,3 +325,12 @@ dod_evidence:
       - check_type: command
         check_value: uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly
     binds_ac: [AC10]
+  - id: dod-omn21279-pr-time-criterion-label-check
+    description: >-
+      AC12. The test-parallel job of ci.yml runs tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py by name on split 1, so a pull request whose contract repeats a criterion label goes red on its own run instead of in the merge queue. Red first: at the base ci.yml names the file in no step and the wiring test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_contract_criterion_labels_wired_omn21279.py -q --no-cov
+    binds_ac:
+      - "AC12"

@@ -9,8 +9,12 @@ requirements:
   - id: req-omn19448-vendored-0064
     statement: The data_source experiment value reaches delegation_events through a migration this repository vendors byte-identical from omnimarket.
     acceptance:
+      - id: AC1
+        statement: "AC1: the projection writes the terminal's cause, operational_outcome and content_verdict unchanged"
       - id: AC2
         statement: "AC2: the new columns arrive through a vendored migration and are written from the terminal -- falsifier: a pytest applying the migration and projecting a terminal asserting each column"
+      - id: AC3
+        statement: "AC3: on the lab, no failed row written after the deploy has a null cause"
 evidence_requirements:
   - kind: tests
     description: The vendored 0064 matches the omnimarket source's checksum, has its tenant ledger row and forward-only class, and replaces the data_source check with experiment admitted and NOT VALID, rewriting no row.
@@ -62,3 +66,24 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn19448-terminal-columns-vendored
+    description: >-
+      Infra's part of AC1 and AC2: the columns the projection copies the terminal's cause, operational_outcome and content_verdict into (0029, 0045) and the eight new terminal columns (0052, 0053, 0058) are added by vendored migrations whose ledger checksum is the file's, each nullable with no default, so a value the terminal did not send stays NULL. The writers that copy the values are proven in the omnimarket contract for this ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn19448_terminal_columns_vendored.py -q -n 0 -k 'copied_into or new_terminal_columns'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn19448-terminal-failure-cause-unrestricted
+    description: >-
+      Infra's part of AC3: no vendored migration restricts terminal_failure_cause to a value list, so a cause the vocabulary gained later (refused_before_dispatch) is stored rather than refused. The lab readback of AC3 (no failed row with a NULL cause after the deploy) is recorded in the omnimarket contract for this ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn19448_terminal_columns_vendored.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

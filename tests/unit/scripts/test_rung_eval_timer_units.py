@@ -34,9 +34,8 @@ _ENV_NAMES = {
     "RUNG_EVAL_LAB_202_MODEL",
     "RUNG_EVAL_PLANNER_200_BASE_URL",
     "RUNG_EVAL_PLANNER_200_MODEL",
-    "RUNG_EVAL_CLOUD_OPENROUTER_BASE_URL",
-    "RUNG_EVAL_CLOUD_OPENROUTER_MODEL",
-    "RUNG_EVAL_CLOUD_OPENROUTER_API_KEY",
+    "RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID",
+    "RUNG_EVAL_DOGFOOD_TENANT_ID",
     "RUNG_EVAL_OMNIMARKET_DIR",
     "RUNG_EVAL_TABLE_DIR",
     "RUNG_EVAL_WINDOW_DAYS",
@@ -117,7 +116,9 @@ def test_service_and_value_free_environment(tmp_path: Path) -> None:
         if line.startswith("# RUNG_EVAL_"):
             name, separator, value = line.removeprefix("# ").partition("=")
             assert separator == "=", line
-            if name.endswith(("_BASE_URL", "_MODEL", "_API_KEY")):
+            if name.endswith(
+                ("_BASE_URL", "_MODEL", "_API_KEY", "_BACKEND_ID", "_TENANT_ID")
+            ):
                 assert value.strip() == "", f"committed environment value: {name}"
             names.add(name.strip())
     assert names >= _ENV_NAMES, f"missing environment names: {_ENV_NAMES - names}"
@@ -142,6 +143,16 @@ def test_service_and_value_free_environment(tmp_path: Path) -> None:
         "missing_latest.txt",
     ):
         assert required in detector_script
+
+
+def test_env_example_names_no_retired_cloud_rung_variable() -> None:
+    text = _ENV_EXAMPLE.read_text(encoding="utf-8")
+    for name in (
+        "RUNG_EVAL_CLOUD_OPENROUTER_BASE_URL",
+        "RUNG_EVAL_CLOUD_OPENROUTER_MODEL",
+        "RUNG_EVAL_CLOUD_OPENROUTER_API_KEY",
+    ):
+        assert name not in text, f"retired cloud rung variable: {name}"
 
 
 @pytest.mark.parametrize("name", ["onex-rung-eval.service", "onex-rung-eval.timer"])
