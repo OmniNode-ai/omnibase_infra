@@ -520,6 +520,34 @@ def test_executor_preflight_runs_before_first_runtime_mutation(
     assert "--entrypoint" in commands[0]
 
 
+def test_candidate_preflight_uses_temporary_no_build_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane_args = executor_mod._compose_file_args(EnumRuntimeLane.DEV)
+    overrides: list[Path] = []
+    probed: list[str] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "run" in argv
+        assert argv[2 : 2 + len(lane_args)] == lane_args
+        extra_args = argv[2 + len(lane_args) :]
+        assert extra_args[0] == "-f"
+        path = Path(extra_args[1])
+        overrides.append(path)
+        service = argv[-3]
+        probed.append(service)
+        content = path.read_text()
+        assert f"  {service}:\n" in content
+        assert "build: !reset null" in content
+        assert f"image: omnibase-infra-{service}" in content
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(executor_mod, "_run", run)
+    executor_mod.preflight_dev_images(EnumRuntimeLane.DEV, list(SERVICES))
+    assert probed == list(SERVICES)
+    assert all(not path.exists() for path in overrides)
+
+
 @pytest.mark.parametrize("lane", [EnumRuntimeLane.PROD, EnumRuntimeLane.STABILITY_TEST])
 def test_candidate_preflight_has_no_nondev_effects(
     monkeypatch: pytest.MonkeyPatch, lane: EnumRuntimeLane

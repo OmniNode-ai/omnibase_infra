@@ -110,6 +110,33 @@ def test_successful_candidates_all_probed_before_swap(
         )
 
 
+def test_candidate_probes_use_temporary_no_build_override(
+    candidate: tuple[DeployExecutor, list[str], Mock],
+) -> None:
+    executor, _, runner = candidate
+    lane_args = executor_mod._compose_file_args(EnumRuntimeLane.DEV)
+    overrides: list[Path] = []
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "run" in argv:
+            assert argv[2 : 2 + len(lane_args)] == lane_args
+            extra_args = argv[2 + len(lane_args) :]
+            assert extra_args[0] == "-f"
+            path = Path(extra_args[1])
+            overrides.append(path)
+            service = argv[-3]
+            content = path.read_text()
+            assert f"  {service}:\n" in content
+            assert "build: !reset null" in content
+            assert f"image: omnibase-infra-{service}" in content
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    runner.side_effect = run
+    executor.rebuild_scope(Scope.RUNTIME, [], Mock())
+    assert len(overrides) == 3
+    assert all(not path.exists() for path in overrides)
+
+
 def test_timeout_refuses_swap_marks_phase_failed_and_cleans_only_probe(
     candidate: tuple[DeployExecutor, list[str], Mock],
 ) -> None:
