@@ -118,7 +118,7 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC9"]
-  - id: "dod-omn20910-ac10-rung-eval-env-example-backend-pin"
+  - id: "dod-omn20910-ac10-rung-env-backend-pin"
     description: "AC10. The rung-eval env example names the backend-pin variables of the cloud rung and none of its retired variables."
     source: "manual"
     checks:
