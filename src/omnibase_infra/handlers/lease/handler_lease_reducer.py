@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Literal
+from uuid import uuid4
 
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.lease import (
     ModelLeaseProjectionRow,
@@ -78,11 +81,15 @@ class HandlerLeaseReducer:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    def handle(
-        self, event: ModelLeaseReply
-    ) -> tuple[ModelPayloadLeaseProjectionUpsert, ...]:
+    def handle(self, envelope: ModelEventEnvelope[object]) -> ModelHandlerOutput[None]:
+        event = ModelLeaseReply.model_validate(envelope.payload)
         self._state, intents = reduce_lease_event(self._state, event)
-        return intents
+        return ModelHandlerOutput.for_reducer(
+            input_envelope_id=envelope.envelope_id,
+            correlation_id=envelope.correlation_id or uuid4(),
+            handler_id="HandlerLeaseReducer",
+            projections=intents,
+        )
 
 
 __all__ = ["HandlerLeaseReducer", "LeaseProjectionState", "reduce_lease_event"]

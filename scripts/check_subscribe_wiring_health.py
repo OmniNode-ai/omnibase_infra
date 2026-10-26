@@ -251,6 +251,13 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # Coding-agent workflow external entrypoint — published by workflow clients
     # (the coding-agent CLI thin-publisher), not a contract-declared node (OMN-13247).
     "onex.cmd.omnibase-infra.coding-agent-invoke.v1": "Published by coding-agent workflow clients as the external entrypoint | owner: jonah | expiry: 2026-12-01",
+    # Generic lease commands (OMN-21424, runtime cluster and generic lease plan
+    # section 5.4). No producer exists yet: the onex lease verb talks to etcd
+    # directly, and the lease users that will publish these commands migrate in
+    # the plan's slices 3 to 5. Remove each entry when its first producer lands.
+    "onex.cmd.omnibase-infra.lease-acquire-requested.v1": "Generic lease command; no producer yet, lease users migrate in plan slices 3-5 (OMN-21424) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.lease-release-requested.v1": "Generic lease command; no producer yet, lease users migrate in plan slices 3-5 (OMN-21424) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.lease-renew-requested.v1": "Generic lease command; no producer yet, lease users migrate in plan slices 3-5 (OMN-21424) | owner: jonah | expiry: 2026-12-01",
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
     "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": "Routed via intent from node_gateway_link_health_projection_compute, not Kafka publish (OMN-15570) | owner: jonah | expiry: 2026-12-01",

@@ -7,8 +7,15 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: REDUCER_GENERIC
 description: >
-  Pure fold of lease events into one row per (kind, resource), keeping the highest fence seen; emits one lease.projection.upsert intent per changed row. No topic is declared yet (see node_lease_orchestrator).
+  Pure fold of lease events into one row per (kind, resource), keeping the highest fence seen; emits one lease.projection.upsert intent per changed row. Placement as primary still waits on the core contract placement field (OMN-21421).
 
+event_bus:
+  subscribe_topics:
+    - onex.evt.omnibase-infra.lease-granted.v1
+    - onex.evt.omnibase-infra.lease-renewed.v1
+    - onex.evt.omnibase-infra.lease-released.v1
+    - onex.evt.omnibase-infra.lease-expired.v1
+  publish_topics: []
 input_model:
   name: ModelLeaseReply
   module: omnibase_infra.models.lease.model_lease_reply

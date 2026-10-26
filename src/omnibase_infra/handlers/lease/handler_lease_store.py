@@ -21,6 +21,8 @@ import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
+import httpx
+
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -34,6 +36,36 @@ from omnibase_infra.models.lease import (
 
 LEASE_PREFIX = "/onex/lease/"
 _REQUEST_PREFIX = "/onex/lease-request/"
+
+
+def lease_kinds_from_spec(spec: str) -> tuple[ModelLeaseKindPolicy, ...]:
+    """Parse a comma list of ``kind:capacity:ttl_s`` policies."""
+    policies: list[ModelLeaseKindPolicy] = []
+    declared: set[str] = set()
+    for item in spec.split(","):
+        try:
+            kind, capacity, ttl_s = (part.strip() for part in item.split(":"))
+            policy = ModelLeaseKindPolicy(
+                kind=kind, capacity=int(capacity), ttl_s=int(ttl_s)
+            )
+            if kind in declared:
+                raise ValueError(f"duplicate lease kind {kind!r}")
+        except ValueError as exc:
+            raise ValueError(f"Invalid lease kind item {item!r}: {exc}") from exc
+        declared.add(kind)
+        policies.append(policy)
+    return tuple(policies)
+
+
+def lease_store_from_config(endpoint: str, kinds_spec: str) -> HandlerLeaseStore:
+    """Build the lease store from a resolved etcd endpoint and kind list."""
+    if not endpoint.strip():
+        raise ValueError("the lease etcd endpoint resolved empty")
+    if not kinds_spec.strip():
+        raise ValueError("the lease kinds resolved empty")
+    kinds = lease_kinds_from_spec(kinds_spec)
+    adapter = HandlerPlacementEtcd(endpoint.strip(), httpx.AsyncClient(timeout=5.0))
+    return HandlerLeaseStore(adapter, kinds)
 
 
 def resource_prefix(kind: str, resource: str, *, prefix: str = LEASE_PREFIX) -> str:
@@ -238,4 +270,10 @@ def _range_entry(responses: list[dict[str, object]]) -> tuple[str, int] | None:
     return None
 
 
-__all__ = ["LEASE_PREFIX", "HandlerLeaseStore", "resource_prefix"]
+__all__ = [
+    "LEASE_PREFIX",
+    "HandlerLeaseStore",
+    "lease_kinds_from_spec",
+    "lease_store_from_config",
+    "resource_prefix",
+]

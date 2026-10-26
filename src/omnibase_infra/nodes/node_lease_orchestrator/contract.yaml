@@ -7,8 +7,37 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: ORCHESTRATOR_GENERIC
 description: >
-  Acquire, renew and release a lease on one resource of a declared kind. A grant is one etcd transaction and its fence is the etcd revision of that transaction (OMN-21418 GenericLease model). No topic is declared yet: the lease command and event topics, and placing this node as a primary, wait on the contract placement read of OMN-21421.
+  Acquire, renew and release a lease on one resource of a declared kind. A grant is one etcd transaction and its fence is the etcd revision of that transaction (OMN-21418 GenericLease model). Placement as primary still waits on the core contract placement field (OMN-21421).
 
+descriptor:
+  # Lease store configuration, overlay-resolved through the ${env.VAR}
+  # convention; the handlers refuse to start a store when either resolves empty.
+  lease_etcd_endpoint: "${env.ONEX_LEASE_ETCD_ENDPOINT}"
+  lease_kinds: "${env.ONEX_LEASE_KINDS}"
+runtime_profiles:
+  - effects
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.lease-acquire-requested.v1
+    - onex.cmd.omnibase-infra.lease-renew-requested.v1
+    - onex.cmd.omnibase-infra.lease-release-requested.v1
+  publish_topics:
+    - onex.evt.omnibase-infra.lease-granted.v1
+    - onex.evt.omnibase-infra.lease-refused.v1
+    - onex.evt.omnibase-infra.lease-renewed.v1
+    - onex.evt.omnibase-infra.lease-released.v1
+    - onex.evt.omnibase-infra.lease-expired.v1
+dependencies:
+  - name: lease_etcd_endpoint
+    type: "environment"
+    env_var: ONEX_LEASE_ETCD_ENDPOINT
+    required: true
+    description: etcd v3 client URL
+  - name: lease_kinds
+    type: "environment"
+    env_var: ONEX_LEASE_KINDS
+    required: true
+    description: comma list of kind:capacity:ttl_s
 input_model:
   name: ModelLeaseAcquireRequest
   module: omnibase_infra.models.lease.model_lease_acquire_request
@@ -28,6 +57,7 @@ handler_routing:
   routing_strategy: operation_match
   handlers:
     - operation: lease.acquire
+      topic: onex.cmd.omnibase-infra.lease-acquire-requested.v1
       handler:
         name: HandlerLeaseAcquire
         module: omnibase_infra.handlers.lease.handler_lease_orchestrator
@@ -38,6 +68,7 @@ handler_routing:
         module: omnibase_infra.models.lease.model_lease_acquire_request
         description: Grant a free slot of the resource in one etcd transaction, or refuse.
     - operation: lease.renew
+      topic: onex.cmd.omnibase-infra.lease-renew-requested.v1
       handler:
         name: HandlerLeaseRenew
         module: omnibase_infra.handlers.lease.handler_lease_orchestrator
@@ -48,6 +79,7 @@ handler_routing:
         module: omnibase_infra.models.lease.model_lease_renew_request
         description: Keep a grant alive at the same fence.
     - operation: lease.release
+      topic: onex.cmd.omnibase-infra.lease-release-requested.v1
       handler:
         name: HandlerLeaseRelease
         module: omnibase_infra.handlers.lease.handler_lease_orchestrator

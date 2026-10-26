@@ -47,6 +47,9 @@ evidence_requirements:
   - kind: tests
     description: "The generic lease suites (two lease stores on a real etcd, two runtime processes on a three-member etcd, the projection and check_fence unit tests) pass."
     command: "uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease tests/integration/nodes/test_lease_nodes_contract_discovery_omn21424.py -q -n 0"
+  - kind: tests
+    description: "The lease wiring suites (the eight topics in the node contracts, the kernel's wire_from_manifest over the three lease contracts on a real etcd, and the onex lease verb against a three-member etcd) pass."
+    command: "uv run pytest tests/unit/nodes/test_lease_topics_contract_omn21424.py tests/integration/runtime/placement/test_lease_wiring_omn21424.py tests/integration/runtime/placement/test_lease_cli_omn21424.py -q -n 0"
   - kind: manual
     description: "Deploy validation command for the caller-contract deploy gate: the committed lease source read at the checkout commit. It starts nothing and touches no running lane."
     command: "deploy: gh api contents of handler_lease_store.py, handler_lease_projection.py and handlers/lease/handler_lease_fence.py at HEAD"
@@ -123,4 +126,26 @@ dod_evidence:
             base64 -d | grep -F 'WHERE lease_projection.fence <= EXCLUDED.fence' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra.handlers.lease.handler_lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21424-ac3-bus-and-cli
+    description: >-
+      The three lease contracts loaded from disk are wired by the kernel's wire_from_manifest onto an in-memory bus with the orchestrator's contract-declared etcd endpoint and kinds; an acquire on the acquire command topic is granted, a second holder is refused, and the repeated request_id is granted again with the first lease_id and fence; renew and release answer on their own event topics. The onex lease verb, through three members of one etcd cluster, grants on one host, returns the same lease_id and fence for the repeated request_id on a second host, refuses another holder, and shows, renews and releases the grant.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/test_lease_topics_contract_omn21424.py tests/integration/runtime/placement/test_lease_wiring_omn21424.py tests/integration/runtime/placement/test_lease_cli_omn21424.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21424-deploy-lease-topics
+    description: >-
+      Read the committed lease orchestrator contract at the checkout commit through the GitHub contents API. Fail when the acquire command topic or the granted event topic is absent from it. Runs on hosted runners without a container daemon or access to a private runtime.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_lease_orchestrator/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'lease-acquire-requested.v1' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_lease_orchestrator/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'lease-granted.v1' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
