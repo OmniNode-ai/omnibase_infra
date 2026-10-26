@@ -300,3 +300,32 @@ async def test_runner_acquires_lane_work_and_releases_with_its_outcome() -> None
 def test_renew_interval_is_a_third_of_the_ttl() -> None:
     assert renew_interval_s(30) == 10.0
     assert renew_interval_s(3) == 1.0
+
+
+class _LostReplyCommands(_FakeCommands):
+    """Commits the first grant but loses its reply, as a dropped connection would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lost = False
+
+    async def acquire(self, request: ModelLeaseAcquireRequest) -> ModelLeaseReply:
+        reply = await super().acquire(request)
+        if not self.lost:
+            self.lost = True
+            raise ConnectionError("reply lost after the grant committed")
+        return reply
+
+
+async def test_acquire_retry_after_a_lost_reply_reuses_the_request_id() -> None:
+    commands = _LostReplyCommands()
+    runner = HandlerLaneWorkLease(commands, HOLDER, ttl_s=30)
+    with pytest.raises(ConnectionError):
+        await runner.acquire()
+    assert (await runner.acquire()).outcome == "lease-granted"
+    first, retry = commands.acquired
+    # The store's request-key idempotency reads back the committed grant.
+    assert retry.request_id == first.request_id
+    await runner.release("done")
+    await runner.acquire()
+    assert commands.acquired[2].request_id != first.request_id

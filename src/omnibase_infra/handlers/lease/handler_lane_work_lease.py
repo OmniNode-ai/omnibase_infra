@@ -74,6 +74,9 @@ class HandlerLaneWorkLease:
         self._holder = holder
         self._ttl_s = ttl_s
         self._lease_id: UUID | None = None
+        # One request_id per acquisition: a retry after a lost reply reads back
+        # the grant the store committed instead of being refused by it.
+        self._request_id = uuid4()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -93,7 +96,7 @@ class HandlerLaneWorkLease:
                 kind=LANE_WORK_KIND,
                 resource=self._holder.resource,
                 holder=self._holder.holder(),
-                request_id=uuid4(),
+                request_id=self._request_id,
                 ttl_s=self._ttl_s,
             )
         )
@@ -125,6 +128,7 @@ class HandlerLaneWorkLease:
             )
         )
         self._lease_id = None
+        self._request_id = uuid4()
         return reply
 
 
