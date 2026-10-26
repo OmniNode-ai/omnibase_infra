@@ -1,0 +1,76 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21418
+title: TLA+ models for runtime primary election and the generic lease
+summary: >-
+  Adds two TLA+ models under formal/, each with a spec, a Model.cfg, its mutation configs, a witness config, committed TLC output bound to the spec and cfg digest, and a design-review verdict in results/. formal/runtime_primary_election passes AtMostOneActingPrimary and EpochMonotonic; mut_no_self_fence and mut_unguarded_write each give a counterexample. formal/generic_lease passes FenceMonotonicPerResource, NoEffectWithStaleFence and ExpiredLeaseFreesResource; mut_renew_changes_fence, mut_effect_skips_check and mut_regrant_same_fence each give a counterexample, and an extra mut_expiry_holds breaks ExpiredLeaseFreesResource. The election and lease nodes are not built here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21418-transcribed-acceptance-criteria
+    statement: The acceptance criteria this change evidences, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: `formal/runtime_primary_election/` holds a spec whose `Model.cfg` passes `AtMostOneActingPrimary` and `EpochMonotonic` -- falsifier: TLC over `formal/runtime_primary_election/Model.cfg` reports an invariant violation'
+      - id: AC2
+        statement: 'AC2: mutations `mut_no_self_fence` and `mut_unguarded_write` each give a counterexample -- falsifier: TLC over either mutation config reports no violation'
+      - id: AC3
+        statement: 'AC3: `formal/generic_lease/` holds a spec whose `Model.cfg` passes `FenceMonotonicPerResource`, `NoEffectWithStaleFence` and `ExpiredLeaseFreesResource` -- falsifier: TLC over `formal/generic_lease/Model.cfg` reports an invariant violation'
+      - id: AC4
+        statement: 'AC4: mutations `mut_renew_changes_fence`, `mut_effect_skips_check` and `mut_regrant_same_fence` each give a counterexample -- falsifier: TLC over any of the three configs reports no violation'
+      - id: AC5
+        statement: 'AC5: a design-review verdict is recorded in each model''s `results/` -- falsifier: `ls formal/runtime_primary_election/results formal/generic_lease/results` lists no verdict file'
+evidence_requirements:
+  - kind: tests
+    description: The committed TLC output of both models matches the current spec and cfg digest, each passing config holds, each mutation and witness reports its named violation, and each results/ holds a verdict.
+    command: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py tests/unit/formal/test_generic_lease_model.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21418-ac1-election-model
+    description: formal/runtime_primary_election/results/Model.out, bound to results/model.sha256, reports no error for TypeOK, AtMostOneActingPrimary and EpochMonotonic with 0 states left on queue.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py -q -k "digest or passing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21418-ac2-election-mutations
+    description: mut_no_self_fence.out reports AtMostOneActingPrimary violated and mut_unguarded_write.out reports EpochMonotonic violated, bound to the same digest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py -q -k "digest or mutation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21418-ac3-lease-model
+    description: formal/generic_lease/results/Model.out, bound to results/model.sha256, reports no error for TypeOK, FenceMonotonicPerResource, NoEffectWithStaleFence and ExpiredLeaseFreesResource with 0 states left on queue.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_generic_lease_model.py -q -k "digest or passing"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21418-ac4-lease-mutations
+    description: mut_renew_changes_fence.out and mut_regrant_same_fence.out report FenceMonotonicPerResource violated and mut_effect_skips_check.out reports NoEffectWithStaleFence violated, bound to the same digest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_generic_lease_model.py -q -k "digest or mutation"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21418-ac5-verdicts
+    description: Each model's results/ holds design_review_verdict.txt, headed "# Design-review verdict" and naming OMN-21418.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/formal/test_runtime_primary_election_model.py tests/unit/formal/test_generic_lease_model.py -q -k verdict
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5

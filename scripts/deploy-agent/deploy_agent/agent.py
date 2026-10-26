@@ -2057,7 +2057,10 @@ class DeployAgent:
                             health_checks = self.executor.verify(
                                 on_phase_update=on_phase_update, lane=cmd.runtime_lane
                             )
-                        except VerificationFailedError as exc:
+                        except (
+                            VerificationFailedError,
+                            subprocess.TimeoutExpired,
+                        ) as exc:
                             if rollback_point is not None:
                                 outcome = restore_rollback_point(
                                     self.executor, rollback_point, on_phase_update

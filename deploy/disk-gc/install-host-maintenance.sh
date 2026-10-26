@@ -23,6 +23,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash deploy/disk-gc/install-host-maintenance.sh
+  bash deploy/disk-gc/install-host-maintenance.sh --log-monitor
   bash deploy/disk-gc/install-host-maintenance.sh --status
   bash deploy/disk-gc/install-host-maintenance.sh --status --json
   bash deploy/disk-gc/install-host-maintenance.sh --retire-legacy-cron
@@ -32,11 +33,45 @@ Installs or reports both cleanup timers:
   - onex-disk-gc.timer
   - onex-worktree-reaper.timer
 
+Use --log-monitor to install only onex-log-monitor.service and its scripts.
+
 Legacy cleanup cron files retired by --retire-legacy-cron:
   - /etc/cron.d/docker-prune
   - /etc/cron.d/omninode-docker-anonymous-volume-prune
   - /etc/cron.d/omninode-runner-cleanup
 EOF
+}
+
+install_log_monitor() {
+  local REPO_ROOT service_src user_unit_dir service_dst monitor_script monitor_dir
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  service_src="${REPO_ROOT}/deploy/systemd/onex-log-monitor.service"
+  user_unit_dir="${HOME}/.config/systemd/user"
+  service_dst="${user_unit_dir}/onex-log-monitor.service"
+
+  monitor_script="$(awk '
+    /^ExecStart=/ {
+      sub(/^ExecStart=/, "")
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /monitor_logs\.py$/) script = $i
+      }
+    }
+    END { print script }
+  ' "$service_src")"
+  if [[ "$monitor_script" != /* ]]; then
+    echo "ExecStart in $service_src must name an absolute monitor_logs.py path." >&2
+    exit 2
+  fi
+  monitor_dir="$(dirname "$monitor_script")"
+
+  mkdir -p "$user_unit_dir" "$monitor_dir"
+  cp "$service_src" "$service_dst"
+  cp "${REPO_ROOT}/scripts/monitor_logs.py" "${monitor_dir}/monitor_logs.py"
+  cp "${REPO_ROOT}/scripts/monitor_alert_contract.yaml" "${monitor_dir}/monitor_alert_contract.yaml"
+
+  systemctl --user daemon-reload
+  systemctl --user enable onex-log-monitor.service
+  systemctl --user restart onex-log-monitor.service
 }
 
 retire_legacy_cron() {
@@ -153,6 +188,11 @@ status_human() {
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
+  exit 0
+fi
+
+if [[ "${1:-}" == "--log-monitor" ]]; then
+  install_log_monitor
   exit 0
 fi
 
