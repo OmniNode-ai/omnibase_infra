@@ -1719,16 +1719,19 @@ def test_audit_refuses_a_listing_row_with_an_error(
     assert broker.acl_argvs == [] and broker.set_calls == []
 
 
-# OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204: h105 only.
+# OPERATOR-CONSENT 2026-10-25T02:09:09Z, rolling ledger line 3204: h105 only, terminal
+# reads. OPERATOR-CONSENT 2026-10-25T23:01:04Z adds WRITE on the one command topic.
 H105 = "dev-jonah-omnibook"
 H105_DERIVED = GRANTS.parent / "h105-scm-pr-create-derived-grants.json"
 SCM_WRITE_TERMINALS = (
     "onex.evt.omnimarket.github-repo-write-completed.v1",
     "onex.evt.omnimarket.github-repo-write-failed.v1",
 )
+SCM_WRITE_REQUESTED = "onex.cmd.omnimarket.github-repo-write-requested.v1"
+SCM_TOPICS = (*SCM_WRITE_TERMINALS, SCM_WRITE_REQUESTED)
 
 
-def test_h105_scm_pr_create_adds_exactly_the_consented_terminal_reads(
+def test_h105_scm_pr_create_adds_exactly_the_consented_grants(
     declaration: lpi.Declaration,
 ) -> None:
     shared = frozenset(
@@ -1742,6 +1745,9 @@ def test_h105_scm_pr_create_adds_exactly_the_consented_terminal_reads(
         lpi.AclRow("topic", topic, "literal", operation)
         for topic in SCM_WRITE_TERMINALS
         for operation in ("read", "describe")
+    } | {
+        lpi.AclRow("topic", SCM_WRITE_REQUESTED, "literal", operation)
+        for operation in ("write", "describe")
     }
     assert shared - actual == set()
     prefix = "local.omnimarket.scm_command_client.consume.v1."
@@ -1770,8 +1776,7 @@ def test_h105_scm_pr_create_does_not_grant_another_principal(
 ) -> None:
     assert declaration.grants_for(principal) == declaration.grants
     assert not any(
-        row.name in SCM_WRITE_TERMINALS
-        for row in lpi.expected_acl_rows(declaration, principal)
+        row.name in SCM_TOPICS for row in lpi.expected_acl_rows(declaration, principal)
     )
 
 
@@ -1790,15 +1795,46 @@ def test_h105_apply_and_audit_use_the_scoped_grants_without_rotating(
         if principal == H105
     )
     assert applied == lpi.expected_acl_rows(declaration, H105)
-    assert {row.name for row in applied if row.name in SCM_WRITE_TERMINALS} == set(
-        SCM_WRITE_TERMINALS
-    )
+    assert {row.name for row in applied if row.name in SCM_TOPICS} == set(SCM_TOPICS)
     assert lpi.audit_acl_rows(declaration, H105, applied) == ((), ())
-    without = frozenset(row for row in applied if row.name not in SCM_WRITE_TERMINALS)
+    without = frozenset(row for row in applied if row.name not in SCM_TOPICS)
     missing, extra = lpi.audit_acl_rows(declaration, H105, without)
     assert frozenset(missing) == applied - without
-    assert len(missing) == 4
+    assert len(missing) == 6
     assert not extra
+
+
+def test_h105_scoped_only_apply_writes_exactly_the_principal_additions(
+    declaration: lpi.Declaration, apply_broker: FakeBroker, ledger_path: Path
+) -> None:
+    apply_broker.users[H105] = "existing-fixture"
+    args = ["--grants", str(GRANTS), "--ledger", str(ledger_path), "--principal", H105]
+    assert lpi.main(["apply-grants", "--scoped-only", *args]) == 0
+    assert apply_broker.set_calls == []
+    applied = frozenset(
+        lpi.AclRow(resource, name, pattern, operation)
+        for principal, resource, name, pattern, *operations in apply_broker.acl_argvs
+        for operation in operations
+        if principal == H105
+    )
+    assert applied == frozenset(
+        lpi.AclRow(g.resource, g.name, g.pattern, operation)
+        for g in declaration.scoped_grants_for(H105)
+        for operation in g.operations
+    )
+    assert lpi.AclRow("topic", SCM_WRITE_REQUESTED, "literal", "write") in applied
+    assert not any(row.name == "*" for row in applied)
+    assert len(applied) < len(lpi.expected_acl_rows(declaration, H105))
+
+
+def test_h105_scoped_only_apply_refuses_a_principal_without_additions(
+    apply_broker: FakeBroker, ledger_path: Path
+) -> None:
+    other = "dev-fixture-laptop"
+    apply_broker.users[other] = "existing-fixture"
+    args = ["--grants", str(GRANTS), "--ledger", str(ledger_path), "--principal", other]
+    assert lpi.main(["apply-grants", "--scoped-only", *args]) == 2
+    assert apply_broker.acl_argvs == []
 
 
 def _h105_policy_copy(tmp_path: Path) -> tuple[Path, dict[str, object]]:
@@ -1847,6 +1883,21 @@ def test_h105_scoped_source_cannot_change_owner_lane_or_add_writes(
         lpi.load_declaration(path)
 
 
+def test_h105_scoped_write_is_only_the_command_topic(tmp_path: Path) -> None:
+    path, _ = _h105_policy_copy(tmp_path)
+    source = tmp_path / H105_DERIVED.name
+    doc = json.loads(source.read_text())
+    writes = {row["resource"] for row in doc["grants"] if row["operation"] == "WRITE"}
+    assert writes == {SCM_WRITE_REQUESTED}
+    assert lpi.load_declaration(path)
+    for field, value in (("pattern", "PREFIXED"), ("resource", SCM_WRITE_TERMINALS[0])):
+        write = next(row for row in doc["grants"] if row["operation"] == "WRITE")
+        changed = {**doc, "grants": [{**write, field: value}]}
+        source.write_text(json.dumps(changed))
+        with pytest.raises(lpi.DeclarationError, match="concrete reads"):
+            lpi.load_declaration(path)
+
+
 def test_h105_scoped_source_is_part_of_the_audit_digest(tmp_path: Path) -> None:
     path, _ = _h105_policy_copy(tmp_path)
     before = lpi.load_declaration(path)
@@ -1892,6 +1943,6 @@ def test_h105_audit_cli_reports_missing_terminal_grants(
         ]
     ) == int(missing_terminals)
     output = capsys.readouterr().out
-    assert f"missing={4 if missing_terminals else 0} extra=0" in output
+    assert f"missing={6 if missing_terminals else 0} extra=0" in output
     assert broker.set_calls == []
     assert broker.acl_argvs == []

@@ -73,7 +73,8 @@ WHO HOLDS A PRINCIPAL (OMN-19975)
     and ``serve`` issues only a (login, device) the document declares. The document
     carries no grant; the grants are the ones this file's grant declaration derives.
     The grant declaration's ``principal_grants_from`` selects additional derived
-    read grants by exact principal, on dev only. Apply, issuance and audit resolve
+    read grants by exact principal, on dev only, and a write only on the topics named
+    in ``SCOPED_WRITE_TOPICS``. Apply, issuance and audit resolve
     the same shared plus principal-specific set; the digest covers both sources.
 
     With ``check --overlay FILE --ledger FILE`` the issuer names every machine its
@@ -85,7 +86,9 @@ WHAT IT RECORDS
     One JSON line per issuance in the ledger: when, which login and device, which
     principal, created or rotated, and the digest of the grant file applied. Never
     the password. ``apply-grants`` records grants-applied rows without login or
-    device, and never sets or rotates a password.
+    device, and never sets or rotates a password. ``apply-grants --scoped-only`` applies
+    just the exact principal's ``principal_grants_from`` rows, for a grant consented
+    for that principal alone while the shared set is not yet consented for it.
 
 HOW IT TALKS TO THE BROKER
     Users through the Redpanda Admin API (the password travels in a request body,
@@ -101,7 +104,7 @@ Usage::
 
     lab_principal_issuer.py check --grants FILE [--overlay FILE [--ledger FILE]]
     lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
-    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
+    lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--scoped-only] [--rpk-container NAME]
     lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
     lab_principal_issuer.py health --socket PATH
 """
@@ -187,15 +190,20 @@ class Declaration:
     digest: str
     principal_grants: tuple[tuple[str, tuple[Grant, ...]], ...] = ()
 
+    def scoped_grants_for(self, principal: str) -> tuple[Grant, ...]:
+        """Only this exact principal's declared additions, none of the shared set."""
+        return tuple(
+            dict.fromkeys(
+                grant
+                for owner, grants in self.principal_grants
+                if owner == principal
+                for grant in grants
+            )
+        )
+
     def grants_for(self, principal: str) -> tuple[Grant, ...]:
         """Shared grants plus only this exact principal's declared additions."""
-        additions = tuple(
-            grant
-            for owner, grants in self.principal_grants
-            if owner == principal
-            for grant in grants
-        )
-        return tuple(dict.fromkeys((*self.grants, *additions)))
+        return tuple(dict.fromkeys((*self.grants, *self.scoped_grants_for(principal))))
 
 
 def load_declaration(path: Path) -> Declaration:
@@ -259,10 +267,12 @@ def load_declaration(path: Path) -> Declaration:
         rows, derived = _derived_grants(path, source, lane, principal=principal)
         additions = tuple(_grant(path, i, row) for i, row in enumerate(rows))
         if not additions or any(
-            g.templated or "write" in g.operations for g in additions
+            g.templated or ("write" in g.operations and not _scoped_write_allowed(g))
+            for g in additions
         ):
             raise DeclarationError(
-                f"{path}: principal additions must be non-empty, concrete reads"
+                f"{path}: principal additions must be non-empty, concrete reads "
+                f"(a write only on {', '.join(sorted(SCOPED_WRITE_TOPICS))})"
             )
         principal_grants.append((principal, additions))
         digest.update(derived)
@@ -274,6 +284,19 @@ def load_declaration(path: Path) -> Declaration:
         grants=grants,
         digest=digest.hexdigest(),
         principal_grants=tuple(principal_grants),
+    )
+
+
+# OPERATOR-CONSENT 2026-10-25T23:01:04Z, lane=orchestrator-31d9: the one command
+# topic a principal-specific addition may write (h105's `onex scm pr-create`).
+SCOPED_WRITE_TOPICS = frozenset({"onex.cmd.omnimarket.github-repo-write-requested.v1"})
+
+
+def _scoped_write_allowed(grant: Grant) -> bool:
+    return (
+        grant.resource == "topic"
+        and grant.pattern == "literal"
+        and grant.name in SCOPED_WRITE_TOPICS
     )
 
 
@@ -1108,6 +1131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply.add_argument("--principal", action="extend", nargs="+")
     apply.add_argument("--overlay", type=Path)
     apply.add_argument(
+        "--scoped-only",
+        action="store_true",
+        help="apply only each principal's principal_grants_from additions, not the shared set",
+    )
+    apply.add_argument(
         "--rpk-container",
         metavar="NAME",
         help="run every rpk call inside this running issuer container, which holds the broker identity",
@@ -1198,7 +1226,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
                     )
             for principal in principals:
-                grants = declaration.grants_for(principal)
+                grants = (
+                    declaration.scoped_grants_for(principal)
+                    if args.scoped_only
+                    else declaration.grants_for(principal)
+                )
+                if not grants:
+                    raise IssuerError(
+                        HTTPStatus.NOT_FOUND,
+                        f"{principal} has no principal_grants_from additions",
+                    )
                 _apply_grants(broker, principal, grants)
                 ledger.append(
                     {
