@@ -995,8 +995,8 @@ def env_secret_store_is_authoritative(
 ) -> bool:
     """Return whether the env store can judge secret presence at gate time.
 
-    When prefetch is enabled and the Infisical address is non-blank, secrets
-    arrive from Infisical after wiring, so the env store is not authoritative.
+    When prefetch is enabled and the Infisical address is non-blank, the
+    kernel must finish prefetch before judging presence from the environment.
     """
     return prefetch_policy == "disabled" or not infisical_addr.strip()
 
@@ -1035,7 +1035,14 @@ def drop_blank_secret_names(
     A listed name set to ``""`` (``GITHUB_TOKEN: ${GITHUB_TOKEN:-}`` in a
     compose file) holds no usable secret, so it counts as absent.
     """
-    return frozenset(name for name in names if values.get(name, "").strip())
+    present: set[str] = set()
+    for name in names:
+        try:
+            if values.get(name, "").strip():
+                present.add(name)
+        except (OSError, RuntimeError, RuntimeHostError) as exc:
+            logger.warning("Required-secret value unreadable: %s", type(exc).__name__)
+    return frozenset(present)
 
 
 def gate_manifest_on_required_secrets(

@@ -1974,10 +1974,9 @@ class RuntimeHostProcess:
         # through HandlerInfisical. Prefetched values are applied to the
         # process environment so downstream steps can read them.
         #
-        # NOTE: This MUST run after Step 4 (_populate_handlers_from_registry)
-        # because it searches self._handlers for a HandlerInfisical instance.
-        # Handlers are not available until the registry has been populated.
-        await self._prefetch_config_from_infisical()
+        # The kernel may have already prefetched before auto-wiring's secret
+        # gate. Reuse that outcome instead of changing secrets after wiring.
+        await self.prefetch_config()
 
         # Step 4.1: FAIL-FAST validation - runtime MUST have at least one handler
         # A runtime with no handlers cannot process any events and is misconfigured.
@@ -4030,6 +4029,15 @@ class RuntimeHostProcess:
                     ),
                 },
             )
+
+    async def prefetch_config(self) -> None:
+        """Prefetch once, before the kernel gates contracts or standalone startup.
+
+        Before handler population the prefetch step constructs its own Infisical
+        handler. Startup reuses the outcome, including best-effort failures.
+        """
+        if self._config_prefetch_status == "pending":
+            await self._prefetch_config_from_infisical()
 
     async def _prefetch_config_from_infisical(self) -> None:
         """Prefetch configuration values from Infisical (OMN-2287, OMN-10587).
