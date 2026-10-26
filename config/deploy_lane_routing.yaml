@@ -121,6 +121,11 @@ instances:
     consumer_group: onex-deploy-agent
     flags:
       max_dev_lag_minutes: 20
+      # OMN-21279: lift after promoting/deploying the dev tag carrying #5353
+      # and its image boots, then remove this block by PR.
+      freeze:
+        until: "2026-10-27T00:00:00Z"
+        reason: "OMN-21279 hold until omnibase_infra#5353 merges and its image boots: dev-head rebuilds without it fail boot on BIFROST_BASE_CONTRACT_PATH unset; lift by a promotion/ deploy of the dev tag carrying #5353, then a PR removing this block"
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]

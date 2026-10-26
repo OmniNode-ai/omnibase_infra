@@ -258,6 +258,8 @@ def test_instance_without_flags_has_no_freeze(tmp_path: Path) -> None:
 
 
 SATELLITE_FREEZE_TICKET = "OMN-20530"
+DEV_HOLD_TICKET = "OMN-21279"
+DEV_HOLD_UNTIL = datetime(2026, 10, 27, tzinfo=UTC)
 SATELLITE_MERGED_BY = datetime(2026, 10, 21, tzinfo=UTC)
 
 
@@ -275,10 +277,10 @@ def _satellite_instances() -> list[str]:
     ]
 
 
-def test_committed_dev_lanes_carry_no_freeze() -> None:
+def test_committed_dev_lanes_carry_no_freeze_but_the_declared_hold() -> None:
     # The operator lifted the dev-201 Tech Week freeze on 2026-10-06 (RULINGs
-    # 07:55:26Z and 14:16:08Z), so neither full dev lane is frozen. Only the
-    # satellite instance is, and the default instance is never it.
+    # 07:55:26Z and 14:16:08Z); the only dev-lane freeze allowed is the
+    # OMN-21279 hold on the default instance.
     satellites = _satellite_instances()
     table = load_routing_table(REPO_ROOT)
     assert table.default_instance not in satellites
@@ -286,8 +288,46 @@ def test_committed_dev_lanes_carry_no_freeze() -> None:
         if instance in satellites:
             continue
         other_flags = lane_flags_for_instance(REPO_ROOT, instance)
+        if other_flags.freeze and DEV_HOLD_TICKET in other_flags.freeze.reason:
+            continue
         assert other_flags.frozen_reason(NOW) is None
         assert other_flags.frozen_reason(UNTIL) is None
+
+
+def test_committed_default_instance_hold_is_declared_and_bounded() -> None:
+    table = load_routing_table(REPO_ROOT)
+    flags = lane_flags_for_instance(REPO_ROOT, table.default_instance)
+
+    assert flags.freeze is not None
+    assert flags.freeze.until == DEV_HOLD_UNTIL
+    assert DEV_HOLD_TICKET in flags.freeze.reason
+    assert "#5353" in flags.freeze.reason
+    assert [
+        instance
+        for instance, other_flags in _committed_flags().items()
+        if other_flags.freeze and DEV_HOLD_TICKET in other_flags.freeze.reason
+    ] == [table.default_instance]
+    assert flags.max_dev_lag() == timedelta(minutes=20)
+    assert flags.frozen_reason(DEV_HOLD_UNTIL) is None
+
+
+def test_committed_default_instance_hold_refuses_gha_and_accepts_promotion() -> None:
+    table = load_routing_table(REPO_ROOT)
+    text = (REPO_ROOT / ROUTING_TABLE_RELPATH).read_text(encoding="utf-8")
+    consumer = _consumer(_router(table.default_instance, {SHA_A: text}))
+    consumer.lane_flags = lane_flags_for_instance(REPO_ROOT, table.default_instance)
+    assert NOW < DEV_HOLD_UNTIL  # _process fixes the consumer's clock at NOW.
+    cmd = _command("gha/omnimarket/pr-4418")
+
+    assert _process(consumer, cmd) == (None, EnumRejectionReason.FROZEN.value)
+    assert len(consumer.notices) == 1
+    assert consumer.notices[0].reason is EnumRejectionReason.FROZEN
+    consumer.job_store.accept.assert_not_called()
+
+    promotion = _command("promotion/operator")
+    assert _process(consumer, promotion) == (promotion, None)
+    assert len(consumer.notices) == 1
+    consumer.job_store.accept.assert_called_once()
 
 
 def test_committed_satellite_lane_is_frozen_so_its_full_stack_is_not_recreated() -> (
