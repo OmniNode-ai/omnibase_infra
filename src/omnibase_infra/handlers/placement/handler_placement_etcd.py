@@ -15,7 +15,11 @@ from collections.abc import Mapping
 
 import httpx
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 
 _JsonObject = dict[str, object]
@@ -41,6 +45,16 @@ class HandlerPlacementEtcd:
     def __init__(self, endpoint: str, *, timeout_s: float = 1.0) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._client = httpx.AsyncClient(timeout=timeout_s)
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure transport for etcd placement operations."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting etcd v3 gateway I/O."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def aclose(self) -> None:
         await self._client.aclose()

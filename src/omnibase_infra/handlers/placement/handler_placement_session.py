@@ -17,7 +17,11 @@ import json
 import time
 from collections.abc import Callable, Sequence
 
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
@@ -49,6 +53,16 @@ class HandlerPlacementSession:
         self._clock = clock
         self._lease_id = 0
         self._deadline = 0.0
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure session for placement membership."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting etcd lease management."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def lease_id(self) -> int:

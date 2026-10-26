@@ -22,6 +22,7 @@ import logging
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.placement.handler_placement_election import (
     HandlerPlacementElection,
@@ -103,6 +104,16 @@ class HandlerPlacementRuntime:
         self._started: dict[str, int] = {}
         self._tasks: list[asyncio.Task[None]] = []
         self._lock = asyncio.Lock()
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure runtime for node placement."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting node consumer lifecycle management."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def runtime_id(self) -> str:

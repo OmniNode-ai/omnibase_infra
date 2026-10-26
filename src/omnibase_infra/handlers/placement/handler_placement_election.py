@@ -10,6 +10,7 @@ the key held by someone else or gone.
 
 from __future__ import annotations
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
 )
@@ -35,6 +36,16 @@ class HandlerPlacementElection:
         self._node_name = node_name
         self._key = f"{PRIMARY_PREFIX}{node_name}"
         self._epoch = 0
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure election for a node's primary role."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting etcd election campaigns."""
+        return EnumHandlerTypeCategory.EFFECT
 
     @property
     def node_name(self) -> str:

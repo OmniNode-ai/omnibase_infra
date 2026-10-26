@@ -17,6 +17,7 @@ import io
 import os
 import platform
 import shutil
+import signal
 import socket
 import subprocess
 import tarfile
@@ -109,6 +110,7 @@ class EtcdProcess:
             ],
             stdout=log,
             stderr=log,
+            start_new_session=True,
         )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -120,7 +122,7 @@ class EtcdProcess:
 
     def stop(self) -> None:
         if self._proc is not None:
-            self._proc.terminate()
+            os.killpg(self._proc.pid, signal.SIGTERM)
             self._proc.wait(timeout=10)
             self._proc = None
 

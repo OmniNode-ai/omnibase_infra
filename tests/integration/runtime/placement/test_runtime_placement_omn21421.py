@@ -128,6 +128,7 @@ def _spawn(etcd: EtcdProcess, runtime_id: str, tmp: Path) -> subprocess.Popen[by
             f"--failover-target-s={FAILOVER_TARGET_S}",
         ],
         env=env,
+        start_new_session=True,
     )
 
 
@@ -164,7 +165,7 @@ async def test_ac1_ac3_killing_the_primary_fails_over_and_rebuilds(
             "standby started early"
         )
 
-        a.send_signal(signal.SIGKILL)
+        os.killpg(a.pid, signal.SIGKILL)
         killed_at = time.time()
         a.wait(timeout=10)
         await _until(
@@ -204,7 +205,7 @@ async def test_ac1_ac3_killing_the_primary_fails_over_and_rebuilds(
     finally:
         for proc in (a, b):
             if proc is not None and proc.poll() is None:
-                proc.send_signal(signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=10)
 
 

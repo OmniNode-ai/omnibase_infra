@@ -10,6 +10,7 @@ after a newer primary's.
 
 from __future__ import annotations
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.placement.model_placement_command import (
     ModelPlacementCommand,
 )
@@ -20,6 +21,16 @@ class HandlerPlacementEpochGuard:
 
     def __init__(self) -> None:
         self._highest: dict[str, int] = {}
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure guard for placement command epochs."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """In-memory placement epoch comparison."""
+        return EnumHandlerTypeCategory.COMPUTE
 
     def highest(self, node_name: str) -> int:
         return self._highest.get(node_name, 0)
