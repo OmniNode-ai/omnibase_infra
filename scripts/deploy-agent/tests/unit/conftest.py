@@ -32,6 +32,28 @@ from deploy_agent import executor as executor_mod
 
 
 @pytest.fixture(autouse=True)
+def _stub_dev_boot_guard(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated job tests do not inspect Docker or the private recovery store.
+
+    The boot-guard replay suite opts out and drives the real guard, including
+    the agent's job flow. This stand-in never stubs existing verification.
+    """
+    if request.node.get_closest_marker("dev_boot_guard") is not None:
+        return
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    guard = Mock()
+    guard.protect.side_effect = lambda *args: nullcontext()
+    monkeypatch.setattr(agent_mod, "DevBootGuard", Mock(return_value=guard))
+    monkeypatch.setattr(
+        "deploy_agent.executor.preflight_dev_images", lambda *args: None
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep manifests and lane locks inside this test's temporary directory."""
     real_home = Path.home

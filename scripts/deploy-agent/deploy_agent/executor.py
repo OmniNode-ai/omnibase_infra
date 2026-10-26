@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -126,6 +126,121 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
     Scope.RUNTIME: ["core", "runtime"],
     Scope.FULL: ["core", "runtime"],
 }
+
+if TYPE_CHECKING:
+    from omnibase_infra.handlers.handler_dev_boot_guard import HandlerDevBootGuard
+    from omnibase_infra.models.model_dev_boot_report_config import (
+        ModelDevBootReportConfig,
+    )
+
+
+# Run in the candidate image with its compose environment and mounts, before
+# any live service is replaced. No kernel, broker or package install is run.
+IMAGE_PREFLIGHT_SCRIPT = r"""
+import importlib.util
+import os
+from pathlib import Path
+
+if os.environ.get("BIFROST_CONTRACT_PATH", ""):
+    value = os.environ.get("BIFROST_BASE_CONTRACT_PATH", "").strip()
+    if not value:
+        raise SystemExit("BIFROST_BASE_CONTRACT_PATH is unset or blank; there is no default")
+    if not Path(value).is_file():
+        raise SystemExit("BIFROST_BASE_CONTRACT_PATH points to a missing file/package")
+for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
+    package = package.strip()
+    if not package:
+        continue
+    try:
+        present = importlib.util.find_spec(package) is not None
+    except (ImportError, ValueError, AttributeError):
+        present = False
+    if not present:
+        raise SystemExit("ONEX_ACTIVE_RUNTIME_PACKAGES points to missing package: " + package)
+"""
+
+
+def load_dev_boot_guard() -> ModuleType:
+    """Load the repo's canonical host effect beside this standalone agent.
+
+    The agent has its own published-infra venv; its host effect must come from
+    the same checkout as the agent, without waiting for a package release.
+    """
+    name = "omnibase_infra.handlers.handler_dev_boot_guard"
+    if name in sys.modules:
+        return sys.modules[name]
+    root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
+    for relative in (
+        "models/model_dev_boot_health_status.py",
+        "models/model_dev_boot_state.py",
+        "models/model_dev_boot_healthcheck.py",
+        "models/model_dev_boot_container_config.py",
+        "models/model_dev_boot_container.py",
+        "models/model_dev_boot_report_config.py",
+        "models/model_dev_boot_point.py",
+        "models/model_dev_boot_request.py",
+        "models/model_dev_boot_result.py",
+        "handlers/handler_dev_boot_guard.py",
+    ):
+        module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        spec = importlib.util.spec_from_file_location(module_name, root / relative)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load dev boot effect: {relative}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def dev_boot_report_config() -> ModelDevBootReportConfig:
+    """Resolve host transport settings before crossing the canonical effect port."""
+    load_dev_boot_guard()
+    from omnibase_infra.models.model_dev_boot_report_config import (
+        ModelDevBootReportConfig,
+    )
+
+    registry_root = Path(
+        os.environ.get("UNIT_DRIFT_REGISTRY_ROOT")
+        or os.environ.get("OMNI_HOME")
+        or Path(REPO_DIR).parent
+    ).expanduser()
+    plugin_setting = os.environ.get("DEPLOY_AGENT_REPORT_PLUGIN_DIR") or os.environ.get(
+        "CLAUDE_PLUGIN_ROOT"
+    )
+    return ModelDevBootReportConfig(
+        registry_root=registry_root,
+        plugin_dir=Path(plugin_setting) if plugin_setting else None,
+        ledger_via_bus=os.environ.get("ONEX_LEDGER_WRITE_VIA") == "bus",
+    )
+
+
+def DevBootGuard(executor: DeployExecutor, state_dir: Path) -> HandlerDevBootGuard:
+    return cast(
+        "HandlerDevBootGuard",
+        load_dev_boot_guard().HandlerDevBootGuard(
+            state_dir,
+            config_hashes=lambda services: executor.dev_boot_config_hashes(services),
+            verify_recovery=lambda update: executor.verify_dev_boot_recovery(
+                on_phase_update=update
+            ),
+            execution=sys.modules[__name__],
+            reporting=dev_boot_report_config(),
+        ),
+    )
+
+
+def preflight_dev_images(lane: EnumRuntimeLane, services: list[str]) -> None:
+    if lane is EnumRuntimeLane.DEV:
+        load_dev_boot_guard().preflight_dev_images(
+            lane, services, execution=sys.modules[__name__]
+        )
+
+
+def deliver_dev_boot_reports(root: Path) -> None:
+    load_dev_boot_guard().deliver_reports(
+        root, execution=sys.modules[__name__], config=dev_boot_report_config()
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -3134,6 +3249,20 @@ class PreflightScriptUnavailableError(RuntimeError):
 
 
 class DeployExecutor:
+    def dev_boot_config_hashes(self, services: Sequence[str]) -> dict[str, str]:
+        return self._rendered_config_hashes(
+            EnumRuntimeLane.DEV, services, profile="runtime"
+        )
+
+    def verify_dev_boot_recovery(
+        self, *, on_phase_update: Callable[[StrEnum, StrEnum], None]
+    ) -> None:
+        self.verify(
+            on_phase_update=on_phase_update,
+            lane=EnumRuntimeLane.DEV,
+            recover_runtime=False,
+        )
+
     def __init__(self, *, migration_record_dir: Path | None = None) -> None:
         self._migration_record_dir = migration_record_dir
         # OMN-18057: services a phase left in a non-running state, and whether
@@ -5912,6 +6041,11 @@ class DeployExecutor:
             else services_for_scope(scope, lane=lane)
         )
 
+        # OMN-21279: run the candidate's setting/package check before any
+        # runtime replacement (and never on a prod or stability runner).
+        if lane is EnumRuntimeLane.DEV and scope is Scope.RUNTIME and build:
+            preflight_dev_images(lane, expected)
+
         # OMN-18692: the DEPS recreate is supervised rather than bounded by a
         # `subprocess.run` timeout. It is the one phase whose cancellation can
         # remove the broker this agent reads its own commands from, so it gets
@@ -6528,6 +6662,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        recover_runtime: bool = True,
     ) -> list[ModelHealthCheck]:
         on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.VERIFICATION]
@@ -6670,7 +6805,11 @@ class DeployExecutor:
                             }
                         )
                 earlier_target_failed = True
-            if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+            if (
+                check.status == "fail"
+                and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
+            ):
                 check, timed_out = self._await_declared_start(
                     lane=lane,
                     service=service,
@@ -6682,6 +6821,7 @@ class DeployExecutor:
             if (
                 check.status == "fail"
                 and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
                 and answering is not None
             ):
                 # OMN-20864: up, answering, and its monitor naming a finding.
@@ -6690,7 +6830,11 @@ class DeployExecutor:
                 check = self._decline_recreate_answering(
                     lane=lane, service=service, failed=check, reading=answering
                 )
-            elif check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+            elif (
+                check.status == "fail"
+                and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
+            ):
                 check, timed_out = self._force_recreate_and_reverify(
                     lane=lane,
                     service=service,

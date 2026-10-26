@@ -106,3 +106,12 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-dev-deploy-boot-recovery
+    description: >-
+      AC2, dev deployment guard. Replays the 2026-10-25 c37f6142 incident's BOOT FAILED 5/5 with BIFROST_BASE_CONTRACT_PATH unset. All three dev runtime services must become Docker healthy within their declared health window. Compose errors, exhausted boots and probe timeouts keep the job failed and forward-redeploy the retained healthy image revision and its resolved compose settings, with no git revert, image build, pull or deps restart. Candidate setting/package checks run before runtime replacement. STATUS and exception reports name the failed commit and boot cause and remain durable until their independent deliveries are acknowledged. Non-dev jobs never construct this guard. These are isolated replays; the live runtime-boot-smoke job remains the boot gate on the PR head.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+    binds_ac:
+      - "AC2"
