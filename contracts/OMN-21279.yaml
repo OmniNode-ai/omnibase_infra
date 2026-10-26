@@ -14,7 +14,20 @@ requirements:
         statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
       - id: AC2
         statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-deploy-agent-recovery-follow-up
+    statement: >-
+      Operational follow-up from lane proc-rollback-preempt-0055, separate from the ticket author's unchanged AC1 and AC2: the dev recovery command must not wait behind a boot that has already exhausted its retries.
+    acceptance:
+      - id: AC3
+        statement: >-
+          An exhausted dev boot ends verification without waiting out the remaining start or recreate budget; a runtime/full job restores its captured healthy images under the lane lock, remains failed, and releases the lock. Probe timeouts also attempt that restore.
+      - id: AC4
+        statement: >-
+          A signed, declared rollback to a dev tag is selected ahead of queued forward jobs for the same lane and instance in the fetched partition; earlier forwards remain uncommitted for replay and the durable rollback job is deduplicated. Single-flight and acceptance checks stand.
 evidence_requirements:
+  - kind: tests
+    description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
+    command: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
     command: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
@@ -32,6 +45,36 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-dev-boot-recovery
+    description: >-
+      Regression for job 3a55c329: RETRIES EXHAUSTED during the initial probe, declared-start wait or recreate wait fails promptly; transient failures retain their health checks. Verification failures and probe timeouts restore the job's own point before unlock, keep the failed verdict, and allow the next job. Before this change the exhausted-boot and timeout cases failed. This is recovery evidence, not a substitute for AC2's runtime-boot-smoke job or the layering evidence below.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q -k 'boot or failure_restores'
+    binds_ac:
+      - AC3
+  - id: dod-omn-21279-dev-queue-priority
+    description: >-
+      Regression for rollback 70315f50 to dev-20261025120130-26d49cec3536: it runs before earlier forwards, Kafka commits retain the skipped frontier across restart and self-update, duplicate rollback delivery does not execute again, and other lanes, instances, unsigned requests and moving refs get no priority. The priority cases failed before the fix.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q -k 'priority or tag_rollback'
+    binds_ac:
+      - AC4
+  - id: dod-omn-21279-deploy-agent-recovery-probe
+    description: >-
+      Deploy-scope source readback runnable on a hosted runner with no lab route, lab credentials, Docker daemon or live deploy. Reads the evaluated revision through GitHub and checks that each verifier wait invokes the exhausted-boot guard, and that the poll path selects priority work while preserving a replay frontier. The merge base lacks both methods. These source-wiring assertions supplement the behavioral regressions above; they do not claim that the live agent has been updated.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)" --jq '.content | @base64d' | python3 -c 'import ast,sys; tree=ast.parse(sys.stdin.read()); cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="DeployExecutor"); methods={n.name:n for n in cls.body if isinstance(n,ast.FunctionDef)}; guard=methods["_assert_boot_can_progress"]; assert any(isinstance(n,ast.Constant) and isinstance(n.value,str) and "RETRIES EXHAUSTED:" in n.value for n in ast.walk(guard)); assert all(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="_assert_boot_can_progress" for n in ast.walk(methods[name])) for name in ("verify","_await_declared_start","_force_recreate_and_reverify"))' &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/consumer.py?ref=$(git rev-parse HEAD)" --jq '.content | @base64d' | python3 -c 'import ast,sys; tree=ast.parse(sys.stdin.read()); cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="DeployConsumer"); methods={n.name:n for n in cls.body if isinstance(n,ast.FunctionDef)}; assert "_priority_message" in methods; poll=methods["poll_and_accept"]; assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="_priority_message" for n in ast.walk(poll)); assert any(isinstance(n,ast.keyword) and n.arg=="replay_from" for n in ast.walk(poll)); commit=methods["_commit_through"]; assert any(isinstance(n,ast.Attribute) and isinstance(n.value,ast.Name) and n.value.id=="replay_from" and n.attr=="offset" for n in ast.walk(commit))'
+    binds_ac:
+      - AC3
+      - AC4
   - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
     description: >-
       AC1. The negative controls of the layering module feed the Dockerfile, workflow and test-module checkers fixture lines that name omnimarket (an ARG, a pip install, a COPY from the wheel, an editable sibling install, a heredoc-continued install, a function-scope import, an importorskip) and assert each one fires; clean and look-alike lines pass. Red first: before the change the module held no such checker and the three live-tree tests it added failed against the base (the Dockerfile named omnimarket, ci.yml installed it as a sibling, five test modules imported it). The check also runs the live-tree Dockerfile and CI install-step tests, which fail at the merge base.

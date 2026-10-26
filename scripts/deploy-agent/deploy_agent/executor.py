@@ -6869,6 +6869,9 @@ class DeployExecutor:
         settled: list[ModelHealthCheck] = []
         pending_timeout: subprocess.TimeoutExpired | None = None
         earlier_target_failed = False
+        # A parked boot may exit from inside either wait below. Preserve all
+        # up-front target readings even when settling cannot finish.
+        self.health_checks = checks + [check for _, _, check, _ in probes]
         for service, port, check, timed_out in probes:
             if check.status == "fail":
                 if earlier_target_failed:
@@ -6908,6 +6911,7 @@ class DeployExecutor:
                 and lane in VERIFY_RECREATE_LANES
                 and recover_runtime
             ):
+                self._assert_boot_can_progress(lane=lane, service=service, failed=check)
                 check, timed_out = self._await_declared_start(
                     lane=lane,
                     service=service,
@@ -6970,6 +6974,44 @@ class DeployExecutor:
 
         on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
         return checks
+
+    def _assert_boot_can_progress(
+        self, *, lane: EnumRuntimeLane, service: str, failed: ModelHealthCheck
+    ) -> None:
+        """Stop a dev boot wait when the entrypoint has exhausted its retries.
+
+        The entrypoint parks forever after this marker (OMN-18550). Neither
+        another health timeout nor recreating the same image can repair the
+        failed boot. Raise into the agent's retained-image restore while it
+        still holds the lane lock. Read only this lane's service container,
+        with bounded logs and time; unreadable logs confer no health verdict.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return
+        container = self._compose_service_container(lane, service)
+        if not container:
+            return
+        try:
+            result = _run(
+                ["docker", "logs", "--tail", "100", container],
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if result.returncode != 0 or not any(
+            line.startswith("[entrypoint] RETRIES EXHAUSTED:")
+            for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+        ):
+            return
+        check = failed.model_copy(
+            update={"detail": "boot retries exhausted; entrypoint is parked"}
+        )
+        self.health_checks = [
+            existing
+            for existing in self.health_checks
+            if existing.endpoint != check.endpoint
+        ] + [check]
+        raise VerificationFailedError([check])
 
     def _probe_runtime_health(
         self, *, service: str, port: int, lane: EnumRuntimeLane | None = None
@@ -7105,6 +7147,7 @@ class DeployExecutor:
                 "runtime_health_keep_waiting", str(elapsed), str(budget), state
             ):
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             delay = min(
                 2 ** min(_attempt, 4), VERIFY_RECREATE_POLL_SECONDS, budget - elapsed
             )
@@ -7346,6 +7389,7 @@ class DeployExecutor:
             )
             if check.status == "pass":
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             remaining = budget - (time.monotonic() - started)
             if remaining <= 0:
                 break
@@ -7472,11 +7516,13 @@ class DeployRolledBackError(VerificationFailedError):
 
     def __init__(
         self,
-        original: VerificationFailedError,
+        original: VerificationFailedError | subprocess.TimeoutExpired,
         outcome: ModelRollbackOutcome,
         point: ModelRollbackPoint,
     ) -> None:
-        super().__init__(original.failures)
+        super().__init__(
+            original.failures if isinstance(original, VerificationFailedError) else []
+        )
         self.outcome = outcome
         image_ids = ", ".join(
             dict.fromkeys(
