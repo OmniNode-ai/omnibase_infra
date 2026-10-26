@@ -7534,7 +7534,21 @@ def capture_rollback_point(
         }
         images: list[ModelRetainedImage] = []
         retention: dict[str, str] = {}
-        for index, (container, _) in enumerate(targets):
+        service_by_target: dict[str, str] = {}
+        for index, (target, _) in enumerate(targets):
+            # Folded profiles share the main runtime's target and container.
+            service_by_target.setdefault(target, service_by_index[index])
+        for index, (target, _) in enumerate(targets):
+            service = service_by_target[target]
+            container = executor._compose_service_container(lane, service)
+            if not container:
+                logger.warning(
+                    "Cannot capture rollback for %s: no unique container for %s in %s",
+                    lane.value,
+                    service,
+                    lane_config_for(lane).compose_project,
+                )
+                return None
             result = _run(
                 ["docker", "inspect", "--format", "{{.Config.Image}}", container],
                 timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],

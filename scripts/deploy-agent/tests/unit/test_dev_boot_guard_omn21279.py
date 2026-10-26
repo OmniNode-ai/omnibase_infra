@@ -482,9 +482,6 @@ def test_nondev_jobs_never_construct_the_dev_guard(
     agent, _ = _agent(tmp_path, monkeypatch, cmd)
     guard = Mock(side_effect=AssertionError("non-dev job reached dev boot guard"))
     monkeypatch.setattr("deploy_agent.agent.DevBootGuard", guard)
-    monkeypatch.setattr(
-        "deploy_agent.agent.capture_rollback_point", Mock(return_value=None)
-    )
     agent._run_deploy(cmd)
     guard.assert_not_called()
     job = agent.job_store.load(cmd.correlation_id)
