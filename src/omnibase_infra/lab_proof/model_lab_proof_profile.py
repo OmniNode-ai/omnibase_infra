@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from omnibase_infra.lab_proof.enum_lab_proof_exempt_class import (
     EnumLabProofExemptClass,
 )
+from omnibase_infra.lab_proof.model_lab_proof_match import is_workflow_only_glob
 from omnibase_infra.lab_proof.model_lab_proof_profile_variant import (
     ModelLabProofProfileVariant,
 )
@@ -46,6 +47,13 @@ class ModelLabProofProfile(BaseModel):
             )
         if len(self.exempt_classes) != len(set(self.exempt_classes)):
             raise ValueError(f"profile {self.profile_key}: duplicate exempt class")
+        if EnumLabProofExemptClass.DOCS_ONLY in self.exempt_classes:
+            globs = [glob for glob in self.docs_globs if is_workflow_only_glob(glob)]
+            if globs:
+                raise ValueError(
+                    f"profile {self.profile_key}: docs_globs {globs} include .github/ "
+                    "paths; workflow paths are never documentation (D3, OMN-19612)"
+                )
         if (
             EnumLabProofExemptClass.DOCS_ONLY in self.exempt_classes
             and not self.docs_globs
