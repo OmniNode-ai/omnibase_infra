@@ -32,7 +32,7 @@ requirements:
   - id: req-boot-probe-no-rebuild
     statement: Boot probe follow-up from lane boot-probe-timeout-0710, separate from the ticket author's unchanged AC1 and AC2; not transcribed from the ticket body.
     acceptance:
-      - id: AC8
+      - id: AC10
         statement: >-
           Both dev candidate probes (the runtime boot probe and the image preflight) run the already-built candidate image through a temporary compose override that resets build and pins image <project>-<service>, so docker compose run never rebuilds the composed runtime image; the override is removed after each probe and the probe flags, scripts and timeouts are unchanged.
   - id: req-rebuild-trigger-lan-label
@@ -212,13 +212,13 @@ dod_evidence:
       - "AC3"
   - id: dod-omn21279-boot-probe-no-rebuild
     description: >-
-      AC8. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
+      AC10. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
     source: manual
     checks:
       - check_type: command
         check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q -k no_build_override
     binds_ac:
-      - "AC8"
+      - "AC10"
   - id: dod-omn-21279-ac6-rebuild-trigger-lan-label
     description: >-
       The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
