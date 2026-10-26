@@ -502,6 +502,17 @@ services:
   #
   # Ticket: OMN-18789. Incident: OMN-18691 lane diagnosis, 2026-09-18/19.
   redpanda:
+    # OMN-21279: a memory reservation (cgroup v2 memory.low) for the dev broker.
+    # On 2026-10-26 the host swapped in at 71,276 KB/s with this broker holding
+    # 10.8 GB of its arena in swap and no reservation, so the kernel was free to
+    # swap its resident pages out for any other cgroup's. Its resident set was
+    # 1.7 to 2.2 GB and its non-reclaimable peak about 4.4 GB, so 4g protects
+    # the working set and not the unused part of the 12G seastar arena. It is a
+    # reclaim floor, not a limit: the broker can still use up to its --memory.
+    # It is here and not in docker-compose.infra.yml because every other lane
+    # merges the base file, and their brokers would otherwise inherit it at
+    # their next recreate.
+    mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}
     environment:
       DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
       DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
