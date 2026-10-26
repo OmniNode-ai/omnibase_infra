@@ -27,6 +27,23 @@ _WORKFLOW = (
 )
 
 
+def _candidate_steps(workflow: dict[object, object]) -> list[dict]:
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    build_job = jobs["build-workspace-candidate"]
+    assert isinstance(build_job, dict)
+    steps = build_job["steps"]
+    assert isinstance(steps, list)
+    assert all(isinstance(step, dict) for step in steps)
+    return steps
+
+
+def _step_index(steps: list[dict], name: str) -> int:
+    indices = [index for index, step in enumerate(steps) if step.get("name") == name]
+    assert len(indices) == 1, f"expected exactly one step named {name!r}, got {indices}"
+    return indices[0]
+
+
 @pytest.fixture(scope="module")
 def dockerfile_text() -> str:
     assert _DOCKERFILE.is_file(), f"missing {_DOCKERFILE}"
@@ -180,13 +197,14 @@ class TestWorkspaceCandidateWorkflow:
         assert assert_idx < push_idx
 
     def test_workflow_composes_omnimarket_layer_before_scan(
-        self, workflow_text: str
+        self, workflow: dict[object, object]
     ) -> None:
-        step_name = "Compose the omnimarket layer onto the candidate (OMN-21279)"
-        assert step_name in workflow_text
-        compose_idx = workflow_text.index(step_name)
+        steps = _candidate_steps(workflow)
+        compose_idx = _step_index(
+            steps, "Compose the omnimarket layer onto the candidate (OMN-21279)"
+        )
         assert (
-            workflow_text.index("Build runtime image (workspace stability-candidate)")
+            _step_index(steps, "Build runtime image (workspace stability-candidate)")
             < compose_idx
         )
         for step_name in (
@@ -195,25 +213,29 @@ class TestWorkspaceCandidateWorkflow:
             "Assert required config paths exist in the built image (OMN-15676)",
             "Push candidate image to Amazon ECR",
         ):
-            assert compose_idx < workflow_text.index(step_name)
+            assert compose_idx < _step_index(steps, step_name)
 
     def test_workflow_composes_from_the_staged_omnimarket_tree(
-        self, workflow_text: str
+        self, workflow: dict[object, object]
     ) -> None:
-        start = workflow_text.index(
-            "Compose the omnimarket layer onto the candidate (OMN-21279)"
-        )
-        end = workflow_text.index("      - name:", start)
-        step_text = workflow_text[start:end]
+        steps = _candidate_steps(workflow)
+        step = steps[
+            _step_index(
+                steps, "Compose the omnimarket layer onto the candidate (OMN-21279)"
+            )
+        ]
         assert (
-            "OMNIMARKET_TREE: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket"
-            in step_text
+            step["env"]["OMNIMARKET_TREE"]
+            == "${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket"
         )
-        assert '--file "${OMNIMARKET_TREE}/Dockerfile.runtime"' in step_text
-        assert '--build-arg "INFRA_RUNTIME_IMAGE=${INFRA_IMAGE}"' in step_text
-        assert '--build-arg "OMNIMARKET_VCS_REF=${OMNIMARKET_VCS_REF}"' in step_text
-        assert '--tag "${CANDIDATE_IMAGE}"' in step_text
-        assert "import omnimarket" in step_text
+        assert step["env"]["CANDIDATE_IMAGE"] == "${{ steps.meta.outputs.tags }}"
+        assert '--file "${OMNIMARKET_TREE}/Dockerfile.runtime"' in step["run"]
+        assert '--build-arg "INFRA_RUNTIME_IMAGE=${INFRA_IMAGE}"' in step["run"]
+        assert '--build-arg "OMNIMARKET_VCS_REF=${OMNIMARKET_VCS_REF}"' in step["run"]
+        assert '--tag "${CANDIDATE_IMAGE}"' in step["run"]
+        assert 'docker tag "${CANDIDATE_IMAGE}" "${INFRA_IMAGE}"' in step["run"]
+        assert "set -euo pipefail" in step["run"]
+        assert "import omnimarket" in step["run"]
 
     def test_workflow_has_no_skip_or_bypass_tokens(self, workflow_text: str) -> None:
         assert "[skip-" not in workflow_text
@@ -227,11 +249,11 @@ class TestWorkspaceCandidateWorkflow:
 def test_recorded_infra_only_candidate_is_composed_before_push(
     recorded_response: dict[str, object], workflow: dict[object, object]
 ) -> None:
-    """Replay delivery run 40272282023, where the infra-only candidate failed.
+    """The recorded run 40272282023 predates the compose step.
 
-    The candidate built and pushed, then the lab lane's topic-provision Job
-    could not import omnimarket. The compose step must sit between that build
-    and the push, so the pushed image is the one carrying omnimarket.
+    Pin the failure that step answers: an infra-only candidate built, then
+    could not import omnimarket in the lab topic-provision Job. Check that the
+    job now carries the import probe. Step order is the ordering test's concern.
     """
     response = recorded_response["response"]
     assert isinstance(response, dict)
@@ -252,9 +274,8 @@ def test_recorded_infra_only_candidate_is_composed_before_push(
         for line in log_lines
     )
 
-    steps = workflow["jobs"]["build-workspace-candidate"]["steps"]
-    names = [step.get("name", "") for step in steps]
-    compose = names.index("Compose the omnimarket layer onto the candidate (OMN-21279)")
-    assert names.index("Build runtime image (workspace stability-candidate)") < compose
-    assert compose < names.index("Push candidate image to Amazon ECR")
+    steps = _candidate_steps(workflow)
+    compose = _step_index(
+        steps, "Compose the omnimarket layer onto the candidate (OMN-21279)"
+    )
     assert "import omnimarket" in steps[compose]["run"]
