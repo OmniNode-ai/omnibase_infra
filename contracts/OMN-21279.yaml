@@ -32,9 +32,15 @@ requirements:
   - id: req-boot-probe-no-rebuild
     statement: Boot probe follow-up from lane boot-probe-timeout-0710, separate from the ticket author's unchanged AC1 and AC2; not transcribed from the ticket body.
     acceptance:
-      - id: AC6
+      - id: AC7
         statement: >-
           Both dev candidate probes (the runtime boot probe and the image preflight) run the already-built candidate image through a temporary compose override that resets build and pins image <project>-<service>, so docker compose run never rebuilds the composed runtime image; the override is removed after each probe and the probe flags, scripts and timeouts are unchanged.
+  - id: req-rebuild-trigger-lan-label
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. The runtime-rebuild publishers' fallback runner set requires arch-amd64 so the job cannot land on h203-light runners that carry no uv.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the trigger-rebuild jobs of runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml and the trigger-delivery job of onex-api-lab-delivery-reusable.yml fall back to [self-hosted, omnibase-ci, arch-amd64], a label set the h203-light runners do not satisfy -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -42,6 +48,9 @@ evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
     command: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+  - kind: tests
+    description: The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -198,10 +207,19 @@ dod_evidence:
       - "AC3"
   - id: dod-omn21279-boot-probe-no-rebuild
     description: >-
-      AC6. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
+      AC7. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
     source: manual
     checks:
       - check_type: command
         check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q -k no_build_override
     binds_ac:
-      - "AC6"
+      - "AC7"
+  - id: dod-omn-21279-ac6-rebuild-trigger-lan-label
+    description: >-
+      The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
