@@ -28,9 +28,9 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 135
+        "omnibase_infra": 138
       },
-      "contracts_discovered": 156,
+      "contracts_discovered": 159,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 96,
       "probe_count": 1096,

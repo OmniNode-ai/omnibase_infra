@@ -10,6 +10,7 @@ etcd (``unknown``).
 
 from __future__ import annotations
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.lease.handler_lease_store import (
     LEASE_PREFIX,
@@ -45,4 +46,33 @@ async def check_fence(
     return EnumLeaseFenceStatus.UNKNOWN
 
 
-__all__ = ["check_fence"]
+class HandlerLeaseFence:
+    """The ``check_fence`` port bound to one etcd adapter."""
+
+    def __init__(
+        self, adapter: HandlerPlacementEtcd, *, prefix: str = LEASE_PREFIX
+    ) -> None:
+        self._adapter = adapter
+        self._prefix = prefix
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
+
+    async def check(
+        self, *, kind: str, resource: str, fence: int
+    ) -> EnumLeaseFenceStatus:
+        return await check_fence(
+            self._adapter,
+            kind=kind,
+            resource=resource,
+            fence=fence,
+            prefix=self._prefix,
+        )
+
+
+__all__ = ["HandlerLeaseFence", "check_fence"]
