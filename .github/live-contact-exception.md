@@ -1,1 +1,0 @@
-Live-contact exception: this change adds one ci.yml step that runs a committed pytest file over committed contract files; no external service is contacted by the edited lines, so there is no response to record or replay.
