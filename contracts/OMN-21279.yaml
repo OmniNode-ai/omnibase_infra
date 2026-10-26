@@ -29,6 +29,12 @@ requirements:
       - id: AC4
         statement: >-
           A signed, declared rollback to a dev tag is selected ahead of queued forward jobs for the same lane and instance in the fetched partition; earlier forwards remain uncommitted for replay and the durable rollback job is deduplicated. Single-flight and acceptance checks stand.
+  - id: req-boot-probe-no-rebuild
+    statement: Boot probe follow-up from lane boot-probe-timeout-0710, separate from the ticket author's unchanged AC1 and AC2; not transcribed from the ticket body.
+    acceptance:
+      - id: AC8
+        statement: >-
+          Both dev candidate probes (the runtime boot probe and the image preflight) run the already-built candidate image through a temporary compose override that resets build and pins image <project>-<service>, so docker compose run never rebuilds the composed runtime image; the override is removed after each probe and the probe flags, scripts and timeouts are unchanged.
   - id: req-rebuild-trigger-lan-label
     statement: >-
       Declared by this pull request under the same ticket; not transcribed from the ticket body. The runtime-rebuild publishers' fallback runner set requires arch-amd64 so the job cannot land on h203-light runners that carry no uv.
@@ -40,6 +46,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: 'AC7: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
+  - id: req-dev-broker-upgrade-path
+    statement: Dev broker crash cause and upgrade path from lane fill-defect-dev-broker-crash-cause-20261026T1235Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: docker/redpanda/dev_broker_upgrade_path.yaml declares the feature release the dev broker volume has run and a hop path to a Redpanda release carrying the ListGroups crash fix, and the dev pin is refused when it is more than one feature release past that volume -- falsifier: test_dev_broker_upgrade_path_omn21279.py, whose fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -204,6 +215,15 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
     binds_ac:
       - "AC3"
+  - id: dod-omn21279-boot-probe-no-rebuild
+    description: >-
+      AC8. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q -k no_build_override
+    binds_ac:
+      - "AC8"
   - id: dod-omn-21279-ac6-rebuild-trigger-lan-label
     description: >-
       The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
@@ -232,3 +252,22 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}")' | grep -qx true
     binds_ac:
       - "AC7"
+  - id: dod-omn21279-dev-broker-upgrade-path
+    description: >-
+      AC9. The dev broker crashed inside Kafka ListGroups on v24.3.18 (SIGSEGV at group_manager::list_groups +0x1cc on 2026-10-25T20:56:59Z and 2026-10-26T12:19:27Z, the second with the AC7 reservation in place). Upstream fixed the group erase race for v25.3.16, and v25.3.x refuses a volume older than v25.2. The test reads the declared upgrade path and the catalog pin; its fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume and a downgrade, and accept v25.1.12. Red first: at the merge base the declaration and the test file do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC9"
+  - id: dod-omn21279-dev-broker-upgrade-path-deploy-probe
+    description: >-
+      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 24.3 feature release and a path ending at v25.3.18. At the merge base the file does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"24.3\"") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
+    binds_ac:
+      - "AC9"

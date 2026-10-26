@@ -14,6 +14,9 @@ Three functions, all deterministic:
 - ``classify_exemption`` decides the two ruled exemptions from the diff and the
   author only (RULING 2026-09-25T13:07:40Z): never from a PR body token.
 
+Operator ruling 2026-09-25T17:30:10Z (OMN-19612, decision D3): a workflow-only
+diff is proved by script_replay, never exempt; workflow paths are never documentation.
+
 Ticket: OMN-19565
 """
 
@@ -32,6 +35,11 @@ from omnibase_infra.lab_proof.enum_lab_proof_exempt_class import (
 from omnibase_infra.lab_proof.enum_lab_proof_kind import EnumLabProofKind
 from omnibase_infra.lab_proof.model_lab_proof_exemption_decision import (
     ModelLabProofExemptionDecision,
+)
+from omnibase_infra.lab_proof.model_lab_proof_match import (
+    WORKFLOW_PATH_PREFIX,
+    is_workflow_only_glob,
+    is_workflow_path,
 )
 from omnibase_infra.lab_proof.model_lab_proof_profile_pin import (
     ModelLabProofProfilePin,
@@ -208,18 +216,31 @@ def classify_exemption(
             exempt=False,
             reason="empty diff: nothing to classify, so no exemption is derived",
         )
-    if EnumLabProofExemptClass.DOCS_ONLY in profile.exempt_classes and paths_all_match(
-        paths, profile.docs_globs
+    if all(is_workflow_path(path) for path in paths):
+        return ModelLabProofExemptionDecision(
+            repo=repo,
+            exempt=False,
+            proof_kind=EnumLabProofKind.SCRIPT_REPLAY,
+            reason=f"all {len(paths)} changed paths are workflow-only: script_replay required",
+        )
+    has_workflow_path = any(is_workflow_path(path) for path in paths)
+    if (
+        not has_workflow_path
+        and EnumLabProofExemptClass.DOCS_ONLY in profile.exempt_classes
+        and paths_all_match(paths, profile.docs_globs)
     ):
         return ModelLabProofExemptionDecision(
             repo=repo,
             exempt=True,
             exempt_class=EnumLabProofExemptClass.DOCS_ONLY,
+            proof_kind=EnumLabProofKind.EXEMPT,
             reason=f"all {len(paths)} changed paths match the docs globs",
         )
     rule = registry.change_control_companion
     if (
-        EnumLabProofExemptClass.BOT_CHANGE_CONTROL_COMPANION in profile.exempt_classes
+        not has_workflow_path
+        and EnumLabProofExemptClass.BOT_CHANGE_CONTROL_COMPANION
+        in profile.exempt_classes
         and repo == rule.repo
         and author in rule.authors
         and paths_all_match(paths, rule.path_globs)
@@ -228,6 +249,7 @@ def classify_exemption(
             repo=repo,
             exempt=True,
             exempt_class=EnumLabProofExemptClass.BOT_CHANGE_CONTROL_COMPANION,
+            proof_kind=EnumLabProofKind.EXEMPT,
             reason=(
                 f"author {author} is a change-control bot and all {len(paths)} "
                 "changed paths are companion paths"
@@ -241,9 +263,12 @@ def classify_exemption(
 
 
 __all__ = [
+    "WORKFLOW_PATH_PREFIX",
     "applicable_checks",
     "classify_exemption",
     "glob_to_regex",
+    "is_workflow_only_glob",
+    "is_workflow_path",
     "load_lab_proof_profile_registry",
     "paths_all_match",
     "validate_steps_against_repo",
