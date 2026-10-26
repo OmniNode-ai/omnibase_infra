@@ -17,7 +17,7 @@
 # consumer-group commits still land (scratch proof:
 # docker/redpanda/dev-bus-ha/evidence/omn-21430-scratch-proof.txt).
 #
-# Design, cutover order and rollback: docker/redpanda/dev-bus-ha/README.md.
+# Design, cutover order and rollback: the internal planning note 2026-10-26-dev-bus-three-brokers.
 # NOTHING here is live. The dev lane's `redpanda` service in
 # docker-compose.infra.yml is unchanged until the cutover runs.
 #
