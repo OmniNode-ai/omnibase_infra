@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21428
+title: "Ledger CLAIM rows as a projection of lane-work leases"
+summary: >-
+  Slice 5 of the OMN-21279 runtime cluster and generic lease plan, stacked on OMN-21424 (generic lease) and OMN-21421 (runtime election). node_projection_lease gains HandlerLeaseLedger (src/omnibase_infra/handlers/lease/handler_lease_ledger.py): a pure fold of lane-work lease events into rolling-ledger rows, the CLAIM from a grant and the TERMINAL from a release (carrying the lane's outcome, a new ModelLeaseReleaseRequest.outcome field) or from an expiry (outcome=unknown cause=lease-expired), every row with actor=script:node_projection_lease. It keeps the GenericLease invariants: per resource the highest fence seen, CLAIMs in rising fence order, one TERMINAL per CLAIM. Expiry is read from the store (expired_claims, sweep_expired) with no reaper. The lane runner's side is HandlerLaneWorkLease (handler_lane_work_lease.py): acquire lane-work on lane:<lane>, renew every ttl_s/3, release with the outcome; it writes no ledger row. Not in this change: AC3 (the nine D1 readers and DEAD_AFTER live in the internal omni plugin and omnimarket) and AC4 (the D2 registries live in omniclaude and omnimarket, and node_github_repo_write_effect's pr_close claim gate reads the omnimarket copy until the fenced write verbs of the plan's T8 replace it); the lease topics, runtime wiring and the onex-remote-lane switch to this client are also not in this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21428-ac1-claim-by-projection
+    statement: "A lane runner acquires a lane-work lease and the CLAIM row is written by node_projection_lease, not by the runner."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: a lane runner acquires a `lane-work` lease and the CLAIM row is written by `node_projection_lease`, not by the runner -- falsifier: a CLAIM row for a test lane carries an actor other than the projection
+  - id: req-omn21428-ac2-terminal-at-expiry
+    statement: "A lane runner killed with no TERMINAL gets a TERMINAL row at lease expiry."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: a lane runner killed with no TERMINAL gets a TERMINAL row at lease expiry -- falsifier: the lab receipt shows the CLAIM open past expiry
+evidence_requirements:
+  - kind: tests
+    description: "The lane-work ledger suites (a lane runner process on the real test etcd, the pure fold and runner unit tests) and the generic lease suites they stack on pass."
+    command: "uv run pytest tests/integration/runtime/placement/test_lane_work_claim_omn21428.py tests/unit/handlers/lease tests/integration/nodes/test_lease_nodes_contract_discovery_omn21424.py -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the committed ledger projection source read at the checkout commit. It starts nothing and touches no running lane."
+    command: "deploy: gh api contents of handlers/lease/handler_lease_ledger.py at HEAD"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21428-ac1-claim-by-projection
+    description: >-
+      A lane runner process acquires a lane-work lease on the test etcd and renews it; before its grant reaches node_projection_lease's ledger handler the temporary ledger has no row, and after it the one CLAIM row carries actor=script:node_projection_lease, the lane and the grant's fence; the release with outcome done writes the TERMINAL, also by the projection. Unit tests assert the CLAIM row's cells, that a renewal, a replayed grant and another kind write nothing, and that the runner holds no ledger writer.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lane_work_claim_omn21428.py tests/unit/handlers/lease/test_lane_work_ledger_omn21428.py -q -n 0 -k "ac1 or runner"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21428-ac2-terminal-at-expiry
+    description: >-
+      The lane runner process renews its TTL-3 lane-work lease past one TTL with no TERMINAL written, is SIGKILLed, and the projection's sweep writes a TERMINAL with cause=lease-expired that closes the CLAIM within 4.5 s of the kill, printing the AC2 receipt; unit tests cover the expiry and release TERMINALs and all 120 orders of five lease events (CLAIMs in rising fence order, one TERMINAL per CLAIM).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lane_work_claim_omn21428.py tests/unit/handlers/lease/test_lane_work_ledger_omn21428.py -q -n 0 -k "ac2 or tla"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21428-deploy-ledger-surface
+    description: >-
+      Read the committed ledger projection source at the checkout commit through the GitHub contents API. Fail when the projection actor or the expiry TERMINAL cause is absent. Runs on hosted runners without a container daemon or access to a private runtime; the ledger projection is not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_ledger.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d > handler_lease_ledger.src &&
+          grep -F 'PROJECTION_ACTOR = "script:node_projection_lease"' handler_lease_ledger.src > /dev/null &&
+          grep -F 'if event.outcome in ("lease-released", "lease-expired"):' handler_lease_ledger.src > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

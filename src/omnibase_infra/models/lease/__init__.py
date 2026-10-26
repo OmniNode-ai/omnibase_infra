@@ -3,6 +3,8 @@
 """Generic lease models (OMN-21424)."""
 
 from omnibase_infra.models.lease.enum_lease_fence_status import EnumLeaseFenceStatus
+from omnibase_infra.models.lease.model_lane_work_claim import ModelLaneWorkClaim
+from omnibase_infra.models.lease.model_lane_work_holder import ModelLaneWorkHolder
 from omnibase_infra.models.lease.model_lease_acquire_request import (
     ModelLeaseAcquireRequest,
 )
@@ -24,6 +26,8 @@ from omnibase_infra.models.lease.model_payload_lease_projection_upsert import (
 __all__ = [
     "EnumLeaseFenceStatus",
     "LeaseOutcome",
+    "ModelLaneWorkClaim",
+    "ModelLaneWorkHolder",
     "ModelLeaseAcquireRequest",
     "ModelLeaseKindPolicy",
     "ModelLeaseProjectionRow",

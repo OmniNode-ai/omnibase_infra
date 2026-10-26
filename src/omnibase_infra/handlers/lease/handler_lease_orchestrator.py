@@ -47,12 +47,15 @@ class HandlerLeaseRenew(HandlerLeaseOrchestratorBase):
 
 
 class HandlerLeaseRelease(HandlerLeaseOrchestratorBase):
-    """``lease-released``, or ``lease-expired`` when the grant was already gone."""
+    """``lease-released`` carrying the holder's outcome, or ``lease-expired`` when the grant was already gone."""
 
     async def handle(self, request: ModelLeaseReleaseRequest) -> ModelLeaseReply:
-        return await self._store.release(
+        reply = await self._store.release(
             request.kind, request.resource, request.lease_id
         )
+        if request.outcome and reply.outcome == "lease-released":
+            return reply.model_copy(update={"reason": request.outcome})
+        return reply
 
 
 __all__ = ["HandlerLeaseAcquire", "HandlerLeaseRelease", "HandlerLeaseRenew"]

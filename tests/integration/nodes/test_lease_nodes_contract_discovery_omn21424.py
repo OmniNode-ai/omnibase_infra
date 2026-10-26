@@ -19,7 +19,7 @@ NODES = {
         "HandlerLeaseRelease",
     },
     "node_lease_reducer": {"HandlerLeaseReducer"},
-    "node_projection_lease": {"HandlerLeaseProjection"},
+    "node_projection_lease": {"HandlerLeaseProjection", "HandlerLeaseLedger"},
 }
 
 

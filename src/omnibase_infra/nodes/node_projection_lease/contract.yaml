@@ -7,7 +7,7 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: EFFECT_GENERIC
 description: >
-  Upsert the lease projection on (kind, resource); the upsert never replaces a row with a lower fence. The table is created by docker/migrations/forward/112_create_lease_projection.sql. No topic is declared yet (see node_lease_orchestrator).
+  Upsert the lease projection on (kind, resource); the upsert never replaces a row with a lower fence. The table is created by docker/migrations/forward/112_create_lease_projection.sql. For the lane-work kind it also writes the rolling-ledger CLAIM row from a grant and the TERMINAL row from a release or expiry (OMN-21428); the lane runner writes neither. No topic is declared yet (see node_lease_orchestrator).
 
 input_model:
   name: ModelPayloadLeaseProjectionUpsert
@@ -20,6 +20,8 @@ output_model:
 capabilities:
   - name: lease.projection.upsert
     description: Write one lease projection row.
+  - name: lease.ledger.lane_work
+    description: Write the ledger CLAIM and TERMINAL rows of a lane-work lease.
 handler_routing:
   routing_strategy: payload_type_match
   handlers:
@@ -30,9 +32,16 @@ handler_routing:
         name: HandlerLeaseProjection
         module: omnibase_infra.handlers.lease.handler_lease_projection
       output_events: []
+    - event_model:
+        name: ModelLeaseReply
+        module: omnibase_infra.models.lease.model_lease_reply
+      handler:
+        name: HandlerLeaseLedger
+        module: omnibase_infra.handlers.lease.handler_lease_ledger
+      output_events: []
 metadata:
   description: Generic lease projection writer.
   author: OmniNode Team
   license: MIT
-  tags: [effect, lease, projection, postgres]
-  related_tickets: [OMN-21424]
+  tags: [effect, lease, projection, postgres, ledger]
+  related_tickets: [OMN-21424, OMN-21428]
