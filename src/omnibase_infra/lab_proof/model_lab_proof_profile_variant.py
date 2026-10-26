@@ -29,7 +29,10 @@ from omnibase_infra.lab_proof.model_lab_proof_foundation_target import (
 from omnibase_infra.lab_proof.model_lab_proof_host_selector import (
     ModelLabProofHostSelector,
 )
-from omnibase_infra.lab_proof.model_lab_proof_match import ModelLabProofMatch
+from omnibase_infra.lab_proof.model_lab_proof_match import (
+    ModelLabProofMatch,
+    is_workflow_only_glob,
+)
 from omnibase_infra.lab_proof.model_lab_proof_negative_control import (
     ModelLabProofNegativeControl,
 )
@@ -75,6 +78,16 @@ class ModelLabProofProfileVariant(BaseModel):
         kind, status, execution = self.proof_kind, self.status, self.execution
         exempt_kind = kind is EnumLabProofKind.EXEMPT
         exempt_status = status is EnumLabProofProfileStatus.EXEMPT
+        if exempt_kind and self.match is not None:
+            globs = [
+                glob for glob in self.match.include_globs if is_workflow_only_glob(glob)
+            ]
+            if globs:
+                raise ValueError(
+                    f"variant {self.variant_key}: a match rule on .github/ paths "
+                    f"({globs}) resolves to proof_kind exempt; a workflow-only PR is "
+                    "proved by script_replay, never exempt (D3, OMN-19612)"
+                )
         if exempt_kind != exempt_status:
             raise ValueError(
                 f"variant {self.variant_key}: proof_kind exempt and status exempt go "
