@@ -1,7 +1,8 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20266
-title: Dev broker restart and availability alarm
-summary: The host system reporter holds recent broker restarts across confirmation ticks, reports unavailable broker states as critical, and warns when the running broker memory is below its floor.
+title: Dev broker alarms and canonical clone metadata reconciliation
+summary: >-
+  Preserve the previously landed broker alarm evidence under this ticket ID and add the canonical clone origin/HEAD repair needed by host clone parity. AC4 below is a repository-local reconciliation requirement for this repair; it does not claim completion of the live ticket's pool probe, placement admission or queue-status acceptance criteria.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -15,6 +16,11 @@ requirements:
         statement: Non-running container states and unreadable inspect, start time or restart count produce a critical restart row.
       - id: AC3
         statement: The reporter compares the running memory argument to its floor and includes broker rows in the digest and active issues.
+  - id: req-omn20266-clone-origin-head
+    statement: After a successful origin fetch, canonical clone reconciliation refreshes the cached remote default branch used by clone parity.
+    acceptance:
+      - id: AC4
+        statement: A clone made while origin defaults to main reconciles onto the dev tip and refreshes origin/HEAD when the remote default moves to dev.
 evidence_requirements:
   - kind: tests
     description: The deployed shell function runs with controlled inspect and clock inputs on Linux without contacting Docker or Slack.
@@ -60,4 +66,22 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k non_running_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20266-clone-origin-head
+    description: >-
+      Run the reconciler CLI against a local origin whose default moved from main to dev after cloning. Assert the reconciled branch and cached origin/HEAD both name dev. The same test fails against the merge-base reconciler, which leaves origin/HEAD at main. This binds only the repository-local AC4 repair, not the live ticket's full host parity probe.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_reconcile_refreshes_origin_head_omn20266.py -q -k test_reconcile_refreshes_a_stale_origin_head_symref
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20266-clone-deploy-probe
+    description: >-
+      Hosted-runner deploy check runs the checked-out reconciliation script against disposable local Git repositories. It verifies the deployed script's metadata refresh behavior without needing lab hosts, credentials or Docker. It does not claim any host installation has changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_deploy_reconcile_refreshes_origin_head_omn20266.py -q -k test_reconcile_refreshes_a_stale_origin_head_symref
         cwd: ${OMNI_HOME}/omnibase_infra
