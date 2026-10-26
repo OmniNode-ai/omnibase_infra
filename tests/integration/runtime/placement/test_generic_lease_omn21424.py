@@ -239,6 +239,7 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
                     f"--ready={ready}",
                 ],
                 env=env,
+                start_new_session=True,
             ),
             etcd_cluster.members[i],
         )
@@ -250,7 +251,7 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
         primary = str(first["runtime"])
         proc, member = hosts[primary]
         # The whole host goes: its runtime and its etcd member.
-        proc.send_signal(signal.SIGKILL)
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait(timeout=10)
         member.stop()
         lost_at = time.time()
@@ -287,5 +288,5 @@ async def test_ac5_ac2_losing_the_lease_primary_host_answers_within_30s(
     finally:
         for proc, _ in hosts.values():
             if proc.poll() is None:
-                proc.send_signal(signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=10)
