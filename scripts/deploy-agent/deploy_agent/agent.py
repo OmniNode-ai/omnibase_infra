@@ -561,8 +561,8 @@ class DeployAgent:
         self._dev_tag_behind_since: dict[str, datetime] = {}
         self._dev_tag_heartbeat: dict[str, ModelDevTagHeartbeat] = {}
         self._dev_tag_heartbeat_published_at: dict[str, datetime] = {}
-        self._idle_read_running_image: Callable[[], str] = lambda: (
-            read_running_image(_runtime_container_for_lane(EnumRuntimeLane.DEV))
+        self._idle_read_running_image: Callable[[], str] = lambda: read_running_image(
+            _runtime_container_for_lane(EnumRuntimeLane.DEV)
         )
         # OMN-19544 AC1. On a lab host this instance shares with a prover (the
         # .105 laptop's VM holds the lane or a proof stack, not both), both
@@ -2014,6 +2014,18 @@ class DeployAgent:
                         not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
                         else None
                     )
+                    # Dev recovery belongs to the boot guard. Every other
+                    # non-prod runtime/full rebuild needs a retained point.
+                    if (
+                        cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                        and cmd.runtime_lane
+                        not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
+                        and rollback_point is None
+                    ):
+                        raise RuntimeError(
+                            f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
+                            "no healthy, retained rollback point"
+                        )
                     services_restarted = self.executor.rebuild_scope(
                         cmd.scope,
                         cmd.services,

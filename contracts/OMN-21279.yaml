@@ -14,6 +14,11 @@ requirements:
         statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
       - id: AC2
         statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-restore-point-protection
+    statement: Restore-point protection for non-prod runtime rebuilds, declared by this pull request (OmniNode-ai/omnibase_infra#5360) under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
   - id: req-deploy-agent-recovery-follow-up
     statement: >-
       Operational follow-up from lane proc-rollback-preempt-0055, separate from the ticket author's unchanged AC1 and AC2: the dev recovery command must not wait behind a boot that has already exhausted its retries.
@@ -167,3 +172,21 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
     binds_ac:
       - "AC2"
+  - id: dod-omn21279-restore-point-labels-and-refusal
+    description: >-
+      Restore-point lane regression evidence. Replays service runtime-effects in project omnibase-infra with a differently named container, missing and ambiguous matches and failed Docker lookup; runtime/full rebuilds must refuse when capture returns no point. It binds AC3, the restore-point criterion this pull request declares under req-restore-point-protection, and claims neither layering criterion AC1 nor AC2.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q
+    binds_ac:
+      - "AC3"
+  - id: dod-omn21279-restore-point-hosted-deploy-check
+    description: >-
+      Hosted-runner check of the deploy agent's restore capture and rebuild refusal. Docker is faked and all state is temporary; no live lane or credentials are needed. Falsified by the base implementation, which inspects service names and rebuilds without a retained point.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
+    binds_ac:
+      - "AC3"

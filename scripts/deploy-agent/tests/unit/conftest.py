@@ -23,6 +23,7 @@ import tarfile
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,9 @@ def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(Path, "home", classmethod(test_home))
     monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
+    # Image-build tests take the real reconcile lock; never lock the host's
+    # canonical workspace. Lock-root tests override this with their own trees.
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path))
 
 
 class _NoopPromotionGuard:
@@ -690,15 +694,33 @@ def _inline_settle_pool(
 
 
 @pytest.fixture(autouse=True)
-def _no_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
-    """OMN-20602: runtime deploys capture a rollback point before the rebuild.
+def _stub_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply a retained point to tests of unrelated deploy behavior.
 
-    Capture probes the live lane's health and docker state, which the fake
-    executors in unrelated agent tests do not model. They get no rollback point
-    by default; ``test_auto_rollback.py`` sets its own ``capture_rollback_point``
-    and exercises the real one against the executor directly.
+    Live health and docker reads are outside these fake executors. Rollback
+    tests override this stand-in and exercise capture and refusal explicitly.
     """
-    monkeypatch.setattr(agent_mod, "capture_rollback_point", lambda *args, **kw: None)
+    from deploy_agent.events import EnumRuntimeLane
+
+    def capture(
+        executor: object, lane: EnumRuntimeLane
+    ) -> executor_mod.ModelRollbackPoint:
+        config = executor_mod.lane_config_for(lane)
+        return executor_mod.ModelRollbackPoint(
+            lane=lane,
+            captured_at=datetime.now(UTC),
+            images=tuple(
+                executor_mod.ModelRetainedImage(
+                    container=config.runtime_health_targets[index][0],
+                    service=service,
+                    image_ref="unit-runtime:latest",
+                    image_id="sha256:" + "a" * 64,
+                )
+                for service, index in executor_mod.SERVICE_HEALTH_TARGET_INDEX.items()
+            ),
+        )
+
+    monkeypatch.setattr(agent_mod, "capture_rollback_point", capture)
 
 
 @pytest.fixture(scope="session")
