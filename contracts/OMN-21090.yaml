@@ -69,11 +69,11 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/migrations/test_omn21090_compaction_current_context_vendor.py -q -k 'declared_with_its_class or fenced'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC4"]
-  - id: "dod-omn21090-ac5-receipts-vendor-unchanged"
-    description: "The compaction_receipts vendor beside the new one is unchanged: its pins, ledger rows, classes and interim declaration still pass. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+  - id: "dod-omn21090-ac5-interim-expiry-and-receipts"
+    description: "The new interim declaration is registered in the OMN-18863 expiry map, which matches the carried declarations (fails at the merge base, where compaction_current_context is mapped but not declared), and the compaction_receipts vendor beside it still passes its pins, ledger rows, classes and interim declaration. The child-ticket state this criterion names is read through the Linear API and is not bound here."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q"
+        check_value: "uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
