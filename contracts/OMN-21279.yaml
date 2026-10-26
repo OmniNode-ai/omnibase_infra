@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: 'AC7: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
+  - id: req-dev-broker-hop-proof
+    statement: Reproduction of the dev broker crash and measured logical versions of the declared upgrade hops from lane fill-defect-dev-broker-crash-cause-20261026T1538Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: docker/redpanda/dev_broker_upgrade_path.yaml records the measured logical version each image finalizes at and the oldest it starts on, and a declared chain from the catalog pin is refused when a hop needs a newer logical version than the previous image leaves -- falsifier: test_dev_broker_hop_logical_versions_omn21279.py, whose fixtures refuse v25.3.18 and v25.2.14 directly over v24.3.18'
   - id: req-dev-broker-upgrade-path
     statement: Dev broker crash cause and upgrade path from lane fill-defect-dev-broker-crash-cause-20261026T1235Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
     acceptance:
@@ -252,6 +257,25 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}")' | grep -qx true
     binds_ac:
       - "AC7"
+  - id: dod-omn21279-dev-broker-hop-proof
+    description: >-
+      AC11. On an h200 scratch broker, v24.3.18 crashed in 2 of 2 runs within 8 minutes under group expiry churn (group_offset_retention_sec 5 with per-call groups and ListGroups loops; exit 135, then exit 133 after "libc++abi: terminating" and "Aborting on shard 0"), and v25.3.18 ran the same workload for 500 s with RestartCount 0. A synthetic v24.3.18 volume (20 topics, 400 groups, SASL on) went through v25.1.12, v25.2.14 and v25.3.18 at cluster_version 14, 15, 16, 17 with its topics, groups, offsets and user intact; v25.3.18 started directly on a v24.3 volume asserted an incompatible logical version. The declaration records those logical versions and the test walks the declared chain against them. Red first: at the merge base the test file and the logical_versions key do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC11"
+  - id: dod-omn21279-dev-broker-hop-proof-deploy-probe
+    description: >-
+      AC11, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it records logical_versions with v25.3.18 starting no earlier than logical version 16. At the merge base the key does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("logical_versions:") and contains("redpandadata/redpanda:v25.3.18:\n    latest: 17\n    earliest: 16"))' | grep -qx true
+    binds_ac:
+      - "AC11"
   - id: dod-omn21279-dev-broker-upgrade-path
     description: >-
       AC9. The dev broker crashed inside Kafka ListGroups on v24.3.18 (SIGSEGV at group_manager::list_groups +0x1cc on 2026-10-25T20:56:59Z and 2026-10-26T12:19:27Z, the second with the AC7 reservation in place). Upstream fixed the group erase race for v25.3.16, and v25.3.x refuses a volume older than v25.2. The test reads the declared upgrade path and the catalog pin; its fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume and a downgrade, and accept v25.1.12. Red first: at the merge base the declaration and the test file do not exist.
