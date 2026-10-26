@@ -108,6 +108,10 @@ case "$1 $2" in
     echo "PARTITION  LEADER  EPOCH  REPLICAS  LOG-START-OFFSET  HIGH-WATERMARK"
     echo "0          0       179    [0]       0                 28101324"
     exit 0 ;;
+  "group list")
+    echo "BROKER  GROUP  STATE"
+    echo "0  local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0  Stable"
+    exit 0 ;;
   "group describe")
     cat <<'EOF'
 GROUP        local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0
@@ -124,6 +128,20 @@ EOF
 esac
 exit 0
 """
+
+#: OMN-21279: only the Stable group can be flagged; Empty reply/canary groups
+#: must never reach describe. Log every argv to verify the real shell calls.
+STUB_MIXED_GROUPS = STUB_FROZEN_GROUP.replace(
+    'case "$1 $2" in',
+    'printf \'%s\\n\' "$*" >> "$RPK_ARGV_LOG"\ncase "$1 $2" in',
+).replace(
+    '    echo "0  local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0  Stable"',
+    r"""    echo "0  local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0  Stable"
+    if [[ " $* " != *" --states Stable "* ]]; then
+      echo "0  local.omnimarket.work_ledger_append_client.consume.v1.0123456789ab.__t.onex.evt.omnimarket.work-ledger-append-completed.v1  Empty"
+      echo "0  gateway-canary-probe-local-5e16674bb76142b985560d6b2334fdc7  Empty"
+    fi""",
+)
 
 #: The positive control for the group check: byte-identical to
 #: ``STUB_FROZEN_GROUP`` except that the group is draining -- CURRENT-OFFSET has
@@ -151,6 +169,10 @@ case "$1 $2" in
   "topic describe")
     echo "PARTITION  LEADER  EPOCH  REPLICAS  LOG-START-OFFSET  HIGH-WATERMARK"
     echo "0          0       179    [0]       0                 28101324"
+    exit 0 ;;
+  "group list")
+    echo "BROKER  GROUP  STATE"
+    echo "0  local.omnimarket-projection-api.snapshot-cache.consume.v1  Stable"
     exit 0 ;;
   "group describe")
     cat <<'EOF'
@@ -198,6 +220,7 @@ class ProbeRunner(Protocol):
         now: int,
         state: Path | None = ...,
         declaration: Path | None = ...,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]: ...
 
 
@@ -211,6 +234,7 @@ def probe_env(tmp_path: Path) -> ProbeRunner:
         now: int,
         state: Path | None = None,
         declaration: Path | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         bindir = tmp_path / "bin"
         bindir.mkdir(exist_ok=True)
@@ -219,6 +243,8 @@ def probe_env(tmp_path: Path) -> ProbeRunner:
         rpk.chmod(0o755)
         env = dict(os.environ)
         env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [
                 "bash",
@@ -338,6 +364,80 @@ def test_frozen_group_is_not_ready_once_the_window_elapses(
         f"stdout={second.stdout}\nstderr={second.stderr}"
     )
     assert "group_not_synced" in (second.stdout + second.stderr)
+
+
+def test_probe_describes_only_stable_groups_never_every_group(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """OMN-21279: prune broker reads without losing the frozen-group verdict."""
+    window = int(_declared("sync_window_seconds"))
+    argv_log = tmp_path / "rpk-argv.log"
+    extra_env = {"RPK_ARGV_LOG": str(argv_log)}
+    expected_describe = (
+        "group describe local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0"
+    )
+
+    first = probe_env(STUB_MIXED_GROUPS, now=1_000_000, extra_env=extra_env)
+    assert first.returncode == 0, first.stderr
+    calls = argv_log.read_text().splitlines()
+    assert all("-r" not in call and ".*" not in call for call in calls)
+    assert "group list --states Stable" in calls
+    assert [call for call in calls if call.startswith("group describe")] == [
+        expected_describe
+    ]
+
+    argv_log.write_text("")
+    second = probe_env(
+        STUB_MIXED_GROUPS, now=1_000_000 + window + 1, extra_env=extra_env
+    )
+    assert second.returncode != 0, second.stdout
+    assert "NOT_READY [group_not_synced]" in second.stdout
+    calls = argv_log.read_text().splitlines()
+    assert all("-r" not in call and ".*" not in call for call in calls)
+    assert [call for call in calls if call.startswith("group describe")] == [
+        expected_describe
+    ]
+
+
+def test_probe_skips_describe_when_no_group_is_stable(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """Even a successful filtered listing is checked defensively for Stable."""
+    argv_log = tmp_path / "rpk-argv.log"
+    stub = STUB_MIXED_GROUPS.replace(
+        "local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0  Stable",
+        "local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0  Empty",
+    )
+    result = probe_env(stub, now=1_000_000, extra_env={"RPK_ARGV_LOG": str(argv_log)})
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("READY [")
+    calls = argv_log.read_text().splitlines()
+    assert "group list --states Stable" in calls
+    assert not any(call.startswith("group describe") for call in calls)
+
+
+def test_probe_falls_back_when_rpk_has_no_states_flag(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """Older rpk lists all groups; only Stable rows should reach describe."""
+    argv_log = tmp_path / "rpk-argv.log"
+    stub = STUB_MIXED_GROUPS.replace(
+        '  "group list")',
+        r"""  "group list")
+    for arg in "$@"; do
+      if [ "$arg" = "--states" ]; then exit 1; fi
+    done""",
+    )
+    result = probe_env(stub, now=1_000_000, extra_env={"RPK_ARGV_LOG": str(argv_log)})
+    assert result.returncode == 0, result.stderr
+    calls = argv_log.read_text().splitlines()
+    assert [call for call in calls if call.startswith("group list")] == [
+        "group list --states Stable",
+        "group list",
+    ]
+    assert [call for call in calls if call.startswith("group describe")] == [
+        "group describe local.omnimarket.pr_lifecycle_fix_effect.consume.1.0.0"
+    ]
 
 
 def test_frozen_group_is_still_ready_inside_the_window(

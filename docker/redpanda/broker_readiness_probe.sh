@@ -36,6 +36,9 @@
 #     exact shape the outage left behind: `STATE Stable MEMBERS 1` at
 #     CURRENT-OFFSET 7473 against LOG-END-OFFSET 7478, byte-identical across
 #     two samples twenty-two seconds apart, for an hour.
+#     Only Stable groups can be flagged, so list Stable groups and describe
+#     only those, instead of every group with -r '.*' (16,610 groups, 15,637
+#     Empty on 2026-10-26; OMN-21279).
 #
 # WHY "HAS COMMITTED AT LEAST ONCE" IS PART OF THE CONDITION AND NOT AN
 # OVERSIGHT. Measured live on the dev lane 2026-09-19: the
@@ -207,7 +210,16 @@ fi
 # just proved it serves offsets, and a lane whose only fault is that one group
 # listing errored should not be declared down. What is consulted is whatever it
 # printed.
-groups="$(rpk group describe -r '.*' 2>/dev/null)"
+if ! stable_listing="$(rpk group list --states Stable 2>/dev/null)"; then
+  stable_listing="$(rpk group list 2>/dev/null)"
+fi
+mapfile -t stable_group_names < <(printf '%s\n' "$stable_listing" | awk '
+  NR > 1 && NF >= 3 && $NF == "Stable" {print $2}
+')
+groups=""
+if [ "${#stable_group_names[@]}" -gt 0 ]; then
+  groups="$(rpk group describe "${stable_group_names[@]}" 2>/dev/null)"
+fi
 
 new_state="${STATE_PATH}.new"
 stale="$(printf '%s\n' "$groups" | awk \
