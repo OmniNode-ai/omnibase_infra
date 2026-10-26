@@ -1,0 +1,99 @@
+{
+  "ticket": "OMN-21279",
+  "title": "Dev broker crashes inside Kafka ListGroups on redpanda v24.3.18",
+  "broker": {
+    "container": "omnibase-infra-redpanda",
+    "lane": "dev lane",
+    "image": "redpandadata/redpanda:v24.3.18",
+    "flags": "--mode dev-container --smp 1 --memory 12G --default-log-level=warn --set topic_partitions_per_shard=7000; rpk expands to --reserve-memory=0M --overprovisioned --unsafe-bypass-fsync=true",
+    "container_created": "2026-10-26T07:28:46Z",
+    "memory_reservation_bytes": 4294967296,
+    "oom_killed": false,
+    "restart_policy": "unless-stopped"
+  },
+  "crashes": [
+    {
+      "at": "2026-10-23T12:03:53Z",
+      "kind": "libc++abi terminating, Aborting on shard 0",
+      "frames": [
+        "kafka::group_state_to_kafka_name(kafka::group_state) +0xd0",
+        "kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x43c",
+        "kafka::group_router::list_groups(list_groups_filter_data) +0x8b4",
+        "kafka::handler_template<kafka::list_groups_api, 0, 4, ...>::handle +0x8e7"
+      ],
+      "source": "docs/incidents/OMN-21337/broker-abort-crash-report.json"
+    },
+    {
+      "at": "2026-10-25T20:56:59Z",
+      "kind": "SIGSEGV on shard 0, si_addr 0x40",
+      "frames": ["0x4a621dc kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x1cc"],
+      "source": "ledger STATUS 2026-10-26T01:22:19Z lane=broker-crash-cause-0110 (binary offset); symbolized by this lane"
+    },
+    {
+      "at": "2026-10-25T22:48:33Z",
+      "kind": "libc++abi terminating, Aborting on shard 0, then SIGSEGV si_code 128",
+      "frames": [],
+      "source": "ledger STATUS 2026-10-26T01:22:19Z; frames not retained, the container was recreated at 2026-10-26T07:28:46Z"
+    },
+    {
+      "at": "2026-10-26T00:59:10Z",
+      "kind": "SIGSEGV on shard 0, si_addr 0x61b",
+      "frames": ["0x4950374 nearest dynamic symbol kafka::group::handle_offset_fetch +0x3604 (distance too large to trust; unverified)"],
+      "source": "ledger STATUS 2026-10-26T01:22:19Z (binary offset); symbolized by this lane"
+    },
+    {
+      "at": "2026-10-26T12:19:27Z",
+      "kind": "SIGSEGV on shard 0, si_addr 0x40; kernel: redpanda segfault at 40 ip ...51dc error 4",
+      "frames": [
+        "0x4a621db kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x1cb",
+        "0x4bf7b04 kafka::group_router::list_groups(list_groups_filter_data) +0x8b4",
+        "0x4cba2a7 kafka::handler_template<kafka::list_groups_api, 0, 4, ...>::handle",
+        "0x4e87db4 kafka::handler_base<false>::handle",
+        "0x4f34296 kafka::process_request"
+      ],
+      "source": "docker logs -t omnibase-infra-redpanda read 2026-10-26T12:4xZ by this lane",
+      "note": "This crash happened with the 4 GiB memory reservation of AC7 in place (MemoryReservation 4294967296, OOMKilled false)."
+    }
+  ],
+  "symbolization": "nm -D --defined-only over /opt/redpanda/libexec/redpanda copied out of the running container; PIE, so backtrace addresses are offsets; nearest preceding dynamic symbol. The binary carries no debug info.",
+  "upstream": {
+    "v24_3_18_code": "group_manager::delete_offsets: auto it = _groups.find(group->id()); co_await it->second->shutdown(); _groups.erase(it); the iterator is not re-validated after the suspension. handle_offset_expiration runs delete_expired_offsets over a snapshot with ss::max_concurrent_for_each, max_concurrent_expirations = 10. delete_groups erases by key and calls _groups.rehash(0).",
+    "fix": "redpanda-data/redpanda#31221 [CORE-16883] kafka: erase group before awaiting shutdown(), merged 2026-07-22; upstream symptom: assert seastar::gate::close() cannot be called more than once",
+    "backports": {
+      "v25.3.x": "#31229, milestone v25.3.16",
+      "v25.2.x": "#31231",
+      "v26.1.x": "#31228",
+      "v24.3.x": "none"
+    },
+    "released_tags": "Docker Hub: v25.3.16 2026-08-13 (first fixed), v25.3.17 2026-08-20, v25.3.18 2026-10-23; newest v25.2.x is v25.2.14 2026-01-22, before the backport merged; newest v25.1.x is v25.1.12",
+    "upgrade_constraint": "v25.3.x feature_table.cc: earliest_version = to_cluster_version(release_version::v25_2_1), commented 'The earliest version we can upgrade from'",
+    "link_to_these_crashes": "inferred, unverified: the fixed race erases a stale _groups iterator after a suspension; list_groups then walks _groups and reads a null or freed group (si_addr 0x40) or a garbage state (uncaught exception in group_state_to_kafka_name). Not reproduced; no debug symbols."
+  },
+  "group_census": {
+    "read_at": "2026-10-26T12:4xZ",
+    "total": 14421,
+    "empty": 13336,
+    "stable": 1085,
+    "largest_patterns": {
+      "local.omnimarket.work_ledger_append_client.consume.v1.<id>.__t.onex.evt.omnimarket.work-ledger-append-completed.v1": 3864,
+      "local.omnimarket.work_ledger_append_client.consume.v1.<id>.__t.onex.evt.omnimarket.work-ledger-append-failed.v1": 3864,
+      "local.omnimarket.scm_command_client.consume.v1.<id>.__t.onex.evt.omnimarket.github-repo-gateway-read-completed.v1": 1549,
+      "local.omnimarket.scm_command_client.consume.v1.<id>.__t.onex.evt.omnimarket.github-repo-write-completed.v1": 848,
+      "local.omnimarket.scm_command_client.consume.v1.<id>.__t.onex.evt.omnimarket.github-repo-write-failed.v1": 848,
+      "local.omnibase_core.runtime_local_terminal_run_<id>.consume.v1.__t.onex.evt.omnimarket.delegate-skill-completed.v1": 637,
+      "local.omnibase_core.runtime_local_terminal_run_<id>_t1.consume.v1.__t.onex.evt.omnimarket.delegate-skill-failed.v1": 637
+    },
+    "note": "Per-call uniquely named groups go Empty, then dead under group_offset_retention, which is the expiry path that runs the racing erase."
+  },
+  "reproduction": {
+    "attempt": "scratch redpandadata/redpanda:v24.3.18 on h201, --smp 1 --memory 1G, group_offset_retention_sec 15, group_offset_retention_check_ms 1000, 6 loops of rpk group seek on new group names, 3 loops of rpk group list, 420 s",
+    "result": "survived; groups_now=0 at the end, so whether the seek loops created groups is unverified",
+    "follow_up": "instrumented rerun refused by lab admission (h201 swap-in over 20000 KB/s); h101 Docker daemon not running, h105 has no Docker"
+  },
+  "fix_path": {
+    "declared_in": "docker/redpanda/dev_broker_upgrade_path.yaml",
+    "hops": ["redpandadata/redpanda:v25.1.12", "redpandadata/redpanda:v25.2.14", "redpandadata/redpanda:v25.3.18"],
+    "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
+    "pending": "each hop proved on a copy of the dev data volume, then pinned and deployed one at a time; not done"
+  }
+}

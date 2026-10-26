@@ -86,26 +86,27 @@ def preflight_dev_images(
     for service in DEV_BOOT_SERVICES:
         if service not in services or service in config.disabled_services:
             continue
-        argv = [
-            "docker",
-            "compose",
-            *execution._compose_file_args(lane),
-            "-p",
-            config.compose_project,
-            "--profile",
-            "runtime",
-            "run",
-            "--rm",
-            "--no-deps",
-            "--pull",
-            "never",
-            "--entrypoint",
-            "python",
-            service,
-            "-c",
-            execution.IMAGE_PREFLIGHT_SCRIPT,
-        ]
-        result = execution._run(argv, timeout=60, env=execution._compose_env())
+        with execution.candidate_probe_file_args(lane, service) as file_args:
+            argv = [
+                "docker",
+                "compose",
+                *file_args,
+                "-p",
+                config.compose_project,
+                "--profile",
+                "runtime",
+                "run",
+                "--rm",
+                "--no-deps",
+                "--pull",
+                "never",
+                "--entrypoint",
+                "python",
+                service,
+                "-c",
+                execution.IMAGE_PREFLIGHT_SCRIPT,
+            ]
+            result = execution._run(argv, timeout=60, env=execution._compose_env())
         if result.returncode != 0:
             # Only our own setting diagnoses are safe to forward. Other Python
             # or compose failures still refuse the image without dumping env.
