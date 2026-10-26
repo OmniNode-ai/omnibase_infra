@@ -95,6 +95,23 @@ def _stub_promotion_guard(
 
 
 @pytest.fixture(autouse=True)
+def _stub_runtime_boot_gate(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep unrelated build tests from running a candidate on the host Docker.
+
+    Like the gateway/recreate fixtures, this isolates tests that stub only
+    build/up. The marked boot-gate tests drive the real gate and replace its
+    subprocess boundary, including through rebuild_scope and the agent job.
+    """
+    if request.node.get_closest_marker("runtime_boot_gate") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor, "_preflight_runtime_boot", lambda *a, **kw: None
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_recreate_renames(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:

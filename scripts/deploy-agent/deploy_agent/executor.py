@@ -24,6 +24,7 @@ from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -1014,6 +1015,26 @@ SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
     "omninode-runtime": 0,
     "runtime-effects": 1,
 }
+
+# OMN-21279: run the candidate image's own boot-path resolution and base-file
+# loader with the service's compose env/mounts. No render, shared-file writes,
+# endpoint probes, broker consumers or full runtime startup in this one-shot.
+RUNTIME_BOOT_PROBE = """\
+import inspect
+import os
+from omnibase_infra.runtime.render_bifrost_delegation_contract import (
+    _load_mapping, _resolve_canonical_source_path, _resolve_target_path,
+)
+if _resolve_target_path(target_path=None, env=os.environ) is not None:
+    # The known-good rollback image resolves its packaged base with no args.
+    # Use the candidate's API; do not reject it merely for predating env binding.
+    resolver = _resolve_canonical_source_path
+    source = resolver(os.environ) if inspect.signature(resolver).parameters else resolver()
+    _load_mapping(source, label="Bifrost base contract")
+"""
+# Share the runtime migration-preflight bound; a cold candidate import may
+# take over a minute on a busy build host.
+RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS = PHASE_TIMEOUTS[Phase.RUNTIME]
 
 LANE_POLICY_PREFIX: dict[EnumRuntimeLane, str] = {
     EnumRuntimeLane.STABILITY_TEST: "STABILITY_TEST",
@@ -4638,6 +4659,7 @@ class DeployExecutor:
                     lane=lane,
                     git_ref=git_ref,
                 )
+                self._preflight_runtime_boot([], on_phase_update, lane=lane)
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -4690,6 +4712,7 @@ class DeployExecutor:
                     lane=lane,
                     git_ref=git_ref,
                 )
+                self._preflight_runtime_boot(services, on_phase_update, lane=lane)
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -4706,6 +4729,81 @@ class DeployExecutor:
                 services if services else services_for_scope(scope, lane=lane), lane
             )
         )
+
+    def _preflight_runtime_boot(
+        self,
+        services: list[str],
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane,
+    ) -> None:
+        """Refuse a dev image with a broken boot contract before any compose up.
+
+        The post-swap health verification and rollback remain in place. This
+        earlier gate preserves the running containers even if no healthy
+        rollback point could be captured. FULL also probes before its core up.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return
+        config = lane_config_for(lane)
+        kernels = [*SERVICE_HEALTH_TARGET_INDEX, "runtime-worker"]
+        targets = _without_disabled_services(
+            [service for service in kernels if not services or service in services],
+            lane,
+        )
+        for service in targets:
+            name = f"onex-boot-probe-{uuid4().hex}"
+            cmd = [
+                "docker",
+                "compose",
+                *_compose_file_args(lane),
+                "-p",
+                config.compose_project,
+                "--profile",
+                "runtime",
+                "run",
+                "--rm",
+                "--no-deps",
+                "--pull",
+                "never",
+                "-T",
+                "--name",
+                name,
+                "--user",
+                "omniinfra",
+                "--entrypoint",
+                "/app/.venv/bin/python",
+                service,
+                "-c",
+                RUNTIME_BOOT_PROBE,
+            ]
+            self._record_compose_invocation(Phase.RUNTIME, cmd)
+            try:
+                result = _run(
+                    cmd, timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS, env=_compose_env()
+                )
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout).strip()[-2000:]
+                    raise RuntimeError(
+                        f"Candidate boot probe failed for {service} (exit "
+                        f"{result.returncode}); running containers kept: {detail}"
+                    )
+            except subprocess.TimeoutExpired as exc:
+                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                raise RuntimeError(
+                    f"Candidate boot probe timed out for {service} after "
+                    f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
+                ) from exc
+            except Exception:
+                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                raise
+            finally:
+                # A timed-out compose client can leave its one-shot running.
+                # Remove only this probe's unique name, never a lane service.
+                try:
+                    _run(["docker", "rm", "-f", name], timeout=30)
+                except (OSError, subprocess.TimeoutExpired):
+                    logger.warning("Could not remove boot probe %s", name)
 
     def _without_failed_cloud_consumers(self, services: list[str]) -> list[str]:
         # OMN-18496: a stopped cloud consumer is neither restarted nor read back.
