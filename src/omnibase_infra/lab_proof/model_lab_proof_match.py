@@ -14,6 +14,21 @@ from omnibase_infra.lab_proof.enum_lab_proof_match_predicate import (
     EnumLabProofMatchPredicate,
 )
 
+# Decision D3 (operator ruling 2026-09-25T17:30:10Z, OMN-19612): a pull request
+# whose changed paths are all under .github/ is proved by script_replay, never
+# exempt, so a .github/ path or glob is never documentation.
+WORKFLOW_PATH_PREFIX = ".github/"
+
+
+def is_workflow_path(path: str) -> bool:
+    """True when a changed path is under ``.github/``."""
+    return path.startswith(WORKFLOW_PATH_PREFIX)
+
+
+def is_workflow_only_glob(pattern: str) -> bool:
+    """True when a glob is scoped to ``.github/``."""
+    return pattern.startswith(WORKFLOW_PATH_PREFIX)
+
 
 class ModelLabProofMatch(BaseModel):
     """Base branches, path globs, and an optional shared predicate.
@@ -32,4 +47,9 @@ class ModelLabProofMatch(BaseModel):
     predicate: EnumLabProofMatchPredicate | None = None
 
 
-__all__ = ["ModelLabProofMatch"]
+__all__ = [
+    "WORKFLOW_PATH_PREFIX",
+    "ModelLabProofMatch",
+    "is_workflow_only_glob",
+    "is_workflow_path",
+]
