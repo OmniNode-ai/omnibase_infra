@@ -19,6 +19,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
+  - id: req-dev-201-bounded-hold
+    statement: Bounded dev-201 deployment hold declared by OmniNode-ai/omnibase_infra#5359 under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: only the default dev instance carries the OMN-21279 hold naming #5353, expiring at 2026-10-27T00:00:00Z without changing the 20-minute lag bound; its consumer refuses a GHA rebuild while accepting an explicit promotion -- falsifier: the committed-default-instance hold tests against config/deploy_lane_routing.yaml'
 evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
@@ -147,3 +152,31 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
     binds_ac:
       - "AC3"
+  - id: dod-omn21279-dev201-hold-bounded
+    description: >-
+      AC4, bounded routing configuration for PR #5359. Reads the committed routing table and requires the OMN-21279 hold on only the default instance, the #5353 lift condition, the exact expiry and the unchanged 20-minute lag bound. The hold must expire at its declared deadline. The merge-base routing table has no default-instance freeze, so this assertion fails there with the head's test overlaid.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --project scripts/deploy-agent --extra dev python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k test_committed_default_instance_hold_is_declared_and_bounded
+    binds_ac:
+      - "AC4"
+  - id: dod-omn21279-dev201-hold-consumer
+    description: >-
+      AC4, hosted-runner deployment check for PR #5359. Loads the committed default-instance flags into the deploy consumer and requires a gha/omnimarket/pr-4418 command to be refused as frozen without job acceptance, then accepts promotion/operator. Kafka delivery is mocked and state is temporary; no Docker daemon, live lane or credentials are needed. The merge-base routing table accepts the GHA command, so the same test fails there with the head's test overlaid.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen --project scripts/deploy-agent --extra dev python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_lane_flags_freeze_omn17427.py -q -k test_committed_default_instance_hold_refuses_gha_and_accepts_promotion
+    binds_ac:
+      - "AC4"
+  - id: dod-omn21279-dev201-hold-hosted-deploy-probe
+    description: >-
+      AC4, hosted-runner deploy-scope probe for PR #5359. Reads config/deploy_lane_routing.yaml through the GitHub contents API at the checked-out commit. Requires dev-201 as the default instance, its 20-minute lag bound, the exact hold expiry, a reason naming OMN-21279 and #5353, and no other instance carrying this ticket's hold. The merge-base file has no dev-201 freeze, so this probe fails there. This reads the repository deployment configuration; it makes no claim about live runtime health.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/config/deploy_lane_routing.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n"; "") | @base64d' | python3 -c 'import sys, yaml; table = yaml.safe_load(sys.stdin); instance = table["default_instance"]; assert instance == "dev-201"; flags = table["instances"][instance]["flags"]; assert flags["max_dev_lag_minutes"] == 20; hold = flags["freeze"]; assert hold["until"] == "2026-10-27T00:00:00Z"; assert "OMN-21279" in hold["reason"] and "#5353" in hold["reason"]; assert [name for name, value in table["instances"].items() if "OMN-21279" in value.get("flags", {}).get("freeze", {}).get("reason", "")] == [instance]'
+    binds_ac:
+      - "AC4"
