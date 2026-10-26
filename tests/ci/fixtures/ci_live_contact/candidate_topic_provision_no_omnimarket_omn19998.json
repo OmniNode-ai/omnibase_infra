@@ -1,0 +1,52 @@
+{
+  "_provenance": {
+    "source": "onex scm run-view OmniNode-ai/omnibase_infra --run-id 40272282023 (Deliver dev candidate to onex-staging, push of dev d845c9605f9a97335e576399f1d83d358f9424e3) and onex scm job-log --job-id 121408974442 --step \"Provision the contract-declared topics on the lane (OMN-18264)\", bus lane dev; jobs kept: those that ran (the two downstream jobs were skipped); job-log lines kept verbatim, selected by content",
+    "captured_utc": "2026-10-26T06:41:00Z",
+    "run_view_correlation_id": "8edaa942-7b75-4bd4-b3d9-bb03b6dad7ff",
+    "job_log_correlation_id": "81364bde-4a67-40f5-81bb-0cee780de8b8",
+    "job_log_sha256": "503438babe207192eb772cd69a244614a40e83f395b697c064fe33a2525bb70b"
+  },
+  "response": {
+    "run_id": 40272282023,
+    "head_sha": "d845c9605f9a97335e576399f1d83d358f9424e3",
+    "jobs": [
+      {
+        "id": 121407479070,
+        "name": "Build migration bundle / Build and push migration image",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "id": 121407479396,
+        "name": "Build runtime stability-candidate / Build + scan + push workspace stability-candidate",
+        "conclusion": "success",
+        "failed_steps": []
+      },
+      {
+        "id": 121408974442,
+        "name": "Candidate render/wiring smoke on an ephemeral kind cluster",
+        "conclusion": "failure",
+        "failed_steps": [
+          "Provision the contract-declared topics on the lane (OMN-18264)",
+          "Emit the candidate render/wiring smoke receipt"
+        ]
+      }
+    ],
+    "job_log": {
+      "job_id": 121408974442,
+      "step_name": "Provision the contract-declared topics on the lane (OMN-18264)",
+      "step_conclusion": "failure",
+      "lines": [
+        "2026-10-26T05:17:23.1821131Z           import omnimarket",
+        "2026-10-26T05:17:23.1822181Z               (\"omnimarket\", Path(omnimarket.__file__).parent / \"nodes\")",
+        "2026-10-26T05:17:23.1824317Z           print(f\"FATAL omnimarket contracts unresolvable: {exc}\")",
+        "2026-10-26T05:17:23.1857782Z   Warning  BackoffLimitExceeded  4s    job-controller  Job has reached the specified backoff limit",
+        "2026-10-26T05:17:23.4397651Z 2026-10-26T05:16:32.953644789Z FATAL omnimarket contracts unresolvable: No module named 'omnimarket'",
+        "2026-10-26T05:17:23.5566475Z 2026-10-26T05:16:09.903832529Z FATAL omnimarket contracts unresolvable: No module named 'omnimarket'",
+        "2026-10-26T05:17:23.6728740Z 2026-10-26T05:15:57.404204782Z FATAL omnimarket contracts unresolvable: No module named 'omnimarket'",
+        "2026-10-26T05:17:23.8073698Z 2026-10-26T05:17:15.957259331Z FATAL omnimarket contracts unresolvable: No module named 'omnimarket'",
+        "2026-10-26T05:17:23.8121789Z ##[error]Process completed with exit code 1."
+      ]
+    }
+  }
+}
