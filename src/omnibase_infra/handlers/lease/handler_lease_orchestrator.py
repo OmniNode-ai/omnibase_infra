@@ -2,19 +2,18 @@
 # SPDX-License-Identifier: MIT
 """Lease orchestrator handlers: acquire, renew, release over the etcd store (OMN-21424).
 
-Each returns the reply the orchestrator publishes; no handler touches the bus.
+Each takes its typed request and returns the reply as its outcome's own class; the
+runtime publishes it on the topic the contract's ``published_events`` names for that
+class. No handler touches the bus.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from uuid import uuid4
 
 import yaml
 
-from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.lease.handler_lease_store import (
     HandlerLeaseStore,
@@ -22,7 +21,12 @@ from omnibase_infra.handlers.lease.handler_lease_store import (
 )
 from omnibase_infra.models.lease import (
     ModelLeaseAcquireRequest,
+    ModelLeaseExpired,
+    ModelLeaseGranted,
+    ModelLeaseRefused,
+    ModelLeaseReleased,
     ModelLeaseReleaseRequest,
+    ModelLeaseRenewed,
     ModelLeaseRenewRequest,
     ModelLeaseReply,
 )
@@ -38,7 +42,7 @@ _CONTRACT = (
 
 @lru_cache(maxsize=1)
 def _contract() -> dict[str, object]:
-    """The orchestrator contract: the source of its topics and store configuration."""
+    """The orchestrator contract: the source of its store configuration."""
     loaded = yaml.safe_load(_CONTRACT.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError(f"Contract {_CONTRACT} must contain a mapping")
@@ -65,23 +69,18 @@ async def _lease_store_from_contract() -> HandlerLeaseStore:
     )
 
 
-@lru_cache(maxsize=5)
-def _reply_topic(outcome: str) -> str:
-    """Resolve one outcome's publish topic from the orchestrator contract."""
-    contract = _CONTRACT
-    loaded = _contract()
-    event_bus = loaded.get("event_bus")
-    if not isinstance(event_bus, dict):
-        raise ValueError(f"Contract {contract} must declare event_bus")
-    topics = event_bus.get("publish_topics")
-    if not isinstance(topics, list) or not all(isinstance(t, str) for t in topics):
-        raise ValueError(f"Contract {contract} must declare publish_topics")
-    matches = [topic for topic in topics if topic.endswith(f"{outcome}.v1")]
-    if len(matches) != 1:
-        raise ValueError(
-            f"Contract {contract} must publish exactly one topic for {outcome!r}"
-        )
-    return str(matches[0])
+_OUTCOME_MODELS: dict[str, type[ModelLeaseReply]] = {
+    "lease-granted": ModelLeaseGranted,
+    "lease-refused": ModelLeaseRefused,
+    "lease-renewed": ModelLeaseRenewed,
+    "lease-released": ModelLeaseReleased,
+    "lease-expired": ModelLeaseExpired,
+}
+
+
+def lease_reply_event(reply: ModelLeaseReply) -> ModelLeaseReply:
+    """The reply as its outcome's own class, the one the contract routes to a topic."""
+    return _OUTCOME_MODELS[reply.outcome].model_validate(reply, from_attributes=True)
 
 
 class HandlerLeaseOrchestratorBase:
@@ -95,25 +94,6 @@ class HandlerLeaseOrchestratorBase:
             self._store = await _lease_store_from_contract()
         return self._store
 
-    def _output(
-        self, envelope: ModelEventEnvelope[object], reply: ModelLeaseReply
-    ) -> ModelHandlerOutput[None]:
-        correlation_id = envelope.correlation_id or uuid4()
-        return ModelHandlerOutput.for_orchestrator(
-            input_envelope_id=envelope.envelope_id,
-            correlation_id=correlation_id,
-            handler_id=type(self).__name__,
-            events=(
-                ModelEventEnvelope(
-                    # The result applier unwraps model payloads before publishing.
-                    payload=reply,
-                    correlation_id=correlation_id,
-                    event_type=_reply_topic(reply.outcome),
-                    tenant_id=envelope.tenant_id,
-                ),
-            ),
-        )
-
     @property
     def handler_type(self) -> EnumHandlerType:
         return EnumHandlerType.NODE_HANDLER
@@ -126,10 +106,7 @@ class HandlerLeaseOrchestratorBase:
 class HandlerLeaseAcquire(HandlerLeaseOrchestratorBase):
     """One etcd transaction: ``lease-granted`` with a fresh fence, or ``lease-refused``."""
 
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[None]:
-        request = ModelLeaseAcquireRequest.model_validate(envelope.payload)
+    async def handle(self, request: ModelLeaseAcquireRequest) -> ModelLeaseReply:
         store = await self._lease_store()
         try:
             reply = await store.acquire(request)
@@ -142,33 +119,27 @@ class HandlerLeaseAcquire(HandlerLeaseOrchestratorBase):
                 request_id=request.request_id,
                 reason=str(exc),
             )
-        return self._output(envelope, reply)
+        return lease_reply_event(reply)
 
 
 class HandlerLeaseRenew(HandlerLeaseOrchestratorBase):
     """``lease-renewed`` at the same fence, or ``lease-expired``."""
 
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[None]:
-        request = ModelLeaseRenewRequest.model_validate(envelope.payload)
+    async def handle(self, request: ModelLeaseRenewRequest) -> ModelLeaseReply:
         reply = await (await self._lease_store()).renew(
             request.kind, request.resource, request.lease_id
         )
-        return self._output(envelope, reply)
+        return lease_reply_event(reply)
 
 
 class HandlerLeaseRelease(HandlerLeaseOrchestratorBase):
     """``lease-released``, or ``lease-expired`` when the grant was already gone."""
 
-    async def handle(
-        self, envelope: ModelEventEnvelope[object]
-    ) -> ModelHandlerOutput[None]:
-        request = ModelLeaseReleaseRequest.model_validate(envelope.payload)
+    async def handle(self, request: ModelLeaseReleaseRequest) -> ModelLeaseReply:
         reply = await (await self._lease_store()).release(
             request.kind, request.resource, request.lease_id
         )
-        return self._output(envelope, reply)
+        return lease_reply_event(reply)
 
 
 __all__ = ["HandlerLeaseAcquire", "HandlerLeaseRelease", "HandlerLeaseRenew"]

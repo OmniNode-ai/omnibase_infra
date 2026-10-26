@@ -27,6 +27,29 @@ event_bus:
     - onex.evt.omnibase-infra.lease-renewed.v1
     - onex.evt.omnibase-infra.lease-released.v1
     - onex.evt.omnibase-infra.lease-expired.v1
+# Each outcome is its own reply class; the runtime routes a returned reply to the
+# topic whose event_type is its class name without the Model prefix.
+published_events:
+  - topic: onex.evt.omnibase-infra.lease-granted.v1
+    event_type: LeaseGranted
+    message_category: EVENT
+    description: A free slot was granted at a fresh fence.
+  - topic: onex.evt.omnibase-infra.lease-refused.v1
+    event_type: LeaseRefused
+    message_category: EVENT
+    description: No free slot, or the kind is not declared.
+  - topic: onex.evt.omnibase-infra.lease-renewed.v1
+    event_type: LeaseRenewed
+    message_category: EVENT
+    description: The grant was kept alive at the same fence.
+  - topic: onex.evt.omnibase-infra.lease-released.v1
+    event_type: LeaseReleased
+    message_category: EVENT
+    description: The grant was given back.
+  - topic: onex.evt.omnibase-infra.lease-expired.v1
+    event_type: LeaseExpired
+    message_category: EVENT
+    description: The grant was already gone.
 dependencies:
   - name: lease_etcd_endpoint
     type: "environment"

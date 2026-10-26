@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The lease orchestrator's answer to an acquire, renew or release (OMN-21424)."""
+"""The lease orchestrator's answer to an acquire, renew or release (OMN-21424).
+
+Each outcome has its own subclass (``model_lease_<outcome>.py``) so the runtime
+routes it to its own topic by the contract's ``published_events``.
+"""
 
 from __future__ import annotations
 
