@@ -1,0 +1,61 @@
+schema_version: 1.0.0
+ticket_id: OMN-21396
+title: Vendor the delegation eval harness identity columns ahead of omnimarket
+summary: 'Infra half only: vendors node_projection_delegation_eval/0008 byte for byte from omnimarket (nullable harness, model, configuration, duration_s and failure_kind on delegation_eval_item_verdicts; nullable harness, model and configuration on delegation_eval_results; one partial index), with its checksum-bound ledger row and expand-only class, unfenced. The engine ladder, the experiment rows, the harness eval runner and the writer are the omnimarket half.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21396-infra-vendor
+    statement: The eval tables the omnimarket eval writer upserts carry the harness identity columns on every lane, deployed byte-identical to the omnimarket source.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the remote lane placement node (omnimarket node_remote_lane_compute) picks the first engine in the order local code-edit, GLM, Codex, Claude sonnet, Claude opus that the lane''s kind, risk class and ROUTE ceiling allow and that has capacity -- falsifier: a unit test where a small-fix lane with a free local slot is placed on code-edit, and the same lane with no local capacity on GLM'
+      - id: AC2
+        statement: 'AC2: an attempt that ends failed, blocked on its own work, or with its declared checks red is retried on the next engine up, never above the ROUTE ceiling, and a lane declaring Required engine: claude never starts below Claude -- falsifier: a unit test where a failed code-edit attempt is retried on GLM, plus the pinned case'
+      - id: AC3
+        statement: 'AC3: every attempt writes one ledger STATUS row with kind=experiment carrying lane, engine, model, outcome, failure cause, duration and next engine -- falsifier: a test that runs a two-attempt escalation and reads exactly two kind=experiment rows'
+      - id: AC4
+        statement: 'AC4: the throughput tick prints one line per engine over 24 hours with attempts, successes and escalations -- falsifier: the line reads nonzero after replaying AC3''s rows'
+evidence_requirements:
+  - kind: tests
+    description: Source byte pin, ledger checksum, expand-only class, no fence, and the exact statement set.
+    command: uv run pytest tests/unit/migrations/test_omn21396_delegation_eval_harness_identity_vendor.py -q
+  - kind: tests
+    description: Real apply of 0003-0008, replay, nullability, the duration check, one index and the tenant writer privilege.
+    command: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_eval_harness_identity_omn21396.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21396-ac3-infra-vendor
+    description: Deploy check, infra half only. Pins the source bytes of 0008, its live ledger checksum, the expand-only class, that it is unfenced, and that it adds exactly the harness identity columns and one partial index. Hermetic on the hosted runner against the checked-out tree; no broker, credential or lab access. Fails before this change, which has no 0008.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21396_delegation_eval_harness_identity_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21396-ac3-infra-live-apply
+    description: 'Applies 0003-0008 to ephemeral PostgreSQL: the columns arrive nullable, an earlier row keeps its values with them NULL, a second apply changes nothing and keeps one index, a negative duration_s is refused, and tenant_projection_writer can update the columns.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_eval_harness_identity_omn21396.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21396-ac1-ac2-ac4-infra-deployment-identity
+    description: >-
+      AC1, AC2 and AC4 binding, infra half only, as in OMN-19988 and OMN-19795: the placement ladder, the escalation and the throughput tick line are proven in omnimarket (tests/nodes/node_remote_lane_compute). This check proves only that the columns the harness eval identity is written to are deployed byte-identical to that source; it does not prove placement, escalation or the tick line.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21396_delegation_eval_harness_identity_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC4
