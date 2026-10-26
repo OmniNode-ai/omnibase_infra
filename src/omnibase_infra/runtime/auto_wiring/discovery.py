@@ -19,6 +19,7 @@ import logging
 from collections.abc import Mapping
 from importlib.metadata import entry_points
 from pathlib import Path
+from typing import Final
 
 import yaml
 
@@ -29,6 +30,12 @@ from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import
     ModelRuntimeLaneScope,
 )
 from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
+from omnibase_infra.models.model_secret_gated_membership import (
+    ModelSecretGatedMembership,
+)
+from omnibase_infra.protocols.protocol_secret_name_lister import (
+    ProtocolSecretNameLister,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -53,6 +60,9 @@ from omnibase_infra.utils.util_runtime_packages import (
 logger = logging.getLogger(__name__)
 
 ENTRY_POINT_GROUP = "onex.nodes"
+
+# Presence marker for a membership record (OMN-21423), never a secret value.
+_ABSENT: Final = "absent"
 
 
 def _contract_targets_active_runtime_packages(
@@ -614,6 +624,22 @@ def read_contract_yaml(contract_path: Path) -> object:
     return raw
 
 
+def _extract_required_secrets(raw: dict) -> tuple[str, ...]:
+    """Extract only names explicitly marked required by the contract (OMN-21423)."""
+    secrets = raw.get("secrets")
+    if not isinstance(secrets, dict):
+        return ()
+    return tuple(
+        sorted(
+            name
+            for name, declaration in secrets.items()
+            if isinstance(name, str)
+            and isinstance(declaration, dict)
+            and declaration.get("required") is True
+        )
+    )
+
+
 def _parse_contract(
     *,
     contract_path: Path,
@@ -709,6 +735,7 @@ def _parse_contract(
             else None
         ),
         requires_cloud_gateway=_contract_requires_cloud_gateway(raw),
+        required_secrets=_extract_required_secrets(raw),
         event_bus=event_bus,
         handler_routing=handler_routing,
         db_io=db_io,
@@ -949,4 +976,82 @@ def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:
     return ModelHandlerRouting(
         routing_strategy="payload_type_match",
         handlers=(entry,),
+    )
+
+
+# --- Required-secret gate (OMN-21423 AC3) -------------------------------------
+#
+# A runtime whose secret store holds no value for a contract's required secret
+# must not wire that contract, so it never joins the contract's consumer group.
+# The probe is typed against names only (``list_keys``), so it cannot read a
+# value.
+
+
+def required_secret_names(manifest: ModelAutoWiringManifest) -> frozenset[str]:
+    """Collect the names required by all contracts in the manifest."""
+    return frozenset(
+        name for contract in manifest.contracts for name in contract.required_secrets
+    )
+
+
+async def resolve_present_secret_names(
+    store: ProtocolSecretNameLister, names: frozenset[str]
+) -> frozenset[str]:
+    """Resolve presence with one names-only listing, or none when unnecessary."""
+    if not names:
+        return frozenset()
+    keys = await store.list_keys()
+    return names & frozenset(keys)
+
+
+def gate_manifest_on_required_secrets(
+    manifest: ModelAutoWiringManifest, present_secret_names: frozenset[str]
+) -> ModelAutoWiringManifest:
+    """Remove contracts missing required secrets and record their non-membership."""
+    kept: list[ModelDiscoveredContract] = []
+    new_skips: list[ModelDiscoverySkip] = []
+    for contract in manifest.contracts:
+        absent = sorted(
+            s for s in contract.required_secrets if s not in present_secret_names
+        )
+        if not absent:
+            kept.append(contract)
+            continue
+        membership = tuple(
+            ModelSecretGatedMembership(
+                contract=contract.name,
+                consumer_group=(contract.event_bus.consumer_group or "")
+                if contract.event_bus
+                else "",
+                secret_ref=s,
+                token=_ABSENT,
+                joined=False,
+            )
+            for s in absent
+        )
+        new_skips.append(
+            ModelDiscoverySkip(
+                contract_path=contract.contract_path,
+                reason="required_secret_absent",
+                message=(
+                    f"Contract requires secret(s) {', '.join(absent)} that this runtime's "
+                    "secret store does not hold; the runtime does not join its consumer group"
+                ),
+                membership=membership,
+            )
+        )
+        logger.warning(
+            "Skipping contract '%s': %s",
+            contract.name,
+            "; ".join(m.render() for m in membership),
+        )
+    if not new_skips:
+        return manifest
+    return ModelAutoWiringManifest(
+        contracts=tuple(kept),
+        errors=manifest.errors,
+        skips=manifest.skips + tuple(new_skips),
+        runtime_profile=manifest.runtime_profile,
+        image_sha=manifest.image_sha,
+        deployment_sha=manifest.deployment_sha,
     )

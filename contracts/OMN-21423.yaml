@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21423
+title: "A runtime with no GitHub token does not join the GitHub nodes' consumer groups"
+summary: >-
+  Part of OMN-21423 (AC3); AC1 is built in omnimarket#4438. Auto-wiring discovery now reads the names of a contract's top-level required secrets (the GitHub write and gateway contracts declare GITHUB_TOKEN required: true). Before wiring, the runtime kernel lists the names its secret store holds (list_keys, never a value) and removes every contract whose required secret is absent, so the runtime never subscribes to that contract's topics and never joins its consumer group. Each removal is a required_secret_absent discovery skip carrying a membership record that renders token=absent joined=false; the skip rides the manifest served at /v1/introspection/manifest. The kernel probes the process-environment secret store (AdapterEnvSecretStore); an Infisical-only runtime store is not probed by this change. AC2 (lab failover replay) is not run by this change, and no broker member list was read.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21423-ac3-token-absent-no-join
+    statement: "A runtime whose secret store holds no value for a contract's required secret does not wire that contract, so it never joins the contract's consumer group, and it records a membership record reading token=absent; the probe lists names only and never reads or logs a value."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a runtime with no GitHub token does not join the write node's group -- falsifier: the group's member list on the dev broker includes a runtime whose membership record reads `token=absent`
+evidence_requirements:
+  - kind: tests
+    description: "The required-secret gate removes a contract whose required secret is absent, records token=absent, never calls get_secret and never logs the value."
+    command: |-
+      uv run pytest tests/unit/runtime/auto_wiring/test_required_secret_gate_omn21423.py -q
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the gate's unit tests, runnable on a hosted runner; they touch no broker and no running lane."
+    command: "deploy: uv run pytest tests/unit/runtime/auto_wiring/test_required_secret_gate_omn21423.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21423-ac3-absent-token-not-wired
+    description: >-
+      A GitHub-write-shaped contract declaring GITHUB_TOKEN required: true is removed from the wiring manifest when the store lists no GITHUB_TOKEN, never reaches wire_from_manifest, and its skip carries a membership record rendering token=absent joined=false. Unit level; no dev broker member list is read.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_required_secret_gate_omn21423.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21423-ac3-names-only-probe
+    description: >-
+      The presence probe lists names only: a store whose get_secret raises is never read, and a sentinel token value set in the environment appears in no log line, repr or JSON of the gated manifest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_required_secret_gate_omn21423.py -q -k "never_leaks or present_secret_keeps or empty_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21423-deploy-probe-gate-at-head
+    description: >-
+      Deploy-scope probe. Reads discovery.py and service_kernel.py through the GitHub API at the commit that carries this contract and exits nonzero unless discovery defines the required-secret gate and the kernel calls it. It touches no broker and no running lane, and reads no dev broker member list.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/discovery.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("def gate_manifest_on_required_secrets(") and contains("reason=\"required_secret_absent\""))' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" -H "Accept: application/vnd.github.raw" | grep -q "manifest = gate_manifest_on_required_secrets("
+    binds_ac:
+      - AC3

@@ -3623,13 +3623,29 @@ async def bootstrap() -> int:
                 LifecycleHookExecutor,
                 discover_contracts,
                 filter_manifest_for_runtime_profile,
+                gate_manifest_on_required_secrets,
+                required_secret_names,
+                resolve_present_secret_names,
                 subscribe_wired_contract_topics,
                 wire_from_manifest,
+            )
+            from omnibase_infra.secret_stores.adapter_env_secret_store import (
+                AdapterEnvSecretStore,
             )
 
             # 1. Discover all contracts from installed packages
             auto_wiring_start = time.time()
             manifest = discover_contracts()
+            # OMN-21423 AC3: a contract whose required secret this runtime's store
+            # does not hold is not wired, so this runtime never joins its group;
+            # the skip carries a token=absent membership record into the
+            # introspection manifest. Names only: list_keys(), never a value.
+            manifest = gate_manifest_on_required_secrets(
+                manifest,
+                await resolve_present_secret_names(
+                    AdapterEnvSecretStore(), required_secret_names(manifest)
+                ),
+            )
             auto_wiring_manifest_discovered = (
                 manifest  # OMN-11198: captured for introspection
             )
