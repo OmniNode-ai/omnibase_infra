@@ -3623,6 +3623,7 @@ async def bootstrap() -> int:
                 LifecycleHookExecutor,
                 discover_contracts,
                 drop_blank_secret_names,
+                env_secret_store_is_authoritative,
                 filter_manifest_for_runtime_profile,
                 gate_manifest_on_required_secrets,
                 required_secret_names,
@@ -3642,15 +3643,25 @@ async def bootstrap() -> int:
             # the skip carries a token=absent membership record into the
             # introspection manifest. Names only: list_keys(), never a value.
             # A name set to a blank value counts as absent.
-            manifest = gate_manifest_on_required_secrets(
-                manifest,
-                drop_blank_secret_names(
-                    await resolve_present_secret_names(
-                        AdapterEnvSecretStore(), required_secret_names(manifest)
+            # Skip when Infisical prefetch supplies secrets after wiring.
+            if env_secret_store_is_authoritative(
+                kernel_profile.prefetch_policy, os.environ.get("INFISICAL_ADDR", "")
+            ):
+                manifest = gate_manifest_on_required_secrets(
+                    manifest,
+                    drop_blank_secret_names(
+                        await resolve_present_secret_names(
+                            AdapterEnvSecretStore(), required_secret_names(manifest)
+                        ),
+                        os.environ,
                     ),
-                    os.environ,
-                ),
-            )
+                )
+            else:
+                logger.info(
+                    "Required-secret gate skipped: prefetch_policy=%s and INFISICAL_ADDR is set, "
+                    "so secrets are prefetched from Infisical after wiring (OMN-21423)",
+                    kernel_profile.prefetch_policy,
+                )
             auto_wiring_manifest_discovered = (
                 manifest  # OMN-11198: captured for introspection
             )

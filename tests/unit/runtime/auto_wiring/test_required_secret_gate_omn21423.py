@@ -17,6 +17,7 @@ from omnibase_infra.models.model_secret_gated_membership import (
 from omnibase_infra.runtime.auto_wiring import (
     discover_contracts_from_paths,
     drop_blank_secret_names,
+    env_secret_store_is_authoritative,
     gate_manifest_on_required_secrets,
     required_secret_names,
     resolve_present_secret_names,
@@ -79,6 +80,23 @@ def manifest(
     assert not result.skips
     assert len(result.contracts) == 2
     return result
+
+
+@pytest.mark.parametrize(
+    ("policy", "addr", "expected"),
+    [
+        ("disabled", "", True),
+        ("disabled", "https://infisical.example", True),
+        ("best_effort", "", True),
+        ("best_effort", "   ", True),
+        ("best_effort", "https://infisical.example", False),
+        ("required", "https://infisical.example", False),
+    ],
+)
+def test_env_secret_store_is_authoritative(
+    policy: str, addr: str, expected: bool
+) -> None:
+    assert env_secret_store_is_authoritative(policy, addr) is expected
 
 
 def test_discovery_parses_required_secret_names(

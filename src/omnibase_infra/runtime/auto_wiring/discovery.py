@@ -990,6 +990,17 @@ def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:
 # value.
 
 
+def env_secret_store_is_authoritative(
+    prefetch_policy: str, infisical_addr: str
+) -> bool:
+    """Return whether the env store can judge secret presence at gate time.
+
+    When prefetch is enabled and the Infisical address is non-blank, secrets
+    arrive from Infisical after wiring, so the env store is not authoritative.
+    """
+    return prefetch_policy == "disabled" or not infisical_addr.strip()
+
+
 def required_secret_names(manifest: ModelAutoWiringManifest) -> frozenset[str]:
     """Collect the names required by all contracts in the manifest."""
     return frozenset(
