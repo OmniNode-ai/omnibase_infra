@@ -1,0 +1,148 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 58 and seed -2702921881341698565 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 93318] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file GenericLease.tla
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module GenericLease
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module GenericLease
+Starting... (2026-10-25 20:27:30)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-25 20:27:30.
+Error: Invariant NotStaleRefused is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ now = 0
+/\ belief = ( c1 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {}
+/\ rev = 0
+/\ sent = 0
+/\ grants = (r1 :> <<>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 2: <Tick line 106, col 3 to line 108, col 74 of module GenericLease>
+/\ now = 1
+/\ belief = ( c1 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {}
+/\ rev = 0
+/\ sent = 0
+/\ grants = (r1 :> <<>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 3: <Tick line 106, col 3 to line 108, col 74 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {}
+/\ rev = 0
+/\ sent = 0
+/\ grants = (r1 :> <<>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 4: <Grant(c1,r1) line 112, col 3 to line 122, col 51 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 1, g |-> 1] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {}
+/\ rev = 1
+/\ sent = 0
+/\ grants = (r1 :> <<1>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 1, g |-> 1, holder |-> c1, exp |-> 4] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 5: <Effect(c1,r1) line 151, col 3 to line 156, col 68 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 1, g |-> 1] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {[fence |-> 1, g |-> 1, r |-> r1, id |-> 1]}
+/\ rev = 1
+/\ sent = 1
+/\ grants = (r1 :> <<1>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 1, g |-> 1, holder |-> c1, exp |-> 4] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 6: <Release(c1,r1) line 142, col 3 to line 147, col 64 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {[fence |-> 1, g |-> 1, r |-> r1, id |-> 1]}
+/\ rev = 1
+/\ sent = 1
+/\ grants = (r1 :> <<1>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 7: <Grant(c1,r1) line 112, col 3 to line 122, col 51 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 2, g |-> 2] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = {[fence |-> 1, g |-> 1, r |-> r1, id |-> 1]}
+/\ rev = 2
+/\ sent = 1
+/\ grants = (r1 :> <<1, 2>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 2, g |-> 2, holder |-> c1, exp |-> 4] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 8: <Effect(c1,r1) line 151, col 3 to line 156, col 68 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 2, g |-> 2] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 0 @@ r2 :> 0)
+/\ applied = (r1 :> <<>> @@ r2 :> <<>>)
+/\ net = { [fence |-> 1, g |-> 1, r |-> r1, id |-> 1],
+  [fence |-> 2, g |-> 2, r |-> r1, id |-> 2] }
+/\ rev = 2
+/\ sent = 2
+/\ grants = (r1 :> <<1, 2>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 2, g |-> 2, holder |-> c1, exp |-> 4] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+State 9: <Next line 172, col 6 to line 172, col 30 of module GenericLease>
+/\ now = 2
+/\ belief = ( c1 :> (r1 :> [fence |-> 2, g |-> 2] @@ r2 :> [fence |-> 0, g |-> 0]) @@
+  c2 :> (r1 :> [fence |-> 0, g |-> 0] @@ r2 :> [fence |-> 0, g |-> 0]) )
+/\ highest = (r1 :> 2 @@ r2 :> 0)
+/\ applied = (r1 :> <<2>> @@ r2 :> <<>>)
+/\ net = {[fence |-> 1, g |-> 1, r |-> r1, id |-> 1]}
+/\ rev = 2
+/\ sent = 2
+/\ grants = (r1 :> <<1, 2>> @@ r2 :> <<>>)
+/\ lease = ( r1 :> [fence |-> 2, g |-> 2, holder |-> c1, exp |-> 4] @@
+  r2 :> [fence |-> 0, g |-> 0, holder |-> none, exp |-> 0] )
+
+11770 states generated, 5358 distinct states found, 3744 states left on queue.
+The depth of the complete state graph search is 10.
+Finished in 00s at (2026-10-25 20:27:30)
+Trace exploration spec path: GenericLease_TTrace_1792974450.tla
