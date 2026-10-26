@@ -78,6 +78,43 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-dev-lane-composed-image
+    description: >-
+      AC2, dev-lane boot. At 03ea9377f the dev lane built omninode-runtime, runtime-effects and runtime-worker from the infra Dockerfile.runtime, which sets no BIFROST_BASE_CONTRACT_PATH, and each exhausted 5 boots on ProtocolConfigurationError ONEX_CORE_041. docker/docker-compose.dev-lane.yml now builds every dev-lane runtime-image service from the staged omnimarket sibling's Dockerfile.runtime FROM a build-only infra image. The check refuses a dev-lane service on the infra-only image that renders Bifrost without a base contract or runs an omnimarket command; over the 03ea9377f overlay it flags 11 services.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-names-composed
+    description: >-
+      AC2, dev-lane build. The deploy agent's lane-agnostic runtime build passes only docker-compose.infra.yml; its dev-lane build now names DEV_LANE_BUILD_SERVICES, the lane-only buildable services plus the base services the overlay composes, so they are rebuilt on the composed image. Fails at 03ea9377f, where DEV_LANE_BUILD_SERVICES does not exist.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_composed_build_omn21279.py scripts/deploy-agent/tests/unit/test_executor_build_path_omn16442.py -q -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-deploy-probe-dev-overlay
+    description: >-
+      AC2, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the composed build context on the staged omnimarket sibling and the build-only infra image it builds FROM. At the merge base neither line exists.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("context: ../workspace/sibling-repos/omnimarket") and contains("infra-runtime: \"service:dev-lane-infra-runtime-image\""))' | grep -qx true
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-context-classification
+    description: >-
+      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile. Run the composed-image regression alongside the exclusion guard: the guard alone also passes on the merge base, whose dev overlay still builds market workloads on the infra-only image. The composed-image tests read that product overlay and fail there, binding this item to the AC2 runtime-image change.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
   - id: dod-omn-21279-ac2-dev-deploy-boot-recovery
     description: >-
       AC2, dev deployment guard. Replays the 2026-10-25 c37f6142 incident's BOOT FAILED 5/5 with BIFROST_BASE_CONTRACT_PATH unset. All three dev runtime services must become Docker healthy within their declared health window. Compose errors, exhausted boots and probe timeouts keep the job failed and forward-redeploy the retained healthy image revision and its resolved compose settings, with no git revert, image build, pull or deps restart. Candidate setting/package checks run before runtime replacement. STATUS and exception reports name the failed commit and boot cause and remain durable until their independent deliveries are acknowledged. Non-dev jobs never construct this guard. These are isolated replays; the live runtime-boot-smoke job remains the boot gate on the PR head.

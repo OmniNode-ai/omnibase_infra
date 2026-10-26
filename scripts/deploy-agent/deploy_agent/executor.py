@@ -42,6 +42,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_BUILD_SERVICES,
     DEV_LANE_CLOUD_DB_SERVICES,
     DEV_LANE_GATEWAY_SERVICES,
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
@@ -5024,12 +5025,14 @@ class DeployExecutor:
     ) -> None:
         """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
 
-        These are declared only in ``docker/docker-compose.dev-lane.yml``, which
-        the lane-agnostic build above never passes, so without this command the
+        The lane-only services are declared in ``docker/docker-compose.dev-lane.yml``,
+        which the lane-agnostic build above never passes, so without this command the
         up phase recreates them from whatever image they already carry and
         reports success. That is exactly what left eight services ~35 commits
         behind on the .201 dev lane while the deploy agent's own terminal event
         said the deploy succeeded.
+
+        OMN-21279 also rebuilds base-file services on the composed image via the overlay.
 
         Additive and explicit: a SECOND build naming the services, rather than
         widening the first one's compose files, so prod and stability-test issue
@@ -5037,13 +5040,13 @@ class DeployExecutor:
         excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
         build`` has nothing to do for a service that carries only an ``image:``.
         """
-        if lane != EnumRuntimeLane.DEV or not DEV_LANE_ONLY_BUILDABLE_SERVICES:
+        if lane != EnumRuntimeLane.DEV or not DEV_LANE_BUILD_SERVICES:
             return
         logger.info(
-            "_build_dev_lane_only_services: building %d dev-lane-only services "
-            "the base compose file does not declare: %s",
-            len(DEV_LANE_ONLY_BUILDABLE_SERVICES),
-            ", ".join(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+            "_build_dev_lane_only_services: building %d dev-lane services "
+            "with the lane overlay: %s",
+            len(DEV_LANE_BUILD_SERVICES),
+            ", ".join(DEV_LANE_BUILD_SERVICES),
         )
         self._compose_build(
             Scope.RUNTIME,
@@ -5053,7 +5056,7 @@ class DeployExecutor:
             runtime_lane=lane,
             git_ref=git_ref,
             compose_files=lane_config_for(lane).compose_files,
-            services=DEV_LANE_ONLY_BUILDABLE_SERVICES,
+            services=DEV_LANE_BUILD_SERVICES,
             stage_workspace=False,
         )
 
