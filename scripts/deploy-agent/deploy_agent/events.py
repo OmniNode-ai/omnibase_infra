@@ -300,6 +300,28 @@ DEV_LANE_ONLY_BUILDABLE_SERVICES: tuple[str, ...] = tuple(
 )
 
 
+# OMN-21279: the lane-agnostic runtime build passes only docker-compose.infra.yml,
+# so it builds these from the infra Dockerfile alone. The dev-lane build passes
+# the overlay and must name them or they keep the infra-only image.
+DEV_LANE_COMPOSED_RUNTIME_SERVICES: tuple[str, ...] = (
+    "omninode-runtime",
+    "runtime-effects",
+    "runtime-worker",
+    "projection-api",
+    "agent-actions-consumer",
+    "skill-lifecycle-consumer",
+    "context-audit-consumer",
+    "intelligence-api",
+    "omninode-contract-resolver",
+)
+
+DEV_LANE_BUILD_SERVICES: tuple[str, ...] = DEV_LANE_ONLY_BUILDABLE_SERVICES + tuple(
+    service
+    for service in DEV_LANE_COMPOSED_RUNTIME_SERVICES
+    if service not in DEV_LANE_ONLY_BUILDABLE_SERVICES
+)
+
+
 # OMN-18134: the DEV lane's gateway compose project, and the services in it.
 #
 # THIS LIST IS NOT A SECOND DEV_LANE_ONLY_RUNTIME_SERVICES. The two are kept

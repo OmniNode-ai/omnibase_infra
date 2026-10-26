@@ -285,6 +285,12 @@ services:
   # profile (which every dependency now is), and a slot must not wait on, or
   # be able to restart, a dev-lane container.
   # =========================================================================
+  # OMN-21279: the dev overlay's build-only infra image, which the slot's
+  # runtime services build omnimarket's composed image FROM. Compose refuses a
+  # `service:` build context that names a service outside the active profile,
+  # so it moves onto `prepr` with them. Its scale 0 is inherited: no container.
+  dev-lane-infra-runtime-image:
+    profiles: !override ["prepr"]
   omninode-runtime:
     profiles: !override ["prepr"]
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime"

@@ -23,12 +23,35 @@ import tarfile
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
+
+
+@pytest.fixture(autouse=True)
+def _stub_dev_boot_guard(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unrelated job tests do not inspect Docker or the private recovery store.
+
+    The boot-guard replay suite opts out and drives the real guard, including
+    the agent's job flow. This stand-in never stubs existing verification.
+    """
+    if request.node.get_closest_marker("dev_boot_guard") is not None:
+        return
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    guard = Mock()
+    guard.protect.side_effect = lambda *args: nullcontext()
+    monkeypatch.setattr(agent_mod, "DevBootGuard", Mock(return_value=guard))
+    monkeypatch.setattr(
+        "deploy_agent.executor.preflight_dev_images", lambda *args: None
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +68,9 @@ def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(Path, "home", classmethod(test_home))
     monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
+    # Image-build tests take the real reconcile lock; never lock the host's
+    # canonical workspace. Lock-root tests override this with their own trees.
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path))
 
 
 class _NoopPromotionGuard:
@@ -70,6 +96,23 @@ def _stub_promotion_guard(
     if request.node.get_closest_marker("promotion_guard") is not None:
         return
     monkeypatch.setattr(executor_mod, "_load_promotion_guard", _NoopPromotionGuard)
+
+
+@pytest.fixture(autouse=True)
+def _stub_runtime_boot_gate(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep unrelated build tests from running a candidate on the host Docker.
+
+    Like the gateway/recreate fixtures, this isolates tests that stub only
+    build/up. The marked boot-gate tests drive the real gate and replace its
+    subprocess boundary, including through rebuild_scope and the agent job.
+    """
+    if request.node.get_closest_marker("runtime_boot_gate") is not None:
+        return
+    monkeypatch.setattr(
+        executor_mod.DeployExecutor, "_preflight_runtime_boot", lambda *a, **kw: None
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -257,6 +300,7 @@ def _derive_deps_budget_from_this_checkout(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.fixture(autouse=True)
 def _derive_image_build_budget_from_this_checkout(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """OMN-18072: derive the runtime image-build ceiling from THIS checkout.
 
@@ -282,12 +326,39 @@ def _derive_image_build_budget_from_this_checkout(
     imported here so a test that pins a host still reaches this closure.
     ``test_executor_build_ceiling_host_omn18615.py`` fails if the host term
     goes missing from this fixture again.
+
+    OMN-21279: the composed recipe belongs to the staged omnimarket sibling,
+    which unit tests do not stage. Count a small composed-recipe fixture for
+    that exact path while continuing to count the real infra Dockerfile. The
+    fixture lives in its own directory, never the test's ``tmp_path``, so a
+    test asserting that its ``tmp_path`` stays empty still observes that.
     """
     from deploy_agent import build_budget
     from deploy_agent import executor as executor_mod
 
     docker_dir = Path(__file__).resolve().parents[4] / "docker"
     compose_file = str(docker_dir / "docker-compose.infra.yml")
+    market_dockerfile = (
+        docker_dir.parent / "workspace/sibling-repos/omnimarket/Dockerfile.runtime"
+    )
+    market_fixture = (
+        tmp_path_factory.mktemp("omn21279-market") / "omnimarket.Dockerfile.runtime"
+    )
+    market_fixture.write_text(
+        "ARG INFRA_RUNTIME_IMAGE\n"
+        "FROM ${INFRA_RUNTIME_IMAGE}\n"
+        "COPY . /app/omnimarket\n"
+        "RUN uv pip install /app/omnimarket\n"
+        "ENV BIFROST_BASE_CONTRACT_PATH=/app/config/delegation/bifrost_delegation.base.yaml\n",
+        encoding="utf-8",
+    )
+    count_build_steps = build_budget.count_build_steps
+
+    def _count_build_steps(dockerfile: Path | str) -> int:
+        path = Path(dockerfile)
+        return count_build_steps(market_fixture if path == market_dockerfile else path)
+
+    monkeypatch.setattr(build_budget, "count_build_steps", _count_build_steps)
 
     def _budget(
         profile: str, compose_files: tuple[str, ...] = (compose_file,)
@@ -623,15 +694,33 @@ def _inline_settle_pool(
 
 
 @pytest.fixture(autouse=True)
-def _no_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
-    """OMN-20602: runtime deploys capture a rollback point before the rebuild.
+def _stub_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply a retained point to tests of unrelated deploy behavior.
 
-    Capture probes the live lane's health and docker state, which the fake
-    executors in unrelated agent tests do not model. They get no rollback point
-    by default; ``test_auto_rollback.py`` sets its own ``capture_rollback_point``
-    and exercises the real one against the executor directly.
+    Live health and docker reads are outside these fake executors. Rollback
+    tests override this stand-in and exercise capture and refusal explicitly.
     """
-    monkeypatch.setattr(agent_mod, "capture_rollback_point", lambda *args, **kw: None)
+    from deploy_agent.events import EnumRuntimeLane
+
+    def capture(
+        executor: object, lane: EnumRuntimeLane
+    ) -> executor_mod.ModelRollbackPoint:
+        config = executor_mod.lane_config_for(lane)
+        return executor_mod.ModelRollbackPoint(
+            lane=lane,
+            captured_at=datetime.now(UTC),
+            images=tuple(
+                executor_mod.ModelRetainedImage(
+                    container=config.runtime_health_targets[index][0],
+                    service=service,
+                    image_ref="unit-runtime:latest",
+                    image_id="sha256:" + "a" * 64,
+                )
+                for service, index in executor_mod.SERVICE_HEALTH_TARGET_INDEX.items()
+            ),
+        )
+
+    monkeypatch.setattr(agent_mod, "capture_rollback_point", capture)
 
 
 @pytest.fixture(scope="session")
