@@ -27,6 +27,7 @@ from omnibase_core.runtime.runtime_local import parse_backend_overrides
 from omnibase_infra.cli.contract_registry import (
     RegistryUnresolvedError,
     node_contract_path,
+    node_provider_distribution,
 )
 from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
@@ -220,6 +221,8 @@ def run_node_by_name(
             reconcile=make_workspace_reconciler(
                 str(omnibase_path) if omnibase_path else None
             ),
+            # OMN-21436: an infra-owned node is not guarded; an unresolved one is.
+            node_provider=node_provider_distribution(node_name),
         )
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
