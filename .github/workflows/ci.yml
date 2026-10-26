@@ -2593,6 +2593,15 @@ jobs:
         if: matrix.split == 1
         run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py tests/scripts/test_release_pr_open_omn18595.py -q --no-cov
 
+      # OMN-21279: the change-aware selector does not pick tests/scripts/ for a
+      # contracts/ change. omnibase_infra#5370 repeated a criterion label that
+      # omnibase_infra#5365 had already merged; its own runs were green and the
+      # merge-queue full suite removed it three times. One split runs the label
+      # check by name; this job's result feeds "CI Summary" through "CI Tests Gate".
+      - name: Verify ticket contract criterion labels are distinct (OMN-21279)
+        if: matrix.split == 1
+        run: uv run --frozen pytest tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py -q --no-cov
+
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         # OMN-15233: tests/integration/ci/test_workflow_uses_refs_resolve_live.py
