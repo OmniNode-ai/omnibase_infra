@@ -1,0 +1,45 @@
+schema_version: 1.0.0
+ticket_id: OMN-19795
+title: Vendor the delegation_eval_results generation-stability columns ahead of omnimarket
+summary: 'Infra half only: vendors node_projection_delegation_eval/0007 byte for byte from omnimarket (four nullable columns on delegation_eval_results: flip_rate, flip_rate_wilson_low, flip_rate_wilson_high, flip_measured_backend_id), with its checksum-bound ledger row and expand-only class, unfenced. The flip-rate plumbing, the dev-lane measurement and the rollup citation are the omnimarket half.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19795-ac2-infra-vendor
+    statement: The results table the eval writer upserts carries the generation-stability columns on every lane, deployed byte-identical to the omnimarket source.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a group of three verdicts with one disagreement counts as one flip -- falsifier: uv run pytest tests/nodes/node_delegation_gate_eval_compute -k flip_rate -v in omnimarket'
+      - id: AC2
+        statement: 'AC2: each class''s results row carries its flip rate, its bound and the backend it was measured on, and the rollup contract''s minimum sample cites the measured value -- falsifier: a class row on the dev lane without either field, or the contract value without a citation'
+evidence_requirements:
+  - kind: tests
+    description: Source byte pin, ledger checksum, expand-only class, no fence, and the four-column statement set.
+    command: uv run pytest tests/unit/migrations/test_omn19795_delegation_eval_flip_columns_vendor.py -q
+  - kind: tests
+    description: Real apply of 0003-0007, replay, nullability and the tenant writer privilege.
+    command: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_eval_flip_columns_omn19795.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19795-ac2-infra-vendor
+    description: Infra half only. Pins the source bytes of 0007, its live ledger checksum, the expand-only class, that it is unfenced, and that it adds exactly the four nullable columns.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19795_delegation_eval_flip_columns_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19795-ac2-infra-live-apply
+    description: 'Applies 0003-0007 to ephemeral PostgreSQL: the four columns arrive nullable, an earlier row keeps its values with them NULL, a second apply changes nothing, and tenant_projection_writer can update them.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_delegation_eval_flip_columns_omn19795.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
