@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21436
+title: >-
+  onex node runs the omnimarket drift guard for nodes omnibase_infra itself provides, so every worktree commit fails the ci-live-contact hook
+summary: >
+  onex node ran the omnimarket drift guard before every node. The ci-live-contact pre-commit hook starts node_ci_live_contact_effect, which omnibase_infra itself ships, and a worktree venv correctly carries no omnimarket, so every worktree commit was refused whenever OMNIBASE_PATH named a workspace. The guard now runs only when the node is not provided by omnibase-infra: a market-provided node and a name no package advertises are still refused on drift.
+
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21436-infra-nodes
+    statement: An infra-owned node is not refused over omnimarket drift.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: `onex node` starts a node that omnibase_infra itself provides without running the omnimarket drift guard, so node_ci_live_contact_effect runs in a pure worktree venv with OMNIBASE_PATH set
+  - id: req-omn21436-market-nodes
+    statement: Market-provided and unknown nodes are still guarded.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: `onex node` still refuses a node that omnimarket provides, or a node that resolves from no package, when omnimarket drifts from the canonical clone
+evidence_requirements:
+  - kind: tests
+    description: "Drift guard scope tests pass"
+    command: "uv run pytest tests/integration/cli/test_node_drift_guard_scope_omn21436.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21436-ac1-infra-node-unguarded
+    description: >-
+      With omnimarket absent and a canonical clone configured, onex node for an infra-owned node reaches contract resolution instead of the drift refusal. Fails at the merge base, which refuses it.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/cli/test_node_drift_guard_scope_omn21436.py -q --no-cov -k infra_owned"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn21436-ac2-market-and-unknown-guarded
+    description: >-
+      A market-provided node and an unadvertised name are still refused on drift; run with the AC1 case so the selection fails at the merge base.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/cli/test_node_drift_guard_scope_omn21436.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn21436-deploy-probe
+    description: "Deploy probe: cli_node.py at the checked-out commit on GitHub scopes the guard by provider."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/cli/test_node_drift_guard_scope_omn21436.py -q --no-cov -k infra_owned"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_node.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "node_provider=node_provider_distribution(node_name)" > /dev/null'
+        cwd: "${OMNI_HOME}/omnibase_infra"

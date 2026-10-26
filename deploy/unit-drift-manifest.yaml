@@ -15,47 +15,57 @@ units:
       - omninode-pc
   - name: onex-disk-gc.service
     tracked: deploy/disk-gc/onex-disk-gc.service
+    installer: deploy/disk-gc/install-disk-gc.sh
     installed: ~/.config/systemd/user/onex-disk-gc.service
     hosts:
       - omninode-pc
     render_registry_root_env: OMNI_HOME
   - name: onex-disk-gc.timer
     tracked: deploy/disk-gc/onex-disk-gc.timer
+    installer: deploy/disk-gc/install-disk-gc.sh
     installed: ~/.config/systemd/user/onex-disk-gc.timer
     hosts:
       - omninode-pc
   - name: onex-buildx-orphan-sweep.service
     tracked: deploy/disk-gc/onex-buildx-orphan-sweep.service
+    installer: deploy/disk-gc/install-buildx-orphan-sweep.sh
     installed: ~/.config/systemd/user/onex-buildx-orphan-sweep.service
     hosts:
       - omninode-pc
   - name: onex-buildx-orphan-sweep.timer
     tracked: deploy/disk-gc/onex-buildx-orphan-sweep.timer
+    installer: deploy/disk-gc/install-buildx-orphan-sweep.sh
     installed: ~/.config/systemd/user/onex-buildx-orphan-sweep.timer
     hosts:
       - omninode-pc
   - name: onex-runner-disk-guard.service
     tracked: deploy/disk-gc/onex-runner-disk-guard.service
+    installer: deploy/disk-gc/install-runner-disk-guard.sh
     installed: ~/.config/systemd/user/onex-runner-disk-guard.service
     hosts:
       - omninode-pc
   - name: onex-runner-disk-guard.timer
     tracked: deploy/disk-gc/onex-runner-disk-guard.timer
+    installer: deploy/disk-gc/install-runner-disk-guard.sh
     installed: ~/.config/systemd/user/onex-runner-disk-guard.timer
     hosts:
       - omninode-pc
   - name: onex-worktree-prune.service
     tracked: deploy/disk-gc/onex-worktree-prune.service
+    installer: deploy/disk-gc/install-worktree-prune.sh
     installed: ~/.config/systemd/user/onex-worktree-prune.service
     hosts:
       - omninode-pc
   - name: onex-worktree-prune.timer
     tracked: deploy/disk-gc/onex-worktree-prune.timer
+    installer: deploy/disk-gc/install-worktree-prune.sh
     installed: ~/.config/systemd/user/onex-worktree-prune.timer
     hosts:
       - omninode-pc
   - name: onex-log-monitor.service
     tracked: deploy/systemd/onex-log-monitor.service
+    installer: deploy/disk-gc/install-host-maintenance.sh
+    installer_args: ['--log-monitor']
     installed: ~/.config/systemd/user/onex-log-monitor.service
     hosts:
       - omninode-pc
@@ -81,16 +91,22 @@ units:
       - omninode-pc
   - name: omninode-git-mirror-daemon.service
     tracked: docker/runners/systemd/omninode-git-mirror-daemon.service
+    installer: deploy/maintenance/omninode-host-maintenance-sync.sh
+    installer_args: ['--converge']
     installed: /etc/systemd/system/omninode-git-mirror-daemon.service
     hosts:
       - omninode-pc
   - name: omninode-git-mirror-refresh.service
     tracked: docker/runners/systemd/omninode-git-mirror-refresh.service
+    installer: deploy/maintenance/omninode-host-maintenance-sync.sh
+    installer_args: ['--converge']
     installed: /etc/systemd/system/omninode-git-mirror-refresh.service
     hosts:
       - omninode-pc
   - name: omninode-git-mirror-refresh.timer
     tracked: docker/runners/systemd/omninode-git-mirror-refresh.timer
+    installer: deploy/maintenance/omninode-host-maintenance-sync.sh
+    installer_args: ['--converge']
     installed: /etc/systemd/system/omninode-git-mirror-refresh.timer
     hosts:
       - omninode-pc
@@ -162,6 +178,8 @@ units:
       - omninode-pc
   - name: monitor_logs.py
     tracked: scripts/monitor_logs.py
+    installer: deploy/disk-gc/install-host-maintenance.sh
+    installer_args: ['--log-monitor']
     installed: ~/.omnibase/infra/deployed/0.34.1/scripts/monitor_logs.py
     hosts:
       - omninode-pc

@@ -1,0 +1,45 @@
+# Dev broker Redpanda upgrade path (OMN-21279).
+#
+# The dev broker (omnibase-infra-redpanda) crashes inside Kafka ListGroups on
+# v24.3.18 (docs/incidents/OMN-21279/dev-broker-crash-cause.json). Upstream
+# fixed the group erase race in PR redpanda-data/redpanda#31221 (CORE-16883),
+# backported to v25.3.x in #31229 for v25.3.16; there is no v24.3.x backport
+# and no v25.2.x release after the backport merged.
+#
+# Redpanda upgrades one feature release at a time: v25.3.x declares
+# earliest_version = v25_2_1 ("The earliest version we can upgrade from"), so a
+# v25.3 broker does not start on the v24.3 data volume. The dev pin may move at
+# most one feature release past deployed_feature_release. Advance
+# deployed_feature_release only after that hop is live on the dev broker and
+# read back (docker inspect image plus /v1/features active version), and drop
+# that hop from path in the same change.
+#
+# tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py and
+# test_dev_broker_hop_logical_versions_omn21279.py read this file.
+deployed_feature_release: "24.3"
+first_fixed_release: "25.3.16"
+feature_releases: ["24.2", "24.3", "25.1", "25.2", "25.3", "26.1"]
+path:
+  - redpandadata/redpanda:v25.1.12
+  - redpandadata/redpanda:v25.2.14
+  - redpandadata/redpanda:v25.3.18
+# Logical versions read from /v1/features on scratch brokers on 2026-10-26
+# (docs/incidents/OMN-21279/dev-broker-crash-cause.json, fix_path.hop_proof):
+# latest is node_latest_version, the cluster_version the image finalizes at;
+# earliest is node_earliest_version, the oldest cluster_version it starts on.
+# A synthetic v24.3.18 volume went 14 -> 15 -> 16 -> 17 through this path with
+# topics, groups, committed offsets and the SCRAM user intact; v25.3.18 started
+# directly on it asserted "incompatible logical version 14 to logical version 17".
+logical_versions:
+  redpandadata/redpanda:v24.3.18:
+    latest: 14
+    earliest: 11
+  redpandadata/redpanda:v25.1.12:
+    latest: 15
+    earliest: 12
+  redpandadata/redpanda:v25.2.14:
+    latest: 16
+    earliest: 15
+  redpandadata/redpanda:v25.3.18:
+    latest: 17
+    earliest: 16

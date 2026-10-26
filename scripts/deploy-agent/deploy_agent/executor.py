@@ -1108,6 +1108,21 @@ def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
     return args
 
 
+@contextlib.contextmanager
+def candidate_probe_file_args(
+    lane: EnumRuntimeLane, service: str
+) -> Iterator[list[str]]:
+    """Use the already-built candidate image for a one-shot boot probe."""
+    # OMN-21279: Compose v5.1.0 rebuilds on run for a service: additional context.
+    with tempfile.TemporaryDirectory(prefix="onex-boot-probe-") as directory:
+        path = Path(directory) / "no-build.yml"
+        path.write_text(
+            f"services:\n  {service}:\n    build: !reset null\n"
+            f"    image: {lane_config_for(lane).compose_project}-{service}\n"
+        )
+        yield [*_compose_file_args(lane), "-f", str(path)]
+
+
 def assert_prod_request_has_stability_digest(
     cmd: ModelRebuildRequested, *, stability_ready_digest: str | None
 ) -> None:
@@ -4754,57 +4769,60 @@ class DeployExecutor:
         )
         for service in targets:
             name = f"onex-boot-probe-{uuid4().hex}"
-            cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
-                "--profile",
-                "runtime",
-                "run",
-                "--rm",
-                "--no-deps",
-                "--pull",
-                "never",
-                "-T",
-                "--name",
-                name,
-                "--user",
-                "omniinfra",
-                "--entrypoint",
-                "/app/.venv/bin/python",
-                service,
-                "-c",
-                RUNTIME_BOOT_PROBE,
-            ]
-            self._record_compose_invocation(Phase.RUNTIME, cmd)
-            try:
-                result = _run(
-                    cmd, timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS, env=_compose_env()
-                )
-                if result.returncode != 0:
-                    detail = (result.stderr or result.stdout).strip()[-2000:]
-                    raise RuntimeError(
-                        f"Candidate boot probe failed for {service} (exit "
-                        f"{result.returncode}); running containers kept: {detail}"
-                    )
-            except subprocess.TimeoutExpired as exc:
-                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
-                raise RuntimeError(
-                    f"Candidate boot probe timed out for {service} after "
-                    f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
-                ) from exc
-            except Exception:
-                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
-                raise
-            finally:
-                # A timed-out compose client can leave its one-shot running.
-                # Remove only this probe's unique name, never a lane service.
+            with candidate_probe_file_args(lane, service) as file_args:
+                cmd = [
+                    "docker",
+                    "compose",
+                    *file_args,
+                    "-p",
+                    config.compose_project,
+                    "--profile",
+                    "runtime",
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "--pull",
+                    "never",
+                    "-T",
+                    "--name",
+                    name,
+                    "--user",
+                    "omniinfra",
+                    "--entrypoint",
+                    "/app/.venv/bin/python",
+                    service,
+                    "-c",
+                    RUNTIME_BOOT_PROBE,
+                ]
+                self._record_compose_invocation(Phase.RUNTIME, cmd)
                 try:
-                    _run(["docker", "rm", "-f", name], timeout=30)
-                except (OSError, subprocess.TimeoutExpired):
-                    logger.warning("Could not remove boot probe %s", name)
+                    result = _run(
+                        cmd,
+                        timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS,
+                        env=_compose_env(),
+                    )
+                    if result.returncode != 0:
+                        detail = (result.stderr or result.stdout).strip()[-2000:]
+                        raise RuntimeError(
+                            f"Candidate boot probe failed for {service} (exit "
+                            f"{result.returncode}); running containers kept: {detail}"
+                        )
+                except subprocess.TimeoutExpired as exc:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise RuntimeError(
+                        f"Candidate boot probe timed out for {service} after "
+                        f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
+                    ) from exc
+                except Exception:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise
+                finally:
+                    # A timed-out compose client can leave its one-shot running.
+                    # Remove only this probe's unique name, never a lane service.
+                    try:
+                        _run(["docker", "rm", "-f", name], timeout=30)
+                    except (OSError, subprocess.TimeoutExpired):
+                        logger.warning("Could not remove boot probe %s", name)
 
     def _without_failed_cloud_consumers(self, services: list[str]) -> list[str]:
         # OMN-18496: a stopped cloud consumer is neither restarted nor read back.
@@ -6869,6 +6887,9 @@ class DeployExecutor:
         settled: list[ModelHealthCheck] = []
         pending_timeout: subprocess.TimeoutExpired | None = None
         earlier_target_failed = False
+        # A parked boot may exit from inside either wait below. Preserve all
+        # up-front target readings even when settling cannot finish.
+        self.health_checks = checks + [check for _, _, check, _ in probes]
         for service, port, check, timed_out in probes:
             if check.status == "fail":
                 if earlier_target_failed:
@@ -6908,6 +6929,7 @@ class DeployExecutor:
                 and lane in VERIFY_RECREATE_LANES
                 and recover_runtime
             ):
+                self._assert_boot_can_progress(lane=lane, service=service, failed=check)
                 check, timed_out = self._await_declared_start(
                     lane=lane,
                     service=service,
@@ -6970,6 +6992,44 @@ class DeployExecutor:
 
         on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
         return checks
+
+    def _assert_boot_can_progress(
+        self, *, lane: EnumRuntimeLane, service: str, failed: ModelHealthCheck
+    ) -> None:
+        """Stop a dev boot wait when the entrypoint has exhausted its retries.
+
+        The entrypoint parks forever after this marker (OMN-18550). Neither
+        another health timeout nor recreating the same image can repair the
+        failed boot. Raise into the agent's retained-image restore while it
+        still holds the lane lock. Read only this lane's service container,
+        with bounded logs and time; unreadable logs confer no health verdict.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return
+        container = self._compose_service_container(lane, service)
+        if not container:
+            return
+        try:
+            result = _run(
+                ["docker", "logs", "--tail", "100", container],
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if result.returncode != 0 or not any(
+            line.startswith("[entrypoint] RETRIES EXHAUSTED:")
+            for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+        ):
+            return
+        check = failed.model_copy(
+            update={"detail": "boot retries exhausted; entrypoint is parked"}
+        )
+        self.health_checks = [
+            existing
+            for existing in self.health_checks
+            if existing.endpoint != check.endpoint
+        ] + [check]
+        raise VerificationFailedError([check])
 
     def _probe_runtime_health(
         self, *, service: str, port: int, lane: EnumRuntimeLane | None = None
@@ -7105,6 +7165,7 @@ class DeployExecutor:
                 "runtime_health_keep_waiting", str(elapsed), str(budget), state
             ):
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             delay = min(
                 2 ** min(_attempt, 4), VERIFY_RECREATE_POLL_SECONDS, budget - elapsed
             )
@@ -7346,6 +7407,7 @@ class DeployExecutor:
             )
             if check.status == "pass":
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             remaining = budget - (time.monotonic() - started)
             if remaining <= 0:
                 break
@@ -7472,11 +7534,13 @@ class DeployRolledBackError(VerificationFailedError):
 
     def __init__(
         self,
-        original: VerificationFailedError,
+        original: VerificationFailedError | subprocess.TimeoutExpired,
         outcome: ModelRollbackOutcome,
         point: ModelRollbackPoint,
     ) -> None:
-        super().__init__(original.failures)
+        super().__init__(
+            original.failures if isinstance(original, VerificationFailedError) else []
+        )
         self.outcome = outcome
         image_ids = ", ".join(
             dict.fromkeys(

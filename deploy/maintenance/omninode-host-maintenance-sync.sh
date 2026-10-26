@@ -161,6 +161,16 @@ MANIFEST=(
   "deploy/maintenance/systemd/omninode-system-slack-report-digest.timer|/etc/systemd/system/omninode-system-slack-report-digest.timer|0644"
   "deploy/maintenance/systemd/omninode-inference-log-retention.service|/etc/systemd/system/omninode-inference-log-retention.service|0644"
   "deploy/maintenance/systemd/omninode-inference-log-retention.timer|/etc/systemd/system/omninode-inference-log-retention.timer|0644"
+  # OMN-21288. These three units were hand copies with no committed installer,
+  # so drift could only be repaired by copying. Listing them here IS their
+  # installation: scheduled --converge writes differing units, daemon-reloads
+  # and enables the refresh timer through the existing activation loop. It
+  # does not restart the running git daemon: that drops in-flight runner fetches.
+  # A changed daemon unit takes effect at its next restart. git-mirror-refresh.sh
+  # itself is staged by scripts/deploy-runners.sh SYNC_PATHS.
+  "docker/runners/systemd/omninode-git-mirror-daemon.service|/etc/systemd/system/omninode-git-mirror-daemon.service|0644"
+  "docker/runners/systemd/omninode-git-mirror-refresh.service|/etc/systemd/system/omninode-git-mirror-refresh.service|0644"
+  "docker/runners/systemd/omninode-git-mirror-refresh.timer|/etc/systemd/system/omninode-git-mirror-refresh.timer|0644"
   "deploy/maintenance/omninode-workspace-reconcile.sh|/data/maintenance/bin/omninode-workspace-reconcile.sh|0755"
   # OMN-18567. The deploy runner's private clone tree converger and its cron
   # unit. Listing them here IS the installation: the hourly --converge writes

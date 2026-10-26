@@ -502,6 +502,28 @@ services:
   #
   # Ticket: OMN-18789. Incident: OMN-18691 lane diagnosis, 2026-09-18/19.
   redpanda:
+    # OMN-21279: OPERATOR-CONSENT 2026-10-25T17:53:44Z authorizes a
+    # 2-4 GB cap on the dev broker. Replace the whole base command: Compose
+    # replaces command lists, and the host's stale DEV_REDPANDA_MEMORY=12G
+    # must not override this cap. Other lanes retain their own commands.
+    # 3G leaves 1 GiB inside the 4g cgroup limit for non-Seastar allocations.
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_EXTERNAL_PORT:-19092}
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://${DEV_REDPANDA_ADVERTISE_HOST:?DEV_REDPANDA_ADVERTISE_HOST is required - use localhost for single-host dev or the reachable host/IP for off-host clients}:${REDPANDA_PANDAPROXY_PORT:-18082}
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 3G
+      - --default-log-level=warn
+      - --set topic_partitions_per_shard=7000
+    mem_limit: 4g
+    mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}
     environment:
       DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
       DEV_KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
@@ -742,6 +764,7 @@ services:
   # the existing order after the SASL flip on both cold and warm deploys.
   redpanda-partition-cap:
     environment:
+      REDPANDA_PROFILE_MEMORY: "3G"
       RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set}
       REDPANDA_CONTROL_PLANE_TOPIC: onex.tenant.events

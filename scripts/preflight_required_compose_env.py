@@ -37,6 +37,10 @@ It also runs the compose password FORMAT contract (OMN-19087), stated once in
 starts, rather than in the forward migration after the infrastructure is up. That
 check matches each set password against a pattern and still prints only names.
 
+For the dev stack, the effective Compose JSON also has to satisfy the broker
+memory cap authorized at 2026-10-25T17:53:44Z (OMN-21279). This render is kept
+in memory and never printed; no deployment is attempted by this check.
+
 Exit codes:
   0 — every required variable is set and non-empty, and every set password
       matches its format
@@ -47,10 +51,16 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import shlex
+import subprocess
 import sys
+from collections.abc import Mapping, Sequence
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 # The format contract lives beside this script. Running a script puts its own
 # directory on sys.path, which is how the deploy agent and refresh_dev_lane.sh
@@ -65,6 +75,60 @@ import preflight_password_contract as password_contract
 _REQUIRED_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?")
 
 _DEFAULT_RUNTIME_POLICY_ENV = "docker/runtime-policy.env"
+
+
+_BROKER_MIN_BYTES = 2 * 1024**3
+_BROKER_MAX_BYTES = 4 * 1024**3
+
+
+def _broker_memory_bytes(value: object) -> int:
+    """Parse Docker/Redpanda binary memory units; refuse malformed values."""
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kmgt]?)i?b?", str(value), re.I)
+    if not match:
+        raise ValueError("missing or malformed broker memory size")
+    return int(Decimal(match[1]) * (1024 ** (" kmgt".index(match[2].lower()))))
+
+
+def _check_broker_memory(broker: Mapping[str, Any]) -> None:
+    """Check both effective bounds, including a zero/unlimited cgroup."""
+    command = broker.get("command") or []
+    if isinstance(command, list):
+        command = " ".join(str(part) for part in command)
+    tokens = shlex.split(command)
+    values: list[str] = []
+    for index, token in enumerate(tokens):
+        if token == "--memory":
+            values.append(tokens[index + 1] if index + 1 < len(tokens) else "")
+        elif token.startswith("--memory="):
+            values.append(token.split("=", 1)[1])
+    if len(values) != 1:
+        raise ValueError("dev broker needs exactly one --memory flag")
+    arena = _broker_memory_bytes(values[0])
+    limit = _broker_memory_bytes(broker.get("mem_limit", 0))
+    if not (
+        _BROKER_MIN_BYTES <= arena <= _BROKER_MAX_BYTES
+        and _BROKER_MIN_BYTES <= limit <= _BROKER_MAX_BYTES
+    ):
+        raise ValueError(
+            "dev broker --memory and mem_limit must each be 2-4 GiB (OMN-21279)"
+        )
+    if arena > limit:
+        raise ValueError("dev broker --memory exceeds its container limit")
+
+
+def _check_dev_broker_stack(compose_files: Sequence[Path], policy_env: Path) -> None:
+    """Render the deployment's actual stack before it replaces containers."""
+    command = ["docker", "compose", "--env-file", str(policy_env)]
+    for path in compose_files:
+        command.extend(["-f", str(path)])
+    command.extend(["--profile", "runtime", "config", "--format", "json"])
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=120, check=False
+    )
+    if result.returncode:
+        # Never echo a rendered stack: it contains interpolated credentials.
+        raise ValueError("cannot render dev broker for memory-cap verification")
+    _check_broker_memory(json.loads(result.stdout)["services"]["redpanda"])
 
 
 def _required_names(compose_path: Path) -> set[str]:
@@ -121,15 +185,15 @@ def main(argv: list[str] | None = None) -> int:
         "--runtime-policy-env",
         default=_DEFAULT_RUNTIME_POLICY_ENV,
         help=(
-            "Path to the contract-rendered runtime policy env file, used ONLY to "
-            "decide which store a missing name should have come from "
+            "Runtime policy env file, used for the dev Compose render and to "
+            "identify the source store of a missing name "
             f"(default: {_DEFAULT_RUNTIME_POLICY_ENV})."
         ),
     )
     parser.add_argument(
         "--lane",
         default="dev",
-        help="Lane name, for the message only (default: dev).",
+        help="Lane name; the dev stack also enforces its broker cap (default: dev).",
     )
     args = parser.parse_args(argv)
 
@@ -160,6 +224,25 @@ def main(argv: list[str] | None = None) -> int:
     if not missing:
         if malformed:
             return 1
+        # Only the ruled dev stack: other lanes have separate broker budgets.
+        # This preflight runs in the deploy agent before any compose up.
+        if args.lane == "dev" and any(
+            path.name == "docker-compose.dev-lane.yml" for path in compose_paths
+        ):
+            try:
+                _check_dev_broker_stack(compose_paths, Path(args.runtime_policy_env))
+            except (
+                ValueError,
+                KeyError,
+                OSError,
+                TypeError,
+                subprocess.TimeoutExpired,
+            ):
+                print(
+                    "ERROR: DEV_BROKER_MEMORY_CAP_REFUSED (OMN-21279); expected --memory and mem_limit within 2-4 GiB",
+                    file=sys.stderr,
+                )
+                return 1
         print(
             f"OK: all {len(required)} required compose variables for lane "
             f"'{args.lane}' are set in this environment "
