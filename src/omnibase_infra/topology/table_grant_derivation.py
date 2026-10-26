@@ -431,9 +431,11 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
-    # OMN-21424: the generic lease projection, vendored infra-first by
-    # docker/migrations/forward/112_create_lease_projection.sql ahead of the
-    # downstream ownership declaration in the infrastructure manifest. The writer,
+    # OMN-21424: the generic lease projection, created infra-first by
+    # docker/migrations/forward/nodes/node_projection_lease/0001 (the node
+    # lineage reaches the application database; the flat stream does not)
+    # ahead of the downstream ownership declaration in the infrastructure
+    # manifest. The writer,
     # node_projection_lease, is an infra node, so no omnimarket contract will
     # declare the relation. The ownership declaration carries access
     # read_write, role lease_projection. Retired when that declaration lands in
@@ -441,12 +443,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # relation; the OMN-18863 expiry module names this bridge.
     ContractTableDeclaration(
         node="legacy_migration:lease_projection",
-        contract_path=Path("docker/migrations/forward/112_create_lease_projection.sql"),
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lease/"
+            "0001_create_lease_projection.sql"
+        ),
         table=ModelDbTableDeclaration(
             name="lease_projection",
             database_ref="application",
             schema="public",
-            migration="docker/migrations/forward/112_create_lease_projection.sql",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lease/"
+                "0001_create_lease_projection.sql"
+            ),
             access="read_write",
             role="lease_projection",
         ),

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """The lease projection migration passes the application database SQL gate.
 
-Migration 112 from the OMN-21424 lease stack failed "Application Database Domain
+The lease projection migration (flat 112 at the time, now
+node_projection_lease/0001) from the OMN-21424 lease stack failed "Application Database Domain
 Enforcement (OMN-15361)" twice over: the table was not schema-qualified, and no
 ownership declaration named it. Both halves are proved here over the real file.
 """
@@ -29,7 +30,11 @@ from scripts.ci.check_application_database_sql import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parents[2]
-_MIGRATION = _ROOT / "docker/migrations/forward/112_create_lease_projection.sql"
+_MIGRATION = (
+    _ROOT
+    / "docker/migrations/forward/nodes/node_projection_lease"
+    / "0001_create_lease_projection.sql"
+)
 
 
 def test_lease_projection_is_schema_qualified() -> None:

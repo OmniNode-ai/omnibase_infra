@@ -1,6 +1,9 @@
 -- OMN-21424: generic lease projection, one row per (kind, resource).
 -- The writer upserts on (kind, resource) and never lowers fence: fence is the
 -- etcd revision of the grant and rises with every grant of a resource.
+-- The topology declares the relation in the application database, which only
+-- the node-owned migration loop reaches; the flat stream applies to
+-- omnibase_infra, so the table lives in this node lineage (OMN-21428).
 
 CREATE TABLE IF NOT EXISTS public.lease_projection (
     kind        TEXT NOT NULL,
@@ -23,7 +26,7 @@ BEGIN
         WHERE rolname = 'tenant_projection_writer'
     ) THEN
         RAISE EXCEPTION
-            'tenant_projection_writer role missing; apply flat migration 103 before 112';
+            'tenant_projection_writer role missing; apply flat migration 103 first';
     END IF;
 END
 $require_tenant_projection_writer$;

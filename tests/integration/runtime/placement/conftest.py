@@ -243,11 +243,12 @@ class EtcdClusterMember:
             ],
             stdout=log,
             stderr=log,
+            start_new_session=True,
         )
 
     def stop(self) -> None:
         if self._proc is not None:
-            self._proc.terminate()
+            os.killpg(self._proc.pid, signal.SIGTERM)
             self._proc.wait(timeout=10)
             self._proc = None
 

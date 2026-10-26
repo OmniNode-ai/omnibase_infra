@@ -21,12 +21,15 @@ import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
     unb64,
 )
 from omnibase_infra.models.lease import (
+    EnumLeaseFenceStatus,
     ModelLeaseAcquireRequest,
     ModelLeaseKindPolicy,
     ModelLeaseReply,
@@ -39,6 +42,37 @@ _REQUEST_PREFIX = "/onex/lease-request/"
 def resource_prefix(kind: str, resource: str, *, prefix: str = LEASE_PREFIX) -> str:
     """The key prefix holding every slot of one resource."""
     return f"{prefix}{kind}/{resource}/"
+
+
+async def check_fence(
+    adapter: HandlerPlacementEtcd,
+    *,
+    kind: str,
+    resource: str,
+    fence: int,
+    prefix: str = LEASE_PREFIX,
+) -> EnumLeaseFenceStatus:
+    """The ``check_fence`` port: does a fence still name its resource's live grant?
+
+    An effect target calls it before it acts on a fenced effect. It answers
+    ``ok`` only when a live slot of the resource carries exactly that fence;
+    never ``ok`` for a lower fence (``stale``), an absent key (``expired``) or
+    an unreachable etcd (``unknown``).
+    """
+    try:
+        entries = await adapter.get_prefix_entries(
+            resource_prefix(kind, resource, prefix=prefix)
+        )
+    except InfraConnectionError:
+        return EnumLeaseFenceStatus.UNKNOWN
+    live = {create_revision for _, _, create_revision, _ in entries}
+    if not live:
+        return EnumLeaseFenceStatus.EXPIRED
+    if fence in live:
+        return EnumLeaseFenceStatus.OK
+    if fence < max(live):
+        return EnumLeaseFenceStatus.STALE
+    return EnumLeaseFenceStatus.UNKNOWN
 
 
 class HandlerLeaseStore:
@@ -54,6 +88,14 @@ class HandlerLeaseStore:
         self._adapter = adapter
         self._kinds = {policy.kind: policy for policy in kinds}
         self._prefix = prefix
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        return EnumHandlerTypeCategory.EFFECT
 
     def _policy(self, kind: str) -> ModelLeaseKindPolicy:
         policy = self._kinds.get(kind)
@@ -238,4 +280,4 @@ def _range_entry(responses: list[dict[str, object]]) -> tuple[str, int] | None:
     return None
 
 
-__all__ = ["LEASE_PREFIX", "HandlerLeaseStore", "resource_prefix"]
+__all__ = ["LEASE_PREFIX", "HandlerLeaseStore", "check_fence", "resource_prefix"]

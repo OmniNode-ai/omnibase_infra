@@ -10,7 +10,7 @@ writes the CLAIM from the grant and the TERMINAL from the release or expiry.
 
 from __future__ import annotations
 
-from typing import Protocol
+from abc import ABC, abstractmethod
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -33,17 +33,20 @@ def renew_interval_s(ttl_s: int) -> float:
     return ttl_s / 3
 
 
-class ProtocolLeaseCommands(Protocol):
+class LeaseCommands(ABC):
     """The lease orchestrator's three commands, answered with its reply."""
 
+    @abstractmethod
     async def acquire(self, request: ModelLeaseAcquireRequest) -> ModelLeaseReply: ...
 
+    @abstractmethod
     async def renew(self, request: ModelLeaseRenewRequest) -> ModelLeaseReply: ...
 
+    @abstractmethod
     async def release(self, request: ModelLeaseReleaseRequest) -> ModelLeaseReply: ...
 
 
-class StoreLeaseCommands:
+class StoreLeaseCommands(LeaseCommands):
     """The commands answered in process by the etcd lease store."""
 
     def __init__(self, store: HandlerLeaseStore) -> None:
@@ -65,7 +68,7 @@ class HandlerLaneWorkLease:
 
     def __init__(
         self,
-        commands: ProtocolLeaseCommands,
+        commands: LeaseCommands,
         holder: ModelLaneWorkHolder,
         *,
         ttl_s: int,
@@ -134,7 +137,7 @@ class HandlerLaneWorkLease:
 
 __all__ = [
     "HandlerLaneWorkLease",
-    "ProtocolLeaseCommands",
+    "LeaseCommands",
     "StoreLeaseCommands",
     "renew_interval_s",
 ]

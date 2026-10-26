@@ -7,7 +7,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
+from omnibase_infra.handlers.lease.handler_lease_store import check_fence
 from omnibase_infra.handlers.placement import HandlerPlacementEtcd
 from omnibase_infra.models.lease import EnumLeaseFenceStatus
 

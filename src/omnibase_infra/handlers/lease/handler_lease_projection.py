@@ -5,12 +5,12 @@
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
 is above the incoming one, so an out-of-order replay never lowers a fence.
 The table is created by
-``docker/migrations/forward/112_create_lease_projection.sql``.
+``docker/migrations/forward/nodes/node_projection_lease/0001_create_lease_projection.sql``.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Awaitable, Callable
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.lease import (
@@ -30,10 +30,8 @@ WHERE lease_projection.fence <= EXCLUDED.fence
 """.strip()
 
 
-class ProtocolLeaseProjectionExecutor(Protocol):
-    """The ``execute(sql, *args)`` shape of an asyncpg connection or pool."""
-
-    async def execute(self, query: str, *args: object) -> str: ...
+# The bound ``execute(sql, *args)`` of an asyncpg connection or pool.
+LeaseProjectionExecute = Callable[..., Awaitable[str]]
 
 
 def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
@@ -51,8 +49,8 @@ def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
 class HandlerLeaseProjection:
     """Applies the reducer's upsert intents to the lease projection table."""
 
-    def __init__(self, executor: ProtocolLeaseProjectionExecutor) -> None:
-        self._executor = executor
+    def __init__(self, execute: LeaseProjectionExecute) -> None:
+        self._execute = execute
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -66,7 +64,7 @@ class HandlerLeaseProjection:
         await self.apply(intent)
 
     async def apply(self, intent: ModelPayloadLeaseProjectionUpsert) -> None:
-        await self._executor.execute(
+        await self._execute(
             UPSERT_LEASE_PROJECTION_SQL, *lease_projection_params(intent.row)
         )
 
@@ -74,6 +72,6 @@ class HandlerLeaseProjection:
 __all__ = [
     "UPSERT_LEASE_PROJECTION_SQL",
     "HandlerLeaseProjection",
-    "ProtocolLeaseProjectionExecutor",
+    "LeaseProjectionExecute",
     "lease_projection_params",
 ]

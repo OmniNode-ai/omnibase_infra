@@ -12,6 +12,7 @@ TERMINAL without its CLAIM, and never two TERMINALs for one CLAIM.
 from __future__ import annotations
 
 import itertools
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -23,6 +24,7 @@ from omnibase_infra.handlers.handler_ledger_write_guard import (
 )
 from omnibase_infra.handlers.lease.handler_lane_work_lease import (
     HandlerLaneWorkLease,
+    LeaseCommands,
     renew_interval_s,
 )
 from omnibase_infra.handlers.lease.handler_lease_ledger import (
@@ -219,7 +221,7 @@ def test_tla_invariants_hold_for_every_event_order() -> None:
 
 async def test_handler_appends_rows_through_its_appender() -> None:
     appender = _MemoryAppender()
-    ledger = HandlerLeaseLedger(appender, clock=lambda: AT)
+    ledger = HandlerLeaseLedger(appender.append, clock=lambda: AT)
     lease_id = uuid4()
     await ledger.handle(_reply("lease-granted", lease_id, 7, holder=HOLDER.holder()))
     await ledger.handle(_reply("lease-renewed", lease_id, 7))
@@ -232,16 +234,18 @@ async def test_file_appender_writes_rows_and_refuses_a_canonical_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger_file = tmp_path / "ROLLING_WORK_LEDGER.md"
-    await LedgerFileAppender(ledger_file).append("row one")
-    await LedgerFileAppender(ledger_file).append("row two")
+    await LedgerFileAppender(ledger_file, os.environ).append("row one")
+    await LedgerFileAppender(ledger_file, os.environ).append("row two")
     assert ledger_file.read_text() == "row one\nrow two\n"
     home = Path.home() / "omni_home_not_tmp"
     monkeypatch.setenv("OMNI_HOME", str(home))
     with pytest.raises(LedgerTestWriteRefusedError):
-        await LedgerFileAppender(home / "ROLLING_WORK_LEDGER.md").append("row")
+        await LedgerFileAppender(home / "ROLLING_WORK_LEDGER.md", os.environ).append(
+            "row"
+        )
 
 
-class _FakeCommands:
+class _FakeCommands(LeaseCommands):
     def __init__(self) -> None:
         self.acquired: list[ModelLeaseAcquireRequest] = []
         self.released: list[ModelLeaseReleaseRequest] = []

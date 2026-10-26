@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -84,6 +85,7 @@ def _start_runner(etcd: EtcdProcess, lane: str, *extra: str) -> subprocess.Popen
         ],
         stdout=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
 
 
@@ -98,7 +100,7 @@ async def test_ac1_claim_row_is_written_by_the_projection(
     etcd: EtcdProcess, store: HandlerLeaseStore, tmp_path: Path
 ) -> None:
     ledger_file = tmp_path / "ROLLING_WORK_LEDGER.md"
-    ledger = HandlerLeaseLedger(LedgerFileAppender(ledger_file))
+    ledger = HandlerLeaseLedger(LedgerFileAppender(ledger_file, os.environ).append)
     proc = _start_runner(etcd, "ac1-lane", "--release-after=1.5", "--outcome=done")
     try:
         granted = await _next_reply(proc)
@@ -117,7 +119,7 @@ async def test_ac1_claim_row_is_written_by_the_projection(
         assert proc.wait(timeout=20) == 0
     finally:
         if proc.poll() is None:
-            proc.kill()
+            os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
     rows = _rows(ledger_file)
     assert [row["verb"] for row in rows] == ["CLAIM", "TERMINAL"]
@@ -131,7 +133,7 @@ async def test_ac2_killed_runner_gets_terminal_at_lease_expiry(
     etcd: EtcdProcess, store: HandlerLeaseStore, tmp_path: Path
 ) -> None:
     ledger_file = tmp_path / "ROLLING_WORK_LEDGER.md"
-    ledger = HandlerLeaseLedger(LedgerFileAppender(ledger_file))
+    ledger = HandlerLeaseLedger(LedgerFileAppender(ledger_file, os.environ).append)
     proc = _start_runner(etcd, "ac2-lane")
     try:
         granted = await _next_reply(proc)
@@ -144,12 +146,12 @@ async def test_ac2_killed_runner_gets_terminal_at_lease_expiry(
             assert reply.fence == granted.fence
             assert await ledger.sweep_expired(store) == ()
         last_renewal = time.monotonic()
-        proc.send_signal(signal.SIGKILL)
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait(timeout=10)
         killed = time.monotonic()
     finally:
         if proc.poll() is None:
-            proc.kill()
+            os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
     terminal_at: float | None = None
     while time.monotonic() - killed < EXPIRY_BOUND_S + 5:

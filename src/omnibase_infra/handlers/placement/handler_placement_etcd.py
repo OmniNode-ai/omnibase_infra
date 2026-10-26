@@ -102,7 +102,17 @@ class HandlerPlacementEtcd:
         return int(str(result.get("TTL", "0")))
 
     async def lease_revoke(self, lease_id: int) -> None:
-        await self._post("/v3/lease/revoke", {"ID": str(lease_id)})
+        """Revoke a lease; one etcd no longer holds (404, already expired) is revoked."""
+        try:
+            await self._post("/v3/lease/revoke", {"ID": str(lease_id)})
+        except InfraConnectionError as exc:
+            cause = exc.__cause__
+            if (
+                isinstance(cause, httpx.HTTPStatusError)
+                and cause.response.status_code == 404
+            ):
+                return
+            raise
 
     async def put(self, key: str, value: str, *, lease_id: int) -> int:
         payload = await self._post(

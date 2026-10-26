@@ -29,7 +29,8 @@ _L1, _L2, _L3, _L4 = (UUID(int=i) for i in range(1, 5))
 
 MIGRATION = (
     Path(__file__).parents[4]
-    / "docker/migrations/forward/112_create_lease_projection.sql"
+    / "docker/migrations/forward/nodes/node_projection_lease"
+    / "0001_create_lease_projection.sql"
 )
 
 

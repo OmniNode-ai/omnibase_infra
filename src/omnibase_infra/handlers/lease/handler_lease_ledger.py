@@ -25,11 +25,9 @@ reads the store and writes their TERMINALs.
 from __future__ import annotations
 
 import asyncio
-import os
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
 from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -47,10 +45,8 @@ PROJECTION_ACTOR = "script:node_projection_lease"
 LaneWorkLedgerState = Mapping[str, ModelLaneWorkClaim]
 
 
-class ProtocolLedgerRowAppender(Protocol):
-    """Appends one rolling-ledger row."""
-
-    async def append(self, row: str) -> None: ...
+# Appends one rolling-ledger row.
+LedgerRowAppend = Callable[[str], Awaitable[None]]
 
 
 def _ts(at: datetime) -> str:
@@ -168,13 +164,18 @@ def expired_claims(
 
 
 class LedgerFileAppender:
-    """Appends rows to a ledger file; a test's write to a canonical ledger is refused."""
+    """Appends rows to a ledger file; a test's write to a canonical ledger is refused.
 
-    def __init__(self, path: Path) -> None:
+    ``env`` is the process environment the write guard reads (``OMNI_HOME`` and
+    the test markers); the caller passes ``os.environ``.
+    """
+
+    def __init__(self, path: Path, env: Mapping[str, str]) -> None:
         self._path = path
+        self._env = env
 
     async def append(self, row: str) -> None:
-        check_file(self._path, os.environ)
+        check_file(self._path, self._env)
         await asyncio.to_thread(self._write, row)
 
     def _write(self, row: str) -> None:
@@ -187,11 +188,11 @@ class HandlerLeaseLedger:
 
     def __init__(
         self,
-        appender: ProtocolLedgerRowAppender,
+        append: LedgerRowAppend,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        self._appender = appender
+        self._append = append
         self._clock = clock
         self._state: dict[str, ModelLaneWorkClaim] = {}
 
@@ -206,7 +207,7 @@ class HandlerLeaseLedger:
     async def handle(self, event: ModelLeaseReply) -> tuple[str, ...]:
         self._state, rows = project_lane_work(self._state, event, at=self._clock())
         for row in rows:
-            await self._appender.append(row)
+            await self._append(row)
         return rows
 
     def open_claims(self) -> dict[str, ModelLaneWorkClaim]:
@@ -230,7 +231,7 @@ __all__ = [
     "HandlerLeaseLedger",
     "LaneWorkLedgerState",
     "LedgerFileAppender",
-    "ProtocolLedgerRowAppender",
+    "LedgerRowAppend",
     "claim_row",
     "expired_claims",
     "project_lane_work",
