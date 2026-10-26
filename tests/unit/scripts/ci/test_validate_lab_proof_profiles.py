@@ -411,21 +411,86 @@ def test_documentation_diff_plus_a_workflow_file_is_not_exempt(
     assert decision.proof_kind is not EnumLabProofKind.EXEMPT
 
 
-def _github_only_exempt_copy() -> dict[str, Any]:
-    data = _raw()
+@pytest.mark.parametrize(
+    "paths",
+    [
+        [".github/workflows/ci.yml"],
+        ["contracts/OMN-1.yaml", ".github/workflows/ci.yml"],
+    ],
+)
+def test_bot_change_control_diff_with_a_workflow_file_is_not_exempt(
+    registry: ModelLabProofProfileRegistry, paths: list[str]
+) -> None:
+    decision = classify_exemption(
+        registry, registry.change_control_companion.repo, paths, OCC_BOT
+    )
+    assert not decision.exempt
+    assert decision.proof_kind is not EnumLabProofKind.EXEMPT
+    if paths == [".github/workflows/ci.yml"]:
+        assert decision.proof_kind is EnumLabProofKind.SCRIPT_REPLAY
+
+
+def test_bot_change_control_contract_without_a_workflow_file_is_exempt(
+    registry: ModelLabProofProfileRegistry,
+) -> None:
+    decision = classify_exemption(
+        registry,
+        registry.change_control_companion.repo,
+        ["contracts/OMN-1.yaml"],
+        OCC_BOT,
+    )
+    assert decision.exempt
+
+
+def _knowledge_base_exempt_variant(data: dict[str, Any]) -> dict[str, Any]:
     for profile in data["profiles"]:
         if profile["repo"] == "OmniNode-ai/knowledge_base":
-            profile["variants"][0]["match"] = {
-                "base_branches": ["main"],
-                "include_globs": [".github/**"],
-            }
-            return data
-    raise AssertionError("no knowledge_base row")
+            for variant in profile["variants"]:
+                if variant["proof_kind"] == "exempt":
+                    assert isinstance(variant, dict)
+                    return variant
+    raise AssertionError("no exempt knowledge_base variant")
 
 
-def test_an_exempt_match_rule_on_github_only_paths_is_refused() -> None:
+def _github_only_exempt_copy() -> dict[str, Any]:
+    data = _raw()
+    variant = _knowledge_base_exempt_variant(data)
+    variant["proof_kind"] = "exempt"
+    variant["match"] = {
+        "base_branches": ["main"],
+        "include_globs": [".github/**"],
+    }
+    return data
+
+
+@pytest.mark.parametrize("glob", ["**", "**/*.yml"])
+def test_a_broad_exempt_match_rule_does_not_exempt_a_workflow_only_diff(
+    glob: str,
+) -> None:
+    data = _raw()
+    variant = _knowledge_base_exempt_variant(data)
+    variant["proof_kind"] = "exempt"
+    variant["match"] = {
+        "base_branches": ["main"],
+        "include_globs": [glob],
+    }
+    registry = ModelLabProofProfileRegistry.model_validate(data)
+    decision = classify_exemption(
+        registry,
+        "OmniNode-ai/knowledge_base",
+        [".github/workflows/index-check.yml"],
+        HUMAN_AUTHOR,
+    )
+    assert not decision.exempt
+    assert decision.proof_kind is EnumLabProofKind.SCRIPT_REPLAY
+
+
+@pytest.mark.parametrize("glob", [".github/**", ".github/workflows/*.yml"])
+def test_an_exempt_match_rule_on_github_only_paths_is_refused(glob: str) -> None:
+    data = _github_only_exempt_copy()
+    _knowledge_base_exempt_variant(data)["match"]["include_globs"] = [glob]
     with pytest.raises(ValidationError, match=r"\.github/"):
-        ModelLabProofProfileRegistry.model_validate(_github_only_exempt_copy())
+        ModelLabProofProfileRegistry.model_validate(data)
 
 
 def test_script_refuses_a_copy_with_a_github_only_row_set_to_exempt(
