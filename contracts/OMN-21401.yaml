@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: 'AC2: after the dev bus applies it, the pool parity read for h105 reports capability scm-pr-create ok -- falsifier: the next pool read''s parity record for h105 has no CAPABILITY-MISSING scm-pr-create item'
+  - id: req-omn21401-command-write
+    statement: Under OPERATOR-CONSENT 2026-10-25T23:01:04Z the dev ACL declaration also gives h105's principal WRITE and DESCRIBE on the one github-repo-write-requested command topic, derived from a produce binding, and applies it with apply-grants --scoped-only so no shared grant is widened.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the dev ACL declares WRITE and DESCRIBE on onex.cmd.omnimarket.github-repo-write-requested.v1 for h105''s principal and no other write -- falsifier: the ACL tests added with the change pass, and fail with the produce binding removed'
 evidence_requirements:
   - kind: tests
     description: The h105 and developer principal grant tests verify the dev ACL declaration and grant derivation.
@@ -45,3 +50,23 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21401-ac3-command-write-test
+    description: the h105 ACL tests assert the derived file holds WRITE only on the github-repo-write-requested topic, that the issuer loader refuses any other scoped write, and that apply-grants --scoped-only applies only the principal's own rows.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py tests/integration/nodes/test_broker_grant_derive_contract_discovery_omn19939.py -q -n 0 --no-cov -k 'h105 or developer'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21401-ac3-issuer-image-write
+    description: >-
+      deploy check for the h105 derived grant file in the issuer image, runnable on the hosted runner with no lab route, broker or credentials: builds the issuer image from the checkout and reads the h105 derived grant file inside it; the only WRITE row is on the github-repo-write-requested topic. It fails at the merge base, whose file holds no WRITE row. It shows the image carries the grant; the live ACL is applied separately with apply-grants --scoped-only and is not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          docker build -q -f docker/Dockerfile.principal-issuer -t omn21401-principal-issuer-write-probe . && docker run --rm --entrypoint python omn21401-principal-issuer-write-probe -c "import json; d = json.load(open('/app/h105-scm-pr-create-derived-grants.json')); writes = {g['resource'] for g in d['grants'] if g['operation'] == 'WRITE'}; assert d['principal'] == 'dev-jonah-omnibook', d['principal']; assert writes == {'onex.cmd.omnimarket.github-repo-write-requested.v1'}, writes"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
