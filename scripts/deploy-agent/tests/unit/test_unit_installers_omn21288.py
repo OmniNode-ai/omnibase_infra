@@ -45,10 +45,25 @@ _MIRROR_NAMES = (
     "omninode-git-mirror-refresh.service",
     "omninode-git-mirror-refresh.timer",
 )
+_DISK_MAINTENANCE_INSTALLERS = (
+    "install-disk-gc.sh",
+    "install-buildx-orphan-sweep.sh",
+    "install-runner-disk-guard.sh",
+    "install-worktree-prune.sh",
+)
 
 
 def _entries(*names: str) -> list[ModelUnitEntry]:
     return [entry for entry in load_manifest(_MANIFEST) if entry.name in names]
+
+
+def _assert_committed_installer(entry: ModelUnitEntry, repo_root: Path) -> None:
+    assert entry.installer, entry.name
+    installer = repo_root / entry.installer
+    assert installer.is_file(), entry.installer
+    text = installer.read_text()
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert Path(entry.tracked).name in text
 
 
 def _fake_systemctl(tmp_path: Path) -> tuple[dict[str, str], Path]:
@@ -111,11 +126,7 @@ def _log_monitor_tree(tmp_path: Path, exec_start: str) -> Path:
 )
 def test_dev201_drift_has_a_committed_installer(name: str) -> None:
     (entry,) = _entries(name)
-    assert entry.installer, name
-    installer = _REPO_ROOT / entry.installer
-    assert installer.is_file()
-    assert installer.read_text().startswith("#!/usr/bin/env bash\n")
-    assert Path(entry.tracked).name in installer.read_text()
+    _assert_committed_installer(entry, _REPO_ROOT)
 
 
 def test_deploy_agent_units_remain_without_installers() -> None:
@@ -143,6 +154,32 @@ def test_disk_maintenance_units_declare_their_installers(
     entries = _entries(f"{stem}.service", f"{stem}.timer")
     assert len(entries) == 2
     assert all(entry.installer == f"deploy/disk-gc/{installer}" for entry in entries)
+    for entry in entries:
+        _assert_committed_installer(entry, _REPO_ROOT)
+
+
+@pytest.mark.parametrize("installer", _DISK_MAINTENANCE_INSTALLERS)
+def test_disk_maintenance_installer_check_refuses_a_missing_script(
+    tmp_path: Path, installer: str
+) -> None:
+    tmp_root = tmp_path / "repo"
+    installer_dir = tmp_root / "deploy/disk-gc"
+    installer_dir.mkdir(parents=True)
+    for other_installer in _DISK_MAINTENANCE_INSTALLERS:
+        if other_installer != installer:
+            shutil.copy2(
+                _REPO_ROOT / "deploy/disk-gc" / other_installer,
+                installer_dir / other_installer,
+            )
+    entries = [
+        entry
+        for entry in load_manifest(_MANIFEST)
+        if entry.installer == f"deploy/disk-gc/{installer}"
+    ]
+    assert len(entries) == 2
+    for entry in entries:
+        with pytest.raises(AssertionError):
+            _assert_committed_installer(entry, tmp_root)
 
 
 def test_log_monitor_installer_deploys_unit_script_and_contract(tmp_path: Path) -> None:
