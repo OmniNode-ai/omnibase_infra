@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21430
+title: "The dev bus on three brokers: compose, design and scratch proof"
+summary: >-
+  Part of OMN-21430. Adds docker/docker-compose.dev-bus-ha.yml (one member of a three-broker Redpanda cluster per host), the member list docker/redpanda/dev-bus-ha/hosts.tsv (h201, h202, h200), one env example per member, a .bootstrap.yaml with default_topic_replications 3 and internal_topic_replication_factor 3, the design with its cutover order and rollback (docker/redpanda/dev-bus-ha/README.md), and a scratch proof script (tests/lab/dev_bus_ha/scratch_three_broker_proof.sh) with its recorded run. The recorded run used three throwaway v24.3.18 brokers on one Docker host (h200), not three hosts. The live dev bus is not cut over by this change: it is still one broker on h201, so AC1 and AC2 are not met by this change. The bindings below cover the committed design and the scratch run only; the live cutover is a later change under this ticket, and the ticket stays open.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21430-ac1-three-brokers-rf3
+    statement: "The dev bus member compose places one broker on each of three distinct hosts and sets replication factor 3 for new and internal topics; the recorded scratch run raised every onex.cmd.* and onex.evt.* topic and __consumer_offsets to RF 3. The live dev bus is not cut over by this change."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: the dev bus runs three KRaft brokers on three hosts with replication factor 3 for `onex.cmd.*` and `onex.evt.*` topics -- falsifier: the broker metadata lists fewer than three brokers or a topic with replication factor below 3
+  - id: req-omn21430-ac2-one-broker-stopped
+    statement: "In the recorded scratch run, with the original broker stopped, an acks=all write landed and a consumer-group commit advanced; with two of three stopped the write did not land. A GitHub write through the dev runtime with one broker stopped is not shown by this change."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: stopping one broker leaves a GitHub write answered -- falsifier: the lab receipt shows the write failing with one broker stopped
+evidence_requirements:
+  - kind: tests
+    description: "The compose, member list, bootstrap config and recorded scratch proof hold the properties the design rests on."
+    command: |-
+      uv run pytest tests/unit/docker/test_dev_bus_ha_compose_omn21430.py -q
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: read the committed compose and proof files. Runnable on a hosted runner; it touches no broker and no running lane."
+    command: "deploy: uv run pytest tests/unit/docker/test_dev_bus_ha_compose_omn21430.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21430-ac1-design-three-hosts-rf3
+    description: >-
+      Design evidence only: three members on three distinct hosts, RF 3 for new and internal topics, and the recorded scratch run with 0 topics below RF 3. Reads committed files; the live dev bus is not cut over by this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_bus_ha_compose_omn21430.py -q -k "three_members or replication_factor or recorded_scratch_proof"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21430-ac2-scratch-one-broker-stopped
+    description: >-
+      Scratch evidence only: the recorded run shows a write and a group commit landing with one of three brokers stopped and the negative control holding with two stopped. Reads committed files; no GitHub write through the dev runtime is shown by this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_dev_bus_ha_compose_omn21430.py -q -k recorded_scratch_proof
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

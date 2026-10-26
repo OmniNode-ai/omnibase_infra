@@ -1,0 +1,8 @@
+# OMN-21430: cluster config read on FIRST cluster formation only (a fresh volume on a
+# fresh cluster, e.g. a rebuild). The grow-in-place cutover does not read it: the
+# existing cluster's config is changed by the rpk steps in README.md instead.
+topic_partitions_per_shard: 7000
+topic_memory_per_partition: 1048576
+auto_create_topics_enabled: true
+default_topic_replications: 3
+internal_topic_replication_factor: 3
