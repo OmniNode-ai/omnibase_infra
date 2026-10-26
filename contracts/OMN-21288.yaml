@@ -31,6 +31,12 @@ requirements:
       - id: AC4
         statement: |-
           AC4: a folded role is never started by the deploy handler, its old container is retired before main is recreated, and a folded effects role resolves to the main runtime's container and digest while an unfolded one reads its own container -- falsifier: the two focused pytest files below
+  - id: req-omn21288-ac5-unit-installers
+    statement: "The lab-host hand-copied units (the log monitor and its script, and the three git-mirror units) install through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), respectively; the unit-drift manifest and report name these repairs, and the git-mirror units' Documentation= URL names a path that exists."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: every DRIFT or MISSING unit in the lab-host drift fixture except the prod-pinned deploy-agent.service declares a committed installer, the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the text report prints repair=bash <installer> <args>, and no tracked unit's Documentation= URL names a missing repo path -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
 evidence_requirements:
   - kind: tests
     description: "The stack check over the fixture compose files and over the real dev stack."
@@ -133,5 +139,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_stability_lane_rollback_omn18061.py -k folded_effects_verification -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3, AC4]
+  - id: dod-omn21288-ac5-unit-installers
+    description: >-
+      Run the unit installer tests over the lab-host drift fixture: the log monitor installs through install-host-maintenance.sh --log-monitor (run against a temporary home with a fake systemctl) and the git-mirror units through the omninode-host-maintenance-sync.sh manifest (row parity with the drift manifest), the manifest names an installer for every drifted unit except deploy-agent.service, the text report prints the repair, and Documentation= URLs resolve to repo paths. The test file is new on this branch, so the run fails at the merge base. No host unit is installed or restarted by this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
