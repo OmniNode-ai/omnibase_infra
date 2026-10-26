@@ -1,0 +1,111 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21421
+title: "Runtime membership, primary election, self-fencing and state rebuild"
+summary: >-
+  Adds src/omnibase_infra/handlers/placement/: an etcd v3 JSON-gateway adapter, a membership session (one lease per runtime, a local self-fence deadline of TTL - margin after each keepalive was sent), a per-node primary election (create-if-absent of the node's leader key on the session lease; the grant's store revision is the epoch), a write-target epoch guard, rebuild-then-consume from the stored projection and offsets, per-node serving counts with an OK/FAIL verdict, and a runtime coordinator that never starts a primary node without etcd. It follows the OMN-21418 RuntimePrimaryElection model (AtMostOneActingPrimary, EpochMonotonic). The integration tests run two runtimes against a real single-member etcd v3.7.3 (a process the fixture starts; the binary is downloaded and checked against the release SHA256SUMS when none is installed). Wiring into auto_wiring/handler_wiring.py and the node_runtime_manifest_reducer membership fields read the contract placement block (omnibase_core ModelContractPlacement, OMN-21420), which is merged on omnibase_core dev but not in a released version; that wiring waits on the release train and is not in this change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21421-ac1-failover
+    statement: "With two runtimes loading one primary node, killing the primary's process makes the standby consume within the node's failover_target_s."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: with two runtimes loading one `primary` node, killing the primary's process makes the standby consume within the node's `failover_target_s` -- falsifier: an integration test with two runtimes and a test etcd measures a gap above `failover_target_s`
+  - id: req-omn21421-ac2-self-fence
+    statement: "A primary cut off from etcd stops consuming and publishing for that node within 5 s."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: a primary cut off from etcd stops consuming and publishing for that node within 5 s -- falsifier: the test observes a publish from the cut-off primary after 5 s
+  - id: req-omn21421-ac3-rebuild
+    statement: "A new primary folds its projection from the stored offsets and reaches the same rows as the old primary."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a new primary folds its projection from the stored offsets and reaches the same rows as the old primary -- falsifier: a row-by-row diff of the two folds is non-empty
+  - id: req-omn21421-ac4-serving-counts
+    statement: "The runtime reports per-node serving counts and a node served by fewer than 2 runtimes is a FAIL."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: the runtime publishes per-node serving counts and a node served by fewer than 2 runtimes is a FAIL on the dev lane health read -- falsifier: stopping one of two runtimes leaves the health read at OK or WARN
+  - id: req-omn21421-ac5-no-etcd-no-primary
+    statement: "A primary node is not started when etcd is unreachable."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: a `primary` node is not started when etcd is unreachable -- falsifier: a runtime booted with etcd stopped runs the node's handlers
+evidence_requirements:
+  - kind: tests
+    description: "The placement integration suite (two runtimes, a real etcd) and the rebuild unit tests pass."
+    command: "uv run pytest tests/integration/runtime/placement tests/unit/handlers/placement -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the placement suite on a hosted runner. It starts its own loopback etcd and touches no running lane."
+    command: "deploy: uv run pytest tests/integration/runtime/placement -q -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21421-ac1-failover
+    description: >-
+      Two runtime processes load one primary node against a loopback etcd; the primary is killed with SIGKILL and the test measures the gap to the standby's first consume against failover_target_s (10 s).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_runtime_placement_omn21421.py -q -n 0 -k test_ac1_ac3
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21421-ac2-self-fence
+    description: >-
+      The primary reaches etcd through a proxy that is then black-holed; the test asserts no publish and a stop of the node's consumer later than 5 s after the cut, and that the standby publishes only after the old primary's last publish. The epoch guard test asserts the old primary's command is refused after failover.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_runtime_placement_omn21421.py -q -n 0 -k "test_ac2 or test_epoch_guard"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21421-ac3-rebuild
+    description: >-
+      The killed primary's rows at offset 30 are diffed row by row against the new primary's fold from the stored checkpoint (offset 28) and the topic; the unit tests diff a fold from stored offsets against a full fold over two partitions.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_runtime_placement_omn21421.py tests/unit/handlers/placement/test_placement_rebuild_omn21421.py -q -n 0 -k "test_ac1_ac3 or fold"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21421-ac4-serving-counts
+    description: >-
+      Two runtimes load one primary and one any node; the serving report reads 2 and OK, and after one runtime stops it reads 1 and FAIL for both nodes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_runtime_placement_omn21421.py -q -n 0 -k test_ac4
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn21421-ac5-no-etcd-no-primary
+    description: >-
+      A runtime is booted with etcd stopped; the primary node's rebuild and consumer never run while the any node starts; after etcd starts the primary node starts after its election and rebuild.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_runtime_placement_omn21421.py -q -n 0 -k test_ac5
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21421-deploy-placement-surface
+    description: >-
+      Read the committed placement source at the checkout commit through the GitHub contents API. Fail when the runtime coordinator's primary hold, the session's self-fence deadline check or the epoch guard's stale-epoch refusal is absent. Runs on hosted runners without a container daemon or access to a private runtime; the module is not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC2, AC5]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_session.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'return self._lease_id != 0 and self._clock() < self._deadline' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_epoch_guard.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'if command.placement_epoch < self.highest(command.node_key):' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/placement/handler_placement_runtime.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'logger.warning("placement: etcd unreachable, primary nodes held: %s", exc)' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
