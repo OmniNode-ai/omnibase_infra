@@ -50,3 +50,13 @@ dod_evidence:
         check_value: uv run pytest tests/unit/docker/test_dev_bus_ha_compose_omn21430.py -q -k recorded_scratch_proof
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-omn21430-deploy-probe-compose-at-head
+    description: >-
+      Deploy-scope probe. Reads docker/docker-compose.dev-bus-ha.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the required seed address, the one-core 12G broker arena and the equal memory and swap limit that refuses swap. It touches no broker and no running lane; the live dev bus is not cut over by this change, so it does not show AC1 or AC2 on the live bus.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-bus-ha.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("${DEV_BUS_HA_SEEDS:?") and contains("--smp 1") and contains("memswap_limit: ${DEV_BUS_HA_MEM_LIMIT:-14g}"))' | grep -qx true
+    binds_ac:
+      - AC1
