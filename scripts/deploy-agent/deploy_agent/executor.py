@@ -1108,6 +1108,21 @@ def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
     return args
 
 
+@contextlib.contextmanager
+def candidate_probe_file_args(
+    lane: EnumRuntimeLane, service: str
+) -> Iterator[list[str]]:
+    """Use the already-built candidate image for a one-shot boot probe."""
+    # OMN-21279: Compose v5.1.0 rebuilds on run for a service: additional context.
+    with tempfile.TemporaryDirectory(prefix="onex-boot-probe-") as directory:
+        path = Path(directory) / "no-build.yml"
+        path.write_text(
+            f"services:\n  {service}:\n    build: !reset null\n"
+            f"    image: {lane_config_for(lane).compose_project}-{service}\n"
+        )
+        yield [*_compose_file_args(lane), "-f", str(path)]
+
+
 def assert_prod_request_has_stability_digest(
     cmd: ModelRebuildRequested, *, stability_ready_digest: str | None
 ) -> None:
@@ -4754,57 +4769,60 @@ class DeployExecutor:
         )
         for service in targets:
             name = f"onex-boot-probe-{uuid4().hex}"
-            cmd = [
-                "docker",
-                "compose",
-                *_compose_file_args(lane),
-                "-p",
-                config.compose_project,
-                "--profile",
-                "runtime",
-                "run",
-                "--rm",
-                "--no-deps",
-                "--pull",
-                "never",
-                "-T",
-                "--name",
-                name,
-                "--user",
-                "omniinfra",
-                "--entrypoint",
-                "/app/.venv/bin/python",
-                service,
-                "-c",
-                RUNTIME_BOOT_PROBE,
-            ]
-            self._record_compose_invocation(Phase.RUNTIME, cmd)
-            try:
-                result = _run(
-                    cmd, timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS, env=_compose_env()
-                )
-                if result.returncode != 0:
-                    detail = (result.stderr or result.stdout).strip()[-2000:]
-                    raise RuntimeError(
-                        f"Candidate boot probe failed for {service} (exit "
-                        f"{result.returncode}); running containers kept: {detail}"
-                    )
-            except subprocess.TimeoutExpired as exc:
-                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
-                raise RuntimeError(
-                    f"Candidate boot probe timed out for {service} after "
-                    f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
-                ) from exc
-            except Exception:
-                on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
-                raise
-            finally:
-                # A timed-out compose client can leave its one-shot running.
-                # Remove only this probe's unique name, never a lane service.
+            with candidate_probe_file_args(lane, service) as file_args:
+                cmd = [
+                    "docker",
+                    "compose",
+                    *file_args,
+                    "-p",
+                    config.compose_project,
+                    "--profile",
+                    "runtime",
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "--pull",
+                    "never",
+                    "-T",
+                    "--name",
+                    name,
+                    "--user",
+                    "omniinfra",
+                    "--entrypoint",
+                    "/app/.venv/bin/python",
+                    service,
+                    "-c",
+                    RUNTIME_BOOT_PROBE,
+                ]
+                self._record_compose_invocation(Phase.RUNTIME, cmd)
                 try:
-                    _run(["docker", "rm", "-f", name], timeout=30)
-                except (OSError, subprocess.TimeoutExpired):
-                    logger.warning("Could not remove boot probe %s", name)
+                    result = _run(
+                        cmd,
+                        timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS,
+                        env=_compose_env(),
+                    )
+                    if result.returncode != 0:
+                        detail = (result.stderr or result.stdout).strip()[-2000:]
+                        raise RuntimeError(
+                            f"Candidate boot probe failed for {service} (exit "
+                            f"{result.returncode}); running containers kept: {detail}"
+                        )
+                except subprocess.TimeoutExpired as exc:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise RuntimeError(
+                        f"Candidate boot probe timed out for {service} after "
+                        f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
+                    ) from exc
+                except Exception:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise
+                finally:
+                    # A timed-out compose client can leave its one-shot running.
+                    # Remove only this probe's unique name, never a lane service.
+                    try:
+                        _run(["docker", "rm", "-f", name], timeout=30)
+                    except (OSError, subprocess.TimeoutExpired):
+                        logger.warning("Could not remove boot probe %s", name)
 
     def _without_failed_cloud_consumers(self, services: list[str]) -> list[str]:
         # OMN-18496: a stopped cloud consumer is neither restarted nor read back.

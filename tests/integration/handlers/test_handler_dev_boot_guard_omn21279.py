@@ -10,9 +10,11 @@ does. No Docker daemon is touched.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -43,6 +45,11 @@ BOOT_ERROR = (
 
 class _Lane(Enum):
     DEV = "dev"
+
+
+@contextlib.contextmanager
+def _probe_file_args(lane: object, service: str) -> Iterator[list[str]]:
+    yield ["-f", "compose.yml", "-f", f"no-build-{service}.yml"]
 
 
 def _container(service: str, *, healthy: bool = True) -> dict[str, Any]:
@@ -120,6 +127,7 @@ class _Host:
             ),
             _run=self.run,
             _compose_file_args=lambda lane: ["-f", "compose.yml"],
+            candidate_probe_file_args=_probe_file_args,
             _compose_env=dict,
             IMAGE_PREFLIGHT_SCRIPT="pass",
             CONFIG_HASH_TIMEOUT_SECONDS=30,
@@ -197,6 +205,8 @@ def test_preflight_refuses_a_candidate_missing_a_required_setting(
         _guard(host, tmp_path).handle(ModelDevBootRequest(operation="preflight"))
     assert host.calls
     assert all("--no-deps" in argv and "never" in argv for argv in host.calls)
+    # OMN-21279: the probe runs the built image, never a rebuild.
+    assert all("no-build-" in " ".join(argv) for argv in host.calls)
 
 
 def test_prepare_retains_the_healthy_family_checked_by_injected_hashes(
