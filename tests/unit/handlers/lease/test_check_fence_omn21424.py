@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import socket
 
+import httpx
 import pytest
 
 from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
@@ -19,7 +20,9 @@ async def test_ac6_unreachable_etcd_is_unknown() -> None:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
-    adapter = HandlerPlacementEtcd(f"http://127.0.0.1:{port}", timeout_s=0.5)
+    adapter = HandlerPlacementEtcd(
+        f"http://127.0.0.1:{port}", httpx.AsyncClient(timeout=0.5)
+    )
     try:
         status = await check_fence(adapter, kind="k", resource="r", fence=5)
     finally:

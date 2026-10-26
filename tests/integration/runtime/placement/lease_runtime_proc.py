@@ -18,6 +18,8 @@ import os
 import time
 from pathlib import Path
 
+import httpx
+
 from omnibase_infra.handlers.lease import HandlerLeaseStore
 from omnibase_infra.handlers.placement import (
     HandlerPlacementEtcd,
@@ -93,7 +95,7 @@ async def main() -> None:
     parser.add_argument("--replies", type=Path, required=True)
     parser.add_argument("--ready", type=Path, required=True)
     args = parser.parse_args()
-    adapter = HandlerPlacementEtcd(args.endpoint, timeout_s=2.0)
+    adapter = HandlerPlacementEtcd(args.endpoint, httpx.AsyncClient(timeout=2.0))
     store = HandlerLeaseStore(
         adapter, [ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=3)]
     )
