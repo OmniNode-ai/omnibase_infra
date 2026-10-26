@@ -1,1 +1,0 @@
-Live-contact exception: merge of origin/dev into this PR; the staged CI-tooling paths are dev's own merged changes plus a docstring-only conflict resolution, and this PR's live-contact test tests/ci/test_hostile_review_threads_live_contact_omn17427.py is unchanged.
