@@ -37,11 +37,16 @@ def _prefix_end(prefix: str) -> str:
 
 
 class HandlerPlacementEtcd:
-    """Async etcd v3 JSON-gateway client; every request is bounded by ``timeout_s``."""
+    """Async etcd v3 JSON-gateway client over an injected HTTP client.
 
-    def __init__(self, endpoint: str, *, timeout_s: float = 1.0) -> None:
+    The caller builds the ``httpx.AsyncClient`` and sets its timeout, which
+    bounds every request; this handler constructs no transport of its own. It
+    takes over the client's lifetime: ``aclose`` closes it.
+    """
+
+    def __init__(self, endpoint: str, client: httpx.AsyncClient) -> None:
         self._endpoint = endpoint.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout_s)
+        self._client = client
 
     async def aclose(self) -> None:
         await self._client.aclose()

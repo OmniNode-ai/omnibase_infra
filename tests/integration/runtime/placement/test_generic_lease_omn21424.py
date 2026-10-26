@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from omnibase_infra.handlers.lease import HandlerLeaseStore
@@ -57,7 +58,10 @@ def _request(
 async def two_stores(
     etcd: EtcdProcess,
 ) -> AsyncIterator[tuple[HandlerLeaseStore, HandlerLeaseStore]]:
-    adapters = [HandlerPlacementEtcd(etcd.endpoint, timeout_s=10.0) for _ in range(2)]
+    adapters = [
+        HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=10.0))
+        for _ in range(2)
+    ]
     try:
         yield (
             HandlerLeaseStore(adapters[0], KINDS),
@@ -140,7 +144,7 @@ async def test_ac6_check_fence_stale_expired_and_ok(
     two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], etcd: EtcdProcess
 ) -> None:
     a, b = two_stores
-    adapter = HandlerPlacementEtcd(etcd.endpoint, timeout_s=5.0)
+    adapter = HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=5.0))
     try:
         old = await a.acquire(_request("fenced", "old", "pair"))
         released = await a.release("pair", "fenced", old.lease_id)
