@@ -38,8 +38,15 @@ requirements:
   - id: req-dev-broker-memory-reservation
     statement: Memory protection for the dev Redpanda broker on the shared lab host, declared by this pull request under the same ticket; not transcribed from the ticket body.
     acceptance:
-      - id: AC7
-        statement: 'AC7: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
+      - id: AC8
+        statement: 'AC8: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
+  - id: req-pr-time-criterion-label-check
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. Green omnibase_infra#5370 was removed from the merge queue three times because its AC7 repeated a label dev already held, which only the full suite checked.
+    acceptance:
+      - id: AC9
+        statement: >-
+          AC9: every pull request CI run executes the ticket-contract criterion-label check by name in one test split, whatever the change-aware selector picks -- falsifier: tests/ci/test_contract_criterion_labels_wired_omn21279.py over .github/workflows/ci.yml
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -215,20 +222,29 @@ dod_evidence:
     binds_ac: [AC6]
   - id: dod-omn21279-dev-broker-memory-reservation
     description: >-
-      AC7, dev broker memory protection. Renders the dev lane (docker-compose.infra.yml plus docker-compose.dev-lane.yml) with docker compose config and asserts the redpanda service carries mem_reservation of at least 4 GiB; renders the base file alone and asserts its broker carries none. Red first: at the base the dev broker rendered a reservation of 0 bytes. Measured on the dev host at 2026-10-26T03:24Z: omnibase-infra-redpanda memory.low 0, memory.current 1.9 GB, memory.swap.current 10.8 GB.
+      AC8, dev broker memory protection. Renders the dev lane (docker-compose.infra.yml plus docker-compose.dev-lane.yml) with docker compose config and asserts the redpanda service carries mem_reservation of at least 4 GiB; renders the base file alone and asserts its broker carries none. Red first: at the base the dev broker rendered a reservation of 0 bytes. Measured on the dev host at 2026-10-26T03:24Z: omnibase-infra-redpanda memory.low 0, memory.current 1.9 GB, memory.swap.current 10.8 GB.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/unit/infra/test_dev_lane_memory_reservation_omn21279.py -q -n 0 --no-cov -p no:randomly
     binds_ac:
-      - "AC7"
+      - "AC8"
   - id: dod-omn21279-dev-broker-reservation-deploy-probe
     description: >-
-      AC7, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the dev broker reservation dial; the base file must not declare it. At the merge base the dial does not exist. The hosted runner runs it; it needs no Docker and no live host.
+      AC8, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the dev broker reservation dial; the base file must not declare it. At the merge base the dial does not exist. The hosted runner runs it; it needs no Docker and no live host.
     source: manual
     checks:
       - check_type: command
         check_value: |-
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}")' | grep -qx true
     binds_ac:
-      - "AC7"
+      - "AC8"
+  - id: dod-omn21279-pr-time-criterion-label-check
+    description: >-
+      AC9. The test-parallel job of ci.yml runs tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py by name on split 1, so a pull request whose contract repeats a criterion label goes red on its own run instead of in the merge queue. Red first: at the base ci.yml names the file in no step and the wiring test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_contract_criterion_labels_wired_omn21279.py -q --no-cov
+    binds_ac:
+      - "AC9"
