@@ -151,6 +151,18 @@ x-dev-lane-runtime-ulimits: &dev_lane_runtime_ulimits
   nofile:
     soft: 65536
     hard: 65536
+# OMN-21279: local-market in docker/catalog/bundles.yaml declares the composed
+# runtime, infra plus omnimarket. Build the staged sibling's own Dockerfile.runtime
+# on the infra image. The infra image carries no omnimarket -- ruling
+# 2026-10-15T21:52:44Z, market depends on infra -- and no BIFROST_BASE_CONTRACT_PATH;
+# the composed image sets that path.
+x-dev-lane-composed-runtime-build: &dev_lane_composed_runtime_build
+  context: ../workspace/sibling-repos/omnimarket
+  dockerfile: Dockerfile.runtime
+  additional_contexts:
+    infra-runtime: "service:dev-lane-infra-runtime-image"
+  args:
+    INFRA_RUNTIME_IMAGE: infra-runtime
 x-dev-lane-analytics-env: &dev_lane_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set — the lab lane connects to omnidash_analytics as the non-BYPASSRLS role_omnidash (OMN-15363), never as the postgres superuser}@postgres:5432/omnidash_analytics"
 # =============================================================================
@@ -754,6 +766,19 @@ services:
     labels:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-15379"
+  # OMN-21279: the build-only infra half of the composed runtime image. The
+  # services below that take `build: *dev_lane_composed_runtime_build` build
+  # omnimarket's Dockerfile.runtime FROM this image via the `service:` build
+  # context. scale 0: `up` never starts a container for it; it is built only.
+  dev-lane-infra-runtime-image:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    profiles: ["runtime", "full"]
+    scale: 0
   # ===========================================================================
   # STRICT SEMANTIC CONTAINER PROBE, AUTOHEAL DISARMED (OMN-17562, ruling 4)
   # ===========================================================================
@@ -852,6 +877,7 @@ services:
   # Ticket: OMN-17562 (operator ruling 2026-09-03, item 4). Pattern source:
   #   docker/docker-compose.stability-test.yml (OMN-15217).
   omninode-runtime:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
       # OMN-20867: this lane's main runtime publishes the runtime tick
@@ -899,6 +925,7 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
       # OMN-19513: node_event_emit_effect spools owed events to
@@ -1003,10 +1030,14 @@ services:
       - "com.omninode.service=runtime-effects"
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+  intelligence-api:
+    build: *dev_lane_composed_runtime_build
   projection-api:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   runtime-worker:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
     # Base runtime-worker inherits interval 30s / timeout 10s / retries 5 but
@@ -1028,6 +1059,7 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   omninode-contract-resolver:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
   # ===========================================================================
@@ -1058,6 +1090,7 @@ services:
   # binding is store-resolved and the missing DSN is what moved these contracts
   # onto the profile in the first place.
   tenant-projection-writer:
+    build: *dev_lane_composed_runtime_build
     profiles: !override ["runtime", "full"]
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env]
@@ -1092,9 +1125,11 @@ services:
   # A stanza here and not a base edit: the base is merged by four other lanes
   # whose brokers offer no SASL handshake.
   agent-actions-consumer:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   skill-lifecycle-consumer:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # context-audit-consumer is additionally the one dev-lane Kafka client that NO
@@ -1106,6 +1141,7 @@ services:
   # the same change. Guarded by
   # tests/unit/scripts/test_omn18012_dev_lane_broker_client_restart_coverage.py.
   context-audit-consumer:
+    build: *dev_lane_composed_runtime_build
     environment:
       !!merge <<: *dev_lane_broker_auth_env
   # ===========================================================================
@@ -1203,12 +1239,7 @@ services:
   # Ticket: OMN-17448. Pattern source:
   #   omninode_infra/k8s/onex-dev/runtime/deployment-omnimarket-projection-*-writer.yaml
   projection-tenant-registry-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-tenant-registry-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1294,12 +1325,7 @@ services:
       - "com.omninode.ticket=OMN-17448"
       - "autoheal=true"
   projection-delegation-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-delegation-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1385,12 +1411,7 @@ services:
   #
   # Ticket: OMN-17562. Pattern source: the two services above, unchanged.
   projection-registration-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-registration-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1452,12 +1473,7 @@ services:
       - "com.omninode.ticket=OMN-17562"
       - "autoheal=true"
   projection-savings-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-savings-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1508,12 +1524,7 @@ services:
       - "com.omninode.ticket=OMN-17562"
       - "autoheal=true"
   projection-tenant-credentials-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-tenant-credentials-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1564,12 +1575,7 @@ services:
       - "com.omninode.ticket=OMN-17562"
       - "autoheal=true"
   projection-live-events-writer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omnimarket-projection-live-events-writer
     profiles: ["runtime", "full"]
     networks:
@@ -1652,12 +1658,7 @@ services:
   # omnibase_infra (migration 080) and the role_omnidash identity has no grant
   # on it.
   infra-routing-decisions-consumer:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.runtime
-      args:
-        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    build: *dev_lane_composed_runtime_build
     container_name: omninode-infra-routing-decisions-consumer
     profiles: ["runtime", "full"]
     networks:
