@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: MIT
 """Pure lease projection reducer (OMN-21424).
 
-``delta(state, event) -> (new_state, intents)`` with no I/O. The state holds one
-row per ``(kind, resource)``: the grant with the highest fence seen. An event
-with a lower fence than the row's is dropped, so replaying events in any order
+``delta(state, event) -> (new_state, intents)`` with no I/O. Each row per
+``(kind, resource)`` is a deterministic commutative join: a higher fence wins
+outright using exactly that event's data, without inheriting a lower fence's
+holder; a lower fence is dropped. At equal fences, state is the maximum of the
+total order ``held < released < expired`` and holder is the non-empty value,
+or the lexicographically greater value if both are non-empty and differ.
+The lease ID comes from the higher-ranked state (equal fences identify the same
+grant). Lower-ranked events can still supply a missing holder without changing
+state. An unchanged merged row emits no intent, so replaying events in any order
 reaches the same rows.
 """
 
@@ -28,8 +34,12 @@ _STATE: dict[str, Literal["held", "released", "expired"]] = {
     "lease-released": "released",
     "lease-expired": "expired",
 }
-# At one fence a release or expiry ends the grant; a late renewal does not revive it.
-_RANK = {"held": 0, "released": 1, "expired": 1}
+# Higher fences use exactly the event's data; lower fences are dropped.
+# Equal fences join by the total order held < released < expired, retain the
+# non-empty or lexicographically greater holder even from a lower-ranked event,
+# and take the lease ID from the higher-ranked state (the same grant).
+# An unchanged merged row emits no intent.
+_RANK = {"held": 0, "released": 1, "expired": 2}
 
 
 def reduce_lease_event(
@@ -45,17 +55,21 @@ def reduce_lease_event(
         return new_state, ()
     key = (event.kind, event.resource)
     current = state.get(key)
-    if current is not None and (
-        event.fence < current.fence
-        or (event.fence == current.fence and _RANK[row_state] < _RANK[current.state])
-    ):
+    if current is not None and event.fence < current.fence:
         return new_state, ()
+    holder = event.holder
+    lease_id = event.lease_id
+    if current is not None and event.fence == current.fence:
+        holder = max(holder, current.holder)
+        if _RANK[row_state] < _RANK[current.state]:
+            row_state = current.state
+            lease_id = current.lease_id
     row = ModelLeaseProjectionRow(
         kind=event.kind,
         resource=event.resource,
-        lease_id=event.lease_id,
+        lease_id=lease_id,
         fence=event.fence,
-        holder=event.holder or (current.holder if current is not None else ""),
+        holder=holder,
         state=row_state,
     )
     if row == current:
