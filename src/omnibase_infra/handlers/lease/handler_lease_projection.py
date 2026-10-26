@@ -10,7 +10,7 @@ The table is created by
 
 from __future__ import annotations
 
-from typing import Protocol
+import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.lease import (
@@ -30,12 +30,6 @@ WHERE lease_projection.fence <= EXCLUDED.fence
 """.strip()
 
 
-class ProtocolLeaseProjectionExecutor(Protocol):
-    """The ``execute(sql, *args)`` shape of an asyncpg connection or pool."""
-
-    async def execute(self, query: str, *args: object) -> str: ...
-
-
 def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
     """Positional parameters of ``UPSERT_LEASE_PROJECTION_SQL`` for ``row``."""
     return (
@@ -51,7 +45,7 @@ def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
 class HandlerLeaseProjection:
     """Applies the reducer's upsert intents to the lease projection table."""
 
-    def __init__(self, executor: ProtocolLeaseProjectionExecutor) -> None:
+    def __init__(self, executor: asyncpg.Pool) -> None:
         self._executor = executor
 
     @property
@@ -74,6 +68,5 @@ class HandlerLeaseProjection:
 __all__ = [
     "UPSERT_LEASE_PROJECTION_SQL",
     "HandlerLeaseProjection",
-    "ProtocolLeaseProjectionExecutor",
     "lease_projection_params",
 ]
