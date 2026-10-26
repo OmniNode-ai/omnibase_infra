@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Final
@@ -33,9 +33,6 @@ from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.models.model_secret_gated_membership import (
     ModelSecretGatedMembership,
-)
-from omnibase_infra.protocols.protocol_secret_name_lister import (
-    ProtocolSecretNameLister,
 )
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -1009,9 +1006,13 @@ def required_secret_names(manifest: ModelAutoWiringManifest) -> frozenset[str]:
 
 
 async def resolve_present_secret_names(
-    store: ProtocolSecretNameLister, names: frozenset[str]
+    list_names: Callable[[], Awaitable[list[str]]], names: frozenset[str]
 ) -> frozenset[str]:
     """Resolve presence with one names-only listing, or none when unnecessary.
+
+    ``list_names`` is a store's bound ``list_keys`` (for example
+    ``AdapterEnvSecretStore().list_keys``), so the gate can list secret names
+    but never read a secret value.
 
     A store error (``OSError``, ``RuntimeError`` or an infra
     ``RuntimeHostError``) logs only its type and returns an empty set, failing
@@ -1020,7 +1021,7 @@ async def resolve_present_secret_names(
     if not names:
         return frozenset()
     try:
-        keys = await store.list_keys()
+        keys = await list_names()
     except (OSError, RuntimeError, RuntimeHostError) as exc:
         logger.warning("Required-secret listing failed: %s", type(exc).__name__)
         return frozenset()

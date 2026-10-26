@@ -3718,7 +3718,8 @@ async def bootstrap() -> int:
                     manifest,
                     drop_blank_secret_names(
                         await resolve_present_secret_names(
-                            AdapterEnvSecretStore(), required_secret_names(manifest)
+                            AdapterEnvSecretStore().list_keys,
+                            required_secret_names(manifest),
                         ),
                         os.environ,
                     ),

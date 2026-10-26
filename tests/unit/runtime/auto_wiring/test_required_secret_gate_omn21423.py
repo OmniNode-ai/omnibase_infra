@@ -140,7 +140,9 @@ async def test_absent_secret_excludes_contract_with_membership(
     manifest: ModelAutoWiringManifest, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = _NamesOnlyStore(["OTHER"])
-    present = await resolve_present_secret_names(store, required_secret_names(manifest))
+    present = await resolve_present_secret_names(
+        store.list_keys, required_secret_names(manifest)
+    )
     assert present == frozenset()
     gated = gate_manifest_on_required_secrets(manifest, present)
 
@@ -172,7 +174,7 @@ async def test_store_error_fails_closed(
             raise RuntimeError(sentinel)
 
     present = await resolve_present_secret_names(
-        _FailingStore(), required_secret_names(manifest)
+        _FailingStore().list_keys, required_secret_names(manifest)
     )
     assert present == frozenset()
     assert len(caplog.records) == 1
@@ -220,7 +222,7 @@ async def test_blank_env_secret_gates_contract(
     monkeypatch.setenv("GITHUB_TOKEN", "")
     present = drop_blank_secret_names(
         await resolve_present_secret_names(
-            AdapterEnvSecretStore(), required_secret_names(manifest)
+            AdapterEnvSecretStore().list_keys, required_secret_names(manifest)
         ),
         {"GITHUB_TOKEN": ""},
     )
@@ -233,7 +235,9 @@ async def test_blank_env_secret_gates_contract(
 @pytest.mark.asyncio
 async def test_present_secret_keeps_contract(manifest: ModelAutoWiringManifest) -> None:
     store = _NamesOnlyStore(["GITHUB_TOKEN", "OTHER"])
-    present = await resolve_present_secret_names(store, required_secret_names(manifest))
+    present = await resolve_present_secret_names(
+        store.list_keys, required_secret_names(manifest)
+    )
     assert present == frozenset({"GITHUB_TOKEN"})
     gated = gate_manifest_on_required_secrets(manifest, present)
     assert store.list_calls == 1
@@ -245,7 +249,9 @@ async def test_present_secret_keeps_contract(manifest: ModelAutoWiringManifest) 
 @pytest.mark.asyncio
 async def test_empty_names_do_not_list_store() -> None:
     store = _NamesOnlyStore(["OTHER"])
-    assert await resolve_present_secret_names(store, frozenset()) == frozenset()
+    assert (
+        await resolve_present_secret_names(store.list_keys, frozenset()) == frozenset()
+    )
     assert store.list_calls == 0
 
 
@@ -267,7 +273,7 @@ async def test_env_store_never_leaks_secret_value(
         if not present:
             monkeypatch.delenv("GITHUB_TOKEN")
         names = await resolve_present_secret_names(
-            AdapterEnvSecretStore(), required_secret_names(manifest)
+            AdapterEnvSecretStore().list_keys, required_secret_names(manifest)
         )
         gated = gate_manifest_on_required_secrets(manifest, names)
         assert (_WRITE_CONTRACT in {c.name for c in gated.contracts}) is present
