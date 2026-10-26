@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import socket
-
 import httpx
 import pytest
 
@@ -16,16 +14,25 @@ from omnibase_infra.models.lease import EnumLeaseFenceStatus
 pytestmark = pytest.mark.unit
 
 
-async def test_ac6_unreachable_etcd_is_unknown() -> None:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = int(sock.getsockname()[1])
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [
+        pytest.param(httpx.ConnectError, "connection refused", id="connect-error"),
+        pytest.param(httpx.ReadTimeout, "timed out", id="read-timeout"),
+    ],
+)
+async def test_ac6_unreachable_etcd_is_unknown(
+    error_type: type[httpx.RequestError], message: str
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error_type(message, request=request)
+
     adapter = HandlerPlacementEtcd(
-        f"http://127.0.0.1:{port}", httpx.AsyncClient(timeout=0.5)
+        "http://etcd.invalid:2379",
+        httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     try:
         status = await check_fence(adapter, kind="k", resource="r", fence=5)
     finally:
         await adapter.aclose()
     assert status is EnumLeaseFenceStatus.UNKNOWN
-    assert status is not EnumLeaseFenceStatus.OK
