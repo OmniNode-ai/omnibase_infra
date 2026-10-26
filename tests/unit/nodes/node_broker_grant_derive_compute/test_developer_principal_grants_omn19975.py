@@ -999,4 +999,13 @@ def test_h105_scm_pr_create_derived_file_is_exactly_the_nodes_output() -> None:
             ("GROUP", "local.omnimarket.scm_command_client.consume.v1.", "PREFIXED"),
         )
         for operation in ("READ", "DESCRIBE")
+    } | {
+        (
+            "dev",
+            "TOPIC",
+            "onex.cmd.omnimarket.github-repo-write-requested.v1",
+            "LITERAL",
+            operation,
+        )
+        for operation in ("WRITE", "DESCRIBE")
     }

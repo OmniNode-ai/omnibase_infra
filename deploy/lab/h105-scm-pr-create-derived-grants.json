@@ -18,6 +18,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.github-repo-write-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.github-repo-write-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.github-repo-write-completed.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
