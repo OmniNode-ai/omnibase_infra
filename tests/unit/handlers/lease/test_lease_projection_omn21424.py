@@ -132,7 +132,7 @@ def _sqlite_with_migration() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     ddl = MIGRATION.read_text()
     table = re.search(
-        r"CREATE TABLE IF NOT EXISTS lease_projection \((.*?)\n\);", ddl, re.S
+        r"CREATE TABLE IF NOT EXISTS public\.lease_projection \((.*?)\n\);", ddl, re.S
     )
     assert table is not None, "the migration creates lease_projection"
     body = re.sub(r"TIMESTAMPTZ NOT NULL DEFAULT now\(\)", "TEXT", table.group(1))
