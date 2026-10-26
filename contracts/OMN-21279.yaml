@@ -19,6 +19,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
+  - id: req-dev-broker-memory-reservation
+    statement: Memory protection for the dev Redpanda broker on the shared lab host, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
 evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
@@ -147,3 +152,22 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
     binds_ac:
       - "AC3"
+  - id: dod-omn21279-dev-broker-memory-reservation
+    description: >-
+      AC4, dev broker memory protection. Renders the dev lane (docker-compose.infra.yml plus docker-compose.dev-lane.yml) with docker compose config and asserts the redpanda service carries mem_reservation of at least 4 GiB; renders the base file alone and asserts its broker carries none. Red first: at the base the dev broker rendered a reservation of 0 bytes. Measured on the dev host at 2026-10-26T03:24Z: omnibase-infra-redpanda memory.low 0, memory.current 1.9 GB, memory.swap.current 10.8 GB.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_dev_lane_memory_reservation_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC4"
+  - id: dod-omn21279-dev-broker-memory-reservation-deploy-probe
+    description: >-
+      AC4, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the dev broker reservation dial; the base file must not declare it. At the merge base the dial does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}")' | grep -qx true
+    binds_ac:
+      - "AC4"
