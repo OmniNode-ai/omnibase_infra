@@ -74,7 +74,7 @@ def test_every_cfg_has_a_recorded_result() -> None:
 
 @pytest.mark.unit
 def test_design_review_verdict_recorded() -> None:
-    verdict = RESULTS / "design_review_verdict.md"
+    verdict = RESULTS / "design_review_verdict.txt"
     assert verdict.is_file()
     text = verdict.read_text()
     assert text.splitlines()[0].startswith("# Design-review verdict")

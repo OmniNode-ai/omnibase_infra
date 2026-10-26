@@ -66,7 +66,7 @@ dod_evidence:
     binds_ac:
       - AC4
   - id: dod-omn21418-ac5-verdicts
-    description: Each model's results/ holds design_review_verdict.md, headed "# Design-review verdict" and naming OMN-21418.
+    description: Each model's results/ holds design_review_verdict.txt, headed "# Design-review verdict" and naming OMN-21418.
     source: manual
     checks:
       - check_type: test_passes
