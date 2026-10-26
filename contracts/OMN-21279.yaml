@@ -14,6 +14,11 @@ requirements:
         statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
       - id: AC2
         statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-restore-point-protection
+    statement: Restore-point protection for non-prod runtime rebuilds, declared by this pull request (OmniNode-ai/omnibase_infra#5360) under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
 evidence_requirements:
   - kind: tests
     description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
@@ -69,14 +74,24 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
     binds_ac:
       - "AC2"
+  - id: dod-omn-21279-ac2-dev-deploy-boot-recovery
+    description: >-
+      AC2, dev deployment guard. Replays the 2026-10-25 c37f6142 incident's BOOT FAILED 5/5 with BIFROST_BASE_CONTRACT_PATH unset. All three dev runtime services must become Docker healthy within their declared health window. Compose errors, exhausted boots and probe timeouts keep the job failed and forward-redeploy the retained healthy image revision and its resolved compose settings, with no git revert, image build, pull or deps restart. Candidate setting/package checks run before runtime replacement. STATUS and exception reports name the failed commit and boot cause and remain durable until their independent deliveries are acknowledged. Non-dev jobs never construct this guard. These are isolated replays; the live runtime-boot-smoke job remains the boot gate on the PR head.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+    binds_ac:
+      - "AC2"
   - id: dod-omn21279-restore-point-labels-and-refusal
     description: >-
-      Restore-point lane regression evidence. Replays service runtime-effects in project omnibase-infra with a differently named container, missing and ambiguous matches and failed Docker lookup; runtime/full rebuilds must refuse when capture returns no point. The lane brief uses this ticket ID for restore protection, while the ticket's AC1/AC2 concern layering. This evidence does not claim either unrelated criterion is satisfied.
+      Restore-point lane regression evidence. Replays service runtime-effects in project omnibase-infra with a differently named container, missing and ambiguous matches and failed Docker lookup; runtime/full rebuilds must refuse when capture returns no point. It binds AC3, the restore-point criterion this pull request declares under req-restore-point-protection, and claims neither layering criterion AC1 nor AC2.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q
-    binds_ac: []
+    binds_ac:
+      - "AC3"
   - id: dod-omn21279-restore-point-hosted-deploy-check
     description: >-
       Hosted-runner check of the deploy agent's restore capture and rebuild refusal. Docker is faked and all state is temporary; no live lane or credentials are needed. Falsified by the base implementation, which inspects service names and rebuilds without a retained point.
@@ -84,4 +99,5 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
-    binds_ac: []
+    binds_ac:
+      - "AC3"
