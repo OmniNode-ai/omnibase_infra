@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-21279
 title: omnibase_infra's runtime image, CI and tests never install or import omnimarket
 summary: >-
-  Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
+  The dev deploy agent now checks the candidate image's Bifrost boot-contract path and readability before any container replacement, refusing the candidate and recording a failed job while preserving the running containers. The post-swap health gate and rollback remain intact. Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -23,6 +23,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-21279-ac2-pre-swap-boot-contract
+    description: >-
+      AC2, dev deployment safety. The 2026-10-25 scrubbed crash-loop reason BIFROST_BASE_CONTRACT_PATH unset is returned by a candidate-image probe. Runtime and full rebuilds must fail before any compose up, retain the running containers and persist the boot reason on a failed job. Positive controls permit a readable contract and preserve post-swap verification; timeout controls refuse the swap and clean only the disposable probe. Red first: the original four regressions failed at the base because no probe ran and the job was recorded successful. This hosted-runner check exercises the deploy agent without Docker or live runtime dependencies; it does not claim a full runtime boot or replace runtime-boot-smoke.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
+    binds_ac:
+      - "AC2"
   - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
     description: >-
       AC1. The negative controls of the layering module feed the Dockerfile, workflow and test-module checkers fixture lines that name omnimarket (an ARG, a pip install, a COPY from the wheel, an editable sibling install, a heredoc-continued install, a function-scope import, an importorskip) and assert each one fires; clean and look-alike lines pass. Red first: before the change the module held no such checker and the three live-tree tests it added failed against the base (the Dockerfile named omnimarket, ci.yml installed it as a sibling, five test modules imported it). The check also runs the live-tree Dockerfile and CI install-step tests, which fail at the merge base.
