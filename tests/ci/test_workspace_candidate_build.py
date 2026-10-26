@@ -179,6 +179,82 @@ class TestWorkspaceCandidateWorkflow:
         push_idx = workflow_text.index("Push candidate image to Amazon ECR")
         assert assert_idx < push_idx
 
+    def test_workflow_composes_omnimarket_layer_before_scan(
+        self, workflow_text: str
+    ) -> None:
+        step_name = "Compose the omnimarket layer onto the candidate (OMN-21279)"
+        assert step_name in workflow_text
+        compose_idx = workflow_text.index(step_name)
+        assert (
+            workflow_text.index("Build runtime image (workspace stability-candidate)")
+            < compose_idx
+        )
+        for step_name in (
+            "Generate unignored Trivy audit report (OMN-16229)",
+            "Run Trivy vulnerability scanner",
+            "Assert required config paths exist in the built image (OMN-15676)",
+            "Push candidate image to Amazon ECR",
+        ):
+            assert compose_idx < workflow_text.index(step_name)
+
+    def test_workflow_composes_from_the_staged_omnimarket_tree(
+        self, workflow_text: str
+    ) -> None:
+        start = workflow_text.index(
+            "Compose the omnimarket layer onto the candidate (OMN-21279)"
+        )
+        end = workflow_text.index("      - name:", start)
+        step_text = workflow_text[start:end]
+        assert (
+            "OMNIMARKET_TREE: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket"
+            in step_text
+        )
+        assert '--file "${OMNIMARKET_TREE}/Dockerfile.runtime"' in step_text
+        assert '--build-arg "INFRA_RUNTIME_IMAGE=${INFRA_IMAGE}"' in step_text
+        assert '--build-arg "OMNIMARKET_VCS_REF=${OMNIMARKET_VCS_REF}"' in step_text
+        assert '--tag "${CANDIDATE_IMAGE}"' in step_text
+        assert "import omnimarket" in step_text
+
     def test_workflow_has_no_skip_or_bypass_tokens(self, workflow_text: str) -> None:
         assert "[skip-" not in workflow_text
         assert "--no-verify" not in workflow_text
+
+
+@pytest.mark.unit
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/candidate_topic_provision_no_omnimarket_omn19998.json"
+)
+def test_recorded_infra_only_candidate_is_composed_before_push(
+    recorded_response: dict[str, object], workflow: dict[object, object]
+) -> None:
+    """Replay delivery run 40272282023, where the infra-only candidate failed.
+
+    The candidate built and pushed, then the lab lane's topic-provision Job
+    could not import omnimarket. The compose step must sit between that build
+    and the push, so the pushed image is the one carrying omnimarket.
+    """
+    response = recorded_response["response"]
+    assert isinstance(response, dict)
+    jobs = {job["name"]: job for job in response["jobs"]}
+    build = jobs[
+        "Build runtime stability-candidate / Build + scan + push workspace stability-candidate"
+    ]
+    smoke = jobs["Candidate render/wiring smoke on an ephemeral kind cluster"]
+    assert build["conclusion"] == "success"
+    assert smoke["conclusion"] == "failure"
+    assert (
+        "Provision the contract-declared topics on the lane (OMN-18264)"
+        in smoke["failed_steps"]
+    )
+    log_lines = response["job_log"]["lines"]
+    assert any(
+        "FATAL omnimarket contracts unresolvable: No module named 'omnimarket'" in line
+        for line in log_lines
+    )
+
+    steps = workflow["jobs"]["build-workspace-candidate"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    compose = names.index("Compose the omnimarket layer onto the candidate (OMN-21279)")
+    assert names.index("Build runtime image (workspace stability-candidate)") < compose
+    assert compose < names.index("Push candidate image to Amazon ECR")
+    assert "import omnimarket" in steps[compose]["run"]

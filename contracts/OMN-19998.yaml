@@ -135,6 +135,11 @@ requirements:
     acceptance:
       - id: AC29
         statement: 'AC29: cited_lines reads a thread cited at line 1 alone as file-level while ranges 1-5 and 20 keep their lines, GitFixVerifier accepts a fix elsewhere in the cited file and refuses a fix to another file, and resolve_anchor posts a path:1 finding as a file anchor -- falsifier: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py -q -n 0 fails 4 of 7 cases against the merge-base scripts'
+  - id: req-omn19998-candidate-composed-omnimarket
+    statement: "The staging stability-candidate build composes omnimarket's Dockerfile.runtime on the infra candidate image before the scan and push, because the infra image carries no omnimarket since #5261 and delivery run 40272282023 failed with No module named 'omnimarket'."
+    acceptance:
+      - id: AC30
+        statement: 'AC30: build-workspace-candidate-runtime.yml builds omnimarket''s Dockerfile.runtime from the staged omnimarket tree on the infra candidate tag, with INFRA_RUNTIME_IMAGE and OMNIMARKET_VCS_REF build args and an import omnimarket probe, after the infra build and before the Trivy scan, config-path check and push -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes fails at the merge base, where the step does not exist'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -202,6 +207,9 @@ evidence_requirements:
   - kind: tests
     description: The line-one tests drive cited_lines and resolve_anchor directly and run GitFixVerifier against a temporary git repository with a reviewed commit and fix commits.
     command: uv run pytest tests/ci/test_hostile_review_line_one_anchor_omn19998.py tests/ci/test_check_hostile_review_threads.py tests/ci/test_post_hostile_review_threads.py -q -n 0
+  - kind: tests
+    description: The candidate-build tests read build-workspace-candidate-runtime.yml and locate the compose step relative to the infra build, the Trivy steps, the config-path check and the push.
+    command: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -557,3 +565,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC29
+  - id: dod-omn19998-ac30-candidate-composed
+    description: AC30 tests locate the omnimarket compose step in the candidate build and read its build arguments and import probe.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes
+        cwd: .
+    binds_ac:
+      - AC30
