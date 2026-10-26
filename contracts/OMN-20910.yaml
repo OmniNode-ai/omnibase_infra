@@ -40,6 +40,11 @@ requirements:
     acceptance:
       - id: "AC9"
         statement: "AC9: hostile-review-judge.yml runs --read-request, --pending and --post-verdicts from base-branch code, skips download and judging when the triggering run uploaded no hostile-review-judge-request artifact and fails closed when the artifact listing fails, and the gate still clears a rejection with a reason and no verdict -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
+  - id: "req-rung-eval-env-example-backend-pin"
+    statement: "The rung-eval host env template names the variables the cloud-openrouter rung reads since OMN-20974 (RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID and RUNG_EVAL_DOGFOOD_TENANT_ID), commented and empty, and no longer names the retired BASE_URL, MODEL and API_KEY variables of that rung."
+    acceptance:
+      - id: "AC10"
+        statement: "AC10: the env example carries both backend-pin names commented with empty values and none of the three retired cloud rung names -- falsifier: uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly -k 'value_free_environment or retired_cloud_rung' fails at the merge base"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay and the workflow tests pass at the head."
@@ -113,3 +118,18 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC9"]
+  - id: "dod-omn20910-ac10-rung-eval-env-example-backend-pin"
+    description: "AC10. The rung-eval env example names the backend-pin variables of the cloud rung and none of its retired variables."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC10"]
+  - id: "dod-omn20910-deploy-rung-eval-env-example"
+    description: "The change is a host env template and its test; the installed unit files are unchanged. The check reads the template the installer copies and fails when it still names a retired cloud rung variable or lacks a backend-pin name."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -q '^# RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID=$' deploy/rung-eval/rung-eval.env.example && grep -q '^# RUNG_EVAL_DOGFOOD_TENANT_ID=$' deploy/rung-eval/rung-eval.env.example && ! grep -qE 'RUNG_EVAL_CLOUD_OPENROUTER_(BASE_URL|MODEL|API_KEY)' deploy/rung-eval/rung-eval.env.example"
+        cwd: "${OMNI_HOME}/omnibase_infra"
