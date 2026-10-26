@@ -116,4 +116,15 @@ resolve_deploy_source_clone_root
 DEPLOY_AGENT_LAUNCHER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 export DEPLOY_AGENT_LAUNCHER
 
+
+# OMN-21279: dev-only ledger transport is resolved after the protected registry
+# root has been restored, so unit files need no private workspace path copies.
+if [[ "${DEPLOY_AGENT_ALLOWED_LANES:-}" == "dev" && "${ONEX_LEDGER_WRITE_VIA:-}" == "bus" ]]; then
+    : "${UNIT_DRIFT_REGISTRY_ROOT:?dev ledger writer requires the registry root}"
+    export ONEX_LEDGER_PATH="${UNIT_DRIFT_REGISTRY_ROOT}/docs/tracking/ROLLING_WORK_LEDGER.md"
+    printf -v ONEX_LEDGER_BUS_APPEND_COMMAND '%q -m omnimarket.work_ledger_bus.cli append --bus-lane dev --omnibase-path %q' \
+        "${UNIT_DRIFT_REGISTRY_ROOT}/.onex-dispatch-venv/bin/python" "$UNIT_DRIFT_REGISTRY_ROOT"
+    export ONEX_LEDGER_BUS_APPEND_COMMAND
+fi
+
 exec "$DEPLOY_AGENT_PYTHON" -m deploy_agent "$@"

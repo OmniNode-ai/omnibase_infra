@@ -58,6 +58,7 @@ class EnumJobSettlingStage(StrEnum):
     ONEX_API_PIN = "onex_api_pin"
     REPAIR_BUILD = "repair_build"
     PUBLISH = "publish"
+    BOOT_RECOVERY = "boot_recovery"
 
 
 class JobState(BaseModel):
