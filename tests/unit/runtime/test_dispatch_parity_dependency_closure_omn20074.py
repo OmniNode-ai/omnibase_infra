@@ -60,10 +60,10 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
         "omnibase-infra",
     ]
     assert legacy["header"]["corpus"]["contracts_discovered"] == 154
-    assert retired["header"]["corpus"]["contracts_discovered"] == 157
+    assert retired["header"]["corpus"]["contracts_discovered"] == 159
     assert retired["header"]["corpus"]["contracts_by_package"] == {
         "omnibase_core": 21,
-        "omnibase_infra": 136,
+        "omnibase_infra": 138,
     }
     assert (
         "onex-change-control"
