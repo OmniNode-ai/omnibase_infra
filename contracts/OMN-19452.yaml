@@ -1,0 +1,49 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19452"
+title: "onex delegate names the lane login when a SASL lane refuses it, and times each client phase"
+summary: >-
+  Coverage-only evidence for the merged fix (omnibase_infra#4471, 1adf3df2). A broker that refuses the SASL login ends onex delegate in a typed sasl_refused transport refusal whose text names onex auth lane-login and --lane, never "Fix the broker address", with a selected lane and with an explicit broker address. The receipt records startup, locus probe, bus connect, reply subscribe, publish and terminal wait durations. Every bound check fails at the fix's parent, which had neither the typed refusal nor the phase durations.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn19452-sasl-refusal-names-login"
+    statement: "A SASL-refused connection is typed and names the lane login remedy."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: a SASL-refused connection ends in a typed refusal naming onex auth lane-login and --lane"
+  - id: "req-omn19452-phase-durations"
+    statement: "The receipt times each client phase."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the receipt records startup, locus probe, publish, reply subscribe and terminal wait durations"
+evidence_requirements:
+  - kind: "tests"
+    description: "SASL refusal and phase timing tests pass"
+    command: >-
+      uv run pytest -q --no-cov tests/unit/backends/test_omn19452_probe_sasl_refusal.py tests/unit/cli/test_delegate_phase_timing_omn19452.py tests/integration/cli/test_delegate_sasl_refusal_cli_omn19452.py tests/integration/cli/test_delegate_sasl_refusal_explicit_broker_omn19452.py tests/integration/cli/test_delegate_phase_durations_cli_omn19452.py
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19452-ac1-sasl-refusal-names-lane-login"
+    description: >-
+      A loopback listener refuses the SASL login on the wire through the real aiokafka client. The probe raises a typed SASL refusal naming the principal (a closed port is not called one). onex delegate, with a selected lane and with an explicit --kafka-bootstrap and no lane, exits non-zero naming onex auth lane-login and --lane and not "Fix the broker address", and writes a receipt whose transport_refusal reason is sasl_refused with that remediation. Fails at the fix's parent, which has no SASL refusal type.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: >-
+          uv run pytest -q --no-cov tests/unit/backends/test_omn19452_probe_sasl_refusal.py tests/integration/cli/test_delegate_sasl_refusal_cli_omn19452.py tests/integration/cli/test_delegate_sasl_refusal_explicit_broker_omn19452.py
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn19452-ac2-receipt-times-each-phase"
+    description: >-
+      Over the CLI with a fake transport, receipt.json carries startup, locus probe, bus connect, reply subscribe, publish and terminal wait durations; the stopwatch and timed bus time each phase in run order, and a refused run marks unreached phases as not reached. Fails at the fix's parent, which has no phase durations.
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: >-
+          uv run pytest -q --no-cov tests/unit/cli/test_delegate_phase_timing_omn19452.py tests/integration/cli/test_delegate_phase_durations_cli_omn19452.py
+        cwd: "${OMNI_HOME}/omnibase_infra"
