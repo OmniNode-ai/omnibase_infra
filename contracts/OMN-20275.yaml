@@ -127,12 +127,12 @@ dod_evidence:
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_runtime_bus_recovery.py tests/integration/runtime/test_runtime_bus_recovery.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-deploy-runtime-bus-recovery"
-    description: "Hosted-runner deploy probe: read the recovery-capable bus on the PR branch and exercise a local runtime HTTP server through outage and recovery. The same server stays live and readiness changes from 503 to 200; broker I/O is simulated. No production deployment is claimed."
+    description: "Hosted-runner deploy probe: read the recovery-capable bus in the head tree and exercise a local runtime HTTP server through outage and recovery. The same server stays live and readiness changes from 503 to 200; broker I/O is simulated. No production deployment is claimed."
     source: "manual"
     binds_ac: ["AC14"]
     checks:
       - check_type: "command"
-        check_value: "curl --fail --silent --show-error --location https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/omn-20275-runtime-bus-recovery/src/omnibase_infra/event_bus/event_bus_kafka.py | grep -q 'class EventBusRecovering' && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_runtime_bus_recovery.py -q -p no:randomly"
+        check_value: "grep -q 'class EventBusRecovering' src/omnibase_infra/event_bus/event_bus_kafka.py && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_runtime_bus_recovery.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20275-ac17-contract-overlay"
     description: "Hosted regression joins the real contract renderer, typed overlay, compose variable references and consent bounds. No broker, credentials, container changes or private repository are needed."
