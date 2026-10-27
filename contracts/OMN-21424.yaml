@@ -82,6 +82,15 @@ dod_evidence:
         check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k test_ac3
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn21424-ac3-revoke-on-txn-error
+    description: >-
+      An acquire whose grant transaction raises revokes the etcd lease it granted before re-raising, so no orphaned lease holds a slot until its TTL and a retry with the same request_id makes a fresh grant.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lease_store_acquire_omn21424.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
   - id: dod-omn21424-ac4-projection
     description: >-
       Every ordering of seven lease events through the pure reducer ends at the highest fence per (kind, resource), and a lower-fence event emits no intent; every ordering of three upserts through the writer's SQL statement against the migration's table (run in SQLite) leaves the highest fence.

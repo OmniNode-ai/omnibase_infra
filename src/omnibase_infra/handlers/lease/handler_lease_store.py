@@ -17,11 +17,13 @@ the same ``request_id`` reads back the grant it made.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -82,6 +84,26 @@ class HandlerLeaseStore:
         if replay is not None:
             return self._replayed(request, replay[0], replay[1])
         etcd_lease, ttl = await self._adapter.lease_grant(request.ttl_s or policy.ttl_s)
+        try:
+            return await self._grant(request, policy, request_key, etcd_lease, ttl)
+        except Exception:
+            # A txn that raised may or may not have committed; the caller sees
+            # no grant either way, so revoke the etcd lease rather than leave
+            # an orphaned slot held until its TTL. A retry with the same
+            # request_id then makes a fresh grant.
+            with contextlib.suppress(InfraConnectionError):
+                await self._adapter.lease_revoke(etcd_lease)
+            raise
+
+    async def _grant(
+        self,
+        request: ModelLeaseAcquireRequest,
+        policy: ModelLeaseKindPolicy,
+        request_key: str,
+        etcd_lease: int,
+        ttl: int,
+    ) -> ModelLeaseReply:
+        """Try each slot under ``etcd_lease``; revokes it unless a slot is granted."""
         lease_id = uuid4()
         value = json.dumps(
             {
