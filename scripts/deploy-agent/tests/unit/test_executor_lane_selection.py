@@ -42,15 +42,39 @@ def _overlay_container_name(overlay: str, service: str) -> str:
     """Read one service's container_name from the committed overlay text.
 
     The overlay uses compose's !override tags, so read that line rather than
-    load the YAML.
+    load the YAML. The service block ends at the next line indented no deeper
+    than the service key; blank and comment lines inside it are skipped, and
+    the indentation width is taken from the file rather than assumed.
     """
     match = re.search(
-        rf"^  {re.escape(service)}:\n(?:    .*\n)*?    container_name: (\S+)$",
+        rf"^(?P<indent>[ ]+){re.escape(service)}:[ \t]*\n"
+        rf"(?:(?:(?P=indent)[ ]+.*|[ \t]*(?:#.*)?)\n)*?"
+        rf"(?P=indent)[ ]+container_name:[ \t]*['\"]?(?P<name>[^'\"\s]+)",
         overlay,
         re.MULTILINE,
     )
     assert match is not None, f"{service} has no container_name in the overlay"
-    return match.group(1)
+    return match.group("name")
+
+
+@pytest.mark.parametrize(
+    "overlay",
+    [
+        "services:\n  main:\n    image: x\n\n    # pinned\n    container_name: main-c\n"
+        "  other:\n    container_name: other-c\n",
+        "services:\n main:\n   image: x\n   container_name: 'main-c'\n"
+        " other:\n   container_name: other-c\n",
+    ],
+)
+def test_overlay_container_name_tolerates_layout(overlay: str) -> None:
+    assert _overlay_container_name(overlay, "main") == "main-c"
+    assert _overlay_container_name(overlay, "other") == "other-c"
+
+
+def test_overlay_container_name_stays_inside_the_service_block() -> None:
+    overlay = "services:\n  main:\n    image: x\n  other:\n    container_name: c\n"
+    with pytest.raises(AssertionError, match="main has no container_name"):
+        _overlay_container_name(overlay, "main")
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
