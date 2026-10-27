@@ -201,7 +201,7 @@ dod_evidence:
     binds_ac: [AC3]
   - id: dod-omn21288-checkout-policy-and-state-refusal
     description: >-
-      Hosted-runner deployment falsifier: the real deploy executor reads its checkout's fold policy without a Linux deploy directory, preserves retired-only no-op requests, and refuses other disabled services. Folded effects preflight refuses missing main state roots before filesystem mutation, repairs a correct dangling alias, and preserves a claim written during the empty-directory handover. No running lane or Docker daemon is required.
+      Hosted-runner deployment falsifier: the real deploy executor reads fold policy from the deployed repository (REPO_DIR) that also supplies its compose files, preserves retired-only no-op requests when a fold is active, and refuses other disabled services. Folded effects preflight refuses missing main state roots before filesystem mutation, repairs a correct dangling alias, and preserves a claim written during the empty-directory handover. No running lane or Docker daemon is required.
     source: manual
     checks:
       - check_type: test_passes

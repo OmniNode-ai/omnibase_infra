@@ -102,6 +102,10 @@ def test_retirement_is_inert_on_other_lanes() -> None:
 def test_only_folded_tenant_carrier_request_does_not_start_the_whole_profile() -> None:
     updates: list[tuple[Phase, PhaseStatus]] = []
     with (
+        patch(
+            "deploy_agent.executor.lane_folded_profiles",
+            return_value={"tenant-projection"},
+        ),
         patch("deploy_agent.executor._requested_services_for_up", return_value=[]),
         patch("deploy_agent.executor._run") as run,
     ):
