@@ -9,6 +9,12 @@ from 15:19:18Z on a v24.2.7 startup assert (``shard_balancer.cc:102``
 asserted the same way and v24.3.18 started healthy, so the operator ruled the
 dev broker onto v24.3.18 (ledger RULING 2026-10-20T17:35:21Z).
 
+On 2026-10-26 the pin moved to v25.1.12, the first hop of
+``docker/redpanda/dev_broker_upgrade_path.yaml`` (OMN-21279), after v25.1.12,
+v25.2.14 and v25.3.18 started healthy in turn on a copy of the dev data volume,
+under the same ruling's rule that the dev broker moves to a version proven on
+a data copy.
+
 The image is spelled in several files: the catalog services, the base compose
 file (``docker-compose.infra.yml``: the broker and its partition-cap one-shot)
 and the dev-lane overlay (``docker-compose.dev-lane.yml``: the SCRAM and SASL
@@ -36,7 +42,7 @@ from tests.unit.docker.conftest import DOCKER_DIR
 
 pytestmark = [pytest.mark.unit]
 
-DEV_BROKER_IMAGE = "redpandadata/redpanda:v24.3.18"
+DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.1.12"
 
 CATALOG_DIR = DOCKER_DIR / "catalog" / "services"
 DEV_COMPOSE_FILES = ("docker-compose.infra.yml", "docker-compose.dev-lane.yml")
@@ -97,7 +103,7 @@ def _declared_dev_images() -> dict[str, str]:
     return declared
 
 
-def test_the_dev_broker_runs_the_image_the_operator_ruled() -> None:
+def test_the_dev_broker_runs_the_declared_image() -> None:
     broker = _services("docker-compose.infra.yml")["redpanda"]
     assert broker["image"] == DEV_BROKER_IMAGE
     assert str(_load(CATALOG_DIR / "redpanda.yaml")["image"]) == DEV_BROKER_IMAGE

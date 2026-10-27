@@ -13,6 +13,8 @@ broker straight to v25.3 would leave it unable to start on its v24.3 volume.
 the dev volume has run and the hop path to a fixed release. These tests refuse a
 dev pin more than one feature release past that, and a path that skips a
 feature release or ends before the fix.
+They also require the dev pin past the deployed volume to be the next proven
+hop, and every path hop to have been proven on a copy of the dev data volume.
 """
 
 from __future__ import annotations
@@ -69,12 +71,89 @@ def pin_refusal(
     return ""
 
 
+def unproven_refusal(
+    image: str, deployed_feature_release: str, path: list[str], proven: list[str]
+) -> str:
+    """Why a pin past the deployed volume is not the next proven hop; empty if it is."""
+    if _feature(image) == deployed_feature_release:
+        return ""
+    if not path or image != path[0]:
+        return f"{image}: the pin must take the next hop on the declared path"
+    if image not in proven:
+        return f"{image}: has not been proven on a copy of the dev data volume"
+    return ""
+
+
 def test_dev_pin_is_at_most_one_feature_release_past_the_deployed_volume() -> None:
     declared = _declaration()
     image = str(yaml.safe_load(CATALOG_BROKER.read_text())["image"])
     assert not pin_refusal(
         image, declared["deployed_feature_release"], declared["feature_releases"]
     )
+
+
+def test_dev_pin_past_the_deployed_volume_is_the_next_proven_hop() -> None:
+    declared = _declaration()
+    image = str(yaml.safe_load(CATALOG_BROKER.read_text())["image"])
+    proven = [str(hop["image"]) for hop in declared["proven_on_data_copy"]]
+    assert (
+        unproven_refusal(
+            image, declared["deployed_feature_release"], declared["path"], proven
+        )
+        == ""
+    )
+
+
+_HOP_1 = "redpandadata/redpanda:v25.1.12"
+_HOP_2 = "redpandadata/redpanda:v25.2.14"
+_HOP_3 = "redpandadata/redpanda:v25.3.18"
+_OFF_HOP = "redpandadata/redpanda:v25.1.11"
+_PATH = [_HOP_1, _HOP_2, _HOP_3]
+_OFF_PATH = "the pin must take the next hop on the declared path"
+_UNPROVEN = "has not been proven on a copy of the dev data volume"
+
+
+@pytest.mark.parametrize(
+    ("image", "deployed", "path", "proven", "reason"),
+    [
+        # A pin on the deployed feature release is not a hop.
+        ("redpandadata/redpanda:v24.3.18", "24.3", _PATH, [], ""),
+        ("redpandadata/redpanda:v24.3.5", "24.3", _PATH, [], ""),
+        # The next hop, proven: accepted.
+        (_HOP_1, "24.3", _PATH, [_HOP_1], ""),
+        # The next hop, not proven: refused as unproven only.
+        (_HOP_1, "24.3", _PATH, [], _UNPROVEN),
+        # Off path but proven: refused as off path, not as unproven.
+        (_OFF_HOP, "24.3", _PATH, [_OFF_HOP], _OFF_PATH),
+        # Off path and unproven: the path check runs first.
+        (_OFF_HOP, "24.3", _PATH, [], _OFF_PATH),
+        # A later hop taken before the next one is off path.
+        (_HOP_2, "24.3", _PATH, [_HOP_1, _HOP_2], _OFF_PATH),
+        # After the first hop is live, deployed advances and the hop leaves path.
+        (_HOP_1, "25.1", [_HOP_2, _HOP_3], [_HOP_1, _HOP_2], ""),
+        (_HOP_2, "25.1", [_HOP_2, _HOP_3], [_HOP_1, _HOP_2], ""),
+        (_HOP_3, "25.1", [_HOP_2, _HOP_3], _PATH, _OFF_PATH),
+        # An exhausted path admits no further pin.
+        (_HOP_3, "25.2", [], [_HOP_3], _OFF_PATH),
+    ],
+)
+def test_unproven_refusal_fixtures(
+    image: str, deployed: str, path: list[str], proven: list[str], reason: str
+) -> None:
+    refusal = unproven_refusal(image, deployed, path, proven)
+    if reason:
+        other = _UNPROVEN if reason == _OFF_PATH else _OFF_PATH
+        assert reason in refusal, refusal
+        assert other not in refusal, refusal
+    else:
+        assert refusal == ""
+
+
+def test_every_path_hop_was_proven_on_a_data_copy() -> None:
+    declared = _declaration()
+    proven = [str(hop["image"]) for hop in declared["proven_on_data_copy"]]
+    for image in declared["path"]:
+        assert image in proven, f"{image} has not been proven on a data copy"
 
 
 @pytest.mark.parametrize(
