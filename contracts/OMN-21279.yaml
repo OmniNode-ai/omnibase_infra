@@ -75,6 +75,11 @@ requirements:
     acceptance:
       - id: AC13
         statement: 'AC13: docs/incidents/OMN-21279/dev-broker-crash-cause.json records the allocation-failure aborts since the 3G arena, with the load on the arena and the decision it leaves to the operator, and the record is internally consistent -- falsifier: test_dev_broker_arena_exhaustion_record_omn21279.py, which fails on an unordered abort list, a count that differs from the list, or a cited 12G floor that is no longer declared'
+  - id: req-dev-broker-first-hop
+    statement: First hop of the dev broker upgrade path from lane fill-defect-dev-broker-crash-cause-20261026T1538Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: every dev broker image site (the catalog redpanda, redpanda-partition-cap and redpanda-local-sasl services, and the four dev redpanda services of docker-compose.infra.yml and docker-compose.dev-lane.yml) pins redpandadata/redpanda:v25.1.12, the first hop of dev_broker_upgrade_path.yaml, and a dev pin past the deployed feature release is refused unless it is the next path hop and is listed in proven_on_data_copy -- falsifier: test_dev_broker_upgrade_path_omn21279.py and test_dev_broker_image_pin_omn17427.py, whose fixtures refuse an unproven v25.1.12 and an off-path v25.1.11 over a 24.3 volume'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -358,3 +363,22 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docs/incidents/OMN-21279/dev-broker-crash-cause.json?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("\"arena_exhaustion_since_cap\"")' | grep -qx true
     binds_ac:
       - "AC13"
+  - id: dod-omn21279-dev-broker-first-hop
+    description: >-
+      AC14. On 2026-10-26 on h201 a 49.2G scratch copy of the dev data volume omnibase-infra-redpanda-data (v24.3.18) started healthy in turn on v25.1.12 (cluster_version 15), v25.2.14 (16) and v25.3.18 (17), each with 4635 topics, 14623 groups and 0 ERROR lines; the live broker was not touched. The dev pin moves to v25.1.12 in every place. The tests refuse a pin past the deployed 24.3 feature release that is not the next path hop or not listed in proven_on_data_copy. Red first: at the merge base every site pins v24.3.18 and proven_on_data_copy does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC14"
+  - id: dod-omn21279-dev-broker-first-hop-deploy-probe
+    description: >-
+      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.1.12 and the declaration lists proven_on_data_copy. At the merge base the catalog pins v24.3.18. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.1.12")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("proven_on_data_copy:")' | grep -qx true
+    binds_ac:
+      - "AC14"

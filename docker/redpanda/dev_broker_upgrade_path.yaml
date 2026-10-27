@@ -9,7 +9,7 @@
 # Redpanda upgrades one feature release at a time: v25.3.x declares
 # earliest_version = v25_2_1 ("The earliest version we can upgrade from"), so a
 # v25.3 broker does not start on the v24.3 data volume. The dev pin may move at
-# most one feature release past deployed_feature_release. Advance
+# most one feature release past deployed_feature_release, along path in order. Advance
 # deployed_feature_release only after that hop is live on the dev broker and
 # read back (docker inspect image plus /v1/features active version), and drop
 # that hop from path in the same change.
@@ -43,3 +43,17 @@ logical_versions:
   redpandadata/redpanda:v25.3.18:
     latest: 17
     earliest: 16
+# Each hop was started in order on one scratch copy of the dev data volume and
+# reached Healthy with cluster_version equal to node_latest_version. A dev pin
+# past deployed_feature_release must be listed here (operator RULING
+# 2026-10-20T17:35:21Z: the dev broker moves to a version proven on a data copy).
+proven_on_data_copy:
+  - image: redpandadata/redpanda:v25.1.12
+    started_healthy_at: "2026-10-26T16:07Z"
+    cluster_version: 15
+  - image: redpandadata/redpanda:v25.2.14
+    started_healthy_at: "2026-10-26T16:08Z"
+    cluster_version: 16
+  - image: redpandadata/redpanda:v25.3.18
+    started_healthy_at: "2026-10-26T16:10Z"
+    cluster_version: 17

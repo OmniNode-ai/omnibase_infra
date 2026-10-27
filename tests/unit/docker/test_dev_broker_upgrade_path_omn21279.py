@@ -13,6 +13,8 @@ broker straight to v25.3 would leave it unable to start on its v24.3 volume.
 the dev volume has run and the hop path to a fixed release. These tests refuse a
 dev pin more than one feature release past that, and a path that skips a
 feature release or ends before the fix.
+They also require the dev pin past the deployed volume to be the next proven
+hop, and every path hop to have been proven on a copy of the dev data volume.
 """
 
 from __future__ import annotations
@@ -69,12 +71,70 @@ def pin_refusal(
     return ""
 
 
+def unproven_refusal(
+    image: str, deployed_feature_release: str, path: list[str], proven: list[str]
+) -> str:
+    """Why a pin past the deployed volume is not the next proven hop; empty if it is."""
+    if _feature(image) == deployed_feature_release:
+        return ""
+    if not path or image != path[0]:
+        return f"{image}: the pin must take the next hop on the declared path"
+    if image not in proven:
+        return f"{image}: has not been proven on a copy of the dev data volume"
+    return ""
+
+
 def test_dev_pin_is_at_most_one_feature_release_past_the_deployed_volume() -> None:
     declared = _declaration()
     image = str(yaml.safe_load(CATALOG_BROKER.read_text())["image"])
     assert not pin_refusal(
         image, declared["deployed_feature_release"], declared["feature_releases"]
     )
+
+
+def test_dev_pin_past_the_deployed_volume_is_the_next_proven_hop() -> None:
+    declared = _declaration()
+    image = str(yaml.safe_load(CATALOG_BROKER.read_text())["image"])
+    proven = [str(hop["image"]) for hop in declared["proven_on_data_copy"]]
+    assert (
+        unproven_refusal(
+            image, declared["deployed_feature_release"], declared["path"], proven
+        )
+        == ""
+    )
+
+
+@pytest.mark.parametrize(
+    ("image", "deployed", "proven", "refused"),
+    [
+        ("redpandadata/redpanda:v24.3.18", "24.3", [], False),
+        (
+            "redpandadata/redpanda:v25.1.12",
+            "24.3",
+            ["redpandadata/redpanda:v25.1.12"],
+            False,
+        ),
+        ("redpandadata/redpanda:v25.1.12", "24.3", [], True),
+        (
+            "redpandadata/redpanda:v25.1.11",
+            "24.3",
+            ["redpandadata/redpanda:v25.1.11"],
+            True,
+        ),
+    ],
+)
+def test_unproven_refusal_fixtures(
+    image: str, deployed: str, proven: list[str], refused: bool
+) -> None:
+    path = _declaration()["path"]
+    assert bool(unproven_refusal(image, deployed, path, proven)) is refused
+
+
+def test_every_path_hop_was_proven_on_a_data_copy() -> None:
+    declared = _declaration()
+    proven = [str(hop["image"]) for hop in declared["proven_on_data_copy"]]
+    for image in declared["path"]:
+        assert image in proven, f"{image} has not been proven on a data copy"
 
 
 @pytest.mark.parametrize(
