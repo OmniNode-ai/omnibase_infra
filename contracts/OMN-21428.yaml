@@ -80,3 +80,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/placement/test_placement_etcd_compatibility_omn21428.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21428-provider-owned-etcd-client
+    description: >-
+      The compatible etcd constructor materializes its fallback client through the HTTP provider. Provider and constructor tests retain subsecond timeouts, redirect policy, injected authentication and client closure. The caller-owned imperative guard regression accepts the source tree and refuses a planted live HTTP call, using the unchanged allowlist and guard. These checks run on a hosted runner without etcd or a container daemon.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/providers/test_provider_http_client.py tests/unit/handlers/placement/test_placement_etcd_compatibility_omn21428.py tests/ci/test_imperative_contract_guard_caller_omn21004.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

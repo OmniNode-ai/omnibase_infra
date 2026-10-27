@@ -22,6 +22,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 _JsonObject = dict[str, object]
 
@@ -58,7 +59,9 @@ class HandlerPlacementEtcd:
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._client = (
-            client if client is not None else httpx.AsyncClient(timeout=timeout_s)
+            client
+            if client is not None
+            else ProviderHttpClient.create_client(timeout_seconds=timeout_s)
         )
 
     @property
