@@ -6393,7 +6393,7 @@ class RuntimeHostProcess:
             ModelEventBusRecoveryConfig,
         )
 
-        event_bus_config = (self._config or {}).get("event_bus", {})
+        event_bus_config = (getattr(self, "_config", None) or {}).get("event_bus", {})
         recovery_config = (
             event_bus_config.get("recovery")
             if isinstance(event_bus_config, dict)

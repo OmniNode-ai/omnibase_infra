@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -153,6 +153,50 @@ def _make_process(
 
     process._materialize_handler_live = materialize_handler_live
     return process
+
+
+@pytest.mark.asyncio
+async def test_dynamic_registration_delivers_once_after_listener_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed attach recovers and delivers an event through the listener."""
+    event_bus = _InMemoryEventBus()
+    contract_source = _CachingContractSource()
+    process = _make_process(event_bus, contract_source)
+    subscribe = event_bus.subscribe
+    attempts = 0
+
+    async def attach(**kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("registration join timed out")
+        return await subscribe(**kwargs)
+
+    monkeypatch.setattr(event_bus, "subscribe", attach)
+    monkeypatch.setattr(runtime_host_module.asyncio, "sleep", AsyncMock())
+    await process._start_dynamic_contract_listener()
+    correlation_id = uuid4()
+    await event_bus.publish(
+        SUFFIX_NODE_REGISTRATION,
+        {
+            "node_name": "node_dynamic_test",
+            "contract_yaml": VALID_CONTRACT_YAML,
+            "event_type": "registered",
+            "correlation_id": str(correlation_id),
+        },
+    )
+
+    assert attempts == 2
+    assert len(event_bus.subscriptions) == 1
+    assert contract_source.registered == [
+        ("node_dynamic_test", VALID_CONTRACT_YAML, correlation_id)
+    ]
+    descriptor = contract_source.get_cached_descriptor("node_dynamic_test")
+    assert process.materialized == [("node_dynamic_test", descriptor, correlation_id)]
+    assert process._dynamic_contract_unsubscribe is not None
+    await process._dynamic_contract_unsubscribe()
+    assert event_bus.unsubscribe_count == 1
 
 
 @pytest.mark.asyncio

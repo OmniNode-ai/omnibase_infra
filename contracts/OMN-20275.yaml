@@ -148,31 +148,34 @@ dod_evidence:
     binds_ac: ["AC14", "AC16"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/runtime/test_runtime_host_dynamic_registration.py tests/unit/event_bus/test_kafka_subscribe_fetch_position_ready.py -q -p no:randomly -n 0 --no-cov"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_runtime_host_dynamic_registration.py tests/unit/event_bus/test_kafka_subscribe_fetch_position_ready.py tests/integration/test_runtime_host_dynamic_registration.py -q -p no:randomly -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-launch-snapshot-ac1-external"
     description: "Ledger append exactly-once redelivery (omnimarket owns this criterion; not validated by this infra repair)."
     source: "manual"
     execution_scope: "local_done_gate"
+    status: "pending"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k redelivered_request_appends_once"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_work_ledger_append_effect/test_handler_work_ledger_append_effect.py -q -k redelivered_request_appends_once"
         cwd: "${OMNI_HOME}/omnimarket"
   - id: "dod-launch-snapshot-ac2-external"
     description: "Refused append preserves ledger bytes (omnimarket owns this criterion; not validated by this infra repair)."
     source: "manual"
     execution_scope: "local_done_gate"
+    status: "pending"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k refused_append_leaves_ledger_unchanged"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_work_ledger_append_effect/test_handler_work_ledger_append_effect.py -q -k refused_append_leaves_ledger_unchanged"
         cwd: "${OMNI_HOME}/omnimarket"
   - id: "dod-launch-snapshot-ac3-external"
     description: "Consent and ruling rows refused over bus (omnimarket owns this criterion; not validated by this infra repair)."
     source: "manual"
     execution_scope: "local_done_gate"
+    status: "pending"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k consent_and_ruling_refused_over_bus"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_work_ledger_append_effect/test_handler_work_ledger_append_effect.py -q -k consent_and_ruling_refused_over_bus"
         cwd: "${OMNI_HOME}/omnimarket"
   - id: "dod-launch-snapshot-ac4-external"
     description: "Ledger bus write mode (external ledger-host repository; out of scope and not run by this lane)."
@@ -182,7 +185,8 @@ dod_evidence:
     linear_dod_text: "External ledger-host falsifier: uv run pytest tests/ledger -q -k bus_write_mode. Not run by this infra repair."
     checks:
       - check_type: "test_passes"
-        check_value: 'uv run --directory "${ONEX_LEDGER_VERIFY_CHECKOUT:?set the owning ledger checkout}" pytest tests/ledger -q -k bus_write_mode'
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ledger -q -k bus_write_mode"
+        cwd: "${ONEX_LEDGER_VERIFY_CHECKOUT}"
   - id: "dod-launch-snapshot-ac5-external"
     description: "Launching host verifies this remote lane CLAIM and TERMINAL against ledger and SQL projection; this h201 diagnosis cannot establish the requested h202 run."
     source: "manual"
