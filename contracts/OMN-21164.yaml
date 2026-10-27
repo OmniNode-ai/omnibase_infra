@@ -10,6 +10,8 @@ requirements:
   - id: req-omn21164-train-cuts
     statement: The train cuts omniintelligence, and its first merge-triggered release is published.
     acceptance:
+      - id: AC1
+        statement: "AC1: dev declares 0.25.0 and the changelog covers the window since v0.24.0 -- falsifier: `gh api repos/OmniNode-ai/omniintelligence/contents/pyproject.toml?ref=dev` still reads version 0.24.0, or CHANGELOG.md on dev has no entry above 0.24.0."
       - id: AC2
         statement: "AC2: the train's policy row no longer holds the repo -- falsifier: the omniintelligence row in omnibase_infra `config/release_train_policy.yaml` on dev still reads `mode: report_only`."
       - id: AC3
@@ -57,3 +59,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn21164-ac1-release-commit-on-dev
+    description: >-
+      The release commit omniintelligence#1152 squashed to (4d5d0b6f) is on dev, declares version 0.25.0 in pyproject.toml and carries a CHANGELOG.md entry for v0.25.0 naming the v0.24.0 window; the omniintelligence contract binds the same criterion at that repository. Read from the commit, not dev's tip, so a later version bump on dev does not void it. At this repository's merge base the armed-row test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/scripts/test_release_train_omniintelligence_armed_omn21164.py -q -n 0 -k armed_to_cut && uv run python -c "import json, urllib.request; base = 'https://raw.githubusercontent.com/OmniNode-ai/omniintelligence/4d5d0b6ff249b4a3e4d9469da04c0f16efd18177/'; py = urllib.request.urlopen(base + 'pyproject.toml').read().decode(); log = urllib.request.urlopen(base + 'CHANGELOG.md').read().decode(); cmp = json.load(urllib.request.urlopen('https://api.github.com/repos/OmniNode-ai/omniintelligence/compare/4d5d0b6ff249b4a3e4d9469da04c0f16efd18177...dev')); assert 'version = \"0.25.0\"' in py; assert log.startswith('## v0.25.0 ') and 'v0.24.0' in log; assert cmp['status'] in ('identical', 'ahead'), cmp['status']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
