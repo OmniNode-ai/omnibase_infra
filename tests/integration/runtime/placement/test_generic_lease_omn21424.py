@@ -42,6 +42,9 @@ PROC = Path(__file__).with_name("lease_runtime_proc.py")
 KINDS = [
     ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=2),
     ModelLeaseKindPolicy(kind="pair", capacity=2, ttl_s=30),
+    # AC1 counts grants while the first one lives: its TTL must outlast the
+    # whole gather on a loaded runner, or a late acquire is a legal regrant.
+    ModelLeaseKindPolicy(kind="exclusive-held", capacity=1, ttl_s=60),
 ]
 H202_ANSWER_BOUND_S = 30.0
 
@@ -78,7 +81,9 @@ async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
     a, b = two_stores
     replies = await asyncio.gather(
         *(
-            (a if i % 2 else b).acquire(_request("only-one", f"holder-{i}"))
+            (a if i % 2 else b).acquire(
+                _request("only-one", f"holder-{i}", "exclusive-held")
+            )
             for i in range(100)
         )
     )
