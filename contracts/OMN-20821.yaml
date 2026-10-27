@@ -1,0 +1,97 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20821"
+title: "A pure compute node plans a developer's broker principal from a grants declaration"
+summary: >-
+  node_developer_principal_plan_compute (COMPUTE_GENERIC, an onex.nodes entry point, runtime_profiles [local-dev]) holds the lab issuer's planning rules as a canonical node. The plan's D5 named a `cli` profile no deployed kernel runs; the profile registry is canonical in omnibase_core (OMN-12957) and refuses an unregistered name, so the contract names local-dev, a registered profile no deployed runtime carries, which keeps main and effects off the node all the same. Its def-B handler lives at omnibase_infra.handlers.handler_developer_principal_plan, as node_broker_grant_derive_compute's does, because node-local handler directories in this repository are reserved for allowlisted infra nodes. HandlerDeveloperPrincipalPlan validates a grants declaration as scripts/lab_principal_issuer.py load_declaration does, names the principal as principal_name does, decides create, rotate or a device-cap refusal against the principals the broker already holds, and returns the exact grant list and the declaration digest. Since the ticket was written the lab declaration moved its grants into derived documents (grants_from, principal_grants_from), so the request carries the declaration text and the text of each derived document it names; the handler reads no file. A smaller deploy/local/developer-principal-grants.yaml declares the minimum for one lane delegation and is held to the lab declaration by a test. The lab issuer script is not changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20821-plan-node"
+    statement: "A pure compute node plans a developer principal under the lab issuer's rules, and the local declaration stays a subset of the lab's."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the handler and `scripts/lab_principal_issuer.py` (`load_declaration`, `principal_name`) accept and refuse the same fixtures: the lab file, and one fixture each for a wrong schema, an empty grants list, an unknown operation, `*` with `read`, a prefixed group read grant under 16 characters, a prefix outside `[a-z][a-z0-9-]{0,15}`, `max_devices_per_login` of 0 and of 21, and a principal name over 63 characters -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute -k parity_with_lab_issuer -q` shows a fixture on which the two disagree, or the fixture set lacks one of those ten"
+      - id: "AC2"
+        statement: "AC2: with `existing_principals` already holding `max_devices_per_login` distinct names with the declaration's prefix, a new principal is refused and a name already present plans `rotate`; the collision pair (subject `a`, device `b-c` and subject `a-b`, device `c`) plans `rotate` for the second and a 70-character name plans a 63-character name ending in the digest -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute -k device_cap -q` plans the new principal `create`, refuses the present one, or fails either pinned case"
+      - id: "AC3"
+        statement: "AC3: the handler runs with `builtins.open`, `pathlib.Path.read_text`, `socket.socket`, `subprocess.Popen`, `os.environ`, `time.time` and `random.random` replaced by functions that raise, and the handler module imports only the standard-library modules `dataclasses`, `hashlib`, `re`, `collections.abc`, `typing`, plus `pydantic` and `yaml` -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute -k pure -q` fails on a handler that reads a file, and passes on one that imports another module"
+      - id: "AC4"
+        statement: "AC4: every grant in `deploy/local/developer-principal-grants.yaml` is a grant of `deploy/lab/developer-principal-grants.yaml` with the same resource, name and pattern and an operation subset -- falsifier: `uv run pytest tests/scripts/test_developer_principal_grants_parity.py -q` stays green after a grant that the lab file lacks is added to the local file"
+      - id: "AC5"
+        statement: "AC5: the same request twice returns byte-identical plans -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute -k deterministic -q` shows two differing outputs"
+      - id: "AC6"
+        statement: "AC6: the manifest filters for the `main` and `effects` runtime profiles (`filter_manifest_for_runtime_profile`) own none of the node -- falsifier: `uv run pytest tests/unit/nodes/node_developer_principal_plan_compute -k profile_ownership -q` finds it owned by either"
+      - id: "AC7"
+        statement: "AC7: the canonical-file-shape ratchet ([OMN-20304](https://linear.app/omninode/issue/OMN-20304)), the contract validation and the new pre-commit entry pass with no baseline entry added -- falsifier: `pre-commit run --all-files` adds or needs a baseline line, or the new entry is absent from `.pre-commit-config.yaml`"
+evidence_requirements:
+  - kind: "tests"
+    description: "The plan node's unit tests, the grants parity test and the contract-routed integration test pass."
+    command: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute tests/scripts/test_developer_principal_grants_parity.py tests/integration/nodes/test_developer_principal_plan_node_omn20821.py"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20821-ac1-parity-with-lab-issuer"
+    description: >-
+      The committed lab and local declarations are accepted by both, with the same principal name, lane, digest and grant list; the nine refusal fixtures (wrong schema, empty grants, unknown operation, * with read, a short prefixed group read, a bad prefix, max devices 0 and 21, an exact principal over 63 characters) are refused by load_declaration and planned as a declaration refusal by the node. Fails at the parent, which has no node.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k parity_with_lab_issuer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac2-device-cap"
+    description: >-
+      With the cap's worth of prefixed principals held, a new device is refused as device_cap and a held one rotates; principals outside the prefix do not count; the collision pair names dev-a-b-c twice and rotates the second; a 70-character name is capped to 63 characters ending in its digest, equal to the issuer's principal_name.
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k device_cap"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac3-pure"
+    description: >-
+      The handler returns the same plan with open, Path.read_text, socket.socket, subprocess.Popen, time.time and random.random replaced by raising functions and os.environ replaced by a mapping whose every read raises; its module imports nothing outside dataclasses, hashlib, re, collections.abc, typing, pydantic, yaml and omnibase_infra. Positive controls: an added open() call and an added import os each fail it.
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k pure"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac4-grants-parity"
+    description: >-
+      Every grant of deploy/local/developer-principal-grants.yaml, read through load_declaration, is a lab grant with the same resource, name and pattern and a subset of its operations; an unknown topic, wider operations or another pattern added to the local file is named. Fails at the parent, which has no local declaration.
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/scripts/test_developer_principal_grants_parity.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac5-deterministic"
+    description: "The same request twice serialises to byte-identical plans, for the lab and the local declaration."
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k deterministic"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac6-profile-ownership"
+    description: >-
+      discover_contracts_from_paths over the node's contract, filtered by filter_manifest_for_runtime_profile, leaves nothing for main or effects and the node for local-dev (positive control).
+    source: "manual"
+    binds_ac: ["AC6"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k profile_ownership"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-ac7-pre-commit-entry"
+    description: >-
+      Exactly one developer-principal-plan pre-commit entry runs the node's unit tests and the grants parity test, with pass_filenames false, on a change to the node, the issuer script or either declaration. The canonical-file-shape ratchet and the contract validation hooks run in CI on the same head with no baseline file changed in this change.
+    source: "manual"
+    binds_ac: ["AC7"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k pre_commit_entry"
+        cwd: "${OMNI_HOME}/omnibase_infra"
