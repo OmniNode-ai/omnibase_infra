@@ -41,14 +41,14 @@ ALTER TABLE public.lease_projection
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'public.lease_projection'::regclass AND contype = 'p'
     ) THEN
         ALTER TABLE public.lease_projection
             ADD CONSTRAINT lease_projection_pkey PRIMARY KEY (kind, resource);
     END IF;
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'public.lease_projection'::regclass
           AND conname = 'lease_projection_fence_check'
     ) THEN
@@ -56,7 +56,7 @@ BEGIN
             ADD CONSTRAINT lease_projection_fence_check CHECK (fence >= 1);
     END IF;
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'public.lease_projection'::regclass
           AND conname = 'lease_projection_state_check'
     ) THEN
