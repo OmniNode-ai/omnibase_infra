@@ -17,6 +17,11 @@ requirements:
       - id: "AC11"
         statement: |-
           AC11: apply-grants re-applies every declared grant to every issued principal in the lane (or the named ones), refuses a principal the broker does not hold, and never sets a password -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"
+  - id: "req-ci-overlay-binding-shape"
+    statement: "The CI publisher accepts the lane's binding fallback and injected secret resolver declarations without changing its transport selection."
+    acceptance:
+      - id: "AC12"
+        statement: "binding_fallback preserves ordered bus names and secret_resolver preserves its convention flag and typed logical-name/source mappings. Both declarations remain optional, unknown keys and malformed shapes are refused, and broker/security selection is unchanged."
 evidence_requirements:
   - kind: "tests"
     description: "AC10 and AC11: issuer tests."
@@ -41,4 +46,12 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: 'uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac12-ci-overlay-binding-shape"
+    description: "AC12: hermetic publisher overlay regression, runnable on a hosted runner without lab secrets, a live broker or Docker. The new declarations fail validation before this PR's model change."
+    source: "manual"
+    binds_ac: ["AC12"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_trigger_learns_binding_fallback_omn20275.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
