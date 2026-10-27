@@ -304,7 +304,11 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
     if destination.is_symlink():
         if destination_path != source_path:
             raise ValueError("main delegation state links to a conflicting directory")
-        source.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # An existing alias records a completed handover. A missing target on
+        # restart can mean the preserved volume was replaced or unmounted;
+        # creating a new empty store would let completed claims run again.
+        if not source.is_dir():
+            raise ValueError("preserved delegation state is missing after handover")
         return
     if source_path.is_relative_to(destination_path) or destination_path.is_relative_to(
         source_path

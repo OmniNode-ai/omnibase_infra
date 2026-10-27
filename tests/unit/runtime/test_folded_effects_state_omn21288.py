@@ -174,3 +174,22 @@ def test_existing_alias_does_not_accept_a_redirected_source(tmp_path: Path) -> N
 
     assert (tmp_path / "main/delegation").is_symlink()
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("remove_root", [False, True])
+def test_existing_alias_refuses_a_missing_preserved_store(
+    tmp_path: Path, remove_root: bool
+) -> None:
+    env = _env(tmp_path)
+    prepare_folded_effects_state(env)
+    source = tmp_path / "effects/delegation"
+    source.rmdir()
+    if remove_root:
+        source.parent.rmdir()
+
+    with pytest.raises(ValueError, match="preserved delegation state is missing"):
+        prepare_folded_effects_state(env)
+
+    assert (tmp_path / "main/delegation").is_symlink()
+    assert not source.exists()
+    assert source.parent.exists() is not remove_root
