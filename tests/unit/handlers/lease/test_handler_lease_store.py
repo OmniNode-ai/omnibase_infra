@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -13,6 +14,7 @@ from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.lease import HandlerLeaseStore
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
+    unb64,
 )
 from omnibase_infra.models.lease import (
     ModelLeaseAcquireRequest,
@@ -24,17 +26,31 @@ from omnibase_infra.models.lease import (
 pytestmark = pytest.mark.unit
 
 
+def _unexpected_request(request: httpx.Request) -> httpx.Response:
+    raise AssertionError(f"unexpected etcd request {request.url.path}")
+
+
 class _FakeEtcd(HandlerPlacementEtcd):
+    """Records calls; an operation the store should not use fails the test."""
+
     def __init__(self) -> None:
+        super().__init__(
+            "http://etcd.test",
+            httpx.AsyncClient(transport=httpx.MockTransport(_unexpected_request)),
+        )
         self.calls: list[tuple[str, str | int]] = []
         self.txn_error = InfraConnectionError("transaction failed")
         self.revoke_error: InfraConnectionError | None = None
+        self.probe_error: InfraConnectionError | None = None
         self.committed = False
+        self.kv: dict[str, str] = {}
 
     async def get(self, key: str) -> tuple[str, int] | None:
         self.calls.append(("get", key))
-        if self.committed and any(call[0] == "txn" for call in self.calls):
-            return "{}", 42
+        if self.probe_error is not None and any(c[0] == "txn" for c in self.calls):
+            raise self.probe_error
+        if key in self.kv:
+            return self.kv[key], 42
         return None
 
     async def lease_grant(self, ttl_s: int) -> tuple[int, int]:
@@ -54,6 +70,12 @@ class _FakeEtcd(HandlerPlacementEtcd):
         failure: list[dict[str, object]],
     ) -> tuple[bool, int, list[dict[str, object]]]:
         self.calls.append(("txn", 123))
+        if self.committed:
+            # The transaction took effect but its answer was lost.
+            for op in success:
+                put = op["requestPut"]
+                assert isinstance(put, dict)
+                self.kv[unb64(put["key"])] = unb64(put["value"])
         raise self.txn_error
 
     async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
@@ -117,6 +139,37 @@ async def test_txn_failure_revokes_grant_and_preserves_original_error(
 async def test_txn_failure_after_remote_commit_does_not_revoke_grant() -> None:
     adapter = _FakeEtcd()
     adapter.committed = True
+    store = HandlerLeaseStore(adapter, [ModelLeaseKindPolicy(kind="worker")])
+    request = _request()
+    request_key = f"/onex/lease-request/worker/resource/{request.request_id}"
+
+    with pytest.raises(InfraConnectionError) as raised:
+        await store.acquire(request)
+
+    assert raised.value is adapter.txn_error
+    assert adapter.calls == [
+        ("get", request_key),
+        ("grant", 30),
+        ("txn", 123),
+        ("get", request_key),
+    ]
+    assert request_key in adapter.kv
+
+
+async def test_commit_probe_on_another_key_does_not_read_as_committed() -> None:
+    adapter = _FakeEtcd()
+    adapter.kv["/onex/lease-request/worker/resource/other"] = "{}"
+    store = HandlerLeaseStore(adapter, [ModelLeaseKindPolicy(kind="worker")])
+
+    with pytest.raises(InfraConnectionError):
+        await store.acquire(_request())
+
+    assert adapter.calls[-1] == ("revoke", 123)
+
+
+async def test_txn_failure_with_failed_commit_probe_keeps_grant_for_its_ttl() -> None:
+    adapter = _FakeEtcd()
+    adapter.probe_error = InfraConnectionError("probe failed")
     store = HandlerLeaseStore(adapter, [ModelLeaseKindPolicy(kind="worker")])
     request = _request()
     request_key = f"/onex/lease-request/worker/resource/{request.request_id}"
