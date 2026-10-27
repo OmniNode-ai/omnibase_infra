@@ -14,6 +14,14 @@ backup/restore and ``scp``, so a write-time check alone proves nothing about
 the file actually being loaded (OMN-15922 established this and the reasoning is
 unchanged).
 
+Both files are replaced atomically (OMN-20827). A direct ``write_text``
+truncates the target before writing it, so a crash in between leaves a short or
+empty file, and an empty ``credentials.json`` is refused by the next
+``load_secrets`` -- the refusal that would stop a rerun of ``lane-login`` from
+repairing the machine. Each write goes to a temporary file in the same
+directory, created at 0600, flushed, renamed over the target, and the directory
+entry is flushed after the rename.
+
 ``StoreGatewayCredential`` still carries its own copy of this plumbing. It is
 not migrated here in the same change: its refusals are load-bearing for the
 cloud credential path and re-homing them needs its own proof, not a rider on a
@@ -22,8 +30,11 @@ change about a bus identity.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import stat
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -73,8 +84,7 @@ class StoreOnexHomeFiles:
 
     def write_config(self, document: dict[str, object]) -> None:
         """Re-dump the WHOLE document, so every other writer's keys survive."""
-        self._onex_home.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(yaml.safe_dump(document, sort_keys=False))
+        self._replace(self.config_path, yaml.safe_dump(document, sort_keys=False))
 
     def load_secrets(self) -> dict[str, str]:
         if not self.credentials_path.exists():
@@ -97,14 +107,41 @@ class StoreOnexHomeFiles:
     def write_secrets(self, secrets: dict[str, str]) -> None:
         """Write the secret file so it is never briefly world-readable.
 
-        ``touch`` + ``chmod`` before ``write_text``: creating the file at the
-        umask default and tightening it afterwards leaves a window in which the
-        value is on disk at 0644.
+        The temporary file is created at 0600 whatever the umask, so the value
+        is never on disk at a wider mode, and the rename keeps that mode.
+        """
+        self._replace(
+            self.credentials_path, json.dumps(secrets, indent=2, sort_keys=True)
+        )
+
+    def _replace(self, target: Path, text: str) -> None:
+        """Write ``text`` to a 0600 temporary file and rename it over ``target``.
+
+        On any failure the temporary file is removed and ``target`` is left as
+        it was, byte for byte.
         """
         self._onex_home.mkdir(parents=True, exist_ok=True)
-        self.credentials_path.touch(mode=0o600, exist_ok=True)
-        self.credentials_path.chmod(0o600)
-        self.credentials_path.write_text(json.dumps(secrets, indent=2, sort_keys=True))
+        fd, temporary = tempfile.mkstemp(
+            dir=self._onex_home, prefix=f".{target.name}.", suffix=".tmp"
+        )
+        try:
+            try:
+                data = text.encode("utf-8")
+                while data:
+                    data = data[os.write(fd, data) :]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            Path(temporary).replace(target)
+        except BaseException:
+            with contextlib.suppress(FileNotFoundError):
+                Path(temporary).unlink()
+            raise
+        directory = os.open(self._onex_home, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def read_secret(self, ref: str, remediation: str) -> str:
         """Resolve one reference, refusing a file anyone but the owner can read."""
