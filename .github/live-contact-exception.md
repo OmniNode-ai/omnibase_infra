@@ -1,0 +1,1 @@
+Live-contact exception: this change adds a head field to the judge reply marker that the gate parses in process; the posting call and its endpoint are unchanged, and recording GitHub API tests drive both.

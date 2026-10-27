@@ -76,7 +76,10 @@ Reference: OMN-17492, OMN-17427.
 
 The judge modes (``--write-request``, ``--read-request``, ``--pending``,
 ``--post-verdicts``) serve the base-branch ``hostile-review-judge.yml``
-``workflow_run`` workflow, which posts onexbot verdict replies. This gate does
+``workflow_run`` workflow, which posts onexbot verdict replies bound to the
+rejection's id, body digest and the PR head whose code the judge saw. A push
+invalidates a prior judgement; the head recorded by ``--pending`` is retained
+through posting even if the PR moves during the model call. This gate does
 not yet require a verdict: a rejection with a reason still clears a finding
 on dev. The rule requiring a verdict lands with OMN-17427 (omnibase_infra#5237).
 """
@@ -121,6 +124,7 @@ JUDGE_DIGEST_CHARS = 64
 _JUDGE_MARKER_RE = re.compile(
     rf"\A<!-- {JUDGE_MARKER} rejection=(?P<rejection>\d+) "
     rf"digest=(?P<digest>[0-9a-f]{{{JUDGE_DIGEST_CHARS}}}) "
+    r"(?:head=(?P<head>[0-9a-f]{40}) )?"
     r"verdict=(?P<verdict>accepted|refused) "
     r"judge=(?P<judge>[a-z][a-z0-9-]{0,62}) "
     r"identity=(?P<identity>[^\s>]+) -->[ \t]*(?:\n|\Z)"
@@ -296,14 +300,19 @@ def parse_judge_reply(body: str) -> dict[str, str] | None:
 
 
 def judge_verdict_for(
-    thread: dict[str, Any], disposition: Disposition
+    thread: dict[str, Any], disposition: Disposition, *, head_sha: str | None = None
 ) -> JudgeVerdict | None:
     """The latest verdict the onexbot App posted on exactly this rejection.
 
     A reply from any other login is ignored, whatever it claims. The verdict
-    must name the rejection's comment id and the digest of its current body.
+    must name the rejection's comment id, its current body digest and the
+    current PR head. An unbound legacy marker is recognised as a judge reply
+    but cannot suppress a new judgement of the current code.
     """
     if disposition.kind != "rejected" or not disposition.comment_id:
+        return None
+    current_head = os.environ.get("HEAD_SHA", "") if head_sha is None else head_sha
+    if re.fullmatch(r"[0-9a-f]{40}", current_head) is None:
         return None
     found: JudgeVerdict | None = None
     for comment in _comments(thread)[1:]:
@@ -322,6 +331,8 @@ def judge_verdict_for(
         if int(fields["rejection"]) != disposition.comment_id:
             continue
         if fields["digest"] != disposition.digest:
+            continue
+        if fields.get("head") != current_head:
             continue
         found = JudgeVerdict(
             verdict=fields["verdict"],
@@ -874,6 +885,8 @@ class PendingRejection:
 
 def pending_rejections(
     threads: Iterable[dict[str, Any]],
+    *,
+    head_sha: str | None = None,
 ) -> tuple[list[PendingRejection], dict[str, str]]:
     """Rejections still to judge, and notes for those the bot will not judge.
 
@@ -888,7 +901,7 @@ def pending_rejections(
         disposition = latest_disposition(thread)
         if disposition is None or disposition.kind != "rejected":
             continue
-        if judge_verdict_for(thread, disposition) is not None:
+        if judge_verdict_for(thread, disposition, head_sha=head_sha) is not None:
             continue
         key = str(disposition.comment_id or thread.get("id", ""))
         why = not_judgeable(disposition)
@@ -1066,7 +1079,7 @@ def run_pending(
     except (OSError, RuntimeError, KeyError, TypeError, ValueError) as exc:
         print(f"::error::could not fetch review threads (fail-closed): {exc}")
         return 1
-    pending, notes = pending_rejections(threads)
+    pending, notes = pending_rejections(threads, head_sha=head_sha)
     unavailable = ""
     if pending and os.environ.get("HOSTILE_REVIEW_IS_FORK", "false") == "true":
         unavailable = FORK_UNAVAILABLE
@@ -1099,6 +1112,7 @@ def run_pending(
                     item.key: {
                         "top_comment_id": item.top_comment_id,
                         "digest": item.digest,
+                        "head_sha": head_sha,
                         "rejection_url": item.rejection_url,
                         "raised_by": item.raised_by,
                     }
@@ -1125,6 +1139,7 @@ def verdict_body(
     *,
     rejection_id: int,
     digest: str,
+    head_sha: str,
     verdict: str,
     judge: str,
     identity: str,
@@ -1134,13 +1149,14 @@ def verdict_body(
     identity = re.sub(r"[\s>]", "_", identity) or "unknown"
     marker = (
         f"<!-- {JUDGE_MARKER} rejection={rejection_id} digest={digest} "
+        f"head={head_sha} "
         f"verdict={verdict} judge={judge} identity={identity} -->"
     )
     if verdict == "accepted":
         tail = (
             "This finding no longer blocks the `Hostile Review Thread Gate`. The "
-            "judgement is bound to the rejection as written: an edit of it, or a "
-            "later disposition, replaces it."
+            "judgement is bound to the rejection as written and this PR head: "
+            "a push, an edit of the rejection or a later disposition replaces it."
         )
     else:
         tail = (
@@ -1209,9 +1225,17 @@ def run_post_verdicts(
         if not sentence or not identity:
             notes[key] = "the judge's verdict carries no sentence or identity"
             continue
+        judged_head = target.get("head_sha")
+        if (
+            not isinstance(judged_head, str)
+            or re.fullmatch(r"[0-9a-f]{40}", judged_head) is None
+        ):
+            notes[key] = "the pending rejection has no valid judged head SHA"
+            continue
         body = verdict_body(
             rejection_id=int(key),
             digest=str(target["digest"]),
+            head_sha=judged_head,
             verdict=verdict,
             judge=judge,
             identity=identity,
@@ -1233,6 +1257,7 @@ def run_post_verdicts(
             notes[key] = f"the judge {verdict} it, but the reply was not sent: {exc}"
             continue
         row = {
+            "head_sha": judged_head,
             "rejection_comment_id": int(key),
             "rejection_url": target.get("rejection_url", ""),
             "voter_model": target.get("raised_by", ""),
