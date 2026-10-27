@@ -58,6 +58,8 @@ def _harness(profiles: str, project: str, override: bool = False) -> str:
             _function("resolve_lane_runtime_services"),
             f"STABILITY_TEST_COMPOSE_PROJECT={shlex.quote(FOLDING_PROJECT)}",
             f"STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES={shlex.quote(profiles)}",
+            f"DEV_COMPOSE_PROJECT={shlex.quote(DEV_PROJECT)}",
+            "DEV_RUNTIME_MAIN_FOLDED_PROFILES=",
             f"PROJECT={shlex.quote(project)}",
             "RUNTIME_BUILD_SERVICES_OVERRIDE=runtime-effects"
             if override
@@ -122,7 +124,7 @@ def test_unknown_profile_fails() -> None:
     assert "Unknown folded runtime profile: unknown-role" in result.stderr
 
 
-@pytest.mark.parametrize("profiles", ["effects", "effects,worker"])
+@pytest.mark.parametrize("profiles", ["effects", "effects,workers"])
 @pytest.mark.parametrize("override", [False, True])
 def test_retirement_precedes_recreate(profiles: str, override: bool) -> None:
     harness = (
@@ -169,7 +171,7 @@ restart_services /tmp "$PROJECT"
         < up
     )
     assert "runtime-effects" not in lines[up]
-    if "worker" in profiles:
+    if "workers" in profiles:
         assert (
             lines.index("stop --time 30 worker-id") < lines.index("rm worker-id") < up
         )
@@ -238,3 +240,20 @@ def test_unknown_profile_propagates_when_caller_handles_failure(override: bool) 
         check=True,
     )
     assert "Unknown folded runtime profile: unknown-role" in result.stderr
+
+
+def test_dev_worker_fold_filters_the_scoped_build_and_restart() -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _harness("effects", DEV_PROJECT)
+            + "\nDEV_RUNTIME_MAIN_FOLDED_PROFILES=workers"
+            + '\nresolve_lane_runtime_services services "$PROJECT"\ndeclare -p services',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "runtime-worker" not in result.stdout
+    assert "runtime-effects" in result.stdout

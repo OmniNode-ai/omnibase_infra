@@ -40,13 +40,15 @@ def _lane_overlay() -> Path:
     raise AssertionError(f"no compose overlay names project {project!r}")
 
 
-def test_exactly_one_lane_folds_and_it_folds_only_effects() -> None:
+def test_only_declared_lanes_fold_and_lab_folds_only_effects() -> None:
     contract = load_contract()
     folding = {
         name: profile
         for name, profile in contract.profiles.items()
         if profile.processes["main"].folded_profiles
     }
+    assert "dev" in folding
+    assert folding.pop("dev").processes["main"].folded_profiles == ("workers",)
     assert len(folding) == 1, sorted(folding)
     (profile,) = folding.values()
     assert profile.compose_project == _lane_project()
@@ -58,7 +60,8 @@ def test_exactly_one_lane_folds_and_it_folds_only_effects() -> None:
 def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     rendered = render_env(load_contract())
     assert {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")} == {
-        FOLDED_KEY: "effects"
+        FOLDED_KEY: "effects",
+        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers",
     }
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)

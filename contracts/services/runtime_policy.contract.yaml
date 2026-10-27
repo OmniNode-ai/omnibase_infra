@@ -184,6 +184,7 @@ profiles:
     services:
       main:
         runtime_id: dev-main
+        folded_profiles: [workers]
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

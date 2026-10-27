@@ -73,7 +73,11 @@ _LANE_NAMING_SERVICES = frozenset({"omninode-runtime", "runtime-effects"})
 #: section 3.4 names for each lane.
 STACKS: dict[str, _Stack] = {
     "dev": _Stack(
-        files=("docker-compose.infra.yml", "docker-compose.dev-lane.yml"),
+        files=(
+            "docker-compose.infra.yml",
+            "docker-compose.dev-lane.yml",
+            "docker-compose.dev-fold.yml",
+        ),
         lane="compose-dev",
         lane_naming_services=_LANE_NAMING_SERVICES,
     ),
@@ -183,7 +187,7 @@ def _load(compose_file: str) -> dict[str, Any]:
     text = (DOCKER_DIR / compose_file).read_text(encoding="utf-8")
     # `!override` is a compose-only tag SafeLoader refuses; merge semantics are
     # applied by `_merged_services`, which is what the tag changes.
-    document = yaml.safe_load(text.replace("!override", ""))
+    document = yaml.safe_load(text.replace("!override", "").replace("!reset", ""))
     assert isinstance(document, dict), f"{compose_file} did not parse to a mapping"
     return document
 
@@ -214,6 +218,9 @@ def _merged_lane_scoped_environments(stack: _Stack) -> dict[str, dict[str, str]]
     for compose_file in stack.files:
         services = _load(compose_file).get("services") or {}
         for name, service in services.items():
+            if service is None:
+                merged.pop(str(name), None)
+                continue
             merged.setdefault(str(name), {}).update(_service_environment(service))
     return {
         name: env
