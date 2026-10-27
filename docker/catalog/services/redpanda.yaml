@@ -1,6 +1,6 @@
 name: redpanda
 description: Kafka-compatible event streaming (local Docker, always-on)
-image: redpandadata/redpanda:v24.3.18
+image: redpandadata/redpanda:v25.1.12
 layer: infrastructure
 container_name: omnibase-infra-redpanda
 required_env: []
