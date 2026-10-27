@@ -234,6 +234,7 @@ def _run_compose_config(
     profile: str = "",
     with_dev_lane_overlay: bool = False,
     borrower_overlay: Path | None = None,
+    with_tenant_fold: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     # NOTE: the default arm keeps the literal "--env-file",
     # "docker/runtime-policy.env" pair on the command line, because
@@ -258,6 +259,8 @@ def _run_compose_config(
         # A lane that layers its own overlay THIRD, over this base and the
         # dev-lane overlay, as the deploy agent renders it.
         command += ["-f", str(borrower_overlay)]
+    if with_tenant_fold:
+        command += ["-f", str(REPO_ROOT / "docker/docker-compose.dev-tenant-fold.yml")]
     if profile:
         command += ["--profile", profile]
     command.append("config")
@@ -276,6 +279,28 @@ pytestmark = pytest.mark.skipif(
     not _docker_compose_available(),
     reason="docker compose is required for non-mutating compose render validation",
 )
+
+
+@pytest.mark.integration
+def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(
+        env, profile="runtime", with_dev_lane_overlay=True, with_tenant_fold=True
+    )
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    assert "tenant-projection-writer" not in services
+    main = services["omninode-runtime"]
+    assert main["environment"]["RUNTIME_PROFILE"] == "main"
+    assert "tenant-projection" in main["environment"][
+        "ONEX_RUNTIME_FOLDED_PROFILES"
+    ].split(",")
+    targets = {volume["target"] for volume in main["volumes"]}
+    assert {
+        "/app/data",
+        "/app/tenant-projection-data",
+        "/app/tenant-projection-logs",
+    } <= targets
 
 
 @pytest.mark.integration
