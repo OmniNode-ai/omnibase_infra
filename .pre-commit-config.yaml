@@ -2098,9 +2098,22 @@ repos:
         name: Check the dev stack runs no workload outside the runtime container
         entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: dev-tenant-projection-fold
+        name: Check the primary dev tenant projection fold
+        entry: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        language: system
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-dev-tenant-fold-required-env-vars
+        name: Check tenant fold required env vars are declared
+        entry: uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-tenant-fold.yml --manifest-file docker/dev-tenant-fold-required-env.manifest.txt
+        language: system
+        files: docker/(docker-compose\.dev-tenant-fold\.yml|dev-tenant-fold-required-env\.manifest\.txt)
+        pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references
