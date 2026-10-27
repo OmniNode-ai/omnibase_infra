@@ -104,30 +104,49 @@ def test_dev_pin_past_the_deployed_volume_is_the_next_proven_hop() -> None:
     )
 
 
+_HOP_1 = "redpandadata/redpanda:v25.1.12"
+_HOP_2 = "redpandadata/redpanda:v25.2.14"
+_HOP_3 = "redpandadata/redpanda:v25.3.18"
+_OFF_HOP = "redpandadata/redpanda:v25.1.11"
+_PATH = [_HOP_1, _HOP_2, _HOP_3]
+_OFF_PATH = "the pin must take the next hop on the declared path"
+_UNPROVEN = "has not been proven on a copy of the dev data volume"
+
+
 @pytest.mark.parametrize(
-    ("image", "deployed", "proven", "refused"),
+    ("image", "deployed", "path", "proven", "reason"),
     [
-        ("redpandadata/redpanda:v24.3.18", "24.3", [], False),
-        (
-            "redpandadata/redpanda:v25.1.12",
-            "24.3",
-            ["redpandadata/redpanda:v25.1.12"],
-            False,
-        ),
-        ("redpandadata/redpanda:v25.1.12", "24.3", [], True),
-        (
-            "redpandadata/redpanda:v25.1.11",
-            "24.3",
-            ["redpandadata/redpanda:v25.1.11"],
-            True,
-        ),
+        # A pin on the deployed feature release is not a hop.
+        ("redpandadata/redpanda:v24.3.18", "24.3", _PATH, [], ""),
+        ("redpandadata/redpanda:v24.3.5", "24.3", _PATH, [], ""),
+        # The next hop, proven: accepted.
+        (_HOP_1, "24.3", _PATH, [_HOP_1], ""),
+        # The next hop, not proven: refused as unproven only.
+        (_HOP_1, "24.3", _PATH, [], _UNPROVEN),
+        # Off path but proven: refused as off path, not as unproven.
+        (_OFF_HOP, "24.3", _PATH, [_OFF_HOP], _OFF_PATH),
+        # Off path and unproven: the path check runs first.
+        (_OFF_HOP, "24.3", _PATH, [], _OFF_PATH),
+        # A later hop taken before the next one is off path.
+        (_HOP_2, "24.3", _PATH, [_HOP_1, _HOP_2], _OFF_PATH),
+        # After the first hop is live, deployed advances and the hop leaves path.
+        (_HOP_1, "25.1", [_HOP_2, _HOP_3], [_HOP_1, _HOP_2], ""),
+        (_HOP_2, "25.1", [_HOP_2, _HOP_3], [_HOP_1, _HOP_2], ""),
+        (_HOP_3, "25.1", [_HOP_2, _HOP_3], _PATH, _OFF_PATH),
+        # An exhausted path admits no further pin.
+        (_HOP_3, "25.2", [], [_HOP_3], _OFF_PATH),
     ],
 )
 def test_unproven_refusal_fixtures(
-    image: str, deployed: str, proven: list[str], refused: bool
+    image: str, deployed: str, path: list[str], proven: list[str], reason: str
 ) -> None:
-    path = _declaration()["path"]
-    assert bool(unproven_refusal(image, deployed, path, proven)) is refused
+    refusal = unproven_refusal(image, deployed, path, proven)
+    if reason:
+        other = _UNPROVEN if reason == _OFF_PATH else _OFF_PATH
+        assert reason in refusal, refusal
+        assert other not in refusal, refusal
+    else:
+        assert refusal == ""
 
 
 def test_every_path_hop_was_proven_on_a_data_copy() -> None:
