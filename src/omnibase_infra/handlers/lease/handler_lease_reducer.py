@@ -8,8 +8,9 @@ outright using exactly that event's data, without inheriting a lower fence's
 holder; a lower fence is dropped. At equal fences, state is the maximum of the
 total order ``held < released < expired`` and holder is the non-empty value,
 or the lexicographically greater value if both are non-empty and differ.
-The lease ID comes from the higher-ranked state (equal fences identify the same
-grant). Lower-ranked events can still supply a missing holder without changing
+The lease ID comes from the higher-ranked state; equal-ranked conflicting IDs
+use the greater UUID, so even inconsistent replay data converges. Lower-ranked
+events can still supply a missing holder without changing
 state. An unchanged merged row emits no intent, so replaying events in any order
 reaches the same rows.
 """
@@ -37,7 +38,8 @@ _STATE: dict[str, Literal["held", "released", "expired"]] = {
 # Higher fences use exactly the event's data; lower fences are dropped.
 # Equal fences join by the total order held < released < expired, retain the
 # non-empty or lexicographically greater holder even from a lower-ranked event,
-# and take the lease ID from the higher-ranked state (the same grant).
+# and take the lease ID from the higher-ranked state, then the greater UUID
+# when equal-ranked events disagree about the grant.
 # An unchanged merged row emits no intent.
 _RANK = {"held": 0, "released": 1, "expired": 2}
 
@@ -64,6 +66,8 @@ def reduce_lease_event(
         if _RANK[row_state] < _RANK[current.state]:
             row_state = current.state
             lease_id = current.lease_id
+        elif _RANK[row_state] == _RANK[current.state]:
+            lease_id = max(lease_id, current.lease_id)
     row = ModelLeaseProjectionRow(
         kind=event.kind,
         resource=event.resource,

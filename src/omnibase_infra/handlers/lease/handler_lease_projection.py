@@ -5,8 +5,9 @@
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
 is above the incoming one, so an out-of-order replay never lowers a fence. At an
 equal fence the statement applies the reducer's join (state by the order
-``held < released < expired``, the lease ID of the higher-ranked state, the
-greater holder), so a replay that reaches the table in any order, including
+``held < released < expired``, the lease ID of the higher-ranked state with
+the greater UUID breaking equal-rank ties, the greater holder), so a replay
+that reaches the table in any order, including
 after the reducer restarts with empty state, lands the same row.
 The table is created by
 ``docker/migrations/forward/nodes/node_projection_lease/0000_create_lease_projection.sql``.
@@ -29,7 +30,12 @@ ON CONFLICT (kind, resource) DO UPDATE SET
     lease_id = CASE
         WHEN EXCLUDED.fence > lease_projection.fence
             OR CASE EXCLUDED.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
-            >= CASE lease_projection.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+            > CASE lease_projection.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+            OR (
+                CASE EXCLUDED.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+                = CASE lease_projection.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+                AND EXCLUDED.lease_id > lease_projection.lease_id
+            )
         THEN EXCLUDED.lease_id ELSE lease_projection.lease_id END,
     fence = EXCLUDED.fence,
     holder = CASE

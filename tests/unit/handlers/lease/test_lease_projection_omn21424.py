@@ -235,3 +235,39 @@ def test_ac4_sql_upsert_refreshes_updated_at_on_every_conflict() -> None:
     )
     (stamp,) = db.execute("SELECT updated_at FROM lease_projection").fetchone()
     assert stamp == "2026-10-27T00:00:00Z"
+
+
+def test_ac4_equal_rank_conflicting_lease_ids_converge_in_sql_and_reducer() -> None:
+    """Even conflicting replay data has one result, independent of delivery order."""
+    events = [
+        ModelLeaseReply(
+            outcome=outcome,
+            kind="k",
+            resource="r",
+            lease_id=lease_id,
+            fence=10,
+            holder=holder,
+        )
+        for outcome, lease_id, holder in (
+            ("lease-expired", _L1, ""),
+            ("lease-expired", _L2, ""),
+            ("lease-released", _L3, "a"),
+        )
+    ]
+    expected = ModelLeaseProjectionRow(
+        kind="k", resource="r", lease_id=_L2, fence=10, holder="a", state="expired"
+    )
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    for order in itertools.permutations(events):
+        state: dict[tuple[str, str], ModelLeaseProjectionRow] = {}
+        with _sqlite_with_migration() as db:
+            for event in order:
+                state, _ = reduce_lease_event(state, event)
+                # Independent reducers can emit these rows after a restart;
+                # SQL must converge without relying on a previous reducer fold.
+                for intent in reduce_lease_event({}, event)[1]:
+                    db.execute(sql, lease_projection_params(intent.row))
+            assert state[("k", "r")] == expected, order
+            assert db.execute(
+                "SELECT lease_id, fence, holder, state FROM lease_projection"
+            ).fetchall() == [(str(_L2), 10, "a", "expired")], order
