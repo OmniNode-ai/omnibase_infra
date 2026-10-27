@@ -1,0 +1,79 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21090"
+title: "Claude Code context service and delegation adapter (compaction mod)"
+summary: "This repository change vendors the per-session current-context projection's migrations ahead of its omnimarket writer node (TA.13, boundary algorithm step 5): node_projection_compaction_current_context/0000 creates omninode_internal.compaction_current_context and 0001 delivers the omninode_runtime grant on the table and its cursor sequence. omnimarket#4430 declares the relation and sequence in omnimarket's ownership manifest and carries no SQL, so these are interim vendored files, digest-pinned until the writer node carries them. Adds checksum-bound ledger rows and migration classes, one interim grant declaration named in the OMN-18863 expiry module, and the regenerated topology instances and rendered catalogs, the same shape the compaction_receipts vendor used. The epic criteria are read through the Linear API on child tickets and are not bound by this contract."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21090-current-context-vendor"
+    statement: |-
+      The two vendored current-context migrations keep their reviewed bytes, each has exactly one checksum-bound ledger row and the correct class, neither is fenced, and the interim grant declaration names the vendored create migration. The chain applies to an ephemeral PostgreSQL database, reapplies without changing a populated row, and gives omninode_runtime exactly SELECT, INSERT and UPDATE on the table and USAGE on the cursor sequence.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: every Track T0 ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track Shared not in state Done, read through the Linear API
+      - id: "AC2"
+        statement: |-
+          AC2: every Track A ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track A not in state Done, read through the Linear API
+      - id: "AC3"
+        statement: |-
+          AC3: every Track B ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track B not in state Done, read through the Linear API
+      - id: "AC4"
+        statement: |-
+          AC4: every Track C ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track C not in state Done, read through the Linear API
+      - id: "AC5"
+        statement: |-
+          AC5: every Track E ticket under this epic is Done with its own criteria met -- falsifier: a child ticket of this epic in track E not in state Done, read through the Linear API
+evidence_requirements:
+  - kind: "tests"
+    description: "Byte pins, ledger checksums, classes, absence of fences and the interim grant declaration."
+    command: "uv run pytest tests/unit/migrations/test_omn21090_compaction_current_context_vendor.py -q"
+  - kind: "tests"
+    description: "Real migration apply, replay, column types and runtime privileges."
+    command: "ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_current_context_vendor_omn21090.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21090-ac1-current-context-vendor-pins"
+    description: "This repository's part: both vendored current-context migrations match their pinned digests and each has exactly one ledger row whose checksum is the live file digest. Fails at the merge base, where neither file nor row exists. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn21090_compaction_current_context_vendor.py -q -k 'reviewed_pin or ledger'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21090-ac2-current-context-live-apply"
+    description: "Track A (TA.13, the current-context projection): the chain applies twice around a populated row on ephemeral PostgreSQL, delivers the declared column types and empty-array defaults, and omninode_runtime can upsert a moved boundary and read its cursor back while DELETE is refused. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_compaction_current_context_vendor_omn21090.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21090-ac3-current-context-interim-grant"
+    description: "The interim grant declaration for compaction_current_context names the vendored create migration with access read_write and role compaction_current_context. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn21090_compaction_current_context_vendor.py -q -k interim_grant"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-omn21090-ac4-current-context-classes"
+    description: "0000 is declared forward-only and 0001 expand-only, and neither is in the fenced node migration manifest. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn21090_compaction_current_context_vendor.py -q -k 'declared_with_its_class or fenced'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC4"]
+  - id: "dod-omn21090-ac5-interim-expiry-and-receipts"
+    description: "The new interim declaration is registered in the OMN-18863 expiry map, which matches the carried declarations (fails at the merge base, where compaction_current_context is mapped but not declared), and the compaction_receipts vendor beside it still passes its pins, ledger rows, classes and interim declaration. The child-ticket state this criterion names is read through the Linear API and is not bound here."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py tests/unit/migrations/test_omn21336_compaction_receipts_vendor.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC5"]
