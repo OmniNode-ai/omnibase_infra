@@ -3712,9 +3712,10 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 139
+        "omnibase_infra": 129,
+        "onex-change-control": 4
       },
-      "contracts_discovered": 160,
+      "contracts_discovered": 154,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 103,
       "probe_count": 1114,
