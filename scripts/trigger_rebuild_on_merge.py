@@ -90,6 +90,10 @@ from pydantic import (
     model_validator,
 )
 
+from omnibase_infra.runtime.models.model_secret_resolver_config import (
+    ModelSecretResolverConfig,
+)
+
 # CI publishes the node_redeploy_orchestrator start command; the orchestrator's
 # deploy publish-monitor effect is the sole emitter of the deploy-agent rebuild
 # command downstream.
@@ -297,6 +301,10 @@ class ModelCiBusLane(BaseModel):
     broker_topology: ModelCiBusLaneBrokerTopology | None = None
     delegation_routes: tuple[ModelCiBusLaneDelegationRoute, ...] = ()
     delegation_fault_routes: tuple[ModelCiBusLaneDelegationFaultRoute, ...] = ()
+    # Client binding declarations are validated here but acted on by the
+    # binding runtime. They do not change this publisher's Kafka transport.
+    binding_fallback: tuple[Literal["inmemory"], ...] = ()
+    secret_resolver: ModelSecretResolverConfig | None = None
 
     @field_validator("broker")
     @classmethod
@@ -393,6 +401,8 @@ ModelCiBusOverlay.model_rebuild(
         "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
         "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
         "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
+        "Literal": Literal,
+        "ModelSecretResolverConfig": ModelSecretResolverConfig,
     }
 )
 ModelCiBusLane.model_rebuild(
@@ -401,6 +411,8 @@ ModelCiBusLane.model_rebuild(
         "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
         "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
         "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
+        "Literal": Literal,
+        "ModelSecretResolverConfig": ModelSecretResolverConfig,
     }
 )
 
