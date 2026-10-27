@@ -8,6 +8,7 @@ import itertools
 import re
 import sqlite3
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import pytest
@@ -163,3 +164,21 @@ def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:
             "SELECT kind, resource, fence, holder FROM lease_projection"
         ).fetchall()
         assert found == [("k", "r", 23, "h23")], order
+
+
+@pytest.mark.parametrize("ended", ["released", "expired"])
+def test_ac4_sql_upsert_at_equal_fence_never_revives_an_ended_lease(
+    ended: Literal["released", "expired"],
+) -> None:
+    """A replayed grant or late renewal at the same fence keeps the ended state."""
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    held = ModelLeaseProjectionRow(
+        kind="k", resource="r", lease_id=_L1, fence=17, holder="h17", state="held"
+    )
+    done = held.model_copy(update={"state": ended})
+    for order in ((held, done), (done, held)):
+        db = _sqlite_with_migration()
+        for row in order:
+            db.execute(sql, lease_projection_params(row))
+        found = db.execute("SELECT fence, state FROM lease_projection").fetchall()
+        assert found == [(17, ended)], order

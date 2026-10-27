@@ -16,6 +16,62 @@ CREATE TABLE IF NOT EXISTS public.lease_projection (
     PRIMARY KEY (kind, resource)
 );
 
+-- ---- BEGIN OMN-15376 shape reconciliation: lease_projection ----
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS kind TEXT;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS resource TEXT;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS lease_id UUID;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS fence BIGINT;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS holder TEXT;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE public.lease_projection ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- Static NOT NULL convergence: a column already holding NULLs fails the ALTER, the
+-- same outcome as a guard would give, with every relation target visible to the SQL gate.
+ALTER TABLE public.lease_projection ALTER COLUMN kind SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN resource SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN lease_id SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN fence SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN holder SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN state SET NOT NULL;
+ALTER TABLE public.lease_projection ALTER COLUMN updated_at SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.lease_projection'::regclass AND contype = 'p'
+    ) THEN
+        ALTER TABLE public.lease_projection
+            ADD CONSTRAINT lease_projection_pkey PRIMARY KEY (kind, resource);
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.lease_projection'::regclass
+          AND contype = 'c' AND conname = 'lease_projection_fence_check'
+    ) THEN
+        ALTER TABLE public.lease_projection
+            ADD CONSTRAINT lease_projection_fence_check CHECK (fence >= 1);
+    END IF;
+END$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.lease_projection'::regclass
+          AND contype = 'c' AND conname = 'lease_projection_state_check'
+    ) THEN
+        ALTER TABLE public.lease_projection
+            ADD CONSTRAINT lease_projection_state_check
+            CHECK (state IN ('held', 'released', 'expired'));
+    END IF;
+END$$;
+-- ---- END OMN-15376 shape reconciliation: lease_projection ----
+
 -- OMN-21279: the topology declares a TABLE grant on this relation for the
 -- tenant projection writer; the grant is issued here, next to the CREATE.
 -- Flat migration 103 provisions the cluster role before this file runs.

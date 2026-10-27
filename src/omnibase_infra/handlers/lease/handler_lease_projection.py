@@ -4,7 +4,9 @@
 
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
 is above the incoming one, so an out-of-order replay never lowers a fence.
-The table is created by
+At one fence a ``held`` row never overwrites a ``released`` or ``expired`` one,
+the same rank the reducer applies, so a replayed grant or late renewal cannot
+revive an ended lease. The table is created by
 ``docker/migrations/forward/nodes/node_projection_lease/0001_create_lease_projection.sql``.
 """
 
@@ -26,7 +28,11 @@ ON CONFLICT (kind, resource) DO UPDATE SET
     fence = EXCLUDED.fence,
     holder = EXCLUDED.holder,
     state = EXCLUDED.state
-WHERE lease_projection.fence <= EXCLUDED.fence
+WHERE lease_projection.fence < EXCLUDED.fence
+   OR (
+       lease_projection.fence = EXCLUDED.fence
+       AND (lease_projection.state = 'held' OR EXCLUDED.state <> 'held')
+   )
 """.strip()
 
 
