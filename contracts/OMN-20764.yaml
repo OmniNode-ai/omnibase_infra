@@ -8,17 +8,17 @@ interfaces_touched:
   - public_api
 requirements:
   - id: req-transcribed-acceptance-criteria
-    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy. Only AC1 is transcribed; AC2 is evidenced by a change in a sibling repository under the same ticket.
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy. AC1 and AC2 are transcribed below; this repository evidences the terminal reason read by the sibling repository for AC2. AC3 was removed from the ticket and its evidence binding is explicitly retired below.
     acceptance:
       - id: AC1
         statement: 'AC1: an onex delegate call whose request topic has no live consumer ends within its budget with a typed terminal naming the topic and the absent consumer, not a bare timeout -- falsifier: uv run pytest tests -k delegate_no_consumer_typed_terminal'
   - id: req-added-criteria-2026-10-24
     statement: >-
-      AC2, transcribed from the ticket body (the part before its falsifier) after it reappeared on the ticket. The classifier half lives in the hourly tick's own repository; this repository binds the seam it reads.
+      AC2, transcribed from the ticket body after it reappeared on the ticket, with the local seam falsifier. The classifier half lives in the hourly tick's own repository; this repository binds the seam it reads.
     acceptance:
       - id: AC2
         statement: >-
-          AC2: hourly-tick records that terminal's reason in its degraded class instead of a generic transport timeout
+          AC2: hourly-tick records that terminal's reason in its degraded class instead of a generic transport timeout -- local seam falsifier: uv run pytest tests/integration/cli/test_delegate_no_consumer_hourly_tick_reason_omn20764.py -q
 evidence_requirements:
   - kind: tests
     description: The typed-terminal suite passes.

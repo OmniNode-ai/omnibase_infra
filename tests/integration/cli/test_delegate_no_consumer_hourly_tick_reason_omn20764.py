@@ -19,24 +19,20 @@ requires that it does not match.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
+from click.testing import CliRunner, Result
 
-from tests.integration.cli.test_delegate_no_consumer_typed_terminal_omn20764 import (
-    _broker_does_not_answer,
-    _delegate,
-    _delegate_environment,
-    _no_group_bound,
-    _only_receipt,
-    clock,
-)
+from omnibase_infra.backends.backend_probe import ConsumerGroupLivenessUnknownError
+from omnibase_infra.cli import cli_delegate, delegate_locus
+from omnibase_infra.cli.cli_delegate import delegate_command
 
 pytestmark = pytest.mark.integration
-
-# Imported for their autouse effect: the fake clock and the stand-in contract.
-__all__ = ["_delegate_environment", "clock"]
 
 # The hourly tick's NO_CONSUMER_FAILURE (an internal repository, sweep script
 # linear-comments-hourly.js, added under OMN-20764), copied verbatim.
@@ -49,16 +45,87 @@ _HOURLY_TICK_NO_CONSUMER = re.compile(
 )
 
 
+def _invoke_delegate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, broker_answers: bool
+) -> tuple[Result, dict[str, Any]]:
+    """Run the command with only its contract, clock and broker answer replaced."""
+    command_topic = "onex.cmd.omnimarket.delegate-skill.v1"
+    terminal_topic = "onex.evt.omnimarket.delegate-skill-completed.v1"
+    contract = {
+        "name": "node_delegate_skill_orchestrator",
+        "terminal_event": terminal_topic,
+        "event_bus": {
+            "publish_topics": [terminal_topic],
+            "subscribe_topics": [command_topic],
+        },
+        "handler": {
+            "module": "tests.fixtures.handler_correlated_noop",
+            "class": "HandlerCorrelatedNoop",
+            "input_model": (
+                "tests.fixtures.handler_correlated_noop.ModelCorrelatedNoopRequest"
+            ),
+        },
+        "handler_routing": {
+            "default_handler": (
+                "tests.fixtures.handler_correlated_noop:HandlerCorrelatedNoop"
+            )
+        },
+    }
+    contract_path = tmp_path / "contract.yaml"
+    contract_path.write_text(yaml.safe_dump(contract), encoding="utf-8")
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
+    monkeypatch.setattr(
+        cli_delegate, "_resolve_packaged_contract", lambda _n: contract_path
+    )
+    monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+    now = 1000.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    def live_consumer_groups(**_: object) -> tuple[str, ...]:
+        if not broker_answers:
+            raise ConsumerGroupLivenessUnknownError("broker did not answer")
+        return ()
+
+    monkeypatch.setattr(delegate_locus, "_monotonic", lambda: now)
+    monkeypatch.setattr(delegate_locus, "_sleep", sleep)
+    monkeypatch.setattr(delegate_locus, "live_consumer_groups", live_consumer_groups)
+    state_root = tmp_path / "state"
+    result = CliRunner().invoke(
+        delegate_command,
+        [
+            "Reply with exactly the word READY",
+            "--json",
+            "--bus",
+            "kafka",
+            "--kafka-bootstrap",
+            "broker.invalid:19092",
+            "--locus",
+            "deployed-lane",
+            "--state-root",
+            str(state_root),
+            "--emit-socket",
+            str(tmp_path / "no-daemon.sock"),
+        ],
+        catch_exceptions=False,
+    )
+    written = sorted(state_root.glob("runs/*/receipt.json"))
+    assert len(written) == 1
+    receipt: dict[str, Any] = json.loads(written[0].read_text(encoding="utf-8"))
+    return result, receipt
+
+
 def test_hourly_tick_delegate_no_consumer_reason_matches_the_held_classifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC2, this side: the missing-consumer terminal carries the classifier's phrase."""
-    _no_group_bound(monkeypatch)
-    state_root = tmp_path / "state"
-    result = _delegate(state_root, tmp_path)
+    result, receipt = _invoke_delegate(tmp_path, monkeypatch, broker_answers=True)
 
     assert result.exit_code != 0
-    receipt = _only_receipt(state_root)
     assert _HOURLY_TICK_NO_CONSUMER.search(receipt["failure_reason"]), receipt[
         "failure_reason"
     ]
@@ -69,12 +136,28 @@ def test_hourly_tick_delegate_no_consumer_reason_control_unanswerable_broker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Control: a broker that did not answer is not reported as a missing consumer."""
-    _broker_does_not_answer(monkeypatch)
-    state_root = tmp_path / "state"
-    result = _delegate(state_root, tmp_path)
+    result, receipt = _invoke_delegate(tmp_path, monkeypatch, broker_answers=False)
 
     assert result.exit_code != 0
-    receipt = _only_receipt(state_root)
     assert not _HOURLY_TICK_NO_CONSUMER.search(receipt["failure_reason"]), receipt[
         "failure_reason"
     ]
+    assert not _HOURLY_TICK_NO_CONSUMER.search(result.output), result.output
+
+
+@pytest.mark.parametrize(
+    ("failure_reason", "matches"),
+    [
+        pytest.param("no live consumer groups are bound", True, id="consumer-group"),
+        pytest.param("no service was listening", True, id="listener"),
+        pytest.param("DelegateNoConsumerRefusedError", True, id="typed-error"),
+        pytest.param("absent_consumer", True, id="typed-field"),
+        pytest.param("broker did not answer", False, id="unknown-broker"),
+        pytest.param("timed out after 180 s", False, id="generic-timeout"),
+    ],
+)
+def test_hourly_tick_no_consumer_pattern_alternatives(
+    failure_reason: str, matches: bool
+) -> None:
+    """Pin each copied classifier alternative and unrelated transport controls."""
+    assert bool(_HOURLY_TICK_NO_CONSUMER.search(failure_reason)) is matches
