@@ -81,6 +81,9 @@ from omnibase_infra.enums.generated.enum_omnibase_infra_topic import (
 )
 from omnibase_infra.errors import (
     EnvelopeValidationError,
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -6386,12 +6389,55 @@ class RuntimeHostProcess:
             version=self._node_identity.version,
         )
 
-        self._dynamic_contract_unsubscribe = await self._event_bus.subscribe(
-            topic=SUFFIX_NODE_REGISTRATION,
-            node_identity=listener_identity,
-            on_message=self._on_dynamic_contract_event,
-            purpose=EnumConsumerGroupPurpose.CONSUME,
+        from omnibase_infra.models.model_event_bus_recovery_config import (
+            ModelEventBusRecoveryConfig,
         )
+
+        event_bus_config = (self._config or {}).get("event_bus", {})
+        recovery_config = (
+            event_bus_config.get("recovery")
+            if isinstance(event_bus_config, dict)
+            else None
+        )
+        recovery = (
+            ModelEventBusRecoveryConfig.model_validate(recovery_config)
+            if recovery_config is not None
+            else ModelEventBusRecoveryConfig.from_contract()
+        )
+        delay = recovery.initial_backoff_seconds
+        while True:
+            try:
+                async with asyncio.timeout(recovery.attempt_timeout_seconds):
+                    self._dynamic_contract_unsubscribe = (
+                        await self._event_bus.subscribe(
+                            topic=SUFFIX_NODE_REGISTRATION,
+                            node_identity=listener_identity,
+                            on_message=self._on_dynamic_contract_event,
+                            purpose=EnumConsumerGroupPurpose.CONSUME,
+                        )
+                    )
+                break
+            except (
+                InfraConnectionError,
+                InfraTimeoutError,
+                InfraUnavailableError,
+                TimeoutError,
+            ) as exc:
+                # A late registration join used to unwind start(), closing all
+                # already-live delegation consumers after a lengthy cold boot.
+                # Keep startup/readiness pending and retry this listener only.
+                # Cancellation still propagates immediately on runtime shutdown.
+                logger.warning(
+                    "Dynamic contract listener unavailable; keeping existing "
+                    "consumers and retrying in %ss: %s",
+                    delay,
+                    sanitize_error_message(exc),
+                )
+                await asyncio.sleep(delay)
+                delay = min(
+                    delay * recovery.backoff_multiplier,
+                    recovery.max_backoff_seconds,
+                )
 
         logger.info(
             "Dynamic contract registration listener started",

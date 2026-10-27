@@ -11,16 +11,34 @@ internal state, isolating the methods under test from full runtime setup.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraTimeoutError
+from omnibase_infra.models.errors.model_timeout_error_context import (
+    ModelTimeoutErrorContext,
+)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 pytestmark = pytest.mark.unit
+
+
+def _join_timeout() -> InfraTimeoutError:
+    return InfraTimeoutError(
+        "registration assignment timed out",
+        context=ModelTimeoutErrorContext(
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="start_consumer",
+            target_name=SUFFIX_NODE_REGISTRATION,
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Shared YAML fixture
@@ -99,6 +117,75 @@ def _make_process(
 
 class TestStartDynamicContractListener:
     """Tests for _start_dynamic_contract_listener."""
+
+    @pytest.mark.asyncio
+    async def test_transient_join_timeout_retries_without_tearing_down_runtime(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A late registration join must not remove already-live consumers."""
+        from omnibase_infra.models.model_event_bus_recovery_config import (
+            ModelEventBusRecoveryConfig,
+        )
+
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        unsubscribe = AsyncMock()
+        process._event_bus.subscribe.side_effect = [
+            _join_timeout(),
+            _join_timeout(),
+            unsubscribe,
+        ]
+        sleep = AsyncMock()
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+
+        await process._start_dynamic_contract_listener()
+
+        policy = ModelEventBusRecoveryConfig.from_contract()
+        assert process._event_bus.subscribe.await_count == 3
+        assert [c.args[0] for c in sleep.await_args_list] == [
+            policy.initial_backoff_seconds,
+            min(
+                policy.initial_backoff_seconds * policy.backoff_multiplier,
+                policy.max_backoff_seconds,
+            ),
+        ]
+        assert process._dynamic_contract_unsubscribe is unsubscribe
+        process._event_bus.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_dynamic_listener_retry_is_cancelled_on_shutdown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Shutdown must interrupt retry rather than create a new consumer."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._event_bus.subscribe.side_effect = _join_timeout()
+        sleeping = asyncio.Event()
+
+        async def sleep(delay: float) -> None:
+            sleeping.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+        task = asyncio.create_task(process._start_dynamic_contract_listener())
+        try:
+            await asyncio.wait_for(sleeping.wait(), timeout=1)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        process._event_bus.subscribe.assert_awaited_once()
+        assert process._dynamic_contract_unsubscribe is None
+
+    @pytest.mark.asyncio
+    async def test_dynamic_listener_configuration_error_is_not_retried(self) -> None:
+        """Malformed subscription declarations still fail startup explicitly."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._event_bus.subscribe.side_effect = ValueError("invalid topic")
+        with pytest.raises(ValueError, match="invalid topic"):
+            await process._start_dynamic_contract_listener()
+        process._event_bus.subscribe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_subscribes_to_node_registration_topic(self) -> None:

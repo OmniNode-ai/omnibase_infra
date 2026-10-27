@@ -2156,9 +2156,23 @@ class EventBusKafka(
         # calls during cold start.  _pending_consumer_keys (set above under
         # the lock) guards against duplicate starts across concurrent callers.
         if need_consumer_start:
-            await self._start_consumer_for_topic_unlocked(
-                topic, effective_group_id, auto_offset_reset_override=auto_offset_reset
-            )
+            try:
+                await self._start_consumer_for_topic_unlocked(
+                    topic,
+                    effective_group_id,
+                    auto_offset_reset_override=auto_offset_reset,
+                )
+            except BaseException:
+                # No unsubscribe handle escapes a failed/cancelled attach. Remove
+                # only this call's intent so retry cannot duplicate its callback;
+                # other callers' subscriptions must keep their ownership.
+                async with self._lock:
+                    self._subscribers[topic] = [
+                        entry
+                        for entry in self._subscribers[topic]
+                        if entry[1] != subscription_id
+                    ]
+                raise
 
         async with self._lock:
             logger.debug(
