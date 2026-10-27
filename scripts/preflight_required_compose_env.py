@@ -39,7 +39,8 @@ check matches each set password against a pattern and still prints only names.
 
 For the dev stack, the effective Compose JSON also has to satisfy the broker
 memory authorized by OPERATOR-CONSENT 2026-10-27T06:37:48Z (OMN-20275):
---memory 12 GiB inside a container limit of 16 GiB. This render is kept
+--memory 12 GiB inside a container limit of 16 GiB. The measured arena
+floor and the consent ceiling both remain enforced. This render is kept
 in memory and never printed; no deployment is attempted by this check.
 
 Exit codes:
@@ -59,7 +60,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -82,15 +83,15 @@ _BROKER_ARENA_BYTES = 12 * 1024**3
 _BROKER_LIMIT_BYTES = 16 * 1024**3
 
 
-def _broker_memory_bytes(value: object) -> int:
+def _broker_memory_bytes(value: object) -> Fraction:
     """Parse Docker/Redpanda binary memory units; refuse malformed values."""
     match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kmgt]?)i?b?", str(value), re.I)
     if not match:
         raise ValueError("missing or malformed broker memory size")
-    return int(Decimal(match[1]) * (1024 ** (" kmgt".index(match[2].lower()))))
+    return Fraction(match[1]) * (1 << (10 * " kmgt".index(match[2].lower())))
 
 
-def _check_broker_memory(broker: Mapping[str, Any]) -> None:
+def _check_broker_memory(broker: Mapping[str, Any]) -> Fraction:
     """Check both effective bounds, including a zero/unlimited cgroup."""
     command = broker.get("command") or []
     if isinstance(command, list):
@@ -110,6 +111,7 @@ def _check_broker_memory(broker: Mapping[str, Any]) -> None:
         raise ValueError(
             "dev broker --memory must be 12 GiB and mem_limit 16 GiB (OMN-20275)"
         )
+    return arena
 
 
 def _check_dev_broker_stack(compose_files: Sequence[Path], policy_env: Path) -> None:
@@ -124,7 +126,15 @@ def _check_dev_broker_stack(compose_files: Sequence[Path], policy_env: Path) -> 
     if result.returncode:
         # Never echo a rendered stack: it contains interpolated credentials.
         raise ValueError("cannot render dev broker for memory-cap verification")
-    _check_broker_memory(json.loads(result.stdout)["services"]["redpanda"])
+    services = json.loads(result.stdout)["services"]
+    arena = _check_broker_memory(services["redpanda"])
+    profile = services.get("redpanda-partition-cap")
+    if profile is not None:
+        memory = profile.get("environment", {}).get("REDPANDA_PROFILE_MEMORY")
+        if _broker_memory_bytes(memory) != arena:
+            raise ValueError(
+                "dev broker partition-cap profile memory must match its arena"
+            )
 
 
 def _required_names(compose_path: Path) -> set[str]:

@@ -28,6 +28,11 @@ requirements:
       - id: "AC13"
         statement: |-
           AC13: the running dev broker container holds a memory cap of 16 GiB and its start command carries --memory 12G, and the deploy preflight accepts exactly that declaration -- falsifier: ssh to the dev lane host and docker inspect omnibase-infra-redpanda reads a Memory other than 17179869184 or a command without --memory 12G
+  - id: "req-dev-broker-contract-overlay"
+    statement: "Dev deploy refresh renders the broker memory policy from its contract and private overlay, without a settings change or a subsequent repo release."
+    acceptance:
+      - id: "AC14"
+        statement: "The dev broker arena, container limit and partition-cap profile use required contract-rendered variables; each dev-201 compose command reads the private runtime_policy.contract.yaml again; the model and preflight refuse values above the consent ceiling. Other lanes and brokers do not read this overlay."
 evidence_requirements:
   - kind: "tests"
     description: "AC10 and AC11: issuer tests."
@@ -78,10 +83,26 @@ dod_evidence:
         check_value: 'uv run pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -p no:randomly'
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20275-dev-broker-deploy-probe"
-    description: "Hosted-runner deploy check reads the candidate overlay and generated policy env and exercises the preflight refusal boundary without credentials, SSH, Docker or a running broker. It fails on 3G/4g and 6G/8g and anything beyond the consented 12G/16g. Render tests additionally check Compose merge semantics when the CLI is available."
+    description: "Hosted-runner deploy check reads the candidate overlay and generated policy env and exercises the preflight refusal boundary without credentials, SSH, Docker or a running broker. It fails if compose literals replace the required contract variables, on 3G/4g and 6G/8g, or on values exceeding the consented 12G/16g ceilings. Render tests additionally check Compose merge semantics when the CLI is available."
     source: "manual"
     binds_ac: ["AC13"]
     checks:
       - check_type: "command"
         check_value: 'uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -p no:randomly -n 0 --no-cov -k "checker or deploy_agent_env"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac14-contract-overlay"
+    description: "Hosted regression joins the real contract renderer, typed overlay, compose variable references and consent bounds. No broker, credentials, container changes or private repository are needed."
+    source: "manual"
+    binds_ac: ["AC14"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/integration/infra/test_dev_broker_memory_policy_omn20275.py scripts/deploy-agent/tests/unit/test_dev_broker_contract_env_omn20275.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac14-deploy-preflight"
+    description: "Hosted deploy probe proves missing contract vars fail fast and rendered bounds/profile consistency are enforced before compose up."
+    source: "manual"
+    binds_ac: ["AC14"]
+    checks:
+      - check_type: "command"
+        check_value: "uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly -k checker"
         cwd: "${OMNI_HOME}/omnibase_infra"
