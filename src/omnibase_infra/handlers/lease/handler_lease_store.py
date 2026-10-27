@@ -80,8 +80,32 @@ class HandlerLeaseStore:
         request_key = self._request_key(request)
         replay = await self._adapter.get(request_key)
         if replay is not None:
-            return self._replayed(request, replay[0], replay[1])
+            replayed = await self._replayed(request, replay[0])
+            if replayed is not None:
+                return replayed
         etcd_lease, ttl = await self._adapter.lease_grant(request.ttl_s or policy.ttl_s)
+        bound = False
+        try:
+            reply, bound = await self._grant(
+                request, policy, request_key, etcd_lease, ttl
+            )
+            return reply
+        finally:
+            # Every exit that did not bind this etcd lease to a slot revokes it,
+            # including a transaction that raised, so no lease outlives its TTL
+            # unused.
+            if not bound:
+                await self._adapter.lease_revoke(etcd_lease)
+
+    async def _grant(
+        self,
+        request: ModelLeaseAcquireRequest,
+        policy: ModelLeaseKindPolicy,
+        request_key: str,
+        etcd_lease: int,
+        ttl: int,
+    ) -> tuple[ModelLeaseReply, bool]:
+        """Try each slot; the flag is True when ``etcd_lease`` now holds a slot."""
         lease_id = uuid4()
         value = json.dumps(
             {
@@ -94,7 +118,7 @@ class HandlerLeaseStore:
         slots = resource_prefix(request.kind, request.resource, prefix=self._prefix)
         for slot in range(policy.capacity):
             slot_key = f"{slots}{slot}"
-            succeeded, revision, responses = await self._adapter.txn(
+            succeeded, _, responses = await self._adapter.txn(
                 compare=[
                     _absent(slot_key),
                     _absent(request_key),
@@ -102,45 +126,72 @@ class HandlerLeaseStore:
                 success=[
                     _put(slot_key, value, etcd_lease),
                     _put(request_key, value, etcd_lease),
+                    {"requestRange": {"key": b64(slot_key)}},
                 ],
                 failure=[{"requestRange": {"key": b64(request_key)}}],
             )
             if succeeded:
-                return ModelLeaseReply(
-                    outcome="lease-granted",
-                    kind=request.kind,
-                    resource=request.resource,
-                    holder=request.holder,
-                    lease_id=lease_id,
-                    fence=revision,
-                    request_id=request.request_id,
-                    ttl_s=ttl,
+                # The fence is the slot key's own create_revision, read in the
+                # same transaction: the value check_fence compares against.
+                created = _range_entry(responses)
+                if created is None:
+                    raise ValueError(f"lease slot {slot_key!r} absent after its grant")
+                return (
+                    ModelLeaseReply(
+                        outcome="lease-granted",
+                        kind=request.kind,
+                        resource=request.resource,
+                        holder=request.holder,
+                        lease_id=lease_id,
+                        fence=created[1],
+                        request_id=request.request_id,
+                        ttl_s=ttl,
+                    ),
+                    True,
                 )
             existing = _range_entry(responses)
             if existing is not None:
-                await self._adapter.lease_revoke(etcd_lease)
-                return self._replayed(request, existing[0], existing[1])
-        await self._adapter.lease_revoke(etcd_lease)
+                replayed = await self._replayed(request, existing[0])
+                if replayed is not None:
+                    return replayed, False
+                return self._refused(
+                    request, "replayed request_id lost its slot"
+                ), False
+        return self._refused(request, f"all {policy.capacity} slot(s) held"), False
+
+    def _refused(
+        self, request: ModelLeaseAcquireRequest, reason: str
+    ) -> ModelLeaseReply:
         return ModelLeaseReply(
             outcome="lease-refused",
             kind=request.kind,
             resource=request.resource,
             holder=request.holder,
             request_id=request.request_id,
-            reason=f"all {policy.capacity} slot(s) held",
+            reason=reason,
         )
 
-    def _replayed(
-        self, request: ModelLeaseAcquireRequest, value: str, fence: int
-    ) -> ModelLeaseReply:
+    async def _replayed(
+        self, request: ModelLeaseAcquireRequest, value: str
+    ) -> ModelLeaseReply | None:
+        """The grant a repeated ``request_id`` made, fenced by its slot key.
+
+        The request key's own create_revision is not used as the fence: the
+        fence is the slot key's create_revision, which check_fence compares
+        against. ``None`` when the slot is gone (the grant expired).
+        """
         held = json.loads(value)
+        lease_id = UUID(str(held["lease_id"]))
+        slot = await self._slot_of(request.kind, request.resource, lease_id)
+        if slot is None:
+            return None
         return ModelLeaseReply(
             outcome="lease-granted",
             kind=request.kind,
             resource=request.resource,
             holder=str(held["holder"]),
-            lease_id=UUID(str(held["lease_id"])),
-            fence=fence,
+            lease_id=lease_id,
+            fence=slot[1],
             request_id=request.request_id,
             reason="replayed request_id",
         )

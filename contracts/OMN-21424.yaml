@@ -81,6 +81,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k test_ac3
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lease_store_omn21424.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
   - id: dod-omn21424-ac4-projection
     description: >-
@@ -89,6 +92,9 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/lease/test_lease_projection_omn21424.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_node_migration_shape_reconciliation.py -q -n 0 -k node_projection_lease
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
   - id: dod-omn21424-ac5-host-loss
