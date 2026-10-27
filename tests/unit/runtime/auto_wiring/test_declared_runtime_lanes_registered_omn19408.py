@@ -90,7 +90,11 @@ def _load_declared_runtime_lanes() -> tuple[LaneDeclaration, ...]:
     declarations: set[LaneDeclaration] = set()
 
     for compose_path in sorted((repo_root / "docker").glob("docker-compose*.yml")):
-        compose_yaml = compose_path.read_text(encoding="utf-8").replace("!override", "")
+        compose_yaml = (
+            compose_path.read_text(encoding="utf-8")
+            .replace("!override", "")
+            .replace("!reset", "")
+        )
         document: object = yaml.safe_load(compose_yaml)
         relative_path = compose_path.relative_to(repo_root).as_posix()
         # A declaration that interpolates (the pre-PR slot overlay's
