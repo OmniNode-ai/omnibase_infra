@@ -17,10 +17,11 @@ from omnibase_infra.topology.table_grant_derivation import (
 
 pytestmark = pytest.mark.unit
 
-# Source bytes from the OMN-21115 omnimarket activation-store migrations.
+# Shipped bytes of the OMN-21115 activation-store migrations; the create adds
+# the guarded column reconciliation the shape gate requires.
 _EXPECTED = {
     "0001_grant_compaction_activations.sql": "98459e8b8dab226d460eb70f44fe0df3b797de15e97442198919d523ae664561",
-    "0000_create_compaction_activations.sql": "5f997b73125f6e08688146dcac94290e6684aadb9a0fca86c83e07d3adad8a59",
+    "0000_create_compaction_activations.sql": "01c2f385f03bc3315bab98719605f7c66b9a73e065773db9b78e5fb06258e60b",
 }
 
 

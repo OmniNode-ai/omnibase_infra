@@ -32,6 +32,15 @@ BEGIN
             RAISE EXCEPTION 'runtime privilege % exceeds the declaration', privilege;
         END IF;
     END LOOP;
+    -- No privilege reaches the table through PUBLIC.
+    IF EXISTS (
+        SELECT FROM information_schema.role_table_grants
+        WHERE table_schema = 'omninode_internal'
+          AND table_name = 'compaction_activations'
+          AND grantee = 'PUBLIC'
+    ) THEN
+        RAISE EXCEPTION 'PUBLIC holds a privilege on compaction_activations';
+    END IF;
 END
 $$;
 
@@ -40,18 +49,20 @@ INSERT INTO omninode_internal.compaction_activations
     (activation_id, session_id, installed_messages_hash, payload_sha256, published_at)
 VALUES
     ('21115000-0000-0000-0000-000000000001', 'grant-proof', 'first', 'payload', CURRENT_TIMESTAMP);
--- The projection's ON CONFLICT path needs SELECT alongside INSERT and UPDATE.
+-- A replayed activation takes the ON CONFLICT path, which needs SELECT
+-- alongside INSERT and UPDATE. The update rewrites only the key, so the
+-- recorded fact is left as first derived (AC3).
 INSERT INTO omninode_internal.compaction_activations
     (activation_id, session_id, installed_messages_hash, payload_sha256, published_at)
 VALUES
     ('21115000-0000-0000-0000-000000000001', 'grant-proof', 'replayed', 'payload', CURRENT_TIMESTAMP)
 ON CONFLICT (activation_id) DO UPDATE
-SET installed_messages_hash = EXCLUDED.installed_messages_hash;
+SET activation_id = EXCLUDED.activation_id;
 DO $$
 BEGIN
     IF (SELECT installed_messages_hash FROM omninode_internal.compaction_activations
-        WHERE activation_id = '21115000-0000-0000-0000-000000000001') IS DISTINCT FROM 'replayed' THEN
-        RAISE EXCEPTION 'runtime activation upsert/read failed';
+        WHERE activation_id = '21115000-0000-0000-0000-000000000001') IS DISTINCT FROM 'first' THEN
+        RAISE EXCEPTION 'runtime activation upsert/read failed or revised the fact';
     END IF;
 END
 $$;
