@@ -29,7 +29,11 @@ from scripts.ci.check_application_database_sql import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parents[2]
-_MIGRATION = _ROOT / "docker/migrations/forward/112_create_lease_projection.sql"
+_MIGRATION = (
+    _ROOT
+    / "docker/migrations/forward/nodes/node_projection_lease"
+    / "0000_create_lease_projection.sql"
+)
 
 
 def test_lease_projection_is_schema_qualified() -> None:

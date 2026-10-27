@@ -9,7 +9,7 @@ equal fence the statement applies the reducer's join (state by the order
 greater holder), so a replay that reaches the table in any order, including
 after the reducer restarts with empty state, lands the same row.
 The table is created by
-``docker/migrations/forward/112_create_lease_projection.sql``.
+``docker/migrations/forward/nodes/node_projection_lease/0000_create_lease_projection.sql``.
 """
 
 from __future__ import annotations
