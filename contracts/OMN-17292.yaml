@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: "AC6: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+  - id: req-omn17292-lease-ratchet-reconciliation
+    statement: The unmerged lease projection migration reconciles a pre-existing table before granting its writer access, without changing ratchet policy or its baseline.
+    acceptance:
+      - id: AC7
+        statement: "AC7: the lease projection migration reconciles every declared column and preserves its primary key, fence/state checks and writer grants on fresh and drifted PostgreSQL tables; repeated apply preserves rows -- falsifier: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_lease_projection_shape_omn17292.py -q -n 0 --no-cov"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -55,6 +60,12 @@ evidence_requirements:
   - kind: tests
     description: The runtime image upgrades filelock past CVE-2026-112940 and npm's bundled undici past CVE-2026-109869.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
+  - kind: tests
+    description: The existing column reconciliation gate accepts the lease projection migration, and real PostgreSQL fresh/drifted apply proofs preserve its constraints and writer access.
+    command: "uv run --frozen pytest tests/ci/test_node_migration_shape_reconciliation.py tests/integration/migrations/test_lease_projection_shape_omn17292.py -q -n 0 --no-cov"
+  - kind: manual
+    description: Deploy check runs the existing lease migration reconciliation case on a hosted runner with no live runtime or database access.
+    command: "deploy: uv run --frozen pytest 'tests/ci/test_node_migration_shape_reconciliation.py::test_guarded_create_table_reconciles_every_declared_column[node:node_projection_lease:0000_create_lease_projection.sql]' -q -n 0 --no-cov"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -117,3 +128,19 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
+  - id: dod-omn17292-ac7-lease-ratchet
+    description: Real PostgreSQL applies the lease projection migration twice on fresh and drifted tables, verifies its constraints and writer insert/upsert, and refuses invalid fences and states.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_lease_projection_shape_omn17292.py -q -n 0 --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
+  - id: dod-omn17292-ac7-deploy-lease-shape
+    description: Hosted-runner deploy check for the new lease SQL runs the existing reconciliation gate's exact lease case. It fails on the original migration's seven missing reconciliations and on dev where that migration case is absent; no live lane or private network is needed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen pytest 'tests/ci/test_node_migration_shape_reconciliation.py::test_guarded_create_table_reconciles_every_declared_column[node:node_projection_lease:0000_create_lease_projection.sql]' -q -n 0 --no-cov"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
