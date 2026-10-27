@@ -34,7 +34,11 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.runtime.model_runtime_node_selection import (
     ENV_RUNTIME_NODE_SELECTION,
 )
-from omnibase_infra.runtime.auto_wiring import filter_manifest_for_runtime_profile
+from omnibase_infra.runtime.auto_wiring import (
+    filter_manifest_for_runtime_profile,
+    gate_manifest_on_required_secrets,
+    required_secret_names,
+)
 from omnibase_infra.runtime.auto_wiring.discovery import (
     discover_contracts,
     discover_contracts_cache_clear,
@@ -162,6 +166,16 @@ def _actionable_manifest_errors(
             and error.entry_point_name in _KNOWN_DELETED_OCC_STUBS
         )
     ]
+
+
+@pytest.mark.integration
+def test_real_manifest_keeps_contracts_when_all_required_secrets_present() -> None:
+    """A runtime holding every required secret loses no contracts (OMN-21423)."""
+    discover_contracts_cache_clear()
+    manifest = discover_contracts()
+    gated = gate_manifest_on_required_secrets(manifest, required_secret_names(manifest))
+    assert [c.name for c in gated.contracts] == [c.name for c in manifest.contracts]
+    assert gated is manifest
 
 
 @pytest.mark.integration
