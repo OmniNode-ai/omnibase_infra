@@ -62,6 +62,15 @@ repos:
         files: ^(\.github/workflows/[^/]+\.ya?ml|tests/ci/test_hostile_reviewer_voters_overlay_omn20910\.py|tests/ci/test_hostile_reviewer_dev_tag_key_omn20910\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20821: the developer principal plan node keeps the lab issuer's rules,
+      # and the local grants declaration stays a subset of the lab's.
+      - id: developer-principal-plan
+        name: Developer principal plan matches the lab issuer (OMN-20821)
+        entry: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute tests/scripts/test_developer_principal_grants_parity.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/nodes/node_developer_principal_plan_compute/|src/omnibase_infra/handlers/handler_developer_principal_plan\.py$|src/omnibase_infra/models/developer_principal/|scripts/lab_principal_issuer\.py$|deploy/(lab|local)/developer-principal-|tests/unit/nodes/node_developer_principal_plan_compute/|tests/scripts/test_developer_principal_grants_parity\.py$)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov
@@ -2098,9 +2107,22 @@ repos:
         name: Check the dev stack runs no workload outside the runtime container
         entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: dev-tenant-projection-fold
+        name: Check the primary dev tenant projection fold
+        entry: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        language: system
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-dev-tenant-fold-required-env-vars
+        name: Check tenant fold required env vars are declared
+        entry: uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-tenant-fold.yml --manifest-file docker/dev-tenant-fold-required-env.manifest.txt
+        language: system
+        files: docker/(docker-compose\.dev-tenant-fold\.yml|dev-tenant-fold-required-env\.manifest\.txt)
+        pass_filenames: false
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references

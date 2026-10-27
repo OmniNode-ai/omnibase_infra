@@ -349,16 +349,22 @@ resolve_lane_folded_services() {
     local filter_name="${2:-}"
     local -A folded_profile_services=(
         [effects]=runtime-effects
-        [worker]=runtime-worker
+        [workers]=runtime-worker
+        [tenant-projection]=tenant-projection-writer
     )
     LANE_FOLDED_SERVICES=()
-    # Only the lab proof lane folds today; its project name and its folded
-    # profiles both come from the sourced runtime-policy.env.
-    if [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
+    # Each folding lane is selected by its declared project and policy.
+    local folded_profiles=""
+    if [[ -n "${DEV_COMPOSE_PROJECT:-}" && "${compose_project}" == "${DEV_COMPOSE_PROJECT}" ]]; then
+        folded_profiles="${DEV_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+    elif [[ -n "${STABILITY_TEST_COMPOSE_PROJECT:-}" \
         && "${compose_project}" == "${STABILITY_TEST_COMPOSE_PROJECT}" ]]; then
+        folded_profiles="${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+    fi
+    if [[ -n "${folded_profiles}" ]]; then
         local -a profiles=()
         local profile
-        IFS=',' read -r -a profiles <<< "${STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES:-}"
+        IFS=',' read -r -a profiles <<< "${folded_profiles}"
         for profile in "${profiles[@]}"; do
             profile="${profile#"${profile%%[![:space:]]*}"}"
             profile="${profile%"${profile##*[![:space:]]}"}"
