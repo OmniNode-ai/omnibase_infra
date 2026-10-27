@@ -8,6 +8,7 @@ import itertools
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -101,6 +102,17 @@ def test_ac4_reducer_replay_in_any_order_keeps_the_highest_fence() -> None:
         assert len(state) == 2
 
 
+def test_ac4_reducer_intents_end_at_the_final_state_for_every_key() -> None:
+    for order in itertools.permutations(_events()):
+        state: dict[tuple[str, str], ModelLeaseProjectionRow] = {}
+        last: dict[tuple[str, str], ModelLeaseProjectionRow] = {}
+        for event in order:
+            state, intents = reduce_lease_event(state, event)
+            for intent in intents:
+                last[(intent.row.kind, intent.row.resource)] = intent.row
+        assert last == state, order
+
+
 def test_ac4_reducer_is_pure_and_emits_no_intent_for_a_lower_fence() -> None:
     high = ModelLeaseReply(
         outcome="lease-granted",
@@ -137,6 +149,7 @@ def _sqlite_with_migration() -> sqlite3.Connection:
     assert table is not None, "the migration creates lease_projection"
     body = re.sub(r"TIMESTAMPTZ NOT NULL DEFAULT now\(\)", "TEXT", table.group(1))
     db.execute(f"CREATE TABLE lease_projection ({body}\n)")
+    db.create_function("now", 0, lambda: "2026-10-27T00:00:00Z")
     return db
 
 
@@ -162,3 +175,62 @@ def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:
             "SELECT kind, resource, fence, holder FROM lease_projection"
         ).fetchall()
         assert found == [("k", "r", 23, "h23")], order
+
+
+def _equal_fence_events() -> list[ModelLeaseReply]:
+    """One grant at fence 10 seen as grant, renewal, release and expiry, plus fence 7."""
+
+    def event(outcome: str, holder: str, fence: int, lease: UUID) -> ModelLeaseReply:
+        return ModelLeaseReply(
+            outcome=cast("Any", outcome),
+            kind="k",
+            resource="r",
+            holder=holder,
+            lease_id=lease,
+            fence=fence,
+        )
+
+    return [
+        event("lease-granted", "a", 10, _L1),
+        event("lease-released", "", 10, _L1),
+        event("lease-expired", "", 10, _L1),
+        event("lease-granted", "z", 7, _L2),
+    ]
+
+
+def test_ac4_sql_upsert_joins_equal_fence_rows_like_the_reducer_in_any_order() -> None:
+    """Replayed rows reach the table in any order, as after a reducer restart."""
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    events = _equal_fence_events()
+    expected: dict[tuple[str, str], ModelLeaseProjectionRow] = {}
+    for event in events:
+        expected, _ = reduce_lease_event(expected, event)
+    want = expected[("k", "r")]
+    assert (want.state, want.holder, want.fence) == ("expired", "a", 10)
+    rows = [
+        intent.row for event in events for intent in reduce_lease_event({}, event)[1]
+    ]
+    for order in itertools.permutations(rows):
+        db = _sqlite_with_migration()
+        for row in order:
+            db.execute(sql, lease_projection_params(row))
+        found = db.execute(
+            "SELECT lease_id, fence, holder, state FROM lease_projection"
+        ).fetchall()
+        assert found == [(str(want.lease_id), 10, "a", "expired")], order
+
+
+def test_ac4_sql_upsert_refreshes_updated_at_on_every_conflict() -> None:
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    db = _sqlite_with_migration()
+    first = ModelLeaseProjectionRow(
+        kind="k", resource="r", lease_id=_L1, fence=10, holder="a", state="held"
+    )
+    db.execute(sql, lease_projection_params(first))
+    db.execute("UPDATE lease_projection SET updated_at = 'stale'")
+    db.execute(
+        sql,
+        lease_projection_params(first.model_copy(update={"state": "released"})),
+    )
+    (stamp,) = db.execute("SELECT updated_at FROM lease_projection").fetchone()
+    assert stamp == "2026-10-27T00:00:00Z"

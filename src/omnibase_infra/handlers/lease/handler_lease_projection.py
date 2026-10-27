@@ -3,7 +3,11 @@
 """Lease projection writer (OMN-21424).
 
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
-is above the incoming one, so an out-of-order replay never lowers a fence.
+is above the incoming one, so an out-of-order replay never lowers a fence. At an
+equal fence the statement applies the reducer's join (state by the order
+``held < released < expired``, the lease ID of the higher-ranked state, the
+greater holder), so a replay that reaches the table in any order, including
+after the reducer restarts with empty state, lands the same row.
 The table is created by
 ``docker/migrations/forward/112_create_lease_projection.sql``.
 """
@@ -22,10 +26,22 @@ UPSERT_LEASE_PROJECTION_SQL = """
 INSERT INTO lease_projection (kind, resource, lease_id, fence, holder, state)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (kind, resource) DO UPDATE SET
-    lease_id = EXCLUDED.lease_id,
+    lease_id = CASE
+        WHEN EXCLUDED.fence > lease_projection.fence
+            OR CASE EXCLUDED.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+            >= CASE lease_projection.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+        THEN EXCLUDED.lease_id ELSE lease_projection.lease_id END,
     fence = EXCLUDED.fence,
-    holder = EXCLUDED.holder,
-    state = EXCLUDED.state
+    holder = CASE
+        WHEN EXCLUDED.fence > lease_projection.fence THEN EXCLUDED.holder
+        WHEN EXCLUDED.holder > lease_projection.holder THEN EXCLUDED.holder
+        ELSE lease_projection.holder END,
+    state = CASE
+        WHEN EXCLUDED.fence > lease_projection.fence
+            OR CASE EXCLUDED.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+            >= CASE lease_projection.state WHEN 'released' THEN 1 WHEN 'expired' THEN 2 ELSE 0 END
+        THEN EXCLUDED.state ELSE lease_projection.state END,
+    updated_at = now()
 WHERE lease_projection.fence <= EXCLUDED.fence
 """.strip()
 
