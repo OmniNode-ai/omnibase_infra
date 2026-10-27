@@ -38,7 +38,9 @@ starts, rather than in the forward migration after the infrastructure is up. Tha
 check matches each set password against a pattern and still prints only names.
 
 For the dev stack, the effective Compose JSON also has to satisfy the broker
-memory cap authorized at 2026-10-25T17:53:44Z (OMN-21279). This render is kept
+memory cap authorized at 2026-10-25T17:53:44Z (OMN-21279) and raised by the
+operator's consent of about 2026-10-27T00:45Z (OMN-20275): --memory 2-6 GiB inside
+a container limit of 2-8 GiB. This render is kept
 in memory and never printed; no deployment is attempted by this check.
 
 Exit codes:
@@ -78,7 +80,8 @@ _DEFAULT_RUNTIME_POLICY_ENV = "docker/runtime-policy.env"
 
 
 _BROKER_MIN_BYTES = 2 * 1024**3
-_BROKER_MAX_BYTES = 4 * 1024**3
+_BROKER_MAX_ARENA_BYTES = 6 * 1024**3
+_BROKER_MAX_LIMIT_BYTES = 8 * 1024**3
 
 
 def _broker_memory_bytes(value: object) -> int:
@@ -106,11 +109,11 @@ def _check_broker_memory(broker: Mapping[str, Any]) -> None:
     arena = _broker_memory_bytes(values[0])
     limit = _broker_memory_bytes(broker.get("mem_limit", 0))
     if not (
-        _BROKER_MIN_BYTES <= arena <= _BROKER_MAX_BYTES
-        and _BROKER_MIN_BYTES <= limit <= _BROKER_MAX_BYTES
+        _BROKER_MIN_BYTES <= arena <= _BROKER_MAX_ARENA_BYTES
+        and _BROKER_MIN_BYTES <= limit <= _BROKER_MAX_LIMIT_BYTES
     ):
         raise ValueError(
-            "dev broker --memory and mem_limit must each be 2-4 GiB (OMN-21279)"
+            "dev broker --memory must be 2-6 GiB and mem_limit 2-8 GiB (OMN-21279, OMN-20275)"
         )
     if arena > limit:
         raise ValueError("dev broker --memory exceeds its container limit")
@@ -239,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
                 subprocess.TimeoutExpired,
             ):
                 print(
-                    "ERROR: DEV_BROKER_MEMORY_CAP_REFUSED (OMN-21279); expected --memory and mem_limit within 2-4 GiB",
+                    "ERROR: DEV_BROKER_MEMORY_CAP_REFUSED (OMN-21279); expected --memory within 2-6 GiB and mem_limit within 2-8 GiB (OMN-20275)",
                     file=sys.stderr,
                 )
                 return 1

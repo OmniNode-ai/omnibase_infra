@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The dev broker obeys the 2026-10-25T17:53:44Z operator consent."""
+"""The dev broker obeys the operator consents of 2026-10-25T17:53:44Z and 2026-10-27T00:45Z (OMN-20275)."""
 
 from __future__ import annotations
 
@@ -61,25 +61,26 @@ def test_checker_accepts_the_real_dev_broker_configuration() -> None:
     services = load_compose("docker-compose.dev-lane.yml")["services"]
     broker = services["redpanda"]
     command = " ".join(broker["command"])
-    assert "--memory 3G" in command
-    assert broker["mem_limit"] == "4g"
+    assert "--memory 6G" in command
+    assert broker["mem_limit"] == "8g"
     _checker()._check_broker_memory(broker)
     assert (
         services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
-        == "3G"
+        == "6G"
     )
 
 
 @pytest.mark.parametrize(
     ("memory", "limit"),
     [
-        ("1G", "4g"),
-        ("12G", "4g"),
+        ("1G", "8g"),
+        ("12G", "8g"),
+        ("7G", "8g"),
         ("3G", 0),
-        ("3G", "5g"),
+        ("3G", "9g"),
         ("3G", "1g"),
-        ("4G", "3g"),
-        ("oops", "4g"),
+        ("6G", "5g"),
+        ("oops", "8g"),
     ],
 )
 def test_checker_refuses_unruled_or_missing_memory(memory: str, limit: object) -> None:
@@ -91,7 +92,13 @@ def test_checker_refuses_unruled_or_missing_memory(memory: str, limit: object) -
 
 @pytest.mark.parametrize(
     ("memory", "limit"),
-    [("2G", "4g"), ("3G", 4 * 1024**3), ("4G", "4g"), ("2048M", "4096m")],
+    [
+        ("2G", "4g"),
+        ("3G", 4 * 1024**3),
+        ("6G", "8g"),
+        ("6G", 8 * 1024**3),
+        ("2048M", "4096m"),
+    ],
 )
 def test_checker_accepts_the_ruled_boundaries(memory: str, limit: object) -> None:
     _checker()._check_broker_memory(
@@ -102,11 +109,12 @@ def test_checker_accepts_the_ruled_boundaries(memory: str, limit: object) -> Non
 @pytest.mark.parametrize("command", [[], ["--memory"], ["--memory 3G", "--memory=12G"]])
 def test_checker_refuses_missing_or_ambiguous_flag(command: list[str]) -> None:
     with pytest.raises(ValueError):
-        _checker()._check_broker_memory({"command": command, "mem_limit": "4g"})
+        _checker()._check_broker_memory({"command": command, "mem_limit": "8g"})
 
 
 @pytest.mark.parametrize(
-    ("memory", "limit", "expected"), [("12G", "4g", 1), ("3G", "0", 1), ("3G", "4g", 0)]
+    ("memory", "limit", "expected"),
+    [("12G", "8g", 1), ("3G", "0", 1), ("6G", "8g", 0), ("3G", "4g", 0)],
 )
 @pytest.mark.usefixtures("docker_compose")
 def test_deploy_preflight_checks_the_rendered_broker(

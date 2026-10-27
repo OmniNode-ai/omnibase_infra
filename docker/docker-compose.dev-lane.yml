@@ -502,11 +502,15 @@ services:
   #
   # Ticket: OMN-18789. Incident: OMN-18691 lane diagnosis, 2026-09-18/19.
   redpanda:
-    # OMN-21279: OPERATOR-CONSENT 2026-10-25T17:53:44Z authorizes a
-    # 2-4 GB cap on the dev broker. Replace the whole base command: Compose
-    # replaces command lists, and the host's stale DEV_REDPANDA_MEMORY=12G
-    # must not override this cap. Other lanes retain their own commands.
-    # 3G leaves 1 GiB inside the 4g cgroup limit for non-Seastar allocations.
+    # OMN-21279: OPERATOR-CONSENT 2026-10-25T17:53:44Z authorized a
+    # 2-4 GB cap on the dev broker. OMN-20275: OPERATOR-CONSENT of about
+    # 2026-10-27T00:45Z ("Yes") raised it to --memory 6G inside an 8g container
+    # cap, after the 3G arena was exhausted within 80 seconds to 3 minutes of
+    # every boot (RestartCount 83, 480,755 segment files over 4,636 partitions).
+    # Replace the whole base command: Compose replaces command lists, and the
+    # host's stale DEV_REDPANDA_MEMORY=12G must not override this cap. Other
+    # lanes retain their own commands. 6G leaves 2 GiB inside the 8g cgroup
+    # limit for non-Seastar allocations.
     command:
       - redpanda
       - start
@@ -519,10 +523,10 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory 3G
+      - --memory 6G
       - --default-log-level=warn
       - --set topic_partitions_per_shard=7000
-    mem_limit: 4g
+    mem_limit: 8g
     mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}
     environment:
       DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
@@ -764,7 +768,7 @@ services:
   # the existing order after the SASL flip on both cold and warm deploys.
   redpanda-partition-cap:
     environment:
-      REDPANDA_PROFILE_MEMORY: "3G"
+      REDPANDA_PROFILE_MEMORY: "6G"
       RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set}
       REDPANDA_CONTROL_PLANE_TOPIC: onex.tenant.events
