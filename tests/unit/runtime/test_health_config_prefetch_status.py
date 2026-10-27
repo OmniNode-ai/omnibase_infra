@@ -50,6 +50,23 @@ class TestHealthCheckIncludesConfigPrefetchStatus:
         assert isinstance(health["config_prefetch_status"], str)
 
     @pytest.mark.asyncio
+    async def test_kernel_prefetch_is_not_repeated_at_runtime_start(self) -> None:
+        """Early kernel prefetch and runtime startup share one outcome."""
+        process = _make_process()
+
+        async def prefetch() -> None:
+            process._config_prefetch_status = "degraded_error"
+
+        with patch.object(
+            process, "_prefetch_config_from_infisical", side_effect=prefetch
+        ) as fetch:
+            await process.prefetch_config()
+            await process.prefetch_config()
+
+        fetch.assert_awaited_once()
+        assert process._config_prefetch_status == "degraded_error"
+
+    @pytest.mark.asyncio
     async def test_default_status_is_pending(self) -> None:
         """Before prefetch runs, status should be 'pending'."""
         process = _make_process()

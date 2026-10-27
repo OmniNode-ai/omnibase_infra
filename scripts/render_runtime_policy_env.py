@@ -95,6 +95,8 @@ def load_contract(path: Path = _DEFAULT_CONTRACT) -> ModelRuntimePolicyContract:
 def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
     """Render all runtime profile policy values as env vars."""
     env: dict[str, str] = {
+        "DEV_REDPANDA_MEMORY": contract.dev_redpanda_memory,
+        "DEV_REDPANDA_MEM_LIMIT": contract.dev_redpanda_mem_limit,
         "AUXILIARY_SERVICES_OMNIMEMORY_ENABLED": _bool_text(
             contract.auxiliary_services_omnimemory_enabled
         ),
