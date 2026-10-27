@@ -5,5 +5,5 @@
 # expects docker/Dockerfile.runtime to carry (OMN-20864).
 floors:
   omninode-claude: "0.27.0"
-  omninode-intelligence: "0.24.0"
+  omninode-intelligence: "0.25.0"
   omninode-memory: "0.18.6"
