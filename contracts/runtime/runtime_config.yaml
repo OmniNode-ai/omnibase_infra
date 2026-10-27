@@ -100,6 +100,10 @@ event_bus:
   max_history: 1000
   # [ACTIVE] circuit_breaker_threshold configures fault tolerance behavior
   circuit_breaker_threshold: 5
+  # Runtime recovery defaults come from the contracts/runtime_event_bus_recovery.yaml.
+  # An event_bus.recovery mapping here can override initial_backoff_seconds,
+  # max_backoff_seconds, backoff_multiplier and attempt_timeout_seconds.
+  # During fallback local delivery is degraded and Kafka readiness stays false.
 # Contract registry configuration [ACTIVE - used by ServiceKernel]
 # The contract registry manages contract staleness checks and persistence.
 contract_registry:

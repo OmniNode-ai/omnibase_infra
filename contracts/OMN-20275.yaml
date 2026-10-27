@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 schema_version: "1.0.0"
 ticket_id: "OMN-20275"
-title: "Issued developer principals write the work ledger only on their own writer topic"
+title: "Principal writer topics, CI overlay binding shape and runtime event bus recovery"
 summary: "The developer principal grant file replaces the shared work-ledger append topic grant with one templated literal topic, onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1, created on issue. The issuer resolves the template per principal, creates that topic, and gains an apply-grants command that re-applies the declared grants to issued principals without setting or rotating a password. The ledger host's own read grants are declared with its login, not in this file."
 is_seam_ticket: false
 interface_change: true
@@ -22,10 +22,22 @@ requirements:
     acceptance:
       - id: "AC12"
         statement: "binding_fallback preserves ordered bus names and secret_resolver preserves its convention flag and typed logical-name/source mappings. Both declarations remain optional, unknown keys and malformed shapes are refused, and broker/security selection is unchanged."
+  - id: "req-runtime-bus-recovery-ruling"
+    statement: "Operator ruling 2026-10-27: Runtime should degraded and fall back to in memory with an alarm so the whole system does not crash."
+    acceptance:
+      - id: "AC13"
+        statement: "A failed runtime Kafka start uses local delivery and retries with contract-declared bounded backoff; it becomes ready when Kafka and all live subscriptions recover, without restarting the runtime."
+      - id: "AC14"
+        statement: "While Kafka is down, runtime liveness remains operational, health is degraded, readiness is false, and exactly one alarm per outage episode is retained through the existing alarm path."
+      - id: "AC15"
+        statement: "Recovery preserves live subscription arguments and unsubscribe ownership, does not replay local deliveries, does not block local subscriptions on network I/O, and stops reconnecting on shutdown."
 evidence_requirements:
   - kind: "tests"
     description: "AC10 and AC11: issuer tests."
     command: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly"
+  - kind: "tests"
+    description: "AC13 to AC15: retry, fallback, alarm, subscription ownership and shutdown regressions."
+    command: "uv run pytest tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -54,4 +66,36 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_trigger_learns_binding_fallback_omn20275.py -q -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac13-runtime-recovery"
+    description: "AC13: a failed Kafka start falls back to local delivery and recovers with bounded backoff."
+    source: "manual"
+    binds_ac: ["AC13"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac14-runtime-recovery"
+    description: "AC14: health is degraded, readiness false and one alarm per outage while Kafka is down."
+    source: "manual"
+    binds_ac: ["AC14"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac15-runtime-recovery"
+    description: "AC15: recovery preserves subscriptions and unsubscribe ownership and stops on shutdown."
+    source: "manual"
+    binds_ac: ["AC15"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/test_runtime_bus_recovery.py -q -n 0 -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-deploy-runtime-bus-recovery"
+    description: "Deploy-scope probe: the recovery-capable bus and its shipped retry policy are present on dev, read from the repository through the GitHub API. No live deploy or broker restart is performed or claimed."
+    source: "manual"
+    binds_ac: ["AC13"]
+    checks:
+      - check_type: "command"
+        check_value: "gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/event_bus_kafka.py?ref=dev --jq .content | base64 -d | grep -q 'class EventBusRecovering'"
         cwd: "${OMNI_HOME}/omnibase_infra"

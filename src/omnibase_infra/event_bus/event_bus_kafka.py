@@ -312,11 +312,17 @@ from omnibase_infra.models.health.model_consumer_sync_status import (
 from omnibase_infra.models.health.model_dispatch_deadline_status import (
     ModelDispatchDeadlineStatus,
 )
+from omnibase_infra.models.model_event_bus_recovery_config import (
+    ModelEventBusRecoveryConfig,
+)
 from omnibase_infra.observability.wiring_health import (
     MixinEmissionCounter,
 )
 from omnibase_infra.protocols.protocol_rejoinable_consumer import (
     ProtocolRejoinableConsumer,
+)
+from omnibase_infra.protocols.protocol_runtime_fallback_bus import (
+    ProtocolRuntimeFallbackBus,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
@@ -5555,4 +5561,300 @@ class EventBusKafka(
         )
 
 
-__all__: list[str] = ["EventBusKafka"]
+_Unsubscribe = Callable[[], Awaitable[None]]
+_Attach = Callable[[bool], Awaitable[_Unsubscribe]]
+_CONNECT_ERRORS = (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+    TimeoutError,
+)
+
+
+class EventBusRecovering(EventBusKafka):
+    """Runtime policy: alarmed local delivery while Kafka recovers (OMN-20275).
+
+    The kernel injects this object once. Its identity and subscription intent
+    survive transport changes. Local receipts identify the in-memory transport;
+    local deliveries are never replayed to Kafka. Shared-bus readiness remains
+    false until producer startup and live subscription restoration complete.
+    Standalone EventBusKafka clients keep their existing startup policy.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: ModelKafkaEventBusConfig,
+        recovery: ModelEventBusRecoveryConfig,
+        local_bus: ProtocolRuntimeFallbackBus,
+        alarm_topic: str,
+        consumer_group: str,
+    ) -> None:
+        super().__init__(config=config)
+        self._recovery_policy = recovery
+        self._local_bus = local_bus
+        self._alarm_topic = alarm_topic
+        self._recovery_group = consumer_group
+        self._fallback_active = False
+        self._recovery_closed = False
+        self._recovery_task: asyncio.Task[None] | None = None
+        self._kafka_close_task: asyncio.Task[None] | None = None
+        self._transport_lock = asyncio.Lock()
+        self._attachments: dict[str, _Attach] = {}
+        self._unsubscribes: dict[str, _Unsubscribe] = {}
+        self._recovery_stopped = asyncio.Event()
+
+    async def start(self) -> None:
+        """Start Kafka or continue locally with exactly one reconnect worker."""
+        async with self._transport_lock:
+            if self._fallback_active:
+                return
+            self._recovery_closed = False
+            self._recovery_stopped.clear()
+            await self._local_bus.start()
+            try:
+                async with asyncio.timeout(
+                    self._recovery_policy.attempt_timeout_seconds
+                ):
+                    await super().start()
+            except _CONNECT_ERRORS as exc:
+                await self._enter_fallback(exc)
+
+    async def _enter_fallback(self, error: Exception) -> None:
+        """Called under the transport lock; retain and signal one alarm per episode."""
+        if self._fallback_active or self._recovery_closed:
+            return
+        self._fallback_active = True
+        await self._local_bus.start()
+        for key, attach in self._attachments.items():
+            self._unsubscribes[key] = await attach(True)
+        message = (
+            "Runtime event bus degraded: using in-memory delivery while Kafka "
+            f"recovers: {sanitize_error_message(error)}"
+        )
+        logger.critical(message)
+        alarm = ModelConsumerRejoinAlarm(
+            topic=self._alarm_topic,
+            consumer_group=self._recovery_group,
+            broker=self.bootstrap_servers,
+            reason="runtime_event_bus_unavailable",
+            coordinator_unavailable_seconds=0,
+            failed_rejoins=1,
+            message=message,
+        )
+        # Existing alarm path retains a bounded local record even when the
+        # broker-backed health emitter cannot publish its mirror.
+        try:
+            async with asyncio.timeout(self._recovery_policy.attempt_timeout_seconds):
+                await self._record_consumer_rejoin_alarm(alarm)
+        except (OSError, RuntimeError, TimeoutError):
+            logger.warning("Runtime bus alarm mirror failed", exc_info=True)
+        self._recovery_task = asyncio.create_task(
+            self._recover(), name="runtime-event-bus-recovery"
+        )
+
+    async def _sleep_before_retry(self, delay: float) -> None:
+        """Wait between bounded attempts; cancellation interrupts shutdown."""
+        await asyncio.sleep(delay)
+
+    async def _recover(self) -> None:
+        delay = self._recovery_policy.initial_backoff_seconds
+        while not self._recovery_closed:
+            await self._sleep_before_retry(delay)
+            try:
+                async with asyncio.timeout(
+                    self._recovery_policy.attempt_timeout_seconds
+                ):
+                    # Do network I/O outside the transport lock: new local
+                    # subscriptions must work even while a connect/join hangs.
+                    await self._close_kafka_transport()
+                    await super().start()
+                await self._restore_subscriptions()
+                logger.info("Runtime event bus recovered; Kafka subscriptions restored")
+                return
+            except asyncio.CancelledError:
+                raise
+            except (*_CONNECT_ERRORS, OSError, RuntimeError, ExceptionGroup) as exc:
+                logger.warning(
+                    "Runtime event bus recovery attempt failed: %s",
+                    sanitize_error_message(exc),
+                )
+                delay = min(
+                    delay * self._recovery_policy.backoff_multiplier,
+                    self._recovery_policy.max_backoff_seconds,
+                )
+
+    async def _restore_subscriptions(self) -> None:
+        """Bound each join and its concurrency, then atomically switch ownership.
+
+        Hundreds of contracts may legitimately take longer than one join's
+        deadline in aggregate. New local subscriptions and removals are folded
+        into the next snapshot without holding a lock across broker I/O.
+        """
+        semaphore = asyncio.Semaphore(self.config.consumer_start_concurrency)
+        restored: dict[str, _Unsubscribe] = {}
+
+        async def restore(key: str, attach: _Attach) -> tuple[str, _Unsubscribe]:
+            async with semaphore:
+                async with asyncio.timeout(
+                    self._recovery_policy.attempt_timeout_seconds
+                ):
+                    return key, await attach(False)
+
+        while True:
+            async with self._transport_lock:
+                attachments = dict(self._attachments)
+            async with asyncio.TaskGroup() as group:
+                tasks = [
+                    group.create_task(restore(key, attach))
+                    for key, attach in attachments.items()
+                    if key not in restored
+                ]
+            restored.update(task.result() for task in tasks)
+            async with self._transport_lock:
+                removed = set(restored) - self._attachments.keys()
+                if not removed and restored.keys() == self._attachments.keys():
+                    for unsubscribe in self._unsubscribes.values():
+                        await unsubscribe()
+                    self._unsubscribes = restored
+                    self._fallback_active = False
+                    return
+            for key in removed:
+                async with asyncio.timeout(
+                    self._recovery_policy.attempt_timeout_seconds
+                ):
+                    await restored.pop(key)()
+
+    async def _close_kafka_transport(self) -> None:
+        """Let one teardown finish even if the recovery worker is cancelled.
+
+        EventBusKafka.close marks shutdown before settling its resources; a
+        second call cannot resume a cancelled first call. Keep that teardown
+        owned here so runtime shutdown can await it after cancelling recovery.
+        """
+        if self._kafka_close_task is None or self._kafka_close_task.done():
+            self._kafka_close_task = asyncio.create_task(
+                super().close(), name="runtime-event-bus-close"
+            )
+        await asyncio.shield(self._kafka_close_task)
+
+    async def publish(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: ModelEventHeaders | None = None,
+    ) -> ModelPublishReceipt:
+        """Deliver locally during an outage, with an explicitly local receipt."""
+        if self._fallback_active:
+            return await self._local_bus.publish(topic, key, value, headers)
+        try:
+            return await super().publish(topic, key, value, headers)
+        except _CONNECT_ERRORS as exc:
+            if self._recovery_closed:
+                raise
+            async with self._transport_lock:
+                await self._enter_fallback(exc)
+            return await self._local_bus.publish(topic, key, value, headers)
+
+    async def subscribe(
+        self,
+        topic: str,
+        node_identity: ModelNodeIdentity | None = None,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
+        *,
+        group_id: str | None = None,
+        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
+        required_for_readiness: bool = False,
+        auto_offset_reset: str | None = None,
+    ) -> _Unsubscribe:
+        """Retain subscription intent and return an unsubscribe that survives recovery."""
+
+        async def attach(local: bool) -> _Unsubscribe:
+            if local:
+                return await self._local_bus.subscribe(
+                    topic,
+                    node_identity,
+                    on_message,
+                    group_id=group_id,
+                    purpose=purpose,
+                    required_for_readiness=required_for_readiness,
+                )
+            return await super(EventBusRecovering, self).subscribe(
+                topic=topic,
+                node_identity=node_identity,
+                on_message=on_message,
+                group_id=group_id,
+                purpose=purpose,
+                required_for_readiness=required_for_readiness,
+                auto_offset_reset=auto_offset_reset,
+            )
+
+        key = str(uuid4())
+        async with self._transport_lock:
+            try:
+                unsubscribe = await attach(self._fallback_active)
+            except _CONNECT_ERRORS as exc:
+                await self._enter_fallback(exc)
+                unsubscribe = await attach(True)
+            self._attachments[key] = attach
+            self._unsubscribes[key] = unsubscribe
+
+        async def unsubscribe_current() -> None:
+            async with self._transport_lock:
+                self._attachments.pop(key, None)
+                current = self._unsubscribes.pop(key, None)
+                if current is not None:
+                    await current()
+
+        return unsubscribe_current
+
+    async def health_check(self) -> dict[str, object]:
+        """Local delivery is live but explicitly degraded, never Kafka-ready."""
+        if self._fallback_active:
+            return {
+                **await self._local_bus.health_check(),
+                "degraded": True,
+                "transport": "inmemory",
+                "configured_transport": "kafka",
+                "recovery_running": self._recovery_task is not None
+                and not self._recovery_task.done(),
+            }
+        return await super().health_check()
+
+    async def get_readiness_status(self) -> ModelEventBusReadiness:
+        """Do not advertise shared-bus readiness during local fallback."""
+        if self._fallback_active:
+            return ModelEventBusReadiness(
+                is_ready=False,
+                consumers_started=False,
+                required_topics_ready=False,
+                last_error="runtime event bus degraded: in-memory fallback; recovering Kafka",
+            )
+        return await super().get_readiness_status()
+
+    async def start_consuming(self) -> None:
+        """Subscriptions attach eagerly; keep the protocol's lifetime wait alive."""
+        await self.start()
+        await self._recovery_stopped.wait()
+
+    async def close(self) -> None:
+        """Cancel recovery before closing transports so shutdown cannot reconnect."""
+        self._recovery_closed = True
+        task, self._recovery_task = self._recovery_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        async with self._transport_lock:
+            await self._close_kafka_transport()
+            await self._local_bus.close()
+            self._attachments.clear()
+            self._unsubscribes.clear()
+            self._fallback_active = False
+            self._recovery_stopped.set()
+
+
+__all__: list[str] = ["EventBusKafka", "EventBusRecovering"]

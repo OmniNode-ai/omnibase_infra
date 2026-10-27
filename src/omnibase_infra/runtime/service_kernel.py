@@ -138,7 +138,10 @@ from omnibase_infra.errors import (
 # Import from infra for type safety until core Part 1 merges; runtime bus
 # selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
-from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.event_bus_kafka import (
+    EventBusKafka,
+    EventBusRecovering,
+)
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
@@ -2146,6 +2149,21 @@ async def bootstrap() -> int:
                 circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
             ),
         )
+        if isinstance(event_bus, EventBusKafka):
+            # Keep one injected identity across local fallback and Kafka recovery.
+            # Standalone Kafka clients retain their existing fail-fast policy.
+            event_bus = EventBusRecovering(
+                config=event_bus.config,
+                recovery=config.event_bus.recovery,
+                local_bus=EventBusInmemory(
+                    environment=environment,
+                    group=config.consumer_group,
+                    max_history=config.event_bus.max_history,
+                    circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+                ),
+                alarm_topic=config.input_topic,
+                consumer_group=config.consumer_group,
+            )
         event_bus_type = "kafka" if isinstance(event_bus, EventBusKafka) else "inmemory"
 
         # Start the bus and wire post-creation infrastructure
@@ -2153,7 +2171,7 @@ async def bootstrap() -> int:
             try:
                 await event_bus.start()
                 logger.debug(
-                    "EventBusKafka started successfully (correlation_id=%s)",
+                    "Runtime event bus started; recovery enabled (correlation_id=%s)",
                     correlation_id,
                 )
             except Exception as e:
