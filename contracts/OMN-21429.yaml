@@ -1,0 +1,67 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21429
+title: "Queue, dispatch and run claims on the generic service"
+summary: >-
+  The omnibase_infra side of slice 6 of the OMN-21279 runtime cluster and generic lease plan, stacked on OMN-21424 (generic lease) and OMN-21421 (runtime election). ModelLeaseKindPolicy gains expires (default true); a kind with expires false is insert-only, the `once` kind of plan section 7 for inventory rows E6 and E10: its grant binds no etcd lease, so it never expires, and renew and release refuse it. tests/integration/runtime/placement/test_slice6_lease_kinds_omn21429.py declares the six slice-6 kinds of section 7 (dispatch, merge-sweep, once, queue-item, close-out-run, token) with their section-7 resource shapes and races two lease stores, one per simulated runtime, on the test etcd of OMN-21421 and OMN-21424, per kind. AC1 (the omniclaude and omnimarket mechanisms E1, E4, E6, E7, E10, E11, E12, E13 taking these leases) and AC3 (deleting omniclaude preexisting_fix_lock.py and omnimarket node_session_bootstrap/dispatch_lease.py) are changes in omniclaude and omnimarket and are not in this change; this contract binds AC2 only.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21429-ac2-one-grant-per-kind
+    statement: "Two concurrent holders of the same resource in each migrated kind get exactly one grant."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: two concurrent holders of the same resource in each migrated kind get exactly one grant -- falsifier: a pytest per kind counts two grants
+evidence_requirements:
+  - kind: tests
+    description: "The slice-6 lease kind suite (two lease stores on a real etcd, one parametrized case per kind) and the OMN-21424 generic lease suites pass."
+    command: "uv run pytest tests/integration/runtime/placement/test_slice6_lease_kinds_omn21429.py tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the committed lease store and kind policy read at the checkout commit. It starts nothing and touches no running lane."
+    command: "deploy: gh api contents of handler_lease_store.py and model_lease_kind_policy.py at HEAD"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21429-ac2-one-grant-per-kind
+    description: >-
+      For each slice-6 kind of plan section 7 (dispatch, merge-sweep, once, queue-item, close-out-run, token), two lease stores, one per simulated runtime, acquire the same resource concurrently on a loopback etcd and the test counts exactly one lease-granted and one lease-refused; twenty racing acquires across the two stores also count one grant; the expiring kinds re-grant after release at a higher fence; the once kind binds no etcd lease and refuses renew and release.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_slice6_lease_kinds_omn21429.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21429-deploy-insert-only-kind
+    description: >-
+      Read the committed lease store and kind policy at the checkout commit through the GitHub contents API. Fail when the kind policy has no expires field or the store still grants an etcd lease for a kind that does not expire. Runs on hosted runners without a container daemon or access to a private runtime; the lease is not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/lease/model_lease_kind_policy.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'expires: bool = True' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'if policy.expires:' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21429-ac2-ambiguous-commit-replay
+    description: >-
+      A real etcd commits an acquisition before the transaction reply is lost. The confirmation read also fails. Retrying the request must replay the committed grant, its fence must remain live, and a competing holder must be refused. Revoking the uncertain grant makes this test fail.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lease_ambiguous_commit_omn21429.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21429-deploy-projection-join
+    description: >-
+      Run the committed projection SQL against the migration's table and compare every equal-fence event order with the reducer. This hosted-runner check needs no container daemon and fails if terminal events erase a holder or lower-ranked events cannot supply one.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lease_projection_omn21424.py -k equal_fence_sql_join -q
+        cwd: ${OMNI_HOME}/omnibase_infra
