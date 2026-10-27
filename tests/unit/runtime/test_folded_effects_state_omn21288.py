@@ -103,6 +103,47 @@ def test_unconfigured_lanes_are_unchanged(tmp_path: Path) -> None:
     assert not (tmp_path / "main").exists()
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_missing_main_root_is_refused_before_mutating_state(
+    tmp_path: Path, blank: str
+) -> None:
+    env = _env(tmp_path)
+    env["ONEX_STATE_DIR"] = blank
+    env["ONEX_STATE_ROOT"] = blank
+    with pytest.raises(ValueError, match="requires ONEX_STATE_DIR or ONEX_STATE_ROOT"):
+        prepare_folded_effects_state(env)
+    assert not (tmp_path / "main").exists()
+    assert not (tmp_path / "effects").exists()
+
+
+def test_dangling_correct_link_recreates_effects_directory(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    target = tmp_path / "main/delegation"
+    target.parent.mkdir()
+    target.symlink_to(tmp_path / "effects/delegation", target_is_directory=True)
+    prepare_folded_effects_state(env)
+    assert target.samefile(tmp_path / "effects/delegation")
+
+
+def test_concurrent_main_write_is_preserved_and_aborts_handover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "main/delegation"
+    target.mkdir(parents=True)
+    original = Path.rmdir
+
+    def write_before_rmdir(path: Path) -> None:
+        if path == target:
+            (path / "concurrent-claim").write_text("keep")
+        original(path)
+
+    monkeypatch.setattr(Path, "rmdir", write_before_rmdir)
+    with pytest.raises(OSError):
+        prepare_folded_effects_state(_env(tmp_path))
+    assert (target / "concurrent-claim").read_text() == "keep"
+    assert not target.is_symlink()
+
+
 def test_preflight_prepares_claim_state_before_handlers_can_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

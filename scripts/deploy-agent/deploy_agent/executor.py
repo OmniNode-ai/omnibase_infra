@@ -278,7 +278,14 @@ COMPOSE_PROJECT = "omnibase-infra"
 # must never become the reason a deploy is slow. Three read-only commands,
 # each bounded well under the phase it precedes.
 CONFIG_HASH_TIMEOUT_SECONDS = 60
-RUNTIME_POLICY_ENV_FILE = Path(REPO_DIR) / "docker" / "runtime-policy.env"
+# Policy belongs to the agent's checkout, like its instance routing table.
+# An explicitly selected deploy repository remains authoritative; without one,
+# a host-specific Linux path must not silently turn every folded role off.
+RUNTIME_POLICY_ENV_FILE = (
+    Path(os.environ.get("DEPLOY_AGENT_REPO_DIR", str(AGENT_CLONE_ROOT)))
+    / "docker"
+    / "runtime-policy.env"
+)
 #: The governed repoint the agent shells out to, resolved against the deploy
 #: clone rather than written out a second time.
 REPOINT_ONEX_API_SCRIPT = (

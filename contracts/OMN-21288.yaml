@@ -199,6 +199,18 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py tests/unit/docker/test_stability_lane_effects_folded_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
+  - id: dod-omn21288-checkout-policy-and-state-refusal
+    description: >-
+      Hosted-runner deployment falsifier: the real deploy executor reads its checkout's fold policy without a Linux deploy directory, preserves retired-only no-op requests, and refuses other disabled services. Folded effects preflight refuses missing main state roots before filesystem mutation, repairs a correct dangling alias, and preserves a claim written during the empty-directory handover. No running lane or Docker daemon is required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py scripts/deploy-agent/tests/unit/test_dev_worker_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3, AC4]
 context:
   remaining_after_this_change: "AC2 end state: twelve dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
