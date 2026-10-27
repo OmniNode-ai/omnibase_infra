@@ -65,7 +65,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_live_contact_omn20910.py -q -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC11"]
   - id: "dod-omn20910-ac11-judge-head-protocol"
     description: "Seven test-first regressions drive the real pending and posting modes with a recording GitHub API, including a push during judgement and five invalid or absent head controls. All seven fail at the merge base; no provider, credential or live GitHub call is used."
@@ -73,7 +73,7 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov -p no:randomly -k HeadBoundJudgeProtocol"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC11"]
   - id: "dod-omn20910-ac11-judge-head-protocol-deploy"
     description: "Hosted-runner deploy check of the judge producer, recorded-contact replay, thread gate, workflow wiring and secret boundary. It requires neither Docker nor a deployed service and does not claim live judgements or green PR gates."
@@ -81,79 +81,79 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "uv run --frozen pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_judge_live_contact_omn20910.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC11"]
   - id: "dod-omn20910-ac1-overlay-declares-voters"
     description: "The review and preflight read the overlay from the private CI overlay, outside the pull request checkout (amended by OMN-20923)."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay' -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-omn20910-ac3-no-voter-endpoint"
     description: "No reviewer workflow names a voter endpoint; the ratchet's positive control finds the known-bad lines."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'ratchet or names_a_voter or retired_endpoint' -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'ratchet or names_a_voter or retired_endpoint'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
   - id: "dod-omn20910-ac4-no-voter-model"
     description: "The widened ratchet refuses a model variable, a model id literal and a MODEL env literal, and no reviewer workflow carries one."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC4"]
   - id: "dod-omn20910-ac5-ratchet-wired"
     description: "The test file is a step of the lint job (covered by the required CI Summary context) and a pre-commit hook entry."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay_ratchet_is_wired -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -k voter_model_from_overlay_ratchet_is_wired"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC5"]
   - id: "dod-omn20910-ac6-dev-tag-read"
     description: "AC6. The clone step is executed against a fake git: it picks the newest dev-<UTC>-<sha12> tag, logs it, fails closed with none, and carries no branch tip or sha."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k clone_step -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k clone_step"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC6"]
   - id: "dod-omn20910-ac7-claude-key-to-review-step"
     description: "AC7. The org secret reaches the review step alone under both names the voter code can read."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression' -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC7"]
   - id: "dod-omn20910-ac8-no-repost-unchanged-diff"
     description: "AC8. The poster records the PR diff digest, skips unchanged diffs already reviewed by github-actions[bot], and ignores other accounts' markers."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_post_hostile_review_threads.py tests/ci/test_post_hostile_review_threads_merge_only_omn20910.py -q -n 0 --no-cov -k diff_digest -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_post_hostile_review_threads.py tests/ci/test_post_hostile_review_threads_merge_only_omn20910.py -q -n 0 --no-cov -k diff_digest"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC8"]
   - id: "dod-omn20910-ac9-review-judge-on-default-branch"
     description: "AC9. The judge workflow and the thread script's judge modes run from the default branch; with no request artifact the judge does nothing; dev's gate rule for a rejection is unchanged."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov -p no:randomly"
-        cwd: "."
+        check_value: "uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC9"]
   - id: "dod-omn20910-ac10-rung-env-backend-pin"
     description: "AC10. The rung-eval env example names the backend-pin variables of the cloud rung and none of its retired variables."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --frozen pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly -k 'value_free_environment or retired_cloud_rung'"
-        cwd: "."
+        check_value: "uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC10"]
   - id: "dod-omn20910-deploy-rung-eval-env-example"
     description: "The change is a host env template and its test; the installed unit files are unchanged. The check reads the template the installer copies and fails when it still names a retired cloud rung variable or lacks a backend-pin name."
@@ -161,4 +161,4 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "grep -q '^# RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID=$' deploy/rung-eval/rung-eval.env.example && grep -q '^# RUNG_EVAL_DOGFOOD_TENANT_ID=$' deploy/rung-eval/rung-eval.env.example && ! grep -qE 'RUNG_EVAL_CLOUD_OPENROUTER_(BASE_URL|MODEL|API_KEY)' deploy/rung-eval/rung-eval.env.example"
-        cwd: "."
+        cwd: "${OMNI_HOME}/omnibase_infra"
