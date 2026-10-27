@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from omnibase_infra.models.contracts.model_dev_broker_memory_policy import (
     ModelDevBrokerMemoryPolicy,
@@ -26,7 +26,7 @@ RuntimeProfileName = Literal[
 ]
 
 
-class ModelRuntimePolicyContract(ModelDevBrokerMemoryPolicy):
+class ModelRuntimePolicyContract(BaseModel):
     """Contract-owned runtime policy rendered into deployment env."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
@@ -45,6 +45,10 @@ class ModelRuntimePolicyContract(ModelDevBrokerMemoryPolicy):
     # as one top-level var, matching omnimemory_memgraph_port's pattern
     # rather than the per-profile omnimemory_memgraph_host pattern.
     arch_graph_bolt_uri: str = Field(min_length=1)
+    # OMN-20275: dev broker only, OPERATOR-CONSENT 2026-10-27T06:37:48Z;
+    # bounds are ModelDevBrokerMemoryPolicy's, checked below.
+    dev_redpanda_memory: str = Field(min_length=1, max_length=32)
+    dev_redpanda_mem_limit: str = Field(min_length=1, max_length=32)
     auxiliary_services_omnimemory_enabled: bool
     profiles: dict[RuntimeProfileName, ModelRuntimeProfilePolicy]
 
@@ -75,6 +79,14 @@ class ModelRuntimePolicyContract(ModelDevBrokerMemoryPolicy):
             msg = "llm cloud endpoint host allowlist entries must be unique"
             raise ValueError(msg)
         return tuple(normalized)
+
+    @model_validator(mode="after")
+    def _dev_broker_within_consent(self) -> ModelRuntimePolicyContract:
+        ModelDevBrokerMemoryPolicy(
+            dev_redpanda_memory=self.dev_redpanda_memory,
+            dev_redpanda_mem_limit=self.dev_redpanda_mem_limit,
+        )
+        return self
 
     @model_validator(mode="after")
     def _requires_runtime_profiles(self) -> ModelRuntimePolicyContract:

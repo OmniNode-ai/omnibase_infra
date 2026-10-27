@@ -51,7 +51,11 @@ def test_other_lanes_do_not_read_dev_broker_contract_overlay(
 ) -> None:
     (policy_env / "runtime_policy.contract.yaml").write_text("invalid: true\n")
     with executor.active_deploy_lane(lane):
-        executor._compose_env()
+        assert executor._dev_broker_policy_env(dict(executor.os.environ)) == {}
+        env = executor._compose_env()
+    # The operator store and process values stand: no contract render was applied.
+    assert env["DEV_REDPANDA_MEMORY"] == "24G"
+    assert env["DEV_REDPANDA_MEM_LIMIT"] == "4g"
 
 
 def test_other_dev_instances_do_not_read_dev_201_broker_overlay(
@@ -60,4 +64,7 @@ def test_other_dev_instances_do_not_read_dev_201_broker_overlay(
     monkeypatch.setattr(executor, "active_dev_instance", lambda: "other-instance")
     (policy_env / "runtime_policy.contract.yaml").write_text("invalid: true\n")
     with executor.active_deploy_lane(EnumRuntimeLane.DEV):
-        executor._compose_env()
+        assert executor._dev_broker_policy_env(dict(executor.os.environ)) == {}
+        env = executor._compose_env()
+    assert env["DEV_REDPANDA_MEMORY"] == "24G"
+    assert env["DEV_REDPANDA_MEM_LIMIT"] == "4g"

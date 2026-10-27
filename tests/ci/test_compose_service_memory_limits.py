@@ -37,6 +37,7 @@ from typing import Any
 
 import pytest
 import yaml
+from dotenv import dotenv_values
 
 pytestmark = [pytest.mark.unit]
 
@@ -220,6 +221,12 @@ def _compose_environment(stack: tuple[str, ...]) -> dict[str, str]:
             elif variable.endswith("_DIR") or variable == "OMNI_HOME":
                 # Volume sources and container paths must be path-shaped.
                 environment[variable] = str(REPO_ROOT / "placeholder")
+    # Contract-rendered values (OMN-20275 broker sizes) are typed; use the
+    # rendered policy, as deploys do, rather than an unparseable placeholder.
+    policy = dotenv_values(DOCKER_DIR / "runtime-policy.env")
+    for variable, value in policy.items():
+        if variable in environment and value:
+            environment[variable] = value
     return environment
 
 
