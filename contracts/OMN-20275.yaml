@@ -8,6 +8,24 @@ is_seam_ticket: false
 interface_change: true
 interfaces_touched: ["public_api"]
 requirements:
+  - id: "req-ledger-host-append-over-bus"
+    statement: "Live ticket criteria for the cross-repository ledger append path remain required; this runtime PR does not claim their completion."
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: the serve handler appends a request's rows through the configured append command exactly once: a redelivered request id returns status duplicate with the original line and no second row -- falsifier: uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k redelivered_request_appends_once
+      - id: "AC2"
+        statement: |-
+          AC2: a request whose append command exits 65 yields a receipt with status refused, exit_code 65 and the refusal text, and the ledger file is byte-identical -- falsifier: uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k refused_append_leaves_ledger_unchanged
+      - id: "AC3"
+        statement: |-
+          AC3: a RULING or OPERATOR-CONSENT row in a bus request is refused before the append command runs -- falsifier: uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k consent_and_ruling_refused_over_bus
+      - id: "AC4"
+        statement: |-
+          AC4: onex-ledger with ONEX_LEDGER_WRITE_VIA=bus writes nothing locally, publishes one request carrying req= and via=bus cells, and exits with the receipt exit code; with the publisher missing it refuses with exit 69 and names the variable -- falsifier: uv run pytest tests/ledger -q -k bus_write_mode
+      - id: "AC5"
+        statement: |-
+          AC5: a remote-lane run on h202 writes its own CLAIM and TERMINAL through the ledger skills, and both rows are in the ledger of record and in omninode_internal.work_ledger_rows with the same row_id -- falsifier: grep -c of the run lane in the ledger file expecting 2, plus psql count(\*) from omninode_internal.work_ledger_rows where raw_row like the run lane expecting 2
   - id: "req-per-principal-writer-topic-grants"
     statement: "Each issued principal holds WRITE on its own writer topic only, and grants can be re-applied without a password change."
     acceptance:
@@ -98,4 +116,64 @@ dod_evidence:
     checks:
       - check_type: "command"
         check_value: "curl --fail --silent --show-error --location https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/omn-20275-runtime-bus-recovery/src/omnibase_infra/event_bus/event_bus_kafka.py | grep -q 'class EventBusRecovering' && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_runtime_bus_recovery.py -q -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac1-ledger-bus"
+    description: "AC1: retained live ticket falsifier, owned by omnimarket; not claimed by this runtime PR."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k redelivered_request_appends_once"
+        cwd: "${OMNI_HOME}/omnimarket"
+  - id: "dod-omn20275-ac2-ledger-bus"
+    description: "AC2: retained live ticket falsifier, owned by omnimarket; not claimed by this runtime PR."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k refused_append_leaves_ledger_unchanged"
+        cwd: "${OMNI_HOME}/omnimarket"
+  - id: "dod-omn20275-ac3-ledger-bus"
+    description: "AC3: retained live ticket falsifier, owned by omnimarket; not claimed by this runtime PR."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_work_ledger_append_effect -q -k consent_and_ruling_refused_over_bus"
+        cwd: "${OMNI_HOME}/omnimarket"
+  - id: "dod-omn20275-ac4-ledger-bus"
+    description: "AC4: retained live ticket falsifier, owned by the private operator-tooling repository; not claimed by this runtime PR."
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ledger -q -k bus_write_mode"
+        cwd: "${ONEX_WORKSPACE_CONFIG_ROOT}"
+  - id: "dod-omn20275-ac5-remote-ledger-witness"
+    description: "AC5: read the h202 proof lane's CLAIM and TERMINAL from the ledger and projection, requiring identical raw rows and row IDs. Requires the ledger host's read-only proof environment; pending, not claimed by this runtime PR."
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "command"
+        check_value: |-
+          uv run python - <<'PROOF'
+          import hashlib
+          import os
+          import re
+          from pathlib import Path
+          import psycopg2
+          lane = os.environ["ONEX_LEDGER_PROOF_LANE"]
+          assert re.fullmatch(r"[A-Za-z0-9_.-]+", lane), "invalid proof lane"
+          rows = [line for line in Path(os.environ["ONEX_LEDGER_PATH"]).read_text().splitlines() if f"lane={lane} |" in line and (" | CLAIM | " in line or " | TERMINAL | " in line)]
+          assert len(rows) == 2, "expected exactly one CLAIM and one TERMINAL"
+          assert {row.split(" | ")[1] for row in rows} == {"CLAIM", "TERMINAL"}
+          assert all("host=h202" in row.split(" | ") for row in rows), "proof must originate on h202"
+          expected = {(hashlib.sha256(row.strip().encode("utf-8")).hexdigest(), row.strip()) for row in rows}
+          with psycopg2.connect(os.environ["ONEX_LEDGER_READ_DSN"]) as conn:
+              conn.set_session(readonly=True)
+              with conn.cursor() as cursor:
+                  cursor.execute("SELECT row_id::text, raw_row FROM omninode_internal.work_ledger_rows WHERE raw_row = ANY(%s)", (rows,))
+                  observed = set(cursor.fetchall())
+          assert observed == expected, "ledger and projection row IDs/raw rows differ"
+          PROOF
         cwd: "${OMNI_HOME}/omnibase_infra"
