@@ -108,10 +108,8 @@ def _check_broker_memory(broker: Mapping[str, Any]) -> None:
     limit = _broker_memory_bytes(broker.get("mem_limit", 0))
     if not (arena == _BROKER_ARENA_BYTES and limit == _BROKER_LIMIT_BYTES):
         raise ValueError(
-            "dev broker --memory must be 12 GiB and mem_limit 16 GiB (OMN-21279, OMN-20275)"
+            "dev broker --memory must be 12 GiB and mem_limit 16 GiB (OMN-20275)"
         )
-    if arena > limit:
-        raise ValueError("dev broker --memory exceeds its container limit")
 
 
 def _check_dev_broker_stack(compose_files: Sequence[Path], policy_env: Path) -> None:
@@ -237,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
                 subprocess.TimeoutExpired,
             ):
                 print(
-                    "ERROR: DEV_BROKER_MEMORY_CAP_REFUSED (OMN-21279); expected --memory 12 GiB and mem_limit 16 GiB (OMN-20275)",
+                    "ERROR: DEV_BROKER_MEMORY_CAP_REFUSED (OMN-20275); expected --memory 12 GiB and mem_limit 16 GiB (OMN-20275)",
                     file=sys.stderr,
                 )
                 return 1
