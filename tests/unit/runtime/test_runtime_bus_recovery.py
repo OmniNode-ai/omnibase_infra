@@ -535,3 +535,39 @@ async def test_shutdown_finishes_teardown_already_started_by_recovery(
     finally:
         allow_close.set()
         await shutdown
+
+
+async def test_one_failed_subscription_on_live_kafka_does_not_degrade_the_bus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unprovisioned topic fails its own subscribe; Kafka stays the transport."""
+    bus = make_bus()
+
+    async def start(self: EventBusKafka) -> None:
+        self._started = True
+        self._shutdown = False
+        self._producer = MagicMock(_closed=False, stop=AsyncMock())
+
+    async def attach(self: EventBusKafka, **kwargs: object) -> AsyncMock:
+        if kwargs["topic"] == "unprovisioned":
+            raise InfraConnectionError("topic metadata unavailable after all retries")
+        return AsyncMock()
+
+    monkeypatch.setattr(EventBusKafka, "start", start)
+    monkeypatch.setattr(EventBusKafka, "close", AsyncMock())
+    monkeypatch.setattr(EventBusKafka, "subscribe", attach)
+    monkeypatch.setattr(
+        EventBusKafka, "health_check", AsyncMock(return_value={"healthy": True})
+    )
+    try:
+        await bus.start()
+        await bus.subscribe("events", group_id="g", on_message=AsyncMock())
+        with pytest.raises(InfraConnectionError, match="metadata unavailable"):
+            await bus.subscribe("unprovisioned", group_id="g", on_message=AsyncMock())
+        health = await bus.health_check()
+        assert health == {"healthy": True}
+        assert "transport" not in health
+        assert not bus.consumer_rejoin_alarms()
+        assert bus._recovery_task is None
+    finally:
+        await bus.close()

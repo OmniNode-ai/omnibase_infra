@@ -5790,7 +5790,12 @@ class EventBusRecovering(EventBusKafka):
         required_for_readiness: bool = False,
         auto_offset_reset: str | None = None,
     ) -> _Unsubscribe:
-        """Retain subscription intent and return an unsubscribe that survives recovery."""
+        """Retain subscription intent and return an unsubscribe that survives recovery.
+
+        Raises:
+            InfraConnectionError, InfraTimeoutError: When Kafka is live and this
+                subscription's consumer cannot start. The bus stays on Kafka.
+        """
 
         async def attach(local: bool) -> _Unsubscribe:
             if local:
@@ -5814,11 +5819,11 @@ class EventBusRecovering(EventBusKafka):
 
         key = str(uuid4())
         async with self._transport_lock:
-            try:
-                unsubscribe = await attach(self._fallback_active)
-            except _CONNECT_ERRORS as exc:
-                await self._enter_fallback(exc)
-                unsubscribe = await attach(True)
+            # With Kafka live, a failed attach is this subscription's own
+            # failure (e.g. an unprovisioned topic): raise it to the caller as
+            # EventBusKafka does. Degrading the whole bus would retain an
+            # attachment that recovery can never restore.
+            unsubscribe = await attach(self._fallback_active)
             self._attachments[key] = attach
             self._unsubscribes[key] = unsubscribe
 
