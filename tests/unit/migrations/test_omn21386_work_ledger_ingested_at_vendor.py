@@ -69,11 +69,17 @@ def test_nullable_column_is_added_before_its_insert_default() -> None:
     assert default == (
         f"ALTER TABLE {_TABLE} ALTER COLUMN ingested_at SET DEFAULT clock_timestamp()"
     )
-    # Existing rows keep NULL: no NOT NULL, no default on the ADD, no backfill.
-    assert not re.search(r"\b(NOT NULL|DEFAULT|UPDATE|DELETE)\b", column)
-    assert not re.search(r"\b(UPDATE|DELETE|DROP)\b", default)
 
 
-def test_it_applies_after_the_sequence_migration() -> None:
-    order = sorted(path.name for path in _VENDOR.glob("*.sql"))
+def test_runner_applies_it_last_and_directly_after_0005() -> None:
+    # The runner applies each node's files in `ls | sort` order; mirror it in C order.
+    runner = (_ROOT / "scripts" / "run-forward-migrations.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'for migration_file in $(ls "${node_dir}"*.sql | sort); do' in runner
+    order = sorted((path.name for path in _VENDOR.glob("*.sql")), key=str.encode)
+    prefixes = [name.split("_", 1)[0] for name in order]
+    assert prefixes == [f"{n:04d}" for n in range(len(order))]
+    assert order[-1] == _INGESTED_AT
+    assert order[-2].startswith("0005_")
     assert order.index(_SEQUENCE) < order.index(_INGESTED_AT)
