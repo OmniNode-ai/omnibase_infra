@@ -11,5 +11,8 @@ services:
       # state and logs separately; no volume is removed during retirement.
       - tenant_projection_data:/app/tenant-projection-data
       - tenant_projection_logs:/app/tenant-projection-logs:ro
-  # Also refuse an explicit compose up of the retired service.
-  tenant-projection-writer: !reset null
+  # The retired carrier starts under no profile a lane bring-up requests, as
+  # the stability lane folds runtime-effects. A service-level `!reset` would
+  # break every reader that loads the overlays with SafeLoader.
+  tenant-projection-writer:
+    profiles: !override ["folded-tenant-projection"]

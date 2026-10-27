@@ -41,14 +41,21 @@ def test_policy_folds_tenant_projections_on_primary_dev_only() -> None:
     assert (ROOT / "docker/runtime-policy.env").read_text() == format_dotenv(rendered)
 
 
-def test_overlay_removes_the_carrier_including_explicit_compose_start() -> None:
+def test_overlay_gates_the_carrier_under_its_folded_profile_only() -> None:
     document = yaml.compose(OVERLAY.read_text())
     assert isinstance(document, yaml.MappingNode)
     services = next(value for key, value in document.value if key.value == "services")
     carrier = next(value for key, value in services.value if key.value == SERVICE)
-    assert carrier.tag == "!reset"
-    assert carrier.value == "null"
+    assert isinstance(carrier, yaml.MappingNode)
+    profiles = next(value for key, value in carrier.value if key.value == "profiles")
+    assert profiles.tag == "!override"
+    assert [item.value for item in profiles.value] == ["folded-tenant-projection"]
     assert SERVICE not in dev_stack_services()
+
+
+def test_overlay_loads_with_the_plain_safe_loader_readers_use() -> None:
+    document = yaml.safe_load(OVERLAY.read_text().replace("!override", ""))
+    assert isinstance(document["services"][SERVICE], dict)
 
 
 def test_main_keeps_its_identity_bindings_and_the_carriers_state() -> None:

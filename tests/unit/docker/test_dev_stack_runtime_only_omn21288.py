@@ -101,7 +101,7 @@ def dev_stack_services() -> dict[str, dict[str, Any]]:
     merged = load_compose(DEV_COMPOSE_FILES[0])
     for path in DEV_COMPOSE_FILES[1:]:
         for name, overlay in load_compose(path).items():
-            # Compose !reset null removes a service, including explicit up.
+            # Compose !reset null removes a service.
             if overlay is None:
                 merged.pop(name, None)
                 continue
@@ -111,7 +111,21 @@ def dev_stack_services() -> dict[str, dict[str, Any]]:
             if env:
                 base["environment"] = env
             merged[name] = base
-    return merged
+    # A service gated only under a folded-role profile starts under no profile
+    # a dev bring-up requests: its role runs inside main.
+    return {
+        name: service
+        for name, service in merged.items()
+        if not _folded_only(service.get("profiles"))
+    }
+
+
+def _folded_only(profiles: object) -> bool:
+    return (
+        isinstance(profiles, list)
+        and bool(profiles)
+        and all(str(p).startswith("folded-") for p in profiles)
+    )
 
 
 def find_out_of_runtime_workloads(
@@ -192,7 +206,7 @@ def test_removed_service_cannot_return_even_with_an_image_only(service: str) -> 
 
 def test_real_dev_files_include_the_final_fold_overlay() -> None:
     text = DEV_COMPOSE_FILES[-1].read_text(encoding="utf-8")
-    assert "tenant-projection-writer: !reset null" in text
+    assert 'profiles: !override ["folded-tenant-projection"]' in text
     assert "tenant-projection-writer" in load_compose(DEV_COMPOSE_FILES[0])
     assert "tenant-projection-writer" not in dev_stack_services()
 
