@@ -21,6 +21,9 @@ omnimemory_memgraph_port: 7687
 # host address (bolt://100.109.203.94:7687) is the cross-lane fallback.
 arch_graph_bolt_uri: "bolt://omnibase-infra-memgraph:7687"
 auxiliary_services_omnimemory_enabled: false
+# OMN-20275: dev broker on 19092 only; consent 2026-10-27T06:37:48Z.
+dev_redpanda_memory: 12G
+dev_redpanda_mem_limit: 16g
 profiles:
   dev:
     compose_project: omnibase-infra
