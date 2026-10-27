@@ -10,6 +10,7 @@ from types import ModuleType
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[3] / "scripts" / "trigger_rebuild_on_merge.py"
@@ -140,24 +141,71 @@ def test_unknown_binding_keys_are_refused(declaration: dict[str, object]) -> Non
 
 
 @pytest.mark.parametrize(
-    "declaration",
+    ("declaration", "expected_loc"),
     [
-        {"binding_fallback": "primary"},
-        {"secret_resolver": {"mappings": [{"logical_name": "KAFKA_SASL_PASSWORD"}]}},
-        {
-            "secret_resolver": {
-                "mappings": [
-                    {
-                        "logical_name": "KAFKA_SASL_PASSWORD",
-                        "source": {"source_type": "env"},
-                    }
-                ]
-            }
-        },
+        ({"binding_fallback": "primary"}, ("binding_fallback",)),
+        (
+            {
+                "secret_resolver": {
+                    "mappings": [{"logical_name": "KAFKA_SASL_PASSWORD"}]
+                }
+            },
+            ("secret_resolver", "mappings", 0, "source"),
+        ),
+        (
+            {
+                "secret_resolver": {
+                    "mappings": [
+                        {
+                            "logical_name": "KAFKA_SASL_PASSWORD",
+                            "source": {"source_type": "env"},
+                        }
+                    ]
+                }
+            },
+            ("secret_resolver", "mappings", 0, "source", "source_path"),
+        ),
     ],
 )
-def test_malformed_binding_shapes_are_refused(declaration: dict[str, object]) -> None:
+def test_malformed_binding_shapes_are_refused(
+    declaration: dict[str, object], expected_loc: tuple[str, ...]
+) -> None:
     mod = _import_trigger_module()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError) as excinfo:
         mod.ModelCiBusLane.model_validate({"broker": "inmemory", **declaration})
+
+    locs = [tuple(err["loc"]) for err in excinfo.value.errors()]
+    assert any(loc[: len(expected_loc)] == expected_loc for loc in locs), locs
+
+
+def test_binding_fallback_edge_values_are_kept_verbatim() -> None:
+    """The model is shape-only: empty and duplicate entries are not policed here."""
+    mod = _import_trigger_module()
+
+    empty = mod.ModelCiBusLane.model_validate(
+        {"broker": "inmemory", "binding_fallback": []}
+    )
+    assert empty.binding_fallback == ()
+    odd = mod.ModelCiBusLane.model_validate(
+        {"broker": "inmemory", "binding_fallback": ["primary", "primary", ""]}
+    )
+    assert odd.binding_fallback == ("primary", "primary", "")
+
+
+def test_secret_resolver_edge_values() -> None:
+    mod = _import_trigger_module()
+
+    explicit_none = mod.ModelCiBusLane.model_validate(
+        {"broker": "inmemory", "secret_resolver": None}
+    )
+    assert explicit_none.secret_resolver is None
+    resolver = mod.ModelCiBusLane.model_validate(
+        {
+            "broker": "inmemory",
+            "secret_resolver": {"enable_convention_fallback": True, "mappings": []},
+        }
+    ).secret_resolver
+    assert resolver is not None
+    assert resolver.enable_convention_fallback is True
+    assert resolver.mappings == ()
