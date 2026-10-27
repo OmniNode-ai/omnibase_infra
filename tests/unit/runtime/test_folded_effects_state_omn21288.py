@@ -135,9 +135,51 @@ def test_unset_main_state_root_is_named(tmp_path: Path) -> None:
     env = _env(tmp_path)
     env.pop("ONEX_STATE_DIR", None)
     env.pop("ONEX_STATE_ROOT", None)
-    with pytest.raises(ValueError, match="ONEX_STATE_DIR or ONEX_STATE_ROOT"):
+    with pytest.raises(ValueError, match="requires ONEX_STATE_DIR"):
         prepare_folded_effects_state(env)
     assert not (tmp_path / "effects").exists()
+
+
+def test_state_root_alone_is_not_the_claim_readers_directory(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["ONEX_STATE_ROOT"] = env.pop("ONEX_STATE_DIR")
+    with pytest.raises(ValueError, match="requires ONEX_STATE_DIR"):
+        prepare_folded_effects_state(env)
+    assert not (tmp_path / "effects").exists()
+    assert not (tmp_path / "main").exists()
+
+
+@pytest.mark.parametrize("file_path", ["effects", "effects/delegation", "main"])
+def test_state_path_that_is_a_regular_file_is_named(
+    tmp_path: Path, file_path: str
+) -> None:
+    blocker = tmp_path / file_path
+    blocker.parent.mkdir(parents=True, exist_ok=True)
+    blocker.write_text("not a directory")
+    with pytest.raises(ValueError, match=f"must be a directory: {blocker}"):
+        prepare_folded_effects_state(_env(tmp_path))
+    assert blocker.read_text() == "not a directory"
+    assert not (tmp_path / "main/delegation").exists()
+
+
+def test_source_swapped_during_handover_refuses_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "effects/delegation"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = Path.symlink_to
+
+    def swap_then_link(
+        self: Path, target: Path, target_is_directory: bool = False
+    ) -> None:
+        source.rmdir()
+        link(source, outside, True)
+        link(self, target, target_is_directory)
+
+    monkeypatch.setattr(Path, "symlink_to", swap_then_link)
+    with pytest.raises(ValueError, match="changed during handover"):
+        prepare_folded_effects_state(_env(tmp_path))
 
 
 @pytest.mark.parametrize("linked_path", ["effects", "effects/delegation", "main"])

@@ -51,17 +51,28 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     # Validate the existing tree before any root-owned filesystem operation.
     # install -d follows links even when chown is later told not to follow them.
-    for folded_path in /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT" "$ONEX_FOLDED_EFFECTS_STATE_ROOT/delegation"; do
-      if [ -L "$folded_path" ]; then
-        echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: folded state path must not be a symlink: $folded_path" >&2
-        exit 2
-      fi
-    done
+    # Every component under the volume is checked: the root is one segment deep.
+    folded_paths_ok() {
+      for folded_path in /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT" "$ONEX_FOLDED_EFFECTS_STATE_ROOT/delegation"; do
+        if [ -L "$folded_path" ]; then
+          echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: folded state path must not be a symlink: $folded_path" >&2
+          return 1
+        fi
+        if [ -e "$folded_path" ] && [ ! -d "$folded_path" ]; then
+          echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: folded state path must be a directory: $folded_path" >&2
+          return 1
+        fi
+      done
+    }
+    folded_paths_ok || exit 2
   fi
   install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
   chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
     install -d -o omniinfra -g omniinfra /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
+    # Check again after install -d: a path swapped in since the first check
+    # refuses boot before the recursive ownership repair walks it.
+    folded_paths_ok || exit 2
     chown -hR omniinfra:omniinfra "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
   fi
   # The runtime-owned secret store (OMN-17099): a named volume mounted under the

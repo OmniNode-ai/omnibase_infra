@@ -281,13 +281,11 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
     }
     if "effects" not in folded:
         raise ValueError("effects state handover requires the folded effects role")
-    main_configured = (
-        env.get("ONEX_STATE_DIR", "").strip() or env.get("ONEX_STATE_ROOT", "").strip()
-    )
+    # The claim reader opens ONEX_STATE_DIR/delegation. Falling back to
+    # ONEX_STATE_ROOT could alias a directory the reader never opens.
+    main_configured = env.get("ONEX_STATE_DIR", "").strip()
     if not main_configured:
-        raise ValueError(
-            "effects state handover requires ONEX_STATE_DIR or ONEX_STATE_ROOT"
-        )
+        raise ValueError("effects state handover requires ONEX_STATE_DIR")
     main_root = Path(main_configured)
     effects_root = Path(configured)
     if not main_root.is_absolute() or not effects_root.is_absolute():
@@ -299,6 +297,8 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
     for state_path in (main_root, effects_root, source):
         if state_path.is_symlink():
             raise ValueError(f"folded state path must not be a symlink: {state_path}")
+        if state_path.exists() and not state_path.is_dir():
+            raise ValueError(f"folded state path must be a directory: {state_path}")
     source_path = source.resolve()
     destination_path = destination.resolve()
     if destination.is_symlink():
@@ -325,6 +325,16 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
     if destination.exists():
         destination.rmdir()  # Only an empty directory can reach this point.
     destination.symlink_to(source, target_is_directory=True)
+    # The checks above ran before these filesystem steps. Confirm the alias and
+    # its source still hold, so a path swapped in between refuses this boot.
+    if (
+        destination.readlink() != source
+        or source.is_symlink()
+        or not source.is_dir()
+        or effects_root.is_symlink()
+        or main_root.is_symlink()
+    ):
+        raise ValueError("folded delegation state changed during handover")
 
 
 def run_preflight(env: MutableMapping[str, str]) -> int:

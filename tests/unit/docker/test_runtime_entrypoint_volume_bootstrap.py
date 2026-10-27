@@ -206,3 +206,87 @@ def test_folded_symlink_refuses_before_any_root_filesystem_operation(
     assert link.is_symlink()
     assert claim.read_text() == "preserve"
     assert list(outside.iterdir()) == [claim]
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    ["effects-data", "effects-data/state", "effects-data/state/delegation"],
+)
+def test_folded_regular_file_refuses_before_any_root_filesystem_operation(
+    tmp_path: Path, file_path: str
+) -> None:
+    app = tmp_path / "app"
+    blocker = app / file_path
+    blocker.parent.mkdir(parents=True, exist_ok=True)
+    blocker.write_text("not a directory")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("id", "install", "chown", "gosu"):
+        script = bin_dir / name
+        script.write_text(
+            "#!/bin/sh\nprintf '0\\n'\n"
+            if name == "id"
+            else "#!/bin/sh\necho 'unexpected root filesystem operation' >&2\nexit 77\n"
+        )
+        script.chmod(0o755)
+    entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
+    result = subprocess.run(
+        ["sh", "-c", entrypoint.replace("/app/", f"{app}/")],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "ONEX_FOLDED_EFFECTS_STATE_ROOT": str(app / "effects-data/state"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "must be a directory" in result.stderr
+    assert "unexpected root filesystem operation" not in result.stderr
+    assert blocker.read_text() == "not a directory"
+
+
+def test_folded_path_swapped_after_install_refuses_before_ownership_repair(
+    tmp_path: Path,
+) -> None:
+    app = tmp_path / "app"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    state = app / "effects-data/state"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    scripts = {
+        "id": "#!/bin/sh\nprintf '0\\n'\n",
+        # The folded install -d runs, then a link replaces the state root.
+        "install": (
+            "#!/bin/sh\n"
+            'case "$*" in *effects-data*) '
+            f"mkdir -p {app}/effects-data && ln -s {outside} {state} ;; esac\n"
+        ),
+        "chown": (
+            "#!/bin/sh\n"
+            'case "$*" in *effects-data*) '
+            "echo 'ownership repair ran' >&2; exit 77 ;; esac\n"
+        ),
+        "gosu": "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in scripts.items():
+        script = bin_dir / name
+        script.write_text(body)
+        script.chmod(0o755)
+    entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
+    result = subprocess.run(
+        ["sh", "-c", entrypoint.replace("/app/", f"{app}/")],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "ONEX_FOLDED_EFFECTS_STATE_ROOT": str(state),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "must not be a symlink" in result.stderr
+    assert "ownership repair ran" not in result.stderr
