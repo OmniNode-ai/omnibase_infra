@@ -26,8 +26,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (kind, resource) DO UPDATE SET
     lease_id = EXCLUDED.lease_id,
     fence = EXCLUDED.fence,
-    holder = EXCLUDED.holder,
-    state = EXCLUDED.state
+    holder = CASE
+        WHEN lease_projection.fence = EXCLUDED.fence AND EXCLUDED.holder = ''
+        THEN lease_projection.holder
+        ELSE EXCLUDED.holder
+    END,
+    state = EXCLUDED.state,
+    updated_at = CURRENT_TIMESTAMP
 WHERE lease_projection.fence < EXCLUDED.fence
    OR (
        lease_projection.fence = EXCLUDED.fence

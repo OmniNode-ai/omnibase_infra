@@ -182,3 +182,44 @@ def test_ac4_sql_upsert_at_equal_fence_never_revives_an_ended_lease(
             db.execute(sql, lease_projection_params(row))
         found = db.execute("SELECT fence, state FROM lease_projection").fetchall()
         assert found == [(17, ended)], order
+
+
+def test_ac4_sql_upsert_refreshes_updated_at_on_transition() -> None:
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    held = ModelLeaseProjectionRow(
+        kind="k", resource="r", lease_id=_L1, fence=17, holder="h17", state="held"
+    )
+    db = _sqlite_with_migration()
+    db.execute(sql, lease_projection_params(held))
+    db.execute("UPDATE lease_projection SET updated_at = '2000-01-01 00:00:00'")
+    db.execute(
+        sql, lease_projection_params(held.model_copy(update={"state": "released"}))
+    )
+    updated_at, state = db.execute(
+        "SELECT updated_at, state FROM lease_projection"
+    ).fetchone()
+    assert updated_at is not None and updated_at > "2000-01-01 00:00:00"
+    assert state == "released"
+
+
+@pytest.mark.parametrize("state", ["held", "released", "expired"])
+def test_ac4_sql_upsert_preserves_holder_for_same_fence_without_holder(
+    state: Literal["held", "released", "expired"],
+) -> None:
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    held = ModelLeaseProjectionRow(
+        kind="k", resource="r", lease_id=_L1, fence=17, holder="h17", state="held"
+    )
+    db = _sqlite_with_migration()
+    db.execute(sql, lease_projection_params(held))
+    incoming = held.model_copy(update={"holder": "", "state": state})
+    db.execute(sql, lease_projection_params(incoming))
+    assert db.execute("SELECT holder, state FROM lease_projection").fetchall() == [
+        ("h17", state)
+    ]
+    # A new fence must not inherit the holder of the preceding grant.
+    newer = incoming.model_copy(update={"lease_id": _L2, "fence": 18, "state": "held"})
+    db.execute(sql, lease_projection_params(newer))
+    assert db.execute("SELECT fence, holder FROM lease_projection").fetchall() == [
+        (18, "")
+    ]

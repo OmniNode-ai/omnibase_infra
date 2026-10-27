@@ -62,3 +62,12 @@ dod_evidence:
           grep -F 'PROJECTION_ACTOR = "script:node_projection_lease"' handler_lease_ledger.src > /dev/null &&
           grep -F 'if event.outcome in ("lease-released", "lease-expired"):' handler_lease_ledger.src > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21428-projection-update-metadata
+    description: >-
+      Lease projection conflict updates refresh updated_at and preserve an omitted holder at the same fence. A newer fence does not inherit the preceding holder, and a terminal row still rejects a replayed held event. The SQL regression cases run without external services on a hosted runner.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lease_projection_omn21424.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
