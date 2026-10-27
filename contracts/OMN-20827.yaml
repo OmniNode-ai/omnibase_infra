@@ -43,7 +43,7 @@ dod_evidence:
     binds_ac: ["AC2"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py -k crash"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py tests/integration/cli/test_lane_login_crash_repair_omn20827.py -k crash"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20827-ac3-temporary-file"
     description: >-

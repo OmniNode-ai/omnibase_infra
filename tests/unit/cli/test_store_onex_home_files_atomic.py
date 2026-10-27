@@ -187,66 +187,6 @@ def test_a_crash_inside_one_write_leaves_the_previous_file_byte_identical(
     assert _leftovers(onex_home) == []
 
 
-def test_a_crash_between_the_two_writes_on_a_first_login_is_refused_then_repaired(
-    onex_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with monkeypatch.context() as patch:
-        patch.setattr(
-            StoreOnexHomeFiles,
-            "write_secrets",
-            lambda self, secrets: (_ for _ in ()).throw(_InjectedCrashError("secrets")),
-        )
-        with pytest.raises(_InjectedCrashError):
-            StoreLaneCredential(onex_home=onex_home).save(
-                lane=_LANE,
-                sasl_username="local-developer",
-                sasl_password="first-secret",
-            )
-
-    store = StoreLaneCredential(onex_home=onex_home)
-    assert store.declared_lanes() == (_LANE,)
-    with pytest.raises(ModelOnexError) as caught:
-        store.load(_LANE)
-    assert caught.value.error_code == EnumCoreErrorCode.CONFIGURATION_NOT_FOUND
-    assert "lane-login" in str(caught.value)
-
-    _lane_login("local-developer", "first-secret")
-    credential = StoreLaneCredential(onex_home=onex_home).load(_LANE)
-    assert credential.sasl_password.get_secret_value() == "first-secret"
-    assert _leftovers(onex_home) == []
-
-
-def test_a_crash_between_the_two_writes_on_a_rotation_keeps_the_previous_secret(
-    onex_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _lane_login("local-developer", "first-secret")
-    secrets_before = (onex_home / "credentials.json").read_bytes()
-
-    with monkeypatch.context() as patch:
-        patch.setattr(
-            StoreOnexHomeFiles,
-            "write_secrets",
-            lambda self, secrets: (_ for _ in ()).throw(_InjectedCrashError("secrets")),
-        )
-        with pytest.raises(_InjectedCrashError):
-            StoreLaneCredential(onex_home=onex_home).save(
-                lane=_LANE,
-                sasl_username="local-developer",
-                sasl_password="second-secret",
-            )
-
-    # The fixed reference still holds the previous secret: readable, and stale.
-    assert (onex_home / "credentials.json").read_bytes() == secrets_before
-    stale = StoreLaneCredential(onex_home=onex_home).load(_LANE)
-    assert stale.sasl_password_ref == _PASSWORD_REF
-    assert stale.sasl_password.get_secret_value() == "first-secret"
-
-    _lane_login("local-developer", "second-secret")
-    rotated = StoreLaneCredential(onex_home=onex_home).load(_LANE)
-    assert rotated.sasl_password.get_secret_value() == "second-secret"
-    assert _leftovers(onex_home) == []
-
-
 # --- AC3: the temporary file is 0600 from creation, and never left behind -----
 
 
