@@ -1,0 +1,72 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21164
+title: The release train cuts omniintelligence after its deliberate 0.25.0 release
+summary: >-
+  omniintelligence's deliberate 0.25.0 minor release merged as omniintelligence#1152 (squash 4d5d0b6f). auto-tag-on-merge pushed v0.25.0, and release.yml ran on that push (run 40519520946) and published omninode-intelligence 0.25.0 to PyPI. That PR's contract bound AC1. This PR binds AC2 to AC4. It moves the train's policy row from report_only to cut. It also corrects the row's package to the distribution name omninode-intelligence: that name is the checkout's own uv.lock entry, the one the cut bumps, and the old name would have stopped the first cut at the lock bump. The ticket's AC3 falsifier reads pypi.org/pypi/omniintelligence, a different project last published at 0.5.0, so the AC3 check reads the distribution the row names.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21164-train-cuts
+    statement: The train cuts omniintelligence, and its first merge-triggered release is published.
+    acceptance:
+      - id: AC1
+        statement: "AC1: dev declares 0.25.0 and the changelog covers the window since v0.24.0 -- falsifier: `gh api repos/OmniNode-ai/omniintelligence/contents/pyproject.toml?ref=dev` still reads version 0.24.0, or CHANGELOG.md on dev has no entry above 0.24.0."
+      - id: AC2
+        statement: "AC2: the train's policy row no longer holds the repo -- falsifier: the omniintelligence row in omnibase_infra `config/release_train_policy.yaml` on dev still reads `mode: report_only`."
+      - id: AC3
+        statement: "AC3: a v0.25.x tag exists and PyPI serves that version -- falsifier: `gh api repos/OmniNode-ai/omniintelligence/tags` lists no tag above v0.24.0, or that version is absent from [https://pypi.org/pypi/omniintelligence/json](<https://pypi.org/pypi/omniintelligence/json>)."
+      - id: AC4
+        statement: "AC4: the publishing release.yml run was triggered by a merge, not by hand, so OMN-18662 AC3 can be read off it -- falsifier: the newest successful release.yml run on the repo carries event `workflow_dispatch` rather than `push`."
+evidence_requirements:
+  - kind: tests
+    description: The armed-row tests and the release-train suite pass.
+    command: uv run pytest tests/scripts/test_release_train_omniintelligence_armed_omn21164.py tests/scripts/test_release_train_nightly.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21164-ac2-row-armed
+    description: >-
+      The omniintelligence row loads as mode cut with package omninode-intelligence, that package moves the checkout's own uv.lock entry, and the armed set is the six reviewed repos. At the merge base the row reads report_only with package omniintelligence, so three of the four new tests and the armed-set test fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_omniintelligence_armed_omn21164.py tests/scripts/test_release_train_nightly.py -q -n 0 -k "omn21164 or armed_to_cut"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21164-ac3-tag-and-pypi
+    description: >-
+      The package the row names is served by PyPI at 0.25.0, and the v0.25.0 tag exists on OmniNode-ai/omniintelligence. At the merge base the row names omniintelligence, which PyPI serves only up to 0.5.0, so the check fails there.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run python -c "import json, urllib.request, yaml; pkg = yaml.safe_load(open('config/release_train_policy.yaml'))['repos']['omniintelligence']['package']; rel = json.load(urllib.request.urlopen(f'https://pypi.org/pypi/{pkg}/json'))['releases']; tags = [t['name'] for t in json.load(urllib.request.urlopen('https://api.github.com/repos/OmniNode-ai/omniintelligence/tags?per_page=100'))]; assert '0.25.0' in rel, pkg; assert 'v0.25.0' in tags"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21164-ac4-push-event-release
+    description: >-
+      The newest successful release.yml run on OmniNode-ai/omniintelligence carries event push (run 40519520946, head v0.25.0), and the train now cuts this repo, so later releases come from merges too. At the merge base the armed-row test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/scripts/test_release_train_omniintelligence_armed_omn21164.py -q -n 0 -k armed_to_cut && uv run python -c "import json, urllib.request; runs = json.load(urllib.request.urlopen('https://api.github.com/repos/OmniNode-ai/omniintelligence/actions/workflows/release.yml/runs?status=success&per_page=1'))['workflow_runs']; assert runs and runs[0]['event'] == 'push', runs[:1] and runs[0]['event']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn21164-ac1-release-commit-on-dev
+    description: >-
+      The release commit omniintelligence#1152 squashed to (4d5d0b6f) is on dev, declares version 0.25.0 in pyproject.toml and carries a CHANGELOG.md entry for v0.25.0 naming the v0.24.0 window; the omniintelligence contract binds the same criterion at that repository. Read from the commit, not dev's tip, so a later version bump on dev does not void it. At this repository's merge base the armed-row test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run pytest tests/scripts/test_release_train_omniintelligence_armed_omn21164.py -q -n 0 -k armed_to_cut && uv run python -c "import json, urllib.request; base = 'https://raw.githubusercontent.com/OmniNode-ai/omniintelligence/4d5d0b6ff249b4a3e4d9469da04c0f16efd18177/'; py = urllib.request.urlopen(base + 'pyproject.toml').read().decode(); log = urllib.request.urlopen(base + 'CHANGELOG.md').read().decode(); cmp = json.load(urllib.request.urlopen('https://api.github.com/repos/OmniNode-ai/omniintelligence/compare/4d5d0b6ff249b4a3e4d9469da04c0f16efd18177...dev')); assert 'version = \"0.25.0\"' in py; assert log.startswith('## v0.25.0 ') and 'v0.24.0' in log; assert cmp['status'] in ('identical', 'ahead'), cmp['status']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
