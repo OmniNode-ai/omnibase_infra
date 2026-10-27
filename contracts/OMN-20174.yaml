@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20174
+title: The lockfile pins msgpack at a release that carries the fix for the HIGH advisory GHSA-j586-36cw-2gc2
+summary: The lockfile resolved msgpack 1.2.1, which the lockfile CVE scan reports under HIGH advisory GHSA-j586-36cw-2gc2 (fixed in 1.2.3). This change bumps the resolved version in uv.lock and the runner image lock. The evidence reads the msgpack pin in uv.lock and fails when it is below 1.2.3. It does not run the scanner itself. The evidence is a unit test that reads uv.lock.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20174-msgpack-fixed
+    statement: The lockfile resolves msgpack at 1.2.3 or later, so the lockfile CVE scan no longer reports GHSA-j586-36cw-2gc2.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: uv.lock resolves msgpack at 1.2.3 or later -- falsifier: a msgpack entry in uv.lock below 1.2.3, as at the merge base where it is 1.2.1'
+evidence_requirements:
+  - kind: tests
+    description: Read uv.lock and refuse msgpack below 1.2.3 and dnspython below 2.9.0.
+    command: uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20174-ac1-msgpack-pin
+    description: The msgpack entry in uv.lock is at 1.2.3 or later. Fails at the merge base, where the entry is 1.2.1, and passes at the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q -k 'test_fixed_versions_locked and msgpack'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
