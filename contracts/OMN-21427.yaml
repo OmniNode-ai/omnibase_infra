@@ -43,6 +43,15 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: dod-omn21427-static-node-migration
+    description: >-
+      The node lease projection migration has statically provable schema-qualified targets. Real PostgreSQL applies it twice, converges nullable columns without changing valid rows, and refuses each of the seven required columns when it contains NULL without replacing or deleting data.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_lease_projection_node_omn21427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21427-expiry-projection
     description: >-
       Reconcile a TTL-expired slot grant from its held projection row through the lease.reconcile handler, without a successful renewal. The expiry event retains the original identity, holder and fence, marks the reducer row expired, and cannot overwrite a newer grant. An unreachable etcd raises instead of emitting an expiry event. This is an explicit reconciliation port; periodic scheduling and deployed runtime wiring remain outside this change.

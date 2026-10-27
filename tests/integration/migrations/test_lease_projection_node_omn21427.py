@@ -12,12 +12,82 @@ import pytest
 
 from omnibase_infra.handlers.lease import HandlerLeaseProjection, reduce_lease_event
 from omnibase_infra.models.lease import ModelLeaseReply
+from omnibase_infra.topology.application_database import load_topology_profile
+from omnibase_infra.validation.application_database_domain_enforcement import (
+    lint_application_database_sql,
+)
 from tests.integration.migrations.conftest import EphemeralPostgres
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 _FORWARD = Path(__file__).parents[3] / "docker/migrations/forward"
 _MIGRATION = _FORWARD / "nodes/node_projection_lease/0000_create_lease_projection.sql"
+
+
+def test_node_lease_migration_has_statically_provable_targets() -> None:
+    assert (
+        lint_application_database_sql(
+            _MIGRATION.read_text(), load_topology_profile("local")
+        )
+        == ()
+    )
+
+
+@pytest.mark.parametrize(
+    "null_column",
+    [None, "kind", "resource", "lease_id", "fence", "holder", "state", "updated_at"],
+)
+def test_node_lease_migration_converges_without_replacing_existing_data(
+    ephemeral_postgres: EphemeralPostgres, null_column: str | None
+) -> None:
+    pg = ephemeral_postgres
+    setup = pg.psql(
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "CREATE ROLE tenant_projection_writer; "
+        "CREATE TABLE public.lease_projection (kind TEXT, resource TEXT, "
+        "lease_id UUID, fence BIGINT, holder TEXT, state TEXT, updated_at TIMESTAMPTZ); "
+        "INSERT INTO public.lease_projection VALUES ('slot', 'slot:h201', "
+        "'00000000-0000-0000-0000-000000000007', 7, 'holder', 'held', '2026-10-27Z');",
+    )
+    assert setup.returncode == 0, setup.stderr
+    if null_column is not None:
+        null_updates = {
+            "kind": "UPDATE public.lease_projection SET kind = NULL",
+            "resource": "UPDATE public.lease_projection SET resource = NULL",
+            "lease_id": "UPDATE public.lease_projection SET lease_id = NULL",
+            "fence": "UPDATE public.lease_projection SET fence = NULL",
+            "holder": "UPDATE public.lease_projection SET holder = NULL",
+            "state": "UPDATE public.lease_projection SET state = NULL",
+            "updated_at": "UPDATE public.lease_projection SET updated_at = NULL",
+        }
+        nulled = pg.psql("-c", null_updates[null_column])
+        assert nulled.returncode == 0, nulled.stderr
+    before = pg.psql("-Atc", "SELECT row_to_json(p) FROM public.lease_projection p")
+    assert before.returncode == 0, before.stderr
+    applied = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(_MIGRATION))
+    if null_column is None:
+        assert applied.returncode == 0, applied.stderr
+        reapplied = pg.psql("-v", "ON_ERROR_STOP=1", "-f", str(_MIGRATION))
+        assert reapplied.returncode == 0, reapplied.stderr
+        nullable = pg.psql(
+            "-Atc",
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'lease_projection' "
+            "AND is_nullable = 'YES'",
+        )
+        assert nullable.returncode == 0, nullable.stderr
+        assert nullable.stdout.strip() == "0"
+    else:
+        assert applied.returncode != 0
+        assert (
+            f'column "{null_column}" of relation "lease_projection" contains null values'
+            in applied.stderr
+        )
+    after = pg.psql("-Atc", "SELECT row_to_json(p) FROM public.lease_projection p")
+    assert after.returncode == 0, after.stderr
+    assert after.stdout == before.stdout
 
 
 async def test_application_database_lease_projection_applies_fenced_intents(
