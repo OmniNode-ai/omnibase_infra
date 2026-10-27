@@ -13,7 +13,6 @@ from omnibase_infra.handlers.lease.handler_lease_orchestrator import (
 from omnibase_infra.handlers.lease.handler_lease_projection import (
     UPSERT_LEASE_PROJECTION_SQL,
     HandlerLeaseProjection,
-    ProtocolLeaseProjectionExecutor,
     lease_projection_params,
 )
 from omnibase_infra.handlers.lease.handler_lease_reducer import (
@@ -39,7 +38,6 @@ __all__ = [
     "HandlerLeaseRenew",
     "HandlerLeaseStore",
     "LeaseProjectionState",
-    "ProtocolLeaseProjectionExecutor",
     "check_fence",
     "lease_kinds_from_spec",
     "lease_projection_params",

@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import click
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.lease.handler_lease_store import (
     HandlerLeaseStore,
     lease_kinds_from_spec,
@@ -30,6 +31,16 @@ from omnibase_infra.models.lease import (
 class LeaseCliConfig:
     etcd: str
     kinds: str
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure transport: the CLI drives the lease store directly."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Every subcommand reads or writes etcd."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def resolve(self) -> tuple[str, tuple[ModelLeaseKindPolicy, ...]]:
         """Validate the endpoint and kinds when a command runs, not at ``--help``."""

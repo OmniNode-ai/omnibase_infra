@@ -162,3 +162,25 @@ def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:
             "SELECT kind, resource, fence, holder FROM lease_projection"
         ).fetchall()
         assert found == [("k", "r", 23, "h23")], order
+
+
+def test_ac4_sql_upsert_equal_fence_never_revives_an_ended_grant() -> None:
+    """At an equal fence the SQL applies the reducer's rank: held never overwrites released."""
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    rows = [
+        ModelLeaseProjectionRow(
+            kind="k",
+            resource="r",
+            lease_id=UUID(int=23),
+            fence=23,
+            holder="h23",
+            state=state,
+        )
+        for state in ("held", "released")
+    ]
+    for order in itertools.permutations(rows):
+        db = _sqlite_with_migration()
+        for row in order:
+            db.execute(sql, lease_projection_params(row))
+        found = db.execute("SELECT fence, state FROM lease_projection").fetchall()
+        assert found == [(23, "released")], order

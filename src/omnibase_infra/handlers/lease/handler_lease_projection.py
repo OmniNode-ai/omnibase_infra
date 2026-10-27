@@ -3,14 +3,16 @@
 """Lease projection writer (OMN-21424).
 
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
-is above the incoming one, so an out-of-order replay never lowers a fence.
+is above the incoming one, so an out-of-order replay never lowers a fence, and
+at an equal fence it applies the reducer's state rank, so a late renewal never
+revives a released or expired grant.
 The table is created by
 ``docker/migrations/forward/112_create_lease_projection.sql``.
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.lease import (
@@ -26,14 +28,13 @@ ON CONFLICT (kind, resource) DO UPDATE SET
     fence = EXCLUDED.fence,
     holder = EXCLUDED.holder,
     state = EXCLUDED.state
-WHERE lease_projection.fence <= EXCLUDED.fence
+WHERE lease_projection.fence < EXCLUDED.fence
+   OR (
+       lease_projection.fence = EXCLUDED.fence
+       AND (CASE EXCLUDED.state WHEN 'held' THEN 0 ELSE 1 END)
+           >= (CASE lease_projection.state WHEN 'held' THEN 0 ELSE 1 END)
+   )
 """.strip()
-
-
-class ProtocolLeaseProjectionExecutor(Protocol):
-    """The ``execute(sql, *args)`` shape of an asyncpg connection or pool."""
-
-    async def execute(self, query: str, *args: object) -> str: ...
 
 
 def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
@@ -51,7 +52,7 @@ def lease_projection_params(row: ModelLeaseProjectionRow) -> tuple[object, ...]:
 class HandlerLeaseProjection:
     """Applies the reducer's upsert intents to the lease projection table."""
 
-    def __init__(self, executor: ProtocolLeaseProjectionExecutor) -> None:
+    def __init__(self, executor: asyncpg.Pool) -> None:
         self._executor = executor
 
     @property
@@ -74,6 +75,5 @@ class HandlerLeaseProjection:
 __all__ = [
     "UPSERT_LEASE_PROJECTION_SQL",
     "HandlerLeaseProjection",
-    "ProtocolLeaseProjectionExecutor",
     "lease_projection_params",
 ]

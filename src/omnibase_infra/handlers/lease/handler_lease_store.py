@@ -21,6 +21,7 @@ import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -84,6 +85,16 @@ class HandlerLeaseStore:
         self._adapter = adapter
         self._kinds = {policy.kind: policy for policy in kinds}
         self._prefix = prefix
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure transport for lease operations over etcd."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Side-effecting etcd lease grants, renewals and releases."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def _policy(self, kind: str) -> ModelLeaseKindPolicy:
         policy = self._kinds.get(kind)
