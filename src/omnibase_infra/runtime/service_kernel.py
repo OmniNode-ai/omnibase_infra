@@ -3724,7 +3724,9 @@ async def bootstrap() -> int:
                         os.environ,
                     ),
                 )
-                auto_wiring_manifest_discovered = manifest
+                # auto_wiring_manifest_discovered keeps the full discovery
+                # result: the cross-profile effect lookup below (OMN-14517)
+                # raises RuntimeHostError on cold boot when it is narrowed.
 
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
