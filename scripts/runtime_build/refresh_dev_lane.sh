@@ -590,7 +590,8 @@ run_preflight_required_env() {
         --lane "${LANE}" \
         --runtime-policy-env "${REPO_ROOT}/docker/runtime-policy.env" \
         --compose-file "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
-        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml"
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml" \
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-tenant-fold.yml"
 }
 
 # OMN-20867: the lane's env fragment from the private deployment overlay clone,
