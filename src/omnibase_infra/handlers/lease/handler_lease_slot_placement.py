@@ -25,7 +25,12 @@ class HandlerLeaseSlotPlacement:
     async def place(
         self, hosts: Sequence[str], holder: str, request_id: UUID
     ) -> ModelLeaseReply:
-        """Replay across all hosts before attempting a grant in host order."""
+        """Replay across all hosts before attempting a grant in host order.
+
+        A refusal names every host it tried, so it is never attributed to one.
+        """
+        if not hosts:
+            raise ValueError("place() needs at least one host")
         for host in hosts:
             replay = await self._store.granted(
                 ModelLeaseAcquireRequest(
@@ -51,7 +56,7 @@ class HandlerLeaseSlotPlacement:
         return ModelLeaseReply(
             outcome="lease-refused",
             kind=self._kind,
-            resource=f"slot:{hosts[-1]}" if hosts else "slot:none",
+            resource=f"slot:{','.join(hosts)}",
             holder=holder,
             request_id=request_id,
             reason=f"no free slot on {','.join(hosts)}",

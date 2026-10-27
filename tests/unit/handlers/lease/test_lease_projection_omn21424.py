@@ -151,7 +151,7 @@ def test_upsert_refreshes_updated_at_only_in_the_guarded_conflict_update() -> No
     assignments, guard = update.split("WHERE")
     assert "updated_at" not in insert
     assert re.search(r"\bupdated_at\s*=\s*now\(\)", assignments)
-    assert guard.strip() == "lease_projection.fence <= EXCLUDED.fence"
+    assert guard.strip().startswith("lease_projection.fence < EXCLUDED.fence")
 
 
 def test_updated_at_changes_for_accepted_updates_only() -> None:
@@ -195,3 +195,18 @@ def test_ac4_sql_upsert_replayed_out_of_order_never_lowers_the_fence() -> None:
             "SELECT kind, resource, fence, holder FROM public.lease_projection"
         ).fetchall()
         assert found == [("k", "r", 23, "h23")], order
+
+
+def test_sql_upsert_at_equal_fence_never_regresses_the_state() -> None:
+    """A late ``held`` write at the same fence keeps ``released``/``expired``."""
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    states = ("held", "released", "expired")
+    for order in itertools.permutations(states):
+        db = _sqlite_with_migration()
+        for state in order:
+            row = ModelLeaseProjectionRow(
+                kind="k", resource="r", lease_id=_L1, fence=17, holder="h", state=state
+            )
+            db.execute(sql, lease_projection_params(row))
+        found = db.execute("SELECT state FROM public.lease_projection").fetchall()
+        assert found == [("expired",)], order

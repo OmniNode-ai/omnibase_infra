@@ -4,8 +4,9 @@
 
 An effect target calls it before it acts on a fenced effect. It answers ``ok``
 only when a live slot of the resource carries exactly that fence; never ``ok``
-for a lower fence (``stale``), an absent key (``expired``) or an unreachable
-etcd (``unknown``).
+for a lower fence (``stale``), an absent key or a fence above every live grant
+(``expired``: revisions only rise, so such a grant was issued and is gone) or
+an unreachable etcd (``unknown``). ``unknown`` means only that etcd was not read.
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ class HandlerLeaseFence:
             return EnumLeaseFenceStatus.OK
         if fence < max(live):
             return EnumLeaseFenceStatus.STALE
-        return EnumLeaseFenceStatus.UNKNOWN
+        return EnumLeaseFenceStatus.EXPIRED
 
 
 __all__ = ["HandlerLeaseFence"]

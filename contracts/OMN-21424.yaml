@@ -120,7 +120,7 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F '_absent(slot_key),' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_projection.py?ref=$(git rev-parse HEAD)" --jq .content |
-            base64 -d | grep -F 'WHERE lease_projection.fence <= EXCLUDED.fence' > /dev/null &&
+            base64 -d | grep -F 'WHERE lease_projection.fence < EXCLUDED.fence' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra.handlers.lease.handler_lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra

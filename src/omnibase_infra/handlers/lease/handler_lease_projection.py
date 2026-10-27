@@ -3,7 +3,9 @@
 """Lease projection writer (OMN-21424).
 
 Upserts on ``(kind, resource)``; the ``WHERE`` clause keeps a row whose fence
-is above the incoming one, so an out-of-order replay never lowers a fence.
+is above the incoming one, so an out-of-order replay never lowers a fence. At
+an equal fence it keeps the reducer's order ``held < released < expired``, so
+a late ``held`` write never regresses a ``released`` or ``expired`` row.
 The table is created by
 ``docker/migrations/forward/112_create_lease_projection.sql``.
 """
@@ -27,7 +29,12 @@ ON CONFLICT (kind, resource) DO UPDATE SET
     holder = EXCLUDED.holder,
     state = EXCLUDED.state,
     updated_at = now()
-WHERE lease_projection.fence <= EXCLUDED.fence
+WHERE lease_projection.fence < EXCLUDED.fence
+    OR (
+        lease_projection.fence = EXCLUDED.fence
+        AND (CASE EXCLUDED.state WHEN 'held' THEN 0 WHEN 'released' THEN 1 ELSE 2 END)
+            >= (CASE lease_projection.state WHEN 'held' THEN 0 WHEN 'released' THEN 1 ELSE 2 END)
+    )
 """.strip()
 
 

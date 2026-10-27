@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-21424 AC6 (unreachable store): check_fence answers unknown, never ok."""
+"""OMN-21424 AC6: check_fence answers unknown only for an unreachable store, never ok."""
 
 from __future__ import annotations
 
 import socket
+from typing import cast
 
 import httpx
 import pytest
@@ -31,3 +32,31 @@ async def test_ac6_unreachable_etcd_is_unknown() -> None:
         await adapter.aclose()
     assert status is EnumLeaseFenceStatus.UNKNOWN
     assert status is not EnumLeaseFenceStatus.OK
+
+
+class _FakeAdapter:
+    def __init__(self, revisions: tuple[int, ...]) -> None:
+        self._revisions = revisions
+
+    async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
+        return [(f"{prefix}{i}", "v", rev, 1) for i, rev in enumerate(self._revisions)]
+
+
+@pytest.mark.parametrize(
+    ("fence", "expected"),
+    [
+        (7, EnumLeaseFenceStatus.OK),
+        (9, EnumLeaseFenceStatus.OK),
+        (5, EnumLeaseFenceStatus.STALE),
+        (8, EnumLeaseFenceStatus.STALE),
+        (12, EnumLeaseFenceStatus.EXPIRED),
+    ],
+)
+async def test_a_fence_above_every_live_grant_is_expired_not_unknown(
+    fence: int, expected: EnumLeaseFenceStatus
+) -> None:
+    adapter = cast("HandlerPlacementEtcd", _FakeAdapter((7, 9)))
+    status = await HandlerLeaseFence(adapter).check_fence(
+        kind="k", resource="r", fence=fence
+    )
+    assert status is expected
