@@ -7,7 +7,7 @@ contract_version: {major: 1, minor: 0, patch: 0}
 node_version: {major: 1, minor: 0, patch: 0}
 node_type: EFFECT_GENERIC
 description: >
-  Upsert the lease projection on (kind, resource); the upsert never replaces a row with a lower fence. The table is created by docker/migrations/forward/112_create_lease_projection.sql. No topic is declared yet (see node_lease_orchestrator).
+  Upsert the lease projection on (kind, resource); the upsert never replaces a row with a lower fence. The table is created by docker/migrations/forward/nodes/node_projection_lease/0000_create_lease_projection.sql. No topic is declared yet (see node_lease_orchestrator).
 
 input_model:
   name: ModelPayloadLeaseProjectionUpsert
