@@ -35,8 +35,8 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "[entrypoint] Bootstrapping runtime volume ownership..."
   # A folded effects role retains its original local delegation claims and
   # archives. Fresh named volumes need the same ownership bootstrap as data.
-  # Only the configured state root under the effects volume is walked, never
-  # the archives, and -h changes a link itself rather than what it names.
+  # Only the volume, state root and existing delegation directory need ownership.
+  # Preserved claim files and archives retain their existing runtime ownership.
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
     case "$ONEX_FOLDED_EFFECTS_STATE_ROOT" in
       # Traversal is refused by segment, not substring: a name such as
@@ -69,11 +69,55 @@ if [ "$(id -u)" -eq 0 ]; then
   install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
   chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
-    install -d -o omniinfra -g omniinfra /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
-    # Check again after install -d: a path swapped in since the first check
-    # refuses boot before the recursive ownership repair walks it.
-    folded_paths_ok || exit 2
-    chown -hR omniinfra:omniinfra "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
+    # Pin each directory inode with O_NOFOLLOW before changing its ownership.
+    # No recursive walk or pathname-based chown runs over preserved contents.
+    python - "$ONEX_FOLDED_EFFECTS_STATE_ROOT" <<'FOLDED_BOOTSTRAP'
+import os
+import pwd
+import sys
+from contextlib import ExitStack
+
+
+def bootstrap_folded_directories(state_root: str, uid: int, gid: int) -> None:
+    volume, state_name = os.path.split(state_root)
+    if volume != "/app/effects-data" or state_name in ("", ".", ".."):
+        raise ValueError("state root must name one directory under /app/effects-data")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    with ExitStack() as opened:
+        def directory(parent: int | None, name: str, create: bool = False) -> int:
+            if create:
+                try:
+                    os.mkdir(name, mode=0o755, dir_fd=parent)
+                except FileExistsError:
+                    pass
+            fd = os.open(name, flags, dir_fd=parent)
+            opened.callback(os.close, fd)
+            return fd
+
+        app = directory(None, "/app")
+        effects = directory(app, "effects-data", create=True)
+        state = directory(effects, state_name, create=True)
+        owned = [effects, state]
+        try:
+            owned.append(directory(state, "delegation"))
+        except FileNotFoundError:
+            # Preflight creates fresh delegation state after the privilege drop;
+            # it must still detect a missing preserved store behind an alias.
+            pass
+        for fd in owned:
+            os.fchown(fd, uid, gid)
+
+
+if __name__ == "__main__":
+    try:
+        runtime_user = pwd.getpwnam("omniinfra")
+        bootstrap_folded_directories(
+            sys.argv[1], runtime_user.pw_uid, runtime_user.pw_gid
+        )
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: {exc}", file=sys.stderr)
+        sys.exit(2)
+FOLDED_BOOTSTRAP
   fi
   # The runtime-owned secret store (OMN-17099): a named volume mounted under the
   # runtime user's home is root-owned when fresh, and the process below runs as

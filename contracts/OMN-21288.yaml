@@ -217,7 +217,16 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py -k "claim_readers_directory or regular_file_is_named or swapped_during_handover" -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py -k "regular_file_refuses or swapped_after_install" -q --no-cov
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py -k "regular_file_refuses or bootstrap_refuses_symlink_swap_before_open" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21288-folded-bootstrap-pinned-directories
+    description: >-
+      Root bootstrap opens the effects volume, state root and existing delegation directory using descriptor-relative O_NOFOLLOW directory opens and changes only those pinned inodes. A swap before open refuses ownership repair; a swap after open cannot redirect it. Nested symlinks, hardlinks and claim files are never traversed or chowned. Fresh roots remain writable without recreating a missing preserved claim store. Hosted runners run the shipped bootstrap program against real temporary directories without Docker or credentials.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py -k folded_bootstrap -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC3]
 context:

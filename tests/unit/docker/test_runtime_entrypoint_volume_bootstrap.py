@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
+import os
+import runpy
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -82,7 +86,7 @@ def _run_root_bootstrap(
     bin_dir.mkdir()
     calls = tmp_path / "calls"
     calls.touch()
-    for name in ("id", "install", "chown", "gosu"):
+    for name in ("id", "install", "chown", "gosu", "python"):
         script = bin_dir / name
         script.write_text(
             "#!/bin/sh\nprintf '0\\n'\n"
@@ -110,10 +114,8 @@ def test_effects_state_root_is_owned_before_privilege_drop_only_when_folded(
 ) -> None:
     result, recorded = _run_root_bootstrap(tmp_path, FOLDED_ROOT if folded else None)
     assert result.returncode == 0, result.stderr
-    install = f"install -d -o omniinfra -g omniinfra /app/effects-data {FOLDED_ROOT}"
-    repair = f"chown -hR omniinfra:omniinfra {FOLDED_ROOT}"
+    repair = f"python - {FOLDED_ROOT}"
     assert (repair in recorded) is folded
-    assert (install in recorded) is folded
     # The archives beside the state root are never walked.
     assert not any(
         call.startswith("chown") and call.endswith(" /app/effects-data")
@@ -123,7 +125,7 @@ def test_effects_state_root_is_owned_before_privilege_drop_only_when_folded(
         gosu = next(
             index for index, call in enumerate(recorded) if call.startswith("gosu ")
         )
-        assert recorded.index(install) < recorded.index(repair) < gosu
+        assert recorded.index(repair) < gosu
 
 
 @pytest.mark.parametrize(
@@ -135,7 +137,7 @@ def test_folded_state_root_with_a_double_dot_in_its_name_boots(
 ) -> None:
     result, recorded = _run_root_bootstrap(tmp_path, folded_root)
     assert result.returncode == 0, result.stderr
-    assert f"chown -hR omniinfra:omniinfra {folded_root}" in recorded
+    assert f"python - {folded_root}" in recorded
 
 
 @pytest.mark.parametrize(
@@ -178,7 +180,7 @@ def test_folded_symlink_refuses_before_any_root_filesystem_operation(
     link.symlink_to(outside, target_is_directory=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("id", "install", "chown", "gosu"):
+    for name in ("id", "install", "chown", "gosu", "python"):
         script = bin_dir / name
         script.write_text(
             "#!/bin/sh\nprintf '0\\n'\n"
@@ -221,7 +223,7 @@ def test_folded_regular_file_refuses_before_any_root_filesystem_operation(
     blocker.write_text("not a directory")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("id", "install", "chown", "gosu"):
+    for name in ("id", "install", "chown", "gosu", "python"):
         script = bin_dir / name
         script.write_text(
             "#!/bin/sh\nprintf '0\\n'\n"
@@ -247,46 +249,133 @@ def test_folded_regular_file_refuses_before_any_root_filesystem_operation(
     assert blocker.read_text() == "not a directory"
 
 
-def test_folded_path_swapped_after_install_refuses_before_ownership_repair(
-    tmp_path: Path,
-) -> None:
+def _folded_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[str, int, int], None]:
+    """Execute the shipped standard-library program against a real temporary tree."""
+    entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
+    program = entrypoint.split("<<'FOLDED_BOOTSTRAP'\n", 1)[1].split(
+        "\nFOLDED_BOOTSTRAP", 1
+    )[0]
+    program_path = tmp_path / "folded_bootstrap.py"
+    program_path.write_text(program)
+    namespace = runpy.run_path(str(program_path), run_name="bootstrap_test")
     app = tmp_path / "app"
+    app.mkdir()
+    real_open = os.open
+
+    def anchored_open(path: Any, flags: int, **kwargs: Any) -> int:
+        # Substitute only the trusted /app anchor, keeping every production
+        # relative open, O_NOFOLLOW, mkdir and fchown unchanged.
+        return real_open(app if path == "/app" else path, flags, **kwargs)
+
+    monkeypatch.setattr(os, "open", anchored_open)
+    return cast(
+        "Callable[[str, int, int], None]", namespace["bootstrap_folded_directories"]
+    )
+
+
+def test_folded_bootstrap_owns_only_directory_descriptors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bootstrap = _folded_bootstrap(tmp_path, monkeypatch)
+    state = tmp_path / "app/effects-data/state"
+    delegation = state / "delegation"
+    delegation.mkdir(parents=True)
     outside = tmp_path / "outside"
     outside.mkdir()
-    state = app / "effects-data/state"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    scripts = {
-        "id": "#!/bin/sh\nprintf '0\\n'\n",
-        # The folded install -d runs, then a link replaces the state root.
-        "install": (
-            "#!/bin/sh\n"
-            'case "$*" in *effects-data*) '
-            f"mkdir -p {app}/effects-data && ln -s {outside} {state} ;; esac\n"
-        ),
-        "chown": (
-            "#!/bin/sh\n"
-            'case "$*" in *effects-data*) '
-            "echo 'ownership repair ran' >&2; exit 77 ;; esac\n"
-        ),
-        "gosu": "#!/bin/sh\nexit 0\n",
-    }
-    for name, body in scripts.items():
-        script = bin_dir / name
-        script.write_text(body)
-        script.chmod(0o755)
-    entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
-    result = subprocess.run(
-        ["sh", "-c", entrypoint.replace("/app/", f"{app}/")],
-        env={
-            "PATH": f"{bin_dir}:/usr/bin:/bin",
-            "ONEX_FOLDED_EFFECTS_STATE_ROOT": str(state),
-        },
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=10,
+    claim = outside / "claim"
+    claim.write_text("preserved")
+    (delegation / "nested-link").symlink_to(outside, target_is_directory=True)
+    (delegation / "linked-claim").hardlink_to(claim)
+    nested = delegation / "nested"
+    nested.mkdir()
+    (nested / "claim").write_text("untouched")
+    before = (claim.stat().st_uid, claim.stat().st_gid, claim.stat().st_mtime_ns)
+    owned: list[int] = []
+    real_chown = os.fchown
+
+    def chown(fd: int, uid: int, gid: int) -> None:
+        owned.append(os.fstat(fd).st_ino)
+        real_chown(fd, uid, gid)
+
+    monkeypatch.setattr(os, "fchown", chown)
+    bootstrap("/app/effects-data/state", os.getuid(), os.getgid())
+    assert owned == [p.stat().st_ino for p in (state.parent, state, delegation)]
+    assert before == (
+        claim.stat().st_uid,
+        claim.stat().st_gid,
+        claim.stat().st_mtime_ns,
     )
-    assert result.returncode == 2, result.stderr
-    assert "must not be a symlink" in result.stderr
-    assert "ownership repair ran" not in result.stderr
+    assert claim.read_text() == "preserved"
+    assert (nested / "claim").read_text() == "untouched"
+
+
+def test_folded_bootstrap_creates_fresh_root_without_creating_claim_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bootstrap = _folded_bootstrap(tmp_path, monkeypatch)
+    bootstrap("/app/effects-data/state", os.getuid(), os.getgid())
+    state = tmp_path / "app/effects-data/state"
+    assert state.is_dir()
+    assert state.stat().st_uid == os.getuid()
+    assert not (state / "delegation").exists()
+
+
+@pytest.mark.parametrize("component", ["effects-data", "state", "delegation"])
+def test_folded_bootstrap_refuses_symlink_swap_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str
+) -> None:
+    bootstrap = _folded_bootstrap(tmp_path, monkeypatch)
+    state = tmp_path / "app/effects-data/state"
+    delegation = state / "delegation"
+    delegation.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    anchored_open = os.open
+    owned: list[int] = []
+
+    def swapping_open(path: Any, flags: int, **kwargs: Any) -> int:
+        if path == component:
+            target = {
+                "effects-data": state.parent,
+                "state": state,
+                "delegation": delegation,
+            }[component]
+            target.rename(target.with_name(target.name + "-saved"))
+            target.symlink_to(outside, target_is_directory=True)
+        return anchored_open(path, flags, **kwargs)
+
+    monkeypatch.setattr(os, "open", swapping_open)
+    monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: owned.append(fd))
+    with pytest.raises(OSError):
+        bootstrap("/app/effects-data/state", os.getuid(), os.getgid())
+    assert owned == []
+    assert list(outside.iterdir()) == []
+
+
+def test_folded_bootstrap_swap_after_open_keeps_ownership_on_pinned_inodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bootstrap = _folded_bootstrap(tmp_path, monkeypatch)
+    state = tmp_path / "app/effects-data/state"
+    delegation = state / "delegation"
+    delegation.mkdir(parents=True)
+    expected = [p.stat().st_ino for p in (state.parent, state, delegation)]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    owned: list[int] = []
+    real_chown = os.fchown
+
+    def swapping_chown(fd: int, uid: int, gid: int) -> None:
+        if not owned:
+            state.rename(state.with_name("state-saved"))
+            state.symlink_to(outside, target_is_directory=True)
+        owned.append(os.fstat(fd).st_ino)
+        real_chown(fd, uid, gid)
+
+    monkeypatch.setattr(os, "fchown", swapping_chown)
+    bootstrap("/app/effects-data/state", os.getuid(), os.getgid())
+    assert owned == expected
+    assert outside.stat().st_ino not in owned
+    assert list(outside.iterdir()) == []
