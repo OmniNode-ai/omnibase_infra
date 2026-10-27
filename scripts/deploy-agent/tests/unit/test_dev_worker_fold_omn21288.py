@@ -31,7 +31,7 @@ def test_primary_dev_disables_the_worker_only(monkeypatch: pytest.MonkeyPatch) -
     )
     config = lane_config_for(EnumRuntimeLane.DEV)
     assert config.disabled_services == frozenset({"runtime-worker"})
-    assert config.compose_files[-1].endswith("docker-compose.dev-fold.yml")
+    assert config.compose_files[-2].endswith("docker-compose.dev-fold.yml")
     assert "workers" in lane_folded_profiles(EnumRuntimeLane.DEV)
     monkeypatch.setattr(
         "deploy_agent.executor.active_dev_instance",
@@ -115,7 +115,13 @@ def test_real_folded_deploy_retires_worker_before_starting_main() -> None:
     ) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         return subprocess.CompletedProcess(
-            cmd, 0, stdout="worker-a\n" if cmd[1] == "ps" else "", stderr=""
+            cmd,
+            0,
+            stdout="worker-a\n"
+            if cmd[1] == "ps"
+            and "label=com.docker.compose.service=runtime-worker" in cmd
+            else "",
+            stderr="",
         )
 
     executor = DeployExecutor()
@@ -142,8 +148,8 @@ def test_real_folded_deploy_retires_worker_before_starting_main() -> None:
                 lambda *args: None,
                 lane=EnumRuntimeLane.DEV,
             )
-            assert [c[1] for c in calls] == ["ps", "stop", "compose"]
-    assert [c[1] for c in calls] == ["ps", "stop", "compose", "rm"]
+            assert [c[1] for c in calls] == ["ps", "stop", "ps", "compose"]
+    assert [c[1] for c in calls] == ["ps", "stop", "ps", "compose", "rm"]
     assert "omninode-runtime" in calls[-2]
     assert "runtime-worker" not in calls[-2]
     assert "runtime-worker" not in verify.call_args.args[0]
@@ -269,3 +275,16 @@ def test_public_failure_path_restores_retained_worker(method: str) -> None:
         in run.call_args_list[0].args[0]
     )
     assert run.call_args_list[-1].args[0] == ["docker", "start", "worker-id"]
+
+
+def test_primary_dev_keeps_both_folds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor._load_runtime_policy_env",
+        lambda: {"DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers,tenant-projection"},
+    )
+    config = lane_config_for(EnumRuntimeLane.DEV)
+    assert {"runtime-worker", "tenant-projection-writer"} <= config.disabled_services
+    assert [Path(f).name for f in config.compose_files][-2:] == [
+        "docker-compose.dev-fold.yml",
+        "docker-compose.dev-tenant-fold.yml",
+    ]

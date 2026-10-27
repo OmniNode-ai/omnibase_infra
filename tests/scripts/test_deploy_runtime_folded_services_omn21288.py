@@ -36,7 +36,9 @@ def _function(name: str) -> str:
     return match.group(0)
 
 
-def _harness(profiles: str, project: str, override: bool = False) -> str:
+def _harness(
+    profiles: str, project: str, override: bool = False, *, dev_profiles: str = ""
+) -> str:
     text = SCRIPT.read_text()
     declarations = []
     for name in (
@@ -56,10 +58,10 @@ def _harness(profiles: str, project: str, override: bool = False) -> str:
             *declarations,
             _function("resolve_lane_folded_services"),
             _function("resolve_lane_runtime_services"),
+            f"DEV_COMPOSE_PROJECT={shlex.quote(DEV_PROJECT)}",
+            f"DEV_RUNTIME_MAIN_FOLDED_PROFILES={shlex.quote(dev_profiles)}",
             f"STABILITY_TEST_COMPOSE_PROJECT={shlex.quote(FOLDING_PROJECT)}",
             f"STABILITY_TEST_RUNTIME_MAIN_FOLDED_PROFILES={shlex.quote(profiles)}",
-            f"DEV_COMPOSE_PROJECT={shlex.quote(DEV_PROJECT)}",
-            "DEV_RUNTIME_MAIN_FOLDED_PROFILES=",
             f"PROJECT={shlex.quote(project)}",
             "RUNTIME_BUILD_SERVICES_OVERRIDE=runtime-effects"
             if override
@@ -122,6 +124,56 @@ def test_unknown_profile_fails() -> None:
     )
     assert result.returncode != 0
     assert "Unknown folded runtime profile: unknown-role" in result.stderr
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_folded_dev_tenant_carrier_is_excluded_and_retired(override: bool) -> None:
+    harness = (
+        _harness("effects", DEV_PROJECT, override, dev_profiles="tenant-projection")
+        + "\n"
+        + _function("restart_services")
+        + r"""
+if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+    RUNTIME_BUILD_SERVICES=(tenant-projection-writer)
+    RUNTIME_BUILD_SERVICES_OVERRIDE=tenant-projection-writer
+fi
+log_step() { :; }
+log_info() { :; }
+log_cmd() { :; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+exclude_cloud_database_services() { :; }
+COMPOSE_PROFILE=runtime
+RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
+docker() {
+    case "$1" in
+        ps)
+            [[ "$*" == *"label=com.docker.compose.project=$PROJECT"* ]] || return 9
+            [[ "$*" == *"service=tenant-projection-writer"* ]] || return 9
+            printf 'tenant-a\ntenant-b\n' ;;
+        stop | rm) printf '%s\n' "$*" ;;
+        *) return 9 ;;
+    esac
+}
+compose_up_bounded() { shift; printf 'UP %s\n' "$*"; }
+restart_services /tmp "$PROJECT"
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=True
+    )
+    lines = result.stdout.splitlines()
+    if override:
+        assert not any(line.startswith(("UP ", "stop ", "rm ")) for line in lines)
+        return
+    up = next(i for i, line in enumerate(lines) if line.startswith("UP "))
+    assert (
+        lines.index("stop --time 30 tenant-a tenant-b")
+        < lines.index("rm tenant-a tenant-b")
+        < up
+    )
+    assert "tenant-projection-writer" not in lines[up]
+    assert "runtime-effects" in lines[up]
+    assert " -v" not in result.stdout
 
 
 @pytest.mark.parametrize("profiles", ["effects", "effects,workers"])

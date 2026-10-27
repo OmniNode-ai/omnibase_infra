@@ -226,5 +226,6 @@ resolve_compose_file_args() {
         # base: see the header of docker/docker-compose.dev-lane.yml.
         eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-lane.yml") )"
         eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-fold.yml") )"
+        eval "${_out_args_name}+=( -f $(printf '%q' "${docker_dir}/docker-compose.dev-tenant-fold.yml") )"
     fi
 }

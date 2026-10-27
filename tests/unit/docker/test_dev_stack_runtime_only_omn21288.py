@@ -46,18 +46,18 @@ _WORKLOAD_MODULE = re.compile(r"(^|\.)(node_projection\w*|\w*consumer)(\.|$)")
 
 # Services the real dev stack still runs outside the runtime container. Shrink
 # only: move a service's node into the runtime, then delete its line here.
-REMOVED_SERVICES: tuple[str, ...] = ("runtime-worker",)
+REMOVED_SERVICES: tuple[str, ...] = ("runtime-worker", "tenant-projection-writer")
 DEV_COMPOSE_FILES = (
     _DOCKER / "docker-compose.infra.yml",
     _DOCKER / "docker-compose.dev-lane.yml",
     _DOCKER / "docker-compose.dev-fold.yml",
+    _DOCKER / "docker-compose.dev-tenant-fold.yml",
 )
 
 SEPARATE_SERVICES: tuple[str, ...] = (
     # Effects and worker processes.
     "runtime-effects",
     # A second kernel boot under its own profile.
-    "tenant-projection-writer",
     "projection-api",
     # Event consumers.
     "agent-actions-consumer",
@@ -111,7 +111,21 @@ def dev_stack_services() -> dict[str, dict[str, Any]]:
             if env:
                 base["environment"] = env
             merged[name] = base
-    return merged
+    # A service gated only under a folded-role profile starts under no profile
+    # a dev bring-up requests: its role runs inside main.
+    return {
+        name: service
+        for name, service in merged.items()
+        if not _folded_only(service.get("profiles"))
+    }
+
+
+def _folded_only(profiles: object) -> bool:
+    return (
+        isinstance(profiles, list)
+        and bool(profiles)
+        and all(str(p).startswith("folded-") for p in profiles)
+    )
 
 
 def find_out_of_runtime_workloads(
@@ -191,7 +205,7 @@ def test_removed_service_cannot_return_even_with_an_image_only(service: str) -> 
 
 
 def test_real_dev_files_include_the_final_fold_overlay() -> None:
-    text = DEV_COMPOSE_FILES[-1].read_text(encoding="utf-8")
+    text = DEV_COMPOSE_FILES[-2].read_text(encoding="utf-8")
     assert "runtime-worker: !reset null" in text
     assert "runtime-worker" in load_compose(DEV_COMPOSE_FILES[0])
     assert "runtime-worker" not in dev_stack_services()

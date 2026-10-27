@@ -36,12 +36,29 @@ def test_dev_main_attaches_every_worker_node() -> None:
     rendered = render_env(load_contract())
     env["ONEX_RUNTIME_FOLDED_PROFILES"] = rendered["DEV_RUNTIME_MAIN_FOLDED_PROFILES"]
     folded = filter_manifest_for_runtime_profile(discovered, "main", environ=env)
-    expected = {c.name for c in (*main.manifest.contracts, *workers.manifest.contracts)}
+    tenant = filter_manifest_for_runtime_profile(
+        discovered,
+        "tenant-projection",
+        environ={"ONEX_RUNTIME_LANE": env["ONEX_RUNTIME_LANE"]},
+    )
+    expected = {
+        c.name
+        for c in (
+            *main.manifest.contracts,
+            *workers.manifest.contracts,
+            *tenant.manifest.contracts,
+        )
+    }
     attached = {c.name for c in folded.manifest.contracts}
     assert not folded.manifest.errors
-    assert folded.folded_profiles == ("workers",)
+    assert set(folded.folded_profiles) == {"workers", "tenant-projection"}
     assert folded.folded_contracts
     assert attached == expected
+    folded_by_name = {c.name: c for c in folded.manifest.contracts}
+    for contract in workers.manifest.contracts:
+        # Preserve the contract itself, including subscriptions and handlers,
+        # when main owns the worker role.
+        assert folded_by_name[contract.name] == contract
 
 
 def test_dev_stack_has_no_worker_and_preserves_main_identity() -> None:
@@ -90,6 +107,4 @@ def test_shared_resolver_adds_the_fold_only_to_primary_dev() -> None:
         )
         assert ("docker-compose.dev-fold.yml" in result.stdout) is folded
         if folded:
-            assert result.stdout.splitlines()[-1].endswith(
-                "docker-compose.dev-fold.yml"
-            )
+            assert "docker-compose.dev-tenant-fold.yml" in result.stdout

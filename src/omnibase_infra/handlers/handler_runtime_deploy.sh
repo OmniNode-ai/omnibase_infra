@@ -351,6 +351,7 @@ resolve_lane_folded_services() {
         [effects]=runtime-effects
         [worker]=runtime-worker
         [workers]=runtime-worker
+        [tenant-projection]=tenant-projection-writer
     )
     LANE_FOLDED_SERVICES=()
     # Resolve each folding lane from policy, preserving other lanes' scopes.

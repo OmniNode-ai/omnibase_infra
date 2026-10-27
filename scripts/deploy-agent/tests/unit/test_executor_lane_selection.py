@@ -34,6 +34,14 @@ from deploy_agent.executor import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _checkout_runtime_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
+        Path(__file__).resolve().parents[4] / "docker/runtime-policy.env",
+    )
+
+
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
     return None
 
@@ -122,13 +130,15 @@ class TestComposeUpLaneSelection:
                 lane=EnumRuntimeLane.DEV,
             )
 
-        cmd = captured[0]
+        cmd = next(c for c in captured if c[1] == "compose")
         assert cmd[:3] == ["docker", "compose", "-f"]
         assert cmd[3] == COMPOSE_FILE
         assert "-p" in cmd
         assert cmd[cmd.index("-p") + 1] == "omnibase-infra"
         # OMN-15379: dev/lab layers its own migration-fence overlay.
-        assert cmd.count("-f") == 3, f"dev lane must layer its overlays: {cmd}"
+        assert cmd.count("-f") == 4, f"dev lane must layer both fold overlays: {cmd}"
+        assert any("docker-compose.dev-tenant-fold.yml" in tok for tok in cmd)
+        assert any("docker-compose.dev-fold.yml" in tok for tok in cmd)
         assert any("docker-compose.dev-lane.yml" in tok for tok in cmd)
 
     def test_stability_lane_compose_up_layers_overlay_and_project(self) -> None:

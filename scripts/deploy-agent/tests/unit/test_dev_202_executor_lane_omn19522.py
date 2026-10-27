@@ -66,6 +66,15 @@ from deploy_agent.routing import load_routing_table
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _checkout_runtime_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
+        Path(__file__).resolve().parents[4] / "docker/runtime-policy.env",
+    )
+
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _DOCKER = _REPO_ROOT / "docker"
 _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
@@ -110,7 +119,7 @@ def _capture_compose_up(
         patch("deploy_agent.executor.verify_containers_up", return_value=(True, [])),
     ):
         executor._compose_up(Phase.RUNTIME, scope, [], _noop, lane=EnumRuntimeLane.DEV)
-    return captured
+    return [c for c in captured if c[1] == "compose"]
 
 
 def _capture_build(executor: DeployExecutor) -> list[list[str]]:
@@ -513,12 +522,15 @@ class TestDev201Unchanged:
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
             "docker-compose.dev-fold.yml",
+            "docker-compose.dev-tenant-fold.yml",
         ]
         assert cfg.postgres_container == "omnibase-infra-postgres"
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.main_runtime_container == "omninode-runtime"
         assert cfg.disabled_phases == frozenset()
-        assert cfg.disabled_services == frozenset()
+        assert cfg.disabled_services == frozenset(
+            {"runtime-worker", "tenant-projection-writer"}
+        )
         for phase in EnumInstancePhase:
             assert lane_runs_phase(EnumRuntimeLane.DEV, phase)
 
@@ -526,7 +538,7 @@ class TestDev201Unchanged:
         select_dev_instance("dev-201")
         up = _capture_compose_up(DeployExecutor())[0]
         assert _project_of(up) == "omnibase-infra"
-        assert len(_files_of(up)) == 3
+        assert len(_files_of(up)) == 4
         assert "onex-api" in up
 
         builds = _capture_build(DeployExecutor())

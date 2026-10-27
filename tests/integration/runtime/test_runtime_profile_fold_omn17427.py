@@ -42,7 +42,7 @@ def test_committed_stability_fold_attaches_effects_to_main(
     lane_name = next(
         name
         for name, profile in policy.profiles.items()
-        if profile.processes["main"].folded_profiles == ("effects",)
+        if "effects" in profile.processes["main"].folded_profiles
     )
     rendered = render_env(policy)
     environment = {
