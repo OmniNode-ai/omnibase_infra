@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21386
+title: Vendor the work-ledger ingestion-time migration ahead of omnimarket
+summary: >-
+  Infrastructure prerequisite for omnimarket#4408: vendors 0006 byte for byte from 858a0c67dba2197df290508a839c9021ee4a7e75, declares its checksum and migration class, and leaves release publication to the release train. These checks prove the infrastructure portion only. The row-for-row lab proof and green omnimarket head checks remain owned by omnimarket#4408.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21386-history
+    statement: Preserve the ticket's query criterion; this change supplies its database ingestion-time prerequisite.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the query returns every row of both rolls in file order with a sequence and an append time, and a deliberately truncated range reads `incomplete` -- falsifier: the row-for-row comparison.
+  - id: req-omn21386-destination-ci
+    statement: Preserve the ticket's destination criterion; the separate infrastructure prerequisite must release before the destination pin advances.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the change is one pull request in OmniNode-ai/omnimarket and its required `OmniNode-ai/omnimarket` CI check-runs are green on that pull request's head -- falsifier: the check-runs API for that head commit in OmniNode-ai/omnimarket
+evidence_requirements:
+  - kind: tests
+    description: Existing migration discovery and manifest regression checks.
+    command: uv run --frozen pytest tests/unit/migrations/test_node_migration_discovery.py tests/unit/scripts/validation/test_application_migration_manifest.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21386-ac1-vendor-bytes
+    description: >-
+      Infrastructure prerequisite for AC1 only: refuse missing or changed ingestion-time SQL against the digest measured at omnimarket#4408's pinned head. The merge base lacks the file and fails this check.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import hashlib,pathlib; p=pathlib.Path("docker/migrations/forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql"); assert hashlib.sha256(p.read_bytes()).hexdigest()=="d38170eb852f86533de9fcbcad0131d3370c6a80f0999a5ef281cd274a6eab49"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21386-ac2-vendor-declaration
+    description: >-
+      Infrastructure prerequisite for AC2 only: require the exact stream, owner, domain, migration ID and live checksum consumed by the runner. This does not claim the destination PR's CI is green.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import hashlib,pathlib; root=pathlib.Path("docker/migrations/forward"); node="node_projection_work_ledger"; name="0006_work_ledger_ingested_at.sql"; artifact=f"nodes/{node}/{name}"; rows=[r.split("\t") for r in (root/"_ledger/application-migrations.tsv").read_text().splitlines()]; assert [r for r in rows if r[0]==artifact]==[[artifact,f"node:{node}",f"node:{node}","omninode_internal",f"node:{node}:{name}",hashlib.sha256((root/artifact).read_bytes()).hexdigest()]]'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21386-hosted-deploy-artifact
+    description: >-
+      Hosted-runner deployment-artifact check: read this checkout's committed migration from GitHub at its evaluated HEAD and verify the source digest. Missing or changed artifact bytes fail, including at the merge base. This checks the artifact to be released and does not claim a live rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          set -euo pipefail
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/migrations/forward/nodes/node_projection_work_ledger/0006_work_ledger_ingested_at.sql?ref=$(git rev-parse HEAD)" --jq .content | python3 -c 'import base64,hashlib,sys; assert hashlib.sha256(base64.b64decode(sys.stdin.read())).hexdigest()=="d38170eb852f86533de9fcbcad0131d3370c6a80f0999a5ef281cd274a6eab49"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2]
+context:
+  source_pr: https://github.com/OmniNode-ai/omnimarket/pull/4408
+  source_head: 858a0c67dba2197df290508a839c9021ee4a7e75
+  release_handoff: needs train
+  remaining: After the release train publishes omnibase-infra, bump omnimarket#4408's omnibase-infra pin to that release and complete its destination proofs.
