@@ -68,7 +68,7 @@ repos:
         name: Developer principal plan matches the lab issuer (OMN-20821)
         entry: uv run --frozen pytest tests/unit/nodes/node_developer_principal_plan_compute tests/scripts/test_developer_principal_grants_parity.py -q -n 0 --no-cov -p no:randomly
         language: system
-        files: ^(src/omnibase_infra/nodes/node_developer_principal_plan_compute/|src/omnibase_infra/handlers/handler_developer_principal_plan\.py$|scripts/lab_principal_issuer\.py$|deploy/(lab|local)/developer-principal-|tests/unit/nodes/node_developer_principal_plan_compute/|tests/scripts/test_developer_principal_grants_parity\.py$)
+        files: ^(src/omnibase_infra/nodes/node_developer_principal_plan_compute/|src/omnibase_infra/handlers/handler_developer_principal_plan\.py$|src/omnibase_infra/models/developer_principal/|scripts/lab_principal_issuer\.py$|deploy/(lab|local)/developer-principal-|tests/unit/nodes/node_developer_principal_plan_compute/|tests/scripts/test_developer_principal_grants_parity\.py$)
         pass_filenames: false
         stages: [pre-commit]
       - id: anthropic-key-prefix-workflows

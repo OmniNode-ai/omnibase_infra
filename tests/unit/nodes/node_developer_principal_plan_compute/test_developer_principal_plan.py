@@ -32,7 +32,7 @@ from omnibase_infra.handlers import handler_developer_principal_plan
 from omnibase_infra.handlers.handler_developer_principal_plan import (
     HandlerDeveloperPrincipalPlan,
 )
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models import (
+from omnibase_infra.models.developer_principal import (
     ModelDeveloperPrincipalPlan,
     ModelDeveloperPrincipalPlanRequest,
 )

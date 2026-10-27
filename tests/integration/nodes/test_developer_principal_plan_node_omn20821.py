@@ -16,7 +16,7 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models import (
+from omnibase_infra.models.developer_principal import (
     ModelDeveloperPrincipalPlan,
 )
 from scripts import lab_principal_issuer as lpi

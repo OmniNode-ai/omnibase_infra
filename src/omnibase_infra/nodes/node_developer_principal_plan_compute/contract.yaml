@@ -33,11 +33,11 @@ runtime_profiles:
   - local-dev
 input_model:
   name: "ModelDeveloperPrincipalPlanRequest"
-  module: "omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_plan_request"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_plan_request"
   description: "The declaration text, the derived grant documents it names, the login, the device and the principals the broker already holds."
 output_model:
   name: "ModelDeveloperPrincipalPlan"
-  module: "omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_plan"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_plan"
   description: "Create, rotate or a typed refusal, with the principal name, its sorted grants and the declaration digest."
 handler_routing:
   routing_strategy: "operation_match"
@@ -53,7 +53,7 @@ handler_routing:
         - "developer_principal.plan"
       input_model:
         name: "ModelDeveloperPrincipalPlanRequest"
-        module: "omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_plan_request"
+        module: "omnibase_infra.models.developer_principal.model_developer_principal_plan_request"
         description: "Typed def-B request for one principal plan."
       output_fields:
         - decision

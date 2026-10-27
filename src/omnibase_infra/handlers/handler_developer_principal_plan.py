@@ -29,16 +29,16 @@ from typing import Literal
 import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_grant import (
+from omnibase_infra.models.developer_principal.model_developer_principal_grant import (
     ModelDeveloperPrincipalGrant,
 )
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_plan import (
+from omnibase_infra.models.developer_principal.model_developer_principal_plan import (
     ModelDeveloperPrincipalPlan,
 )
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_plan_request import (
+from omnibase_infra.models.developer_principal.model_developer_principal_plan_request import (
     ModelDeveloperPrincipalPlanRequest,
 )
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models.topic_constants import (
+from omnibase_infra.models.developer_principal.topic_constants import (
     SCOPED_WRITE_TOPICS,
 )
 

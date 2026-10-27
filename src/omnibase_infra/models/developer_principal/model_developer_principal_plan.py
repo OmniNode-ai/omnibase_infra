@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_developer_principal_plan_compute.models.model_developer_principal_grant import (
+from omnibase_infra.models.developer_principal.model_developer_principal_grant import (
     ModelDeveloperPrincipalGrant,
 )
 

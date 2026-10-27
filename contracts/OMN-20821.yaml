@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: "OMN-20821"
 title: "A pure compute node plans a developer's broker principal from a grants declaration"
 summary: >-
-  node_developer_principal_plan_compute (COMPUTE_GENERIC, an onex.nodes entry point, runtime_profiles [local-dev]) holds the lab issuer's planning rules as a canonical node. The plan's D5 named a `cli` profile no deployed kernel runs; the profile registry is canonical in omnibase_core (OMN-12957) and refuses an unregistered name, so the contract names local-dev, a registered profile no deployed runtime carries, which keeps main and effects off the node all the same. Its def-B handler lives at omnibase_infra.handlers.handler_developer_principal_plan, as node_broker_grant_derive_compute's does, because node-local handler directories in this repository are reserved for allowlisted infra nodes. HandlerDeveloperPrincipalPlan validates a grants declaration as scripts/lab_principal_issuer.py load_declaration does, names the principal as principal_name does, decides create, rotate or a device-cap refusal against the principals the broker already holds, and returns the exact grant list and the declaration digest. Since the ticket was written the lab declaration moved its grants into derived documents (grants_from, principal_grants_from), so the request carries the declaration text and the text of each derived document it names; the handler reads no file. A smaller deploy/local/developer-principal-grants.yaml declares the minimum for one lane delegation and is held to the lab declaration by a test. The lab issuer script is not changed.
+  node_developer_principal_plan_compute (COMPUTE_GENERIC, an onex.nodes entry point, runtime_profiles [local-dev]) holds the lab issuer's planning rules as a canonical node. The plan's D5 named a `cli` profile no deployed kernel runs; the profile registry is canonical in omnibase_core (OMN-12957) and refuses an unregistered name, so the contract names local-dev, a registered profile no deployed runtime carries, which keeps main and effects off the node all the same. Its def-B handler lives at omnibase_infra.handlers.handler_developer_principal_plan and its models at omnibase_infra.models.developer_principal: node-local handler directories in this repository are reserved for allowlisted infra nodes, and the node-boundary gate refuses a handler outside a node importing that node's models. HandlerDeveloperPrincipalPlan validates a grants declaration as scripts/lab_principal_issuer.py load_declaration does, names the principal as principal_name does, decides create, rotate or a device-cap refusal against the principals the broker already holds, and returns the exact grant list and the declaration digest. Since the ticket was written the lab declaration moved its grants into derived documents (grants_from, principal_grants_from), so the request carries the declaration text and the text of each derived document it names; the handler reads no file. A smaller deploy/local/developer-principal-grants.yaml declares the minimum for one lane delegation and is held to the lab declaration by a test. The lab issuer script is not changed.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -94,4 +94,14 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_developer_principal_plan_compute/test_developer_principal_plan.py -k pre_commit_entry"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20821-deploy-probe-handler-source"
+    description: >-
+      Deploy-scope source readback for a pure compute node with no live deploy: read the handler at the evaluated commit through GitHub and require the handler class the change introduces. It does not deploy a service or claim a runtime runs it; no deployed runtime carries the node's local-dev profile. Fails at the parent, which has no such file. The AC1 parity tests above exercise the handler's behaviour.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_developer_principal_plan.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerDeveloperPrincipalPlan:" > /dev/null'
         cwd: "${OMNI_HOME}/omnibase_infra"
