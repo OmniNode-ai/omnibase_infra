@@ -68,6 +68,74 @@ models:
       source_url: https://platform.claude.com/docs/en/about-claude/pricing
       retrieved_at: '2026-10-06'
       note: 'Model pricing table, row Claude Sonnet 5.5: base input $2 / MTok, output $10 / MTok. OMN-19969 savings-baseline default.'
+  claude-opus-5-5:
+    input_cost_per_1k: 0.004
+    output_cost_per_1k: 0.02
+    effective_date: '2026-10-27'
+    confidence: LOW_CONFIDENCE
+    source: PROVIDER_PUBLISHED_PRICING
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-27T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-27'
+      note: 'Model pricing table, row Claude Opus 5.5: base input $4 / MTok, output $20 / MTok.'
+  claude-opus-5:
+    input_cost_per_1k: 0.005
+    output_cost_per_1k: 0.025
+    effective_date: '2026-10-27'
+    confidence: LOW_CONFIDENCE
+    source: PROVIDER_PUBLISHED_PRICING
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-27T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-27'
+      note: 'Model pricing table, row Claude Opus 5: base input $5 / MTok, output $25 / MTok.'
+  claude-fable-5-1:
+    input_cost_per_1k: 0.01
+    output_cost_per_1k: 0.05
+    effective_date: '2026-10-27'
+    confidence: LOW_CONFIDENCE
+    source: PROVIDER_PUBLISHED_PRICING
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-27T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-27'
+      note: 'Model pricing table, row Claude Fable 5.1: base input $10 / MTok, output $50 / MTok.'
+  claude-fable-5:
+    input_cost_per_1k: 0.01
+    output_cost_per_1k: 0.05
+    effective_date: '2026-10-27'
+    confidence: LOW_CONFIDENCE
+    source: PROVIDER_PUBLISHED_PRICING
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-27T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-27'
+      note: 'Model pricing table, row Claude Fable 5: base input $10 / MTok, output $50 / MTok.'
   claude-haiku-3-5:
     input_cost_per_1k: 0.0008
     output_cost_per_1k: 0.004
