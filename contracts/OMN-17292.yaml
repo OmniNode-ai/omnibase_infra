@@ -41,6 +41,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: "AC7: the lease projection migration reconciles every declared column and preserves its primary key, fence/state checks and writer grants on fresh and drifted PostgreSQL tables; repeated apply preserves rows -- falsifier: ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_lease_projection_shape_omn17292.py -q -n 0 --no-cov"
+  - id: req-omn17292-lease-acquire-cleanup
+    statement: Failed acquire cleanup reports an unsuccessful revoke without replacing the original transaction error, and a refused acquire revokes its unused lease.
+    acceptance:
+      - id: AC8
+        statement: "AC8: a transaction failure followed by revoke failure logs the remaining lease risk and raises the original transaction error; unsuccessful slot comparisons revoke the unused lease before refusal -- falsifier: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/lease/test_lease_store_acquire_omn21424.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
@@ -144,3 +149,19 @@ dod_evidence:
         check_value: "uv run --frozen pytest 'tests/ci/test_node_migration_shape_reconciliation.py::test_guarded_create_table_reconciles_every_declared_column[node:node_projection_lease:0000_create_lease_projection.sql]' -q -n 0 --no-cov"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC7]
+  - id: dod-omn17292-ac8-acquire-cleanup
+    description: Inject transaction and revoke HTTP failures and assert that cleanup logs the lease expiry risk while preserving the transaction error; refuse two occupied slots and assert one revoke before returning lease-refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/lease/test_lease_store_acquire_omn21424.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
+  - id: dod-omn17292-ac8-deploy-acquire-cleanup
+    description: Hosted-runner deploy check exercises the lease acquire cleanup through an injected HTTP transport, without a container daemon or private network. It fails if revoke errors are silent or replace the transaction error.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/lease/test_lease_store_acquire_omn21424.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]

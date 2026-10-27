@@ -187,6 +187,50 @@ async def test_ac6_check_fence_stale_expired_and_ok(
         await adapter.aclose()
 
 
+async def test_ac6_capacity_two_fences_name_distinct_live_grants(
+    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], etcd: EtcdProcess
+) -> None:
+    a, b = two_stores
+    first = await a.acquire(_request("two-fences", "first", "pair"))
+    second = await b.acquire(_request("two-fences", "second", "pair"))
+    assert first.outcome == second.outcome == "lease-granted"
+    assert first.fence < second.fence
+    adapter = HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=5.0))
+    try:
+        # Both grant revisions remain valid while their respective slots live.
+        for grant in (first, second):
+            assert (
+                await check_fence(
+                    adapter, kind="pair", resource="two-fences", fence=grant.fence
+                )
+                is EnumLeaseFenceStatus.OK
+            )
+        await b.release("pair", "two-fences", second.lease_id)
+        assert (
+            await check_fence(
+                adapter, kind="pair", resource="two-fences", fence=second.fence
+            )
+            is EnumLeaseFenceStatus.UNKNOWN
+        )
+        replacement = await b.acquire(_request("two-fences", "replacement", "pair"))
+        assert replacement.outcome == "lease-granted"
+        assert replacement.fence > second.fence
+        assert (
+            await check_fence(
+                adapter, kind="pair", resource="two-fences", fence=second.fence
+            )
+            is EnumLeaseFenceStatus.STALE
+        )
+        assert (
+            await check_fence(
+                adapter, kind="pair", resource="two-fences", fence=first.fence
+            )
+            is EnumLeaseFenceStatus.OK
+        )
+    finally:
+        await adapter.aclose()
+
+
 async def _acquire_until_granted(
     store: HandlerLeaseStore, resource: str, *, deadline_s: float
 ) -> ModelLeaseReply:

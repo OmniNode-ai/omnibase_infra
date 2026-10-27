@@ -17,8 +17,8 @@ the same ``request_id`` reads back the grant it made.
 
 from __future__ import annotations
 
-import contextlib
 import json
+import logging
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
@@ -37,6 +37,7 @@ from omnibase_infra.models.lease import (
 
 LEASE_PREFIX = "/onex/lease/"
 _REQUEST_PREFIX = "/onex/lease-request/"
+logger = logging.getLogger(__name__)
 
 
 def resource_prefix(kind: str, resource: str, *, prefix: str = LEASE_PREFIX) -> str:
@@ -91,8 +92,15 @@ class HandlerLeaseStore:
             # no grant either way, so revoke the etcd lease rather than leave
             # an orphaned slot held until its TTL. A retry with the same
             # request_id then makes a fresh grant.
-            with contextlib.suppress(InfraConnectionError):
+            try:
                 await self._adapter.lease_revoke(etcd_lease)
+            except InfraConnectionError:
+                logger.warning(
+                    "lease: revoke failed after acquire error; etcd lease %s "
+                    "may remain until TTL",
+                    etcd_lease,
+                    exc_info=True,
+                )
             raise
 
     async def _grant(
