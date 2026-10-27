@@ -3374,6 +3374,8 @@ class DeployExecutor:
         # 2026-09-22) and killed two consecutive dev-lane rebuilds at the
         # 3600s hard bound after the first build had already succeeded.
         self.deploy_build_date: str | None = None
+        self._folded_worker_containers: list[str] = []
+        self._folded_worker_project: str = ""
 
     def reset_deploy_observations(self) -> None:
         """Clear per-job observations at the start of a rebuild."""
@@ -4571,6 +4573,30 @@ class DeployExecutor:
         on_phase_update(Phase.SEED, PhaseStatus.SUCCESS)
 
     def rebuild_scope(
+        self,
+        scope: Scope,
+        services: list[str],
+        on_phase_update: PhaseCallback,
+        *,
+        git_sha: str = "",
+        git_ref: str = "",
+        build_source: BuildSource | str = BuildSource.RELEASE,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        image_digest: str | None = None,
+    ) -> list[str]:
+        with self.folded_dev_worker_handoff(lane, verified=False):
+            return self._rebuild_scope(
+                scope,
+                services,
+                on_phase_update,
+                git_sha=git_sha,
+                git_ref=git_ref,
+                build_source=build_source,
+                lane=lane,
+                image_digest=image_digest,
+            )
+
+    def _rebuild_scope(
         self,
         scope: Scope,
         services: list[str],
@@ -6141,10 +6167,60 @@ class DeployExecutor:
             f"{was_down or 'no absent service'}"
         )
 
+    @contextlib.contextmanager
+    def folded_dev_worker_handoff(
+        self, lane: EnumRuntimeLane, *, verified: bool = True
+    ) -> Iterator[None]:
+        """Keep the old worker recoverable until the replacement passes verification."""
+        try:
+            yield
+        except BaseException:
+            if self._folded_worker_containers:
+                census = _run(
+                    [
+                        "docker",
+                        "ps",
+                        "-q",
+                        "--filter",
+                        f"label=com.docker.compose.project={self._folded_worker_project}",
+                        "--filter",
+                        "label=com.docker.compose.service=omninode-runtime",
+                    ],
+                    timeout=30,
+                )
+                if census.returncode != 0:
+                    raise RuntimeError(
+                        "Cannot read candidate main census for worker recovery"
+                    )
+                candidates = census.stdout.split()
+                if candidates:
+                    stopped = _run(
+                        ["docker", "stop", "--time", "30", *candidates], timeout=60
+                    )
+                    if stopped.returncode != 0:
+                        raise RuntimeError(
+                            "Cannot stop candidate main before worker recovery"
+                        )
+                restored = _run(
+                    ["docker", "start", *self._folded_worker_containers], timeout=60
+                )
+                if restored.returncode != 0:
+                    raise RuntimeError("Cannot restore retained folded worker")
+                self._folded_worker_containers = []
+            raise
+        else:
+            if verified and self._folded_worker_containers:
+                removed = _run(
+                    ["docker", "rm", *self._folded_worker_containers], timeout=60
+                )
+                if removed.returncode != 0:
+                    raise RuntimeError("Cannot remove verified folded worker")
+                self._folded_worker_containers = []
+
     def _retire_folded_dev_workers(
         self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
     ) -> None:
-        """Retire the primary dev worker before main takes its role; keep volumes."""
+        """Stop the primary dev worker; the handoff retains it through verification."""
         if (
             lane is not EnumRuntimeLane.DEV
             or active_dev_instance() != DEFAULT_DEV_INSTANCE
@@ -6158,7 +6234,7 @@ class DeployExecutor:
             [
                 "docker",
                 "ps",
-                "-aq",
+                "-q",
                 "--filter",
                 f"label=com.docker.compose.project={project}",
                 "--filter",
@@ -6171,13 +6247,13 @@ class DeployExecutor:
         containers = census.stdout.split()
         if not containers:
             return
-        for command in (
-            ["docker", "stop", "--time", "30", *containers],
-            ["docker", "rm", *containers],
-        ):
-            result = _run(command, timeout=60)
-            if result.returncode != 0:
-                raise RuntimeError("Cannot retire folded worker container")
+        self._folded_worker_project = project
+        self._folded_worker_containers = list(
+            dict.fromkeys([*self._folded_worker_containers, *containers])
+        )
+        result = _run(["docker", "stop", "--time", "30", *containers], timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError("Cannot stop folded worker container")
 
     def _compose_up(
         self,
@@ -6196,10 +6272,14 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
-        if lane is EnumRuntimeLane.DEV and services and not requested_services:
-            # A request naming only a retired role must never widen to the profile.
-            on_phase_update(phase, PhaseStatus.SUCCESS)
-            return
+        if services and not requested_services:
+            if "runtime-worker" in config.disabled_services and all(
+                service == "runtime-worker" for service in services
+            ):
+                # Only a request for the folded worker is a successful no-op.
+                on_phase_update(phase, PhaseStatus.SUCCESS)
+                return
+            raise RuntimeError("Every requested compose service was filtered out")
         # For runtime scope, verification MUST be bounded by the requested
         # runtime service list so the runtime-only rebuild never implicitly
         # waits on core infra containers (OMN-9455). The same list bounds the
@@ -6830,6 +6910,20 @@ class DeployExecutor:
         return fingerprint or ""
 
     def verify(
+        self,
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        recover_runtime: bool = True,
+    ) -> list[ModelHealthCheck]:
+        with self.folded_dev_worker_handoff(lane):
+            return self._verify(
+                on_phase_update,
+                lane=lane,
+                recover_runtime=recover_runtime,
+            )
+
+    def _verify(
         self,
         on_phase_update: PhaseCallback,
         *,

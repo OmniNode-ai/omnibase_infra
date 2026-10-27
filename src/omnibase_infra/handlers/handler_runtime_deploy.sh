@@ -349,6 +349,7 @@ resolve_lane_folded_services() {
     local filter_name="${2:-}"
     local -A folded_profile_services=(
         [effects]=runtime-effects
+        [worker]=runtime-worker
         [workers]=runtime-worker
     )
     LANE_FOLDED_SERVICES=()

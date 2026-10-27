@@ -57,11 +57,15 @@ def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
         patch("deploy_agent.executor.lane_folded_profiles", return_value={"workers"}),
         patch("deploy_agent.executor._run", side_effect=run),
     ):
+        executor = DeployExecutor()
         if failure:
             with pytest.raises(RuntimeError):
-                DeployExecutor()._retire_folded_dev_workers(EnumRuntimeLane.DEV)
+                with executor.folded_dev_worker_handoff(EnumRuntimeLane.DEV):
+                    executor._retire_folded_dev_workers(EnumRuntimeLane.DEV)
         else:
-            DeployExecutor()._retire_folded_dev_workers(EnumRuntimeLane.DEV)
+            with executor.folded_dev_worker_handoff(EnumRuntimeLane.DEV):
+                executor._retire_folded_dev_workers(EnumRuntimeLane.DEV)
+                assert all(c[1] != "rm" for c in calls)
     assert "label=com.docker.compose.service=runtime-worker" in calls[0]
     assert "label=com.docker.compose.project=omnibase-infra" in calls[0]
     assert all("-v" not in c and "--volumes" not in c for c in calls)
@@ -79,7 +83,7 @@ def test_retirement_is_inert_on_other_lanes() -> None:
 def test_only_folded_worker_request_does_not_start_the_whole_profile() -> None:
     updates: list[tuple[Phase, PhaseStatus]] = []
     with (
-        patch("deploy_agent.executor._requested_services_for_up", return_value=[]),
+        patch("deploy_agent.executor.lane_folded_profiles", return_value={"workers"}),
         patch("deploy_agent.executor._run") as run,
     ):
         DeployExecutor()._compose_up(
@@ -130,14 +134,138 @@ def test_real_folded_deploy_retires_worker_before_starting_main() -> None:
         patch.object(executor, "_ensure_runtime_migrations_ready"),
         patch.object(executor, "rerun_changed_oneshots"),
     ):
-        executor._compose_up(
+        with executor.folded_dev_worker_handoff(EnumRuntimeLane.DEV):
+            executor._compose_up(
+                Phase.RUNTIME,
+                Scope.RUNTIME,
+                [],
+                lambda *args: None,
+                lane=EnumRuntimeLane.DEV,
+            )
+            assert [c[1] for c in calls] == ["ps", "stop", "compose"]
+    assert [c[1] for c in calls] == ["ps", "stop", "compose", "rm"]
+    assert "omninode-runtime" in calls[-2]
+    assert "runtime-worker" not in calls[-2]
+    assert "runtime-worker" not in verify.call_args.args[0]
+
+
+@pytest.mark.parametrize("folded", [frozenset(), frozenset({"workers"})])
+def test_other_empty_filtered_requests_are_refused(folded: frozenset[str]) -> None:
+    with (
+        patch("deploy_agent.executor.lane_folded_profiles", return_value=folded),
+        patch("deploy_agent.executor._requested_services_for_up", return_value=[]),
+        patch("deploy_agent.executor._run") as run,
+        pytest.raises(RuntimeError, match="Every requested compose service"),
+    ):
+        DeployExecutor()._compose_up(
             Phase.RUNTIME,
             Scope.RUNTIME,
-            [],
+            ["runtime-effects"],
             lambda *args: None,
-            lane=EnumRuntimeLane.DEV,
         )
-    assert [c[1] for c in calls] == ["ps", "stop", "rm", "compose"]
-    assert "omninode-runtime" in calls[-1]
-    assert "runtime-worker" not in calls[-1]
-    assert "runtime-worker" not in verify.call_args.args[0]
+    run.assert_not_called()
+
+
+def test_failed_handoff_stops_candidate_before_restoring_worker() -> None:
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        output = ""
+        if cmd[1] == "ps":
+            output = (
+                "main-id"
+                if "label=com.docker.compose.service=omninode-runtime" in cmd
+                else "worker-id"
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout=output, stderr="")
+
+    executor = DeployExecutor()
+    with (
+        patch("deploy_agent.executor.lane_folded_profiles", return_value={"workers"}),
+        patch("deploy_agent.executor._run", side_effect=run),
+        pytest.raises(RuntimeError, match="unhealthy candidate"),
+    ):
+        with executor.folded_dev_worker_handoff(EnumRuntimeLane.DEV):
+            executor._retire_folded_dev_workers(EnumRuntimeLane.DEV)
+            raise RuntimeError("unhealthy candidate")
+    assert [cmd[1] for cmd in calls] == ["ps", "stop", "ps", "stop", "start"]
+    assert calls[-2][-1] == "main-id"
+    assert calls[-1][-1] == "worker-id"
+    assert not executor._folded_worker_containers
+
+
+def test_failed_candidate_stop_does_not_start_a_second_worker_owner() -> None:
+    executor = DeployExecutor()
+    executor._folded_worker_containers = ["worker-id"]
+    with (
+        patch(
+            "deploy_agent.executor._run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, stdout="main-id", stderr=""),
+                subprocess.CompletedProcess([], 1, stdout="", stderr="stop failed"),
+            ],
+        ) as run,
+        pytest.raises(RuntimeError, match="Cannot stop candidate main"),
+    ):
+        with executor.folded_dev_worker_handoff(EnumRuntimeLane.DEV):
+            raise RuntimeError("unhealthy candidate")
+    assert all(call.args[0][1] != "start" for call in run.call_args_list)
+    assert executor._folded_worker_containers == ["worker-id"]
+
+
+def test_rebuild_keeps_worker_until_verification_returns() -> None:
+    executor = DeployExecutor()
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="worker-id" if cmd[1] == "ps" else "", stderr=""
+        )
+
+    def rebuild(*args: object, **kwargs: object) -> list[str]:
+        executor._retire_folded_dev_workers(EnumRuntimeLane.DEV)
+        return ["omninode-runtime"]
+
+    with (
+        patch("deploy_agent.executor.lane_folded_profiles", return_value={"workers"}),
+        patch("deploy_agent.executor._run", side_effect=run),
+        patch.object(executor, "_rebuild_scope", side_effect=rebuild),
+        patch.object(executor, "_verify", return_value=[]),
+    ):
+        assert executor.rebuild_scope(Scope.RUNTIME, [], lambda *args: None) == [
+            "omninode-runtime"
+        ]
+        assert [cmd[1] for cmd in calls] == ["ps", "stop"]
+        executor.verify(lambda *args: None)
+        assert [cmd[1] for cmd in calls] == ["ps", "stop", "rm"]
+
+
+@pytest.mark.parametrize("method", ["rebuild", "verify"])
+def test_public_failure_path_restores_retained_worker(method: str) -> None:
+    executor = DeployExecutor()
+    executor._folded_worker_containers = ["worker-id"]
+    executor._folded_worker_project = "owned-test-project"
+    with (
+        patch(
+            "deploy_agent.executor._run",
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        ) as run,
+        patch.object(
+            executor, "_rebuild_scope", side_effect=RuntimeError("candidate refused")
+        ),
+        patch.object(
+            executor, "_verify", side_effect=RuntimeError("candidate refused")
+        ),
+        pytest.raises(RuntimeError, match="candidate refused"),
+    ):
+        if method == "rebuild":
+            executor.rebuild_scope(Scope.RUNTIME, [], lambda *args: None)
+        else:
+            executor.verify(lambda *args: None)
+    assert (
+        "label=com.docker.compose.project=owned-test-project"
+        in run.call_args_list[0].args[0]
+    )
+    assert run.call_args_list[-1].args[0] == ["docker", "start", "worker-id"]

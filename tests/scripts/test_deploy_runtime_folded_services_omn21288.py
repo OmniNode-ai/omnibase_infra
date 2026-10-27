@@ -257,3 +257,20 @@ def test_dev_worker_fold_filters_the_scoped_build_and_restart() -> None:
     )
     assert "runtime-worker" not in result.stdout
     assert "runtime-effects" in result.stdout
+
+
+@pytest.mark.parametrize("profile", ["worker", "workers"])
+def test_worker_profile_spellings_remain_accepted(profile: str) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _harness(profile, FOLDING_PROJECT)
+            + '\nresolve_lane_runtime_services services "$PROJECT"\ndeclare -p services',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "runtime-worker" not in result.stdout
+    assert "omninode-runtime" in result.stdout
