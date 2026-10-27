@@ -255,9 +255,9 @@ class TestLiveState:
                 "entry is the only durable record a later reader has"
             )
         assert "deliberate minor release" in note, (
-            "the surviving blocker -- the unreleased-commit backlog that makes "
-            "a patch cut the wrong shape -- must stay stated, because it is "
-            "what still holds this repo at report_only"
+            "the backlog blocker -- the unreleased-commit backlog that made a "
+            "patch cut the wrong shape -- must stay on record with the minor "
+            "release that cleared it (OMN-21164)"
         )
 
     def test_infra_counts_docker_migrations_as_release_relevant(self) -> None:
@@ -287,7 +287,7 @@ class TestLiveState:
             "omnibase_compat is excluded by operator ruling and must not appear"
         )
 
-    def test_exactly_the_five_reviewed_repos_are_armed_to_cut(self) -> None:
+    def test_exactly_the_six_reviewed_repos_are_armed_to_cut(self) -> None:
         """Arming a repo is one field, and this test is what keeps it a
         deliberate, visible act rather than a side effect of another change.
 
@@ -309,6 +309,10 @@ class TestLiveState:
         (OMN-20715) after release-on-merge.yml was retired (omnimarket#3037,
         2026-09-28), leaving nothing releasing it. Its premise is a lab receipt,
         not green CI alone.
+
+        omniintelligence was armed (OMN-21164) once the deliberate minor
+        release its entry asked for had shipped: 0.25.0, tagged by
+        auto-tag-on-merge and published by a push-event release.yml run.
         """
         policies = rt.load_policy(_POLICY)
         armed = sorted(
@@ -318,6 +322,7 @@ class TestLiveState:
             "omnibase_core",
             "omnibase_infra",
             "omnibase_spi",
+            "omniintelligence",
             "omnimarket",
             "omnimemory",
         ]
