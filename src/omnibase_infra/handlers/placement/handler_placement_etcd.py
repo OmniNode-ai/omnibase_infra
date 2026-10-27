@@ -41,16 +41,25 @@ def _prefix_end(prefix: str) -> str:
 
 
 class HandlerPlacementEtcd:
-    """Async etcd v3 JSON-gateway client over an injected HTTP client.
+    """Async etcd v3 JSON-gateway client with optional HTTP client injection.
 
-    The caller builds the ``httpx.AsyncClient`` and sets its timeout, which
-    bounds every request; this handler constructs no transport of its own. It
-    takes over the client's lifetime: ``aclose`` closes it.
+    Without ``client``, ``timeout_s`` bounds every request as in the original
+    endpoint-only API. An injected client retains its own timeout, TLS and
+    authentication settings; ``timeout_s`` applies only to a constructed client.
+    In either case, ``aclose`` closes the client.
     """
 
-    def __init__(self, endpoint: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        client: httpx.AsyncClient | None = None,
+        *,
+        timeout_s: float = 1.0,
+    ) -> None:
         self._endpoint = endpoint.rstrip("/")
-        self._client = client
+        self._client = (
+            client if client is not None else httpx.AsyncClient(timeout=timeout_s)
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
