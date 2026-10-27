@@ -458,6 +458,27 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="lease_projection",
         ),
     ),
+    # OMN-21115: activation ingestion precedes the omnimarket contract pin.
+    # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+    # when node_context_install_confirm_trigger_effect reaches the pin.
+    ContractTableDeclaration(
+        node="legacy_migration:compaction_activations",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
+            "0000_create_compaction_activations.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="compaction_activations",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
+                "0000_create_compaction_activations.sql"
+            ),
+            access="read_write",
+            role="compaction_activations",
+        ),
+    ),
     # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
     # omnimarket node contract, as compaction_receipts below. 0001 grants
     # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence

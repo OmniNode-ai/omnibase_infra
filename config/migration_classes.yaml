@@ -495,3 +495,5 @@ migrations:
   intelligence/024_create_llm_delegation_projection_tables.sql: expand-only
   intelligence/025_fix_llm_delegation_call_log_date_index.sql: forward-only # DROP
   intelligence/026_create_code_entities.sql: expand-only
+  forward/nodes/node_context_install_confirm_trigger_effect/0000_create_compaction_activations.sql: forward-only
+  forward/nodes/node_context_install_confirm_trigger_effect/0001_grant_compaction_activations.sql: expand-only

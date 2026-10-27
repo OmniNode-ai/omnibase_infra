@@ -104,6 +104,12 @@ class ModelDiscoveredContract(BaseModel):
             "on lanes where cloud mirroring is provisioned/enabled (OMN-13809)."
         ),
     )
+    required_secrets: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Names of required top-level contract secrets (OMN-21423); never values"
+        ),
+    )
     event_bus: ModelEventBusWiring | None = Field(
         default=None, description="Event bus wiring if declared"
     )
