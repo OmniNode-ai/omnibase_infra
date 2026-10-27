@@ -891,7 +891,8 @@ def pending_rejections(
     """Rejections still to judge, and notes for those the bot will not judge.
 
     Only a thread's latest disposition counts, and a rejection that already
-    carries the onexbot App's verdict on its id and current body is done.
+    carries the onexbot App's verdict on its id, current body and reviewed
+    head is done. Legacy or prior-head verdicts remain pending.
     """
     pending: list[PendingRejection] = []
     notes: dict[str, str] = {}

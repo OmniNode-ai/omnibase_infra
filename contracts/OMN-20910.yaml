@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: "AC1 (amended by OMN-20923): the review and preflight read the overlay from the private CI overlay, outside the pull request checkout -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
+  - id: "req-overlay-only-voter-swap"
+    statement: "Changing a voter model is an overlay-only edit. The resolver proof belongs to omniintelligence, whose loader this repository's workflow calls."
+    acceptance:
+      - id: "AC2"
+        statement: "Adding or swapping a voter is an overlay-only diff, proven by a test that changes the overlay model and asserts the resolved call target changes with no workflow edit -- falsifier: pytest test over the resolver with two overlay fixtures"
   - id: "req-no-voter-endpoint-in-workflows"
     statement: "No workflow file names a review voter endpoint, port, model flag or endpoint variable."
     acceptance:
@@ -59,6 +64,33 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: "dod-omn20910-ac2-overlay-only-voter-swap"
+    description: "The real resolver's two-overlay controls change an Anthropic model or backend and inspect the resolved call configuration. These tests are owned by omniintelligence; the local workflow proof separately asserts this caller delegates voter resolution to that overlay."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/unit/review_pairing/test_review_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly -k 'changing_anthropic_model_is_an_overlay_only_swap or changing_the_backend_changes_the_model_and_nothing_else'"
+        cwd: "${OMNI_HOME}/omniintelligence"
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly -k 'preflight_resolves_targets_from_the_overlay or review_reads_the_overlay'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn20910-ac11-recorded-rejection-protocol"
+    description: "A successful dev-bus GitHub review-thread capture supplies a real finding, rejection, ids and reviewed head. Replay through the production verdict producer and parser accepts only that head and refuses legacy, other-head, wrong-identity and changed-body controls, with no API seam replacement. Verdicts are protocol controls, not claimed model judgements."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_live_contact_omn20910.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
+  - id: "dod-omn20910-ac11-recorded-rejection-deploy"
+    description: "Hosted-runner check for the judge script's protocol against recorded real GitHub data; executes without a provider, credentials, Docker or a running service. Fails if the producer drops the reviewed head or the consumer accepts a mismatched verdict."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_live_contact_omn20910.py tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
   - id: "dod-omn20910-ac11-judge-head-protocol"
     description: "Seven test-first regressions drive the real pending and posting modes with a recording GitHub API, including a push during judgement and five invalid or absent head controls. All seven fail at the merge base; no provider, credential or live GitHub call is used."
     source: "manual"
