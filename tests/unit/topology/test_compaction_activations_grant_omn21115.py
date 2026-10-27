@@ -6,9 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
-    ModelDbTableDeclaration,
-)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     _resolve_projection_database_target,
 )
@@ -32,15 +29,12 @@ _EXPECTED = {
 )
 def test_activation_write_uses_only_the_runtime_table_grant(profile):
     topology = load_topology_profile(profile)
-    table = ModelDbTableDeclaration(
-        name="compaction_activations",
-        database_ref="application",
-        schema="omninode_internal",
-        migration="0000_create_compaction_activations.sql",
-        access="read_write",
-        role="compaction_activations",
+    (declaration,) = (
+        d
+        for d in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        if d.table.name == "compaction_activations"
     )
-    _resolve_projection_database_target((table,), topology)
+    _resolve_projection_database_target((declaration.table,), topology)
     principal = topology.databases["application"].principals["omninode_runtime"]
     grants = [g for g in principal.grants if "compaction_activations" in g.objects]
     assert len(grants) == 1
@@ -65,10 +59,15 @@ def test_interim_declaration_has_delivered_migrations():
     create = root / declaration.table.migration
     assert create.is_file()
     grant = create.parent / "0001_grant_compaction_activations.sql"
-    assert (
-        "GRANT SELECT, INSERT, UPDATE ON omninode_internal.compaction_activations TO omninode_runtime;"
-        in grant.read_text()
-    )
+    # Compare the complete executable SQL, so a second GRANT widening the
+    # privileges or admitting another principal cannot hide after a substring.
+    statements = " ".join(
+        line.split("--", 1)[0].strip() for line in grant.read_text().splitlines()
+    ).split(";")
+    assert [s.strip() for s in statements if s.strip()] == [
+        "GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime",
+        "GRANT SELECT, INSERT, UPDATE ON omninode_internal.compaction_activations TO omninode_runtime",
+    ]
 
 
 @pytest.mark.parametrize(

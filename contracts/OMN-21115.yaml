@@ -66,8 +66,8 @@ dod_evidence:
     binds_ac:
       - AC5
   - id: dod-omn21115-grant-hosted
-    description: Hosted isolated container proves shipped activation privileges pass the real projection binding validator. Fails on the base, whose topology does not grant the activation relation. Does not access a running service.
+    description: The hosted runner's disposable PostgreSQL 16 service applies the shipped migrations, proves the runtime role can upsert and read activations with exactly SELECT, INSERT and UPDATE, then rolls back. Fails on the base where the activation migrations are absent. Uses the service and psql already provisioned by repo-evidence, without a container pull or dependency sync inside the per-check budget. Does not establish the full omnimarket acceptance criteria.
     source: manual
     checks:
       - check_type: command
-        check_value: env docker run --rm --volume "$PWD:/workspace:ro" --workdir /workspace --env UV_PROJECT_ENVIRONMENT=/tmp/infra-proof ghcr.io/astral-sh/uv:python3.12-bookworm sh -c 'uv sync --frozen --group dev --quiet && uv run --no-sync pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov'
+        check_value: env PGHOST="${INTEGRATION_POSTGRES_HOST:?}" PGPORT="${INTEGRATION_POSTGRES_PORT:?}" PGUSER="${INTEGRATION_POSTGRES_USER:?}" PGPASSWORD="${INTEGRATION_POSTGRES_PASSWORD:?}" PGDATABASE="${INTEGRATION_POSTGRES_DB:?}" psql -X --set ON_ERROR_STOP=1 --file tests/integration/migrations/proofs/compaction_activations_omn21115.sql
