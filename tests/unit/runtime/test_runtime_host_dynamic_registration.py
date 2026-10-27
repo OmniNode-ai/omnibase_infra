@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -38,6 +39,30 @@ def _join_timeout() -> InfraTimeoutError:
             target_name=SUFFIX_NODE_REGISTRATION,
         ),
     )
+
+
+def _recovery_config(
+    *, initial: float, maximum: float = 1.0, attempt_timeout: float = 1.0
+) -> dict[str, object]:
+    return {
+        "event_bus": {
+            "environment": "dev",
+            "recovery": {
+                "initial_backoff_seconds": initial,
+                "max_backoff_seconds": maximum,
+                "backoff_multiplier": 2,
+                "attempt_timeout_seconds": attempt_timeout,
+            },
+        }
+    }
+
+
+def _retry_delays(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        str(r.args[0])
+        for r in caplog.records
+        if r.getMessage().startswith("Dynamic contract listener unavailable")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -120,60 +145,105 @@ class TestStartDynamicContractListener:
 
     @pytest.mark.asyncio
     async def test_transient_join_timeout_retries_without_tearing_down_runtime(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """A late registration join must not remove already-live consumers."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = _recovery_config(initial=0.001, maximum=0.003)
+        unsubscribe = AsyncMock()
+        process._event_bus.subscribe.side_effect = [
+            _join_timeout(),
+            _join_timeout(),
+            _join_timeout(),
+            unsubscribe,
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            await process._start_dynamic_contract_listener()
+
+        assert process._event_bus.subscribe.await_count == 4
+        assert _retry_delays(caplog) == ["0.001", "0.002", "0.003"]
+        assert process._dynamic_contract_unsubscribe is unsubscribe
+        process._event_bus.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_attempt_timeout_abandons_hung_join_and_retries(self) -> None:
+        """The per-attempt timeout must cut a hung subscribe and try again."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = _recovery_config(initial=0.001, attempt_timeout=0.05)
+        unsubscribe = AsyncMock()
+        hung_cancelled = asyncio.Event()
+
+        async def hang_once(**_kwargs: object) -> AsyncMock:
+            if process._event_bus.subscribe.await_count == 1:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    hung_cancelled.set()
+                    raise
+            return unsubscribe
+
+        process._event_bus.subscribe.side_effect = hang_once
+
+        await asyncio.wait_for(process._start_dynamic_contract_listener(), timeout=5)
+
+        assert hung_cancelled.is_set()
+        assert process._event_bus.subscribe.await_count == 2
+        assert process._dynamic_contract_unsubscribe is unsubscribe
+
+    @pytest.mark.asyncio
+    async def test_shutdown_during_join_propagates_without_retry(self) -> None:
+        """Cancelling inside the attempt timeout window must not be retried."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = _recovery_config(initial=0.001, attempt_timeout=60)
+        joining = asyncio.Event()
+
+        async def hang(**_kwargs: object) -> AsyncMock:
+            joining.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        process._event_bus.subscribe.side_effect = hang
+        task = asyncio.create_task(process._start_dynamic_contract_listener())
+        try:
+            await asyncio.wait_for(joining.wait(), timeout=1)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        process._event_bus.subscribe.assert_awaited_once()
+        assert process._dynamic_contract_unsubscribe is None
+
+    @pytest.mark.asyncio
+    async def test_shutdown_during_backoff_uses_contract_policy_and_stops(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Without host recovery config the shipped policy sets the backoff,
+        and shutdown during that backoff creates no further consumer."""
         from omnibase_infra.models.model_event_bus_recovery_config import (
             ModelEventBusRecoveryConfig,
         )
 
         process = _make_process()
         process._kafka_contract_source.environment = "dev"
-        unsubscribe = AsyncMock()
-        process._event_bus.subscribe.side_effect = [
-            _join_timeout(),
-            _join_timeout(),
-            unsubscribe,
-        ]
-        sleep = AsyncMock()
-        monkeypatch.setattr(asyncio, "sleep", sleep)
-
-        await process._start_dynamic_contract_listener()
-
-        policy = ModelEventBusRecoveryConfig.from_contract()
-        assert process._event_bus.subscribe.await_count == 3
-        assert [c.args[0] for c in sleep.await_args_list] == [
-            policy.initial_backoff_seconds,
-            min(
-                policy.initial_backoff_seconds * policy.backoff_multiplier,
-                policy.max_backoff_seconds,
-            ),
-        ]
-        assert process._dynamic_contract_unsubscribe is unsubscribe
-        process._event_bus.close.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_dynamic_listener_retry_is_cancelled_on_shutdown(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Shutdown must interrupt retry rather than create a new consumer."""
-        process = _make_process()
-        process._kafka_contract_source.environment = "dev"
         process._event_bus.subscribe.side_effect = _join_timeout()
-        sleeping = asyncio.Event()
+        policy = ModelEventBusRecoveryConfig.from_contract()
 
-        async def sleep(delay: float) -> None:
-            sleeping.set()
-            await asyncio.Event().wait()
+        with caplog.at_level(logging.WARNING):
+            task = asyncio.create_task(process._start_dynamic_contract_listener())
+            try:
+                async with asyncio.timeout(1):
+                    while not _retry_delays(caplog):
+                        await asyncio.sleep(0.001)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
 
-        monkeypatch.setattr(asyncio, "sleep", sleep)
-        task = asyncio.create_task(process._start_dynamic_contract_listener())
-        try:
-            await asyncio.wait_for(sleeping.wait(), timeout=1)
-        finally:
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
+        assert _retry_delays(caplog) == [str(policy.initial_backoff_seconds)]
         process._event_bus.subscribe.assert_awaited_once()
         assert process._dynamic_contract_unsubscribe is None
 
