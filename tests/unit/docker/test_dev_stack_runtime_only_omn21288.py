@@ -209,6 +209,10 @@ def test_real_dev_files_include_the_final_fold_overlay() -> None:
     assert "runtime-worker: !reset null" in text
     assert "runtime-worker" in load_compose(DEV_COMPOSE_FILES[0])
     assert "runtime-worker" not in dev_stack_services()
+    text = DEV_COMPOSE_FILES[-1].read_text(encoding="utf-8")
+    assert 'profiles: !override ["folded-tenant-projection"]' in text
+    assert "tenant-projection-writer" in load_compose(DEV_COMPOSE_FILES[0])
+    assert "tenant-projection-writer" not in dev_stack_services()
 
 
 @pytest.mark.parametrize(

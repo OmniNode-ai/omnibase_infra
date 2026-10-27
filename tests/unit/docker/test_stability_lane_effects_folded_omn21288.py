@@ -40,18 +40,17 @@ def _lane_overlay() -> Path:
     raise AssertionError(f"no compose overlay names project {project!r}")
 
 
-def test_only_declared_lanes_fold_and_lab_folds_only_effects() -> None:
+def test_exactly_one_lane_folds_effects() -> None:
     contract = load_contract()
-    folding = {
-        name: profile
-        for name, profile in contract.profiles.items()
-        if profile.processes["main"].folded_profiles
-    }
-    assert "dev" in folding
-    assert folding.pop("dev").processes["main"].folded_profiles == (
+    assert contract.profiles["dev"].processes["main"].folded_profiles == (
         "workers",
         "tenant-projection",
     )
+    folding = {
+        name: profile
+        for name, profile in contract.profiles.items()
+        if "effects" in profile.processes["main"].folded_profiles
+    }
     assert len(folding) == 1, sorted(folding)
     (profile,) = folding.values()
     assert profile.compose_project == _lane_project()

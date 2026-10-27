@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# What a developer machine's principal may do on the broker the developer runs
+# (OMN-20821).
+#
+# The local bundle's counterpart of deploy/lab/developer-principal-grants.yaml,
+# and smaller: only the minimum for one lane delegation (`onex delegate --bus
+# kafka --lane local`). Produce the delegate command, read and write the two
+# terminals it waits for, read under the CLI's terminal group prefix, and describe
+# every group, which the CLI needs to see a live consumer before it publishes.
+#
+# Every grant here must be a grant of the lab declaration with the same resource,
+# name and pattern and a subset of its operations;
+# tests/scripts/test_developer_principal_grants_parity.py fails otherwise. The
+# rules are the lab issuer's, which node_developer_principal_plan_compute applies.
+schema: developer-principal-grants.v1
+lane: local
+principal_prefix: dev-
+max_devices_per_login: 5
+allowed_login_domains: []
+grants:
+  - resource: topic
+    name: onex.cmd.omnimarket.delegate-skill.v1
+    pattern: literal
+    operations: [describe, write]
+  - resource: topic
+    name: onex.evt.omnimarket.delegate-skill-completed.v1
+    pattern: literal
+    operations: [describe, read, write]
+  - resource: topic
+    name: onex.evt.omnimarket.delegate-skill-failed.v1
+    pattern: literal
+    operations: [describe, read, write]
+  - resource: group
+    name: local.omnibase_core.runtime_local_
+    pattern: prefixed
+    operations: [describe, read]
+  - resource: group
+    name: "*"
+    pattern: literal
+    operations: [describe]
