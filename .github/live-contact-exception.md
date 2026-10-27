@@ -1,0 +1,1 @@
+Live-contact exception: this index is a merge of origin/dev e0097a40a into omn-21424-generic-lease; the only CI-tooling change it carries is the .github/workflows/ci.yml step from omnibase_infra#5381 (9f2a608bb), already merged on dev under its own gate, and this PR makes no CI-tooling change of its own. Removed again by the next commit.
