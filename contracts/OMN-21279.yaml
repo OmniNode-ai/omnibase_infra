@@ -63,6 +63,18 @@ requirements:
       - id: AC10
         statement: >-
           The dev overlay renders Redpanda --memory 3G and mem_limit 4g even with stale DEV_REDPANDA_MEMORY=12G; deploy preflight refuses a flag or limit outside 2-4 GiB or an arena larger than its limit.
+  - id: req-pr-time-criterion-label-check
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. Green omnibase_infra#5370 was removed from the merge queue three times because its AC7 repeated a label dev already held, which only the full suite checked.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: every pull request CI run executes the ticket-contract criterion-label check by name in one test split, whatever the change-aware selector picks -- falsifier: tests/ci/test_contract_criterion_labels_wired_omn21279.py over .github/workflows/ci.yml
+  - id: req-dev-broker-arena-exhaustion
+    statement: The dev broker's allocation-failure aborts after the 3G arena landed, from lane fill-defect-dev-broker-crash-cause-20261026T2139Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: docs/incidents/OMN-21279/dev-broker-crash-cause.json records the allocation-failure aborts since the 3G arena, with the load on the arena and the decision it leaves to the operator, and the record is internally consistent -- falsifier: test_dev_broker_arena_exhaustion_record_omn21279.py, which fails on an unordered abort list, a count that differs from the list, or a cited 12G floor that is no longer declared'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -318,3 +330,31 @@ dod_evidence:
       - check_type: command
         check_value: uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly
     binds_ac: [AC10]
+  - id: dod-omn21279-pr-time-criterion-label-check
+    description: >-
+      AC12. The test-parallel job of ci.yml runs tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py by name on split 1, so a pull request whose contract repeats a criterion label goes red on its own run instead of in the merge queue. Red first: at the base ci.yml names the file in no step and the wiring test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_contract_criterion_labels_wired_omn21279.py -q --no-cov
+    binds_ac:
+      - "AC12"
+  - id: dod-omn21279-dev-broker-arena-exhaustion
+    description: >-
+      AC13. After #5385 set the dev broker to --memory 3G with a 4g container limit (container created 2026-10-26T18:57:22Z), the broker logged 12 seastar allocation-failure aborts in 2 h 50 min, against 5 crashes in the 17 h before. The memory diagnostic at 21:42:41Z read 3071M used of 3G; the broker held 4605 topics and 8100 client connections. The record and its consistency test do not change the arena: OPERATOR-CONSENT 2026-10-25T17:53:44Z bounds it to 2-4 GiB and the preflight refuses more, so the decision is left to the operator. Red first: at the merge base the record has no arena_exhaustion_since_cap section and the test file does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_arena_exhaustion_record_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC13"
+  - id: dod-omn21279-arena-exhaustion-deploy-probe
+    description: >-
+      AC13, deploy-scope probe. Reads docs/incidents/OMN-21279/dev-broker-crash-cause.json through the GitHub API at the commit that carries this contract and exits nonzero unless it holds the arena_exhaustion_since_cap section. At the merge base the key does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docs/incidents/OMN-21279/dev-broker-crash-cause.json?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("\"arena_exhaustion_since_cap\"")' | grep -qx true
+    binds_ac:
+      - "AC13"
