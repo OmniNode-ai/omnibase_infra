@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20827"
+title: "The ~/.onex credential files are replaced atomically so a crash cannot strand a stored bus login"
+summary: >-
+  StoreOnexHomeFiles.write_config and write_secrets no longer write their target with write_text. Each writes a temporary file in the same directory, created at 0600 whatever the umask, flushes it, renames it over the target, and flushes the directory entry; on any failure the temporary file is removed and the target is left byte-identical. StoreLaneCredential.save keeps its order (config, then secrets), so a crash between the two leaves either a config naming a missing secret (first login), which load refuses naming lane-login, or the previous secret under the fixed reference (rotation); a rerun of onex auth lane-login repairs both. config.yaml is now 0600 as well, because it is written the same way.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20827-atomic-replace"
+    statement: "Both ~/.onex files are replaced atomically, so a crash cannot leave a file a rerun of lane-login cannot repair."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: each file is written to a temporary file in the same directory at mode 0600 and moved over the target with an atomic rename, with the directory entry flushed -- falsifier: `uv run pytest tests/unit/cli/test_store_onex_home_files_atomic.py -k atomic_replace -q` shows a direct write to the target path"
+      - id: "AC2"
+        statement: "AC2: a crash injected during either write leaves the previous file byte-identical; a crash between the config write and the secrets write on a first login leaves a config naming a missing secret, which `load` refuses loudly, and on a rotation (the fixed reference `local-lane-sasl` already holds the previous secret) leaves the previous secret readable, which then fails to authenticate; a rerun of `lane-login` repairs both -- falsifier: the crash-injection test, run separately for first creation and for rotation, finds a changed or truncated previous file or a rerun that refuses"
+      - id: "AC3"
+        statement: "AC3: the temporary file never exists at a mode wider than 0600 and none remains after a successful or failed write -- falsifier: the test finds a wider mode or a leftover temporary file"
+      - id: "AC4"
+        statement: "AC4: every existing test of the two store classes passes unchanged -- falsifier: `uv run pytest tests/unit/cli -k \"store\" -q` fails on a test this task did not touch"
+evidence_requirements:
+  - kind: "tests"
+    description: "The atomic-replace, crash-injection and temporary-file tests pass, with the existing store tests unchanged."
+    command: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py tests/unit/cli/test_omn18432_lane_credential_store.py tests/unit/cli/test_omn18432_lane_login_command.py tests/unit/cli/test_omn18432_delegate_lane_credentials.py"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20827-ac1-atomic-replace"
+    description: >-
+      write_config and write_secrets each rename one 0600 temporary file from the target's own directory over the target and flush a directory descriptor, and neither opens the target for writing nor calls write_text on it. Fails at the parent, which writes the target directly.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py -k atomic_replace"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20827-ac2-crash-injection"
+    description: >-
+      A crash at the flush or at the rename of either write leaves the previous file byte-identical with no leftover. A crash between the config and secrets writes on a first login leaves the lane declared and load refusing with CONFIGURATION_NOT_FOUND naming lane-login; on a rotation of the local lane it leaves the previous secret under local-lane-sasl, byte-identical and readable. A rerun of onex auth lane-login repairs both. Fails at the parent, whose direct writes leave no temporary file to rename.
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py -k crash"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20827-ac3-temporary-file"
+    description: >-
+      Under a 000 umask, every write lands in a file descriptor at mode 0600, and no temporary file remains after a successful write or after a failure at the write, the flush or the rename. Fails at the parent.
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py -k 'never_wider_than_0600 or leaves_no_temporary_file'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20827-ac4-existing-store-tests"
+    description: >-
+      The new atomic tests run together with the untouched existing suites of the two store classes and the lane-login command, which all pass. Fails at the parent, which has no atomic test file.
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_store_onex_home_files_atomic.py tests/unit/cli/test_omn18432_lane_credential_store.py tests/unit/cli/test_omn18432_lane_login_command.py tests/unit/cli/test_omn18432_delegate_lane_credentials.py"
+        cwd: "${OMNI_HOME}/omnibase_infra"
