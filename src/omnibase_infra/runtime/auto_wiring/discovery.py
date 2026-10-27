@@ -981,10 +981,11 @@ def _parse_legacy_handler(h_raw: dict) -> ModelHandlerRouting | None:
 #
 # A runtime whose secret store holds no value for a contract's required secret
 # must not wire that contract, so it never joins the contract's consumer group.
-# A store error fails closed; a name whose value is blank counts as absent
-# (``drop_blank_secret_names``, given the env mapping by the kernel).
-# The probe is typed against names only (``list_keys``), so it cannot read a
-# value.
+# A store error fails closed. The store probe is typed against names only
+# (``list_keys``), so it cannot read a value. The kernel's store is the process
+# environment, so it then drops a listed name whose environment value is blank
+# (``drop_blank_secret_names``); that check reads only the strip() truthiness of
+# the value and never logs or returns it.
 
 
 def env_secret_store_is_authoritative(
@@ -1036,14 +1037,7 @@ def drop_blank_secret_names(
     A listed name set to ``""`` (``GITHUB_TOKEN: ${GITHUB_TOKEN:-}`` in a
     compose file) holds no usable secret, so it counts as absent.
     """
-    present: set[str] = set()
-    for name in names:
-        try:
-            if values.get(name, "").strip():
-                present.add(name)
-        except (OSError, RuntimeError, RuntimeHostError) as exc:
-            logger.warning("Required-secret value unreadable: %s", type(exc).__name__)
-    return frozenset(present)
+    return frozenset(name for name in names if values.get(name, "").strip())
 
 
 def gate_manifest_on_required_secrets(

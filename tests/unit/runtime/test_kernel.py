@@ -912,7 +912,16 @@ class TestBootstrap:
 
         assert exit_code == 0
 
-    @pytest.mark.parametrize("prefetched_value", [None, "", "   ", "test-token"])
+    @pytest.mark.parametrize(
+        ("prefetched_value", "kernel_status"),
+        [
+            (None, "degraded_error"),
+            (None, "skipped"),
+            ("", "ok"),
+            ("   ", "ok"),
+            ("test-token", "ok"),
+        ],
+    )
     async def test_required_secret_gate_after_infisical_prefetch(
         self,
         mock_wire_infrastructure: MagicMock,
@@ -922,8 +931,13 @@ class TestBootstrap:
         mock_health_server: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
         prefetched_value: str | None,
+        kernel_status: str,
     ) -> None:
-        """A failed/empty prefetch cannot admit a secret-dependent contract."""
+        """A failed/empty prefetch cannot admit a secret-dependent contract.
+
+        A skipped kernel prefetch (no inline credentials) stays pending, so the
+        runtime retries with its handler registry's secret resolver.
+        """
         from omnibase_infra.runtime.auto_wiring.handler_wiring import (
             wire_from_manifest as real_wire_from_manifest,
         )
@@ -955,7 +969,7 @@ class TestBootstrap:
             order.append("prefetch")
             if prefetched_value is not None:
                 monkeypatch.setenv("GITHUB_TOKEN", prefetched_value)
-            return "degraded_error" if prefetched_value is None else "ok"
+            return kernel_status
 
         async def wire(**kwargs: object) -> ModelAutoWiringReport:
             order.append("wire")
@@ -1002,7 +1016,7 @@ class TestBootstrap:
             assert skips[0].membership[0].token == "absent"
         assert order == ["prefetch", "wire"]
         assert mock_runtime_host.call_args.kwargs["config_prefetch_status"] == (
-            "degraded_error" if prefetched_value is None else "ok"
+            "pending" if kernel_status == "skipped" else kernel_status
         )
 
     @pytest.mark.parametrize("selection", ["profile", "node"])

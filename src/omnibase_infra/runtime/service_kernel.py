@@ -3709,11 +3709,19 @@ async def bootstrap() -> int:
                     kernel_profile.prefetch_policy,
                     os.environ.get("INFISICAL_ADDR", ""),
                 ):
-                    config_prefetch_status = await prefetch_runtime_config(
+                    # config.name is the runtime's service_name, so this is the
+                    # slug the runtime's own prefetch would use. No handler
+                    # registry exists yet: a "skipped" result (no inline
+                    # Infisical credentials) stays pending so the runtime retries
+                    # with a registry ProtocolSecretResolver; the gate below
+                    # then fails closed on the unpopulated environment.
+                    kernel_prefetch_status = await prefetch_runtime_config(
                         container=container,
                         service_slug=config.name,
                         prefetch_policy=kernel_profile.prefetch_policy,
                     )
+                    if kernel_prefetch_status != "skipped":
+                        config_prefetch_status = kernel_prefetch_status
                 manifest = gate_manifest_on_required_secrets(
                     manifest,
                     drop_blank_secret_names(

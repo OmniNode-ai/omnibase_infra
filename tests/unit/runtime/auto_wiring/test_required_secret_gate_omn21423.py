@@ -198,23 +198,6 @@ def test_blank_secret_value_counts_as_absent(value: str) -> None:
     assert drop_blank_secret_names(names, values) == frozenset({"OTHER"})
 
 
-def test_unreadable_secret_value_counts_as_absent(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    sentinel = "ghp_SENTINEL_never_print"
-
-    class _UnreadableValues(dict[str, str]):
-        def get(self, key: str, default: str = "") -> str:
-            if key == "GITHUB_TOKEN":
-                raise OSError(sentinel)
-            return super().get(key, default)
-
-    assert drop_blank_secret_names(
-        frozenset({"GITHUB_TOKEN", "OTHER"}), _UnreadableValues(OTHER="x")
-    ) == frozenset({"OTHER"})
-    assert sentinel not in caplog.text
-
-
 @pytest.mark.asyncio
 async def test_blank_env_secret_gates_contract(
     manifest: ModelAutoWiringManifest, monkeypatch: pytest.MonkeyPatch
