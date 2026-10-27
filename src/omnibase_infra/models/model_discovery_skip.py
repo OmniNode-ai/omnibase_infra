@@ -9,6 +9,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.model_secret_gated_membership import (
+    ModelSecretGatedMembership,
+)
+
 
 class ModelDiscoverySkip(BaseModel):
     """A parsed contract excluded by runtime policy, rather than a failure."""
@@ -16,7 +20,11 @@ class ModelDiscoverySkip(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
     contract_path: Path = Field(..., description="Excluded contract.yaml path")
-    reason: Literal["inactive_runtime_package", "dormant_cloud_gateway"] = Field(
-        ..., description="Machine-readable policy exclusion reason"
-    )
+    reason: Literal[
+        "inactive_runtime_package", "dormant_cloud_gateway", "required_secret_absent"
+    ] = Field(..., description="Machine-readable policy exclusion reason")
     message: str = Field(..., description="Explanation of the policy exclusion")
+    membership: tuple[ModelSecretGatedMembership, ...] = Field(
+        default_factory=tuple,
+        description="Membership records for a required_secret_absent skip (OMN-21423); empty for other reasons",
+    )

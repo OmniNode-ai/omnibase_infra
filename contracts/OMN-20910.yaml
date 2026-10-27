@@ -45,6 +45,11 @@ requirements:
     acceptance:
       - id: "AC10"
         statement: "AC10: the env example carries both backend-pin names commented with empty values and none of the three retired cloud rung names -- falsifier: uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly -k 'value_free_environment or retired_cloud_rung' fails at the merge base"
+  - id: "req-review-judge-head-protocol"
+    statement: "The default-branch rejection judge produces the head-bound reply protocol required by omnibase_infra#5237, retaining the head whose code it judged rather than the head at posting time."
+    acceptance:
+      - id: "AC11"
+        statement: "AC11: pending records and posted judge replies carry the same judged head, a push invalidates the prior judgement, an unbound legacy verdict is queued for judgement again, and a missing or invalid recorded head posts nothing -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov -p no:randomly -k HeadBoundJudgeProtocol (seven cases fail before the change)"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay and the workflow tests pass at the head."
@@ -54,6 +59,30 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: "dod-omn20910-ac11-recorded-rejection-protocol"
+    description: "A successful dev-bus GitHub review-thread capture supplies a real finding, rejection, ids and reviewed head. Replay through the production verdict producer and parser accepts only that head and refuses legacy, other-head, wrong-identity and changed-body controls, with no API seam replacement. Verdicts are protocol controls, not claimed model judgements."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_live_contact_omn20910.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
+  - id: "dod-omn20910-ac11-judge-head-protocol"
+    description: "Seven test-first regressions drive the real pending and posting modes with a recording GitHub API, including a push during judgement and five invalid or absent head controls. All seven fail at the merge base; no provider, credential or live GitHub call is used."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov -p no:randomly -k HeadBoundJudgeProtocol"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
+  - id: "dod-omn20910-ac11-judge-head-protocol-deploy"
+    description: "Hosted-runner deploy check of the judge producer, recorded-contact replay, thread gate, workflow wiring and secret boundary. It requires neither Docker nor a deployed service and does not claim live judgements or green PR gates."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --frozen pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_judge_live_contact_omn20910.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
   - id: "dod-omn20910-ac1-overlay-declares-voters"
     description: "The review and preflight read the overlay from the private CI overlay, outside the pull request checkout (amended by OMN-20923)."
     source: "manual"

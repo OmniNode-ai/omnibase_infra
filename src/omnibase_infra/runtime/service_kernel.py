@@ -202,7 +202,10 @@ from omnibase_infra.runtime.protocol_domain_plugin import (
     ProtocolDomainPlugin,
     RegistryDomainPlugin,
 )
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+from omnibase_infra.runtime.runtime_host_process import (
+    RuntimeHostProcess,
+    prefetch_runtime_config,
+)
 from omnibase_infra.runtime.runtime_profile import (
     load_runtime_profile,
     resolve_runtime_profile_name,
@@ -3621,6 +3624,10 @@ async def bootstrap() -> int:
                             exc_info=True,
                         )
 
+        # Prefetch configuration without constructing the runtime before health
+        # bind (OMN-9741/13768). Preserve its outcome for runtime startup.
+        config_prefetch_status = "pending"
+
         # --- Auto-wiring: Contract discovery + handler wiring (OMN-7656) ---
         #
         # After explicit plugins register their handlers/dispatchers, auto-wiring
@@ -3644,9 +3651,17 @@ async def bootstrap() -> int:
             from omnibase_infra.runtime.auto_wiring import (
                 LifecycleHookExecutor,
                 discover_contracts,
+                drop_blank_secret_names,
+                env_secret_store_is_authoritative,
                 filter_manifest_for_runtime_profile,
+                gate_manifest_on_required_secrets,
+                required_secret_names,
+                resolve_present_secret_names,
                 subscribe_wired_contract_topics,
                 wire_from_manifest,
+            )
+            from omnibase_infra.secret_stores.adapter_env_secret_store import (
+                AdapterEnvSecretStore,
             )
 
             # 1. Discover all contracts from installed packages
@@ -3709,6 +3724,40 @@ async def bootstrap() -> int:
                         },
                     )
 
+                # Select profile/lane/nodes before probing required secrets.
+                # Infisical prefetch must finish before the env presence check;
+                # a failed best-effort prefetch never bypasses this gate.
+                if config.name and not env_secret_store_is_authoritative(
+                    kernel_profile.prefetch_policy,
+                    os.environ.get("INFISICAL_ADDR", ""),
+                ):
+                    # config.name is the runtime's service_name, so this is the
+                    # slug the runtime's own prefetch would use. No handler
+                    # registry exists yet: a "skipped" result (no inline
+                    # Infisical credentials) stays pending so the runtime retries
+                    # with a registry ProtocolSecretResolver; the gate below
+                    # then fails closed on the unpopulated environment.
+                    kernel_prefetch_status = await prefetch_runtime_config(
+                        container=container,
+                        service_slug=config.name,
+                        prefetch_policy=kernel_profile.prefetch_policy,
+                    )
+                    if kernel_prefetch_status != "skipped":
+                        config_prefetch_status = kernel_prefetch_status
+                manifest = gate_manifest_on_required_secrets(
+                    manifest,
+                    drop_blank_secret_names(
+                        await resolve_present_secret_names(
+                            AdapterEnvSecretStore().list_keys,
+                            required_secret_names(manifest),
+                        ),
+                        os.environ,
+                    ),
+                )
+                # auto_wiring_manifest_discovered keeps the full discovery
+                # result: the cross-profile effect lookup below (OMN-14517)
+                # raises RuntimeHostError on cold boot when it is narrowed.
+
                 # 2. Collect topics already claimed by explicit plugins
                 #    by inspecting registered routes on the dispatch engine
                 claimed_topic_patterns = set()
@@ -3764,16 +3813,11 @@ async def bootstrap() -> int:
                     )
 
                 # 4. Filter manifest to exclude quarantined contracts
-                from omnibase_infra.runtime.auto_wiring.models import (
-                    ModelAutoWiringManifest,
-                )
-
                 filtered_contracts = tuple(
                     c for c in manifest.contracts if c.name not in quarantined_names
                 )
-                filtered_manifest = ModelAutoWiringManifest(
-                    contracts=filtered_contracts,
-                    errors=manifest.errors,
+                filtered_manifest = manifest.model_copy(
+                    update={"contracts": filtered_contracts}
                 )
                 auto_wiring_manifest_for_subscriptions = filtered_manifest
                 db_io_contracts = tuple(
@@ -4130,8 +4174,8 @@ async def bootstrap() -> int:
 
         # Start HTTP health server before long Kafka subscription work. At this
         # point RuntimeHostProcess does not exist yet, so ServiceHealth serves
-        # startup liveness with runtime_attached=false. RuntimeHostProcess is
-        # created and attached immediately below (OMN-13768), still before the
+        # startup liveness with runtime_attached=false. The runtime is
+        # constructed and attached immediately below (OMN-13768), still before the
         # long-running Kafka subscription work further down.
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
@@ -4188,21 +4232,6 @@ async def bootstrap() -> int:
                 "runtime_attached": False,
             },
         )
-
-        # OMN-13768: RuntimeHostProcess is created, registered in the container,
-        # and attached to the health server HERE — before the long-running Kafka
-        # subscription work below (subscribe_wired_contract_topics/plugin consumer
-        # start/ContractRegistrationEventRouter wiring, which the module docstring
-        # notes "may take 10+ min"). Previously this block ran *after* that work,
-        # so ServiceHealth._runtime stayed None for the whole subscription window
-        # and GET /ready raised ProtocolConfigurationError [ONEX_CORE_041]
-        # ("RuntimeHostProcess not available") even though the auto-wired
-        # consumers below were already processing events. None of the
-        # RegistryProtocolBinding/RuntimeHostProcess construction inputs
-        # (container, event_bus, dispatch_engine, node_graph_config,
-        # kernel_profile, contracts_dir, auto_wiring_manifest_for_subscriptions)
-        # depend on the subscription work that used to precede this block, so
-        # the reorder is dependency-safe. See docs/handoffs/2026-07-01 write-up.
 
         # 5. Resolve RegistryProtocolBinding from container or create new instance
         # NOTE: Fallback to creating new instance is intentional degraded mode behavior.
@@ -4306,7 +4335,7 @@ async def bootstrap() -> int:
             # runtime config, which in a container means the contracts
             # bind-mount resolved to a directory with no runtime_config.yaml
             # in it (an empty or wrongly-targeted ONEX_CONTRACTS_DIR). That is
-            # what happened on the .201 dev lane when a failed deploy's
+            # what happened on the lab dev lane host when a failed deploy's
             # rollback removed the deployed tree out from under the running
             # containers and Docker re-created the bind source empty.
             #
@@ -4400,6 +4429,7 @@ async def bootstrap() -> int:
             runtime_node_graph_config=node_graph_config,
             # OMN-10587: Wire prefetch policy from runtime profile.
             prefetch_policy=kernel_profile.prefetch_policy,
+            config_prefetch_status=config_prefetch_status,
             # OMN-15418: Thread the same checked-in topology used by cold boot
             # into post-freeze Kafka contract materialization.
             deployment_topology=deployment_topology,
@@ -4415,6 +4445,8 @@ async def bootstrap() -> int:
                 "output_topic": config.output_topic,
             },
         )
+
+        # Register and attach the runtime before Kafka subscriptions (OMN-13768).
         if container.service_registry is not None:
             try:
                 await container.service_registry.register_instance(
