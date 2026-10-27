@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21426
+title: "Landing controller leases on the generic service"
+summary: >-
+  Slice 3 of the OMN-21279 runtime cluster and generic lease plan, stacked on OMN-21424 (generic lease) and OMN-21421 (runtime election). src/omnibase_infra/handlers/lease/handler_landing_lease.py declares the landing controller's lease kinds on the generic lease orchestrator, landing-fix (ttl 2700 s, resource pr:<repo>#<n>, inventory A1), landing-cause (ttl 5400 s, resource cause:<key>, inventory A2 and D5, which also stands in for the A8 check-then-create guard) and lab-proof (ttl 10200 s, the lab prover's PROVER_DEADLINE_S, resource repo:<repo>, inventory A3), and builds each row's acquire. src/omnibase_infra/handlers/lease/handler_fenced_push.py is the fix worker's push as a fenced effect: check_fence first, refused LEASE_FENCE_STALE, LEASE_EXPIRED or LEASE_UNREADABLE with no push, else git push --force-with-lease on the worker's expected remote sha (GenericLease NoEffectWithStaleFence). AC3 (deleting omnimarket node_stuck_owner_actor_effect and node_landing_lease_claim_close_effect) is the companion omnimarket change. Not in this change: switching the landing controller (its state.json leases[]) and omnimarket node_pr_landing_decision_compute to these grants, and the fix worker passing its fence on every write command; that switch waits on the lease orchestrator being placed and served by the runtime (its topics and placement wait on an omnibase_core release carrying omnibase_core#2098).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21426-ac1-landing-kinds
+    statement: "The fix-worker, cause, lab-prover and CI-red owner leases (A1, A2, A3, D5) are granted by the lease orchestrator as kinds landing-fix, landing-cause and lab-proof."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: fix-worker, cause, lab-prover and CI-red owner leases (inventory A1, A2, A3, D5) are granted by the lease orchestrator as kinds `landing-fix`, `landing-cause`, `lab-proof` -- falsifier: a grep of the controller and decision node finds a lease written to `state.json` `leases[]` or the reducer's ledger entries
+  - id: req-omn21426-ac2-revoked-push-refused
+    statement: "A revoked fix worker's push is refused LEASE_FENCE_STALE."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: a revoked fix worker's push is refused `LEASE_FENCE_STALE` -- falsifier: the lab receipt shows the revoked worker's push reaching GitHub
+evidence_requirements:
+  - kind: tests
+    description: "The landing lease suites (two lease orchestrators on a real etcd, a bare git repository standing in for GitHub, and the kind and resource unit tests) pass."
+    command: "uv run pytest tests/integration/runtime/placement/test_landing_leases_omn21426.py tests/unit/handlers/lease/test_landing_lease_omn21426.py -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the committed fenced push source read at the checkout commit. It starts nothing and touches no running lane."
+    command: "deploy: gh api contents of handlers/lease/handler_fenced_push.py and handlers/lease/handler_landing_lease.py at HEAD"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21426-ac1-landing-kinds
+    description: >-
+      Two lease orchestrators (HandlerLeaseAcquire), one per simulated runtime, on the loopback test etcd: 20 concurrent acquires for each of the A1, A2 and A3 rows give exactly one lease-granted of kind landing-fix, landing-cause and lab-proof; a D5 CI-red owner acquire for a held cause is refused, so A2 and D5 share one owner per cause; the unit tests pin the kinds, TTLs and resource keys. The landing controller and decision node still write state.json leases[] in this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_landing_leases_omn21426.py tests/unit/handlers/lease/test_landing_lease_omn21426.py -q -n 0 -k "test_ac1 or kind or row or subject"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21426-ac2-revoked-push-refused
+    description: >-
+      A fix worker's landing-fix grant is revoked and a second worker is granted by the other runtime at a higher fence; the revoked worker's push is refused LEASE_FENCE_STALE and the bare repository standing in for GitHub keeps its branch head; the live worker's push lands; interleaved pushes of three successive grants leave the accepted fences in rising order; a released grant with no successor is refused LEASE_EXPIRED and a stopped etcd LEASE_UNREADABLE, each with no push.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_landing_leases_omn21426.py -q -n 0 -k "test_ac2 or stale or expired or unreadable"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21426-deploy-fenced-push
+    description: >-
+      Read the committed fenced push source at the checkout commit through the GitHub contents API. Fail when the fence check before the push, the LEASE_FENCE_STALE refusal or the landing-fix kind is absent. Runs on hosted runners without a container daemon or access to a private runtime; the landing leases are not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_fenced_push.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'if status is not EnumLeaseFenceStatus.OK:' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_fenced_push.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F '"LEASE_FENCE_STALE"' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_landing_lease.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'LANDING_FIX = "landing-fix"' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
