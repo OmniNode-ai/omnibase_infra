@@ -184,6 +184,8 @@ profiles:
     services:
       main:
         runtime_id: dev-main
+        # OMN-21288: tenant projection nodes share the main runtime.
+        folded_profiles: [tenant-projection]
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof
