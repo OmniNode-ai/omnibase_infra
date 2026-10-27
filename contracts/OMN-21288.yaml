@@ -169,5 +169,14 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_trigger_binding_declarations_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21288-folded-state-symlink-refusal
+    description: >-
+      Refuse redirected main or effects state roots and delegation sources, including a source replaced after a successful boot. The root shell rejects effects-volume symlinks before any ownership command, and both shell and Python checks preserve the outside target. The focused runtime handover also retains completed SQLite work and new writes across restart. These hosted checks require no running lane or credentials.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py tests/integration/runtime/test_folded_effects_state_handover_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."

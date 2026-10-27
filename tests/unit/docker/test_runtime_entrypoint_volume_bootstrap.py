@@ -131,6 +131,7 @@ def test_effects_state_root_is_owned_before_privilege_drop_only_when_folded(
     [
         "/app/effects-data",
         "/app/effects-data/",
+        "/app/effects-data/.",
         "/app/effects-data/state/",
         "/app/effects-data/../data",
         "/app/effects-data/a/b",
@@ -145,3 +146,50 @@ def test_folded_state_root_outside_the_effects_volume_refuses_boot(
     assert "FOLDED_EFFECTS_STATE_REFUSED" in result.stderr
     assert not any(call.startswith("gosu ") for call in recorded)
     assert not any("effects-data" in call or "/etc" in call for call in recorded)
+
+
+@pytest.mark.parametrize(
+    "linked_path",
+    ["effects-data", "effects-data/state", "effects-data/state/delegation"],
+)
+def test_folded_symlink_refuses_before_any_root_filesystem_operation(
+    tmp_path: Path, linked_path: str
+) -> None:
+    app = tmp_path / "app"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    claim = outside / "claim"
+    claim.write_text("preserve")
+    link = app / linked_path
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside, target_is_directory=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("id", "install", "chown", "gosu"):
+        script = bin_dir / name
+        script.write_text(
+            "#!/bin/sh\nprintf '0\\n'\n"
+            if name == "id"
+            else "#!/bin/sh\necho 'unexpected root filesystem operation' >&2\nexit 77\n"
+        )
+        script.chmod(0o755)
+    # Run the real shell with only its absolute /app paths relocated into this
+    # isolated tree; the guard and command ordering are unchanged.
+    entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
+    result = subprocess.run(
+        ["sh", "-c", entrypoint.replace("/app/", f"{app}/")],
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "ONEX_FOLDED_EFFECTS_STATE_ROOT": str(app / "effects-data/state"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "must not be a symlink" in result.stderr
+    assert "unexpected root filesystem operation" not in result.stderr
+    assert link.is_symlink()
+    assert claim.read_text() == "preserve"
+    assert list(outside.iterdir()) == [claim]

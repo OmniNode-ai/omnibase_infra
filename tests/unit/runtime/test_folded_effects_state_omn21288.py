@@ -138,3 +138,39 @@ def test_unset_main_state_root_is_named(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="ONEX_STATE_DIR or ONEX_STATE_ROOT"):
         prepare_folded_effects_state(env)
     assert not (tmp_path / "effects").exists()
+
+
+@pytest.mark.parametrize("linked_path", ["effects", "effects/delegation", "main"])
+def test_symlinked_state_paths_are_refused_without_touching_the_target(
+    tmp_path: Path, linked_path: str
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    claim = outside / "claim"
+    claim.write_text("preserve")
+    link = tmp_path / linked_path
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        prepare_folded_effects_state(_env(tmp_path))
+
+    assert link.is_symlink()
+    assert claim.read_text() == "preserve"
+    assert list(outside.iterdir()) == [claim]
+
+
+def test_existing_alias_does_not_accept_a_redirected_source(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    prepare_folded_effects_state(env)
+    source = tmp_path / "effects/delegation"
+    source.rmdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    source.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        prepare_folded_effects_state(env)
+
+    assert (tmp_path / "main/delegation").is_symlink()
+    assert list(outside.iterdir()) == []

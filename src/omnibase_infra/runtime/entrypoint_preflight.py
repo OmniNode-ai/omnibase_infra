@@ -294,6 +294,11 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
         raise ValueError("folded effects and main state roots must be absolute")
     source = effects_root / "delegation"
     destination = main_root / "delegation"
+    # Only the destination alias may be a link. A redirected source would
+    # silently adopt a different claim store, including on a later restart.
+    for state_path in (main_root, effects_root, source):
+        if state_path.is_symlink():
+            raise ValueError(f"folded state path must not be a symlink: {state_path}")
     source_path = source.resolve()
     destination_path = destination.resolve()
     if destination.is_symlink():

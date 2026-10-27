@@ -33,15 +33,13 @@ set -e
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "[entrypoint] Bootstrapping runtime volume ownership..."
-  install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
-  chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
   # A folded effects role retains its original local delegation claims and
   # archives. Fresh named volumes need the same ownership bootstrap as data.
   # Only the configured state root under the effects volume is walked, never
   # the archives, and -h changes a link itself rather than what it names.
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
     case "$ONEX_FOLDED_EFFECTS_STATE_ROOT" in
-      *..* | */ | /app/effects-data/*/*) folded_root_ok=0 ;;
+      *..* | */ | /app/effects-data/. | /app/effects-data/*/*) folded_root_ok=0 ;;
       /app/effects-data/?*) folded_root_ok=1 ;;
       *) folded_root_ok=0 ;;
     esac
@@ -49,6 +47,18 @@ if [ "$(id -u)" -eq 0 ]; then
       echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: ONEX_FOLDED_EFFECTS_STATE_ROOT must name one directory directly under /app/effects-data" >&2
       exit 2
     fi
+    # Validate the existing tree before any root-owned filesystem operation.
+    # install -d follows links even when chown is later told not to follow them.
+    for folded_path in /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT" "$ONEX_FOLDED_EFFECTS_STATE_ROOT/delegation"; do
+      if [ -L "$folded_path" ]; then
+        echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: folded state path must not be a symlink: $folded_path" >&2
+        exit 2
+      fi
+    done
+  fi
+  install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
+  chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
+  if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
     install -d -o omniinfra -g omniinfra /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
     chown -hR omniinfra:omniinfra "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
   fi
