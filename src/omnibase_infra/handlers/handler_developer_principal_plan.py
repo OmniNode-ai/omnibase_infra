@@ -38,7 +38,7 @@ from omnibase_infra.models.developer_principal.model_developer_principal_plan im
 from omnibase_infra.models.developer_principal.model_developer_principal_plan_request import (
     ModelDeveloperPrincipalPlanRequest,
 )
-from omnibase_infra.models.developer_principal.topic_constants import (
+from omnibase_infra.models.developer_principal.topics import (
     SCOPED_WRITE_TOPICS,
 )
 
