@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+kinds:
+  - kind: slot
+    inventory_row: B2
+    replaces: "landing placement slot marker <host>.<lease>.<pid>"
+    capacity: 4
+    ttl_s: 90
+  - kind: prepr-project
+    inventory_row: C1
+    replaces: "landing_compose_guard.py pre-PR project lease directory"
+    capacity: 1
+    ttl_s: 300
+  - kind: prepr-slot
+    inventory_row: C2
+    replaces: "scripts/runtime_build/prepr_teardown_slot.py slot-N.json"
+    capacity: 1
+    ttl_s: 300
+  - kind: prepr-host
+    inventory_row: C3
+    replaces: "scripts/runtime_build/prepr_runtime_pool.py lease.json"
+    capacity: 1
+    ttl_s: 900
+  - kind: compose-lane
+    inventory_row: C4
+    replaces: "scripts/runtime_build/lane_lock.py lane-locks/<project>.lock"
+    capacity: 1
+    ttl_s: 900
+  - kind: deploy-host
+    inventory_row: C5
+    replaces: "scripts/deploy-agent/deploy_agent/host_slot.py lease.json and slot.lock"
+    capacity: 1
+    ttl_s: 1800
+  - kind: host-reconcile
+    inventory_row: C7
+    replaces: ".onex-reconcile-host.lock directory (three copies)"
+    capacity: 1
+    ttl_s: 3600
+  - kind: lab-stack
+    inventory_row: C8
+    replaces: "lab-stack-leases generation files"
+    capacity: 1
+    ttl_s: 3600
+  - kind: heavy-suite
+    inventory_row: C9
+    replaces: "scripts/heavy_lock.py /tmp/omninode-heavy-suite.lock"
+    capacity: 1
+    ttl_s: 60

@@ -274,6 +274,7 @@ databases:
               - dep_health_findings
               - hook_events
               - instruction_eval_aggregate_snapshots
+              - lease_projection
               - llm_cost_aggregates
               - local_environment
               - metering_summary
@@ -443,5 +444,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 2d00c72549f1f9f753425edf4c27c7a4db0ae3e506967b4bece254ee39da3e8d
+  sha256: b3b620dfcf7b1ab56c39164cddd4bcb4a5cdba42f5d23876edf84371801d798d
 topology_instance: onex-dev
