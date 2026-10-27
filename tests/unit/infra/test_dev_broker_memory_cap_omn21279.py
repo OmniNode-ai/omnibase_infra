@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The dev broker obeys the 2026-10-25T17:53:44Z operator consent."""
+"""The dev broker obeys OPERATOR-CONSENT 2026-10-27T06:37:48Z (OMN-20275)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from types import ModuleType
 import pytest
 from dotenv import dotenv_values
 
-from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, load_compose
+from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, load_compose, render_stack
 
 ROOT = Path(__file__).resolve().parents[3]
 pytestmark = pytest.mark.unit
@@ -61,25 +61,37 @@ def test_checker_accepts_the_real_dev_broker_configuration() -> None:
     services = load_compose("docker-compose.dev-lane.yml")["services"]
     broker = services["redpanda"]
     command = " ".join(broker["command"])
-    assert "--memory 3G" in command
-    assert broker["mem_limit"] == "4g"
+    assert "--memory 12G" in command
+    assert broker["mem_limit"] == "16g"
     _checker()._check_broker_memory(broker)
     assert (
         services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
-        == "3G"
+        == "12G"
     )
 
 
 @pytest.mark.parametrize(
     ("memory", "limit"),
     [
-        ("1G", "4g"),
-        ("12G", "4g"),
+        ("1G", "8g"),
+        ("12G", "8g"),
+        ("7G", "8g"),
+        ("6145M", "8g"),
+        ("3G", "4g"),
+        ("6G", "8g"),
+        ("13G", "16g"),
+        ("12G", "17g"),
+        ("12289M", "16g"),
+        ("12287M", "16g"),
+        ("12G", "16385m"),
+        ("12G", "16383m"),
         ("3G", 0),
-        ("3G", "5g"),
+        ("3G", "9g"),
+        ("3G", "8193m"),
         ("3G", "1g"),
-        ("4G", "3g"),
-        ("oops", "4g"),
+        ("6G", "5g"),
+        ("4097M", "4g"),
+        ("oops", "8g"),
     ],
 )
 def test_checker_refuses_unruled_or_missing_memory(memory: str, limit: object) -> None:
@@ -91,7 +103,11 @@ def test_checker_refuses_unruled_or_missing_memory(memory: str, limit: object) -
 
 @pytest.mark.parametrize(
     ("memory", "limit"),
-    [("2G", "4g"), ("3G", 4 * 1024**3), ("4G", "4g"), ("2048M", "4096m")],
+    [
+        ("12G", "16g"),
+        ("12G", 16 * 1024**3),
+        ("12288M", "16384m"),
+    ],
 )
 def test_checker_accepts_the_ruled_boundaries(memory: str, limit: object) -> None:
     _checker()._check_broker_memory(
@@ -102,11 +118,18 @@ def test_checker_accepts_the_ruled_boundaries(memory: str, limit: object) -> Non
 @pytest.mark.parametrize("command", [[], ["--memory"], ["--memory 3G", "--memory=12G"]])
 def test_checker_refuses_missing_or_ambiguous_flag(command: list[str]) -> None:
     with pytest.raises(ValueError):
-        _checker()._check_broker_memory({"command": command, "mem_limit": "4g"})
+        _checker()._check_broker_memory({"command": command, "mem_limit": "8g"})
 
 
 @pytest.mark.parametrize(
-    ("memory", "limit", "expected"), [("12G", "4g", 1), ("3G", "0", 1), ("3G", "4g", 0)]
+    ("memory", "limit", "expected"),
+    [
+        ("12G", "8g", 1),
+        ("3G", "0", 1),
+        ("6G", "8g", 1),
+        ("3G", "4g", 1),
+        ("12G", "16g", 0),
+    ],
 )
 @pytest.mark.usefixtures("docker_compose")
 def test_deploy_preflight_checks_the_rendered_broker(
@@ -197,3 +220,22 @@ def test_deploy_preflight_checks_the_real_dev_stack(advertise_host: str | None) 
     else:
         assert result.returncode == 0, result.stderr
         assert "OK: all" in result.stdout
+
+
+@pytest.mark.parametrize("memory", ["3G", "6G", "12G", "24G"])
+@pytest.mark.usefixtures("docker_compose")
+def test_rendered_dev_broker_keeps_consented_12g_16g(memory: str) -> None:
+    services = render_stack(DEV_LANE_STACK, {"DEV_REDPANDA_MEMORY": memory})
+    broker = services["redpanda"]
+    assert "--memory 12G" in " ".join(broker["command"])
+    assert int(broker["mem_limit"]) == 16 * 1024**3
+    assert (
+        services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
+        == "12G"
+    )
+
+
+def test_deploy_agent_env_declares_consented_dev_memory() -> None:
+    policy = dotenv_values(ROOT / "docker/runtime-policy.env")
+    assert policy["DEV_REDPANDA_MEMORY"] == "12G"
+    assert policy["DEV_REDPANDA_MEM_LIMIT"] == "16g"
