@@ -502,7 +502,22 @@ def test_dev_lane_compose_file_set_matches_both_deploy_paths() -> None:
     assert "_DEV_LANE_OVERLAY = " in executor
     assert "docker-compose.dev-lane.yml" in executor
     dev_config = executor.split("EnumRuntimeLane.DEV: ModelLaneConfig(", 1)[1][:400]
-    assert "compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY)" in dev_config, (
+    assert (
+        "compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY)"
+        in dev_config
+    ), (
         "the deploy agent's DEV lane no longer loads exactly "
-        "(base, dev-lane overlay). Update this test and the manifest set together."
+        "(base, dev-lane overlay, tenant fold). Update this test and the manifest set together."
     )
+
+
+@pytest.mark.unit
+def test_tenant_fold_required_names_match_its_manifest() -> None:
+    required = _required_names(_REPO_ROOT / "docker/docker-compose.dev-tenant-fold.yml")
+    declared = _declared_names(
+        _REPO_ROOT / "docker/dev-tenant-fold-required-env.manifest.txt"
+    )
+    assert required == declared == {"DEV_RUNTIME_MAIN_FOLDED_PROFILES"}
+    assert "docker-compose.dev-tenant-fold.yml" in _REFRESH_DEV_LANE.read_text()
+    hooks = (_REPO_ROOT / ".pre-commit-config.yaml").read_text()
+    assert "--manifest-file docker/dev-tenant-fold-required-env.manifest.txt" in hooks

@@ -512,6 +512,7 @@ class TestDev201Unchanged:
         assert [Path(f).name for f in cfg.compose_files] == [
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
+            "docker-compose.dev-tenant-fold.yml",
         ]
         assert cfg.postgres_container == "omnibase-infra-postgres"
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
@@ -525,7 +526,7 @@ class TestDev201Unchanged:
         select_dev_instance("dev-201")
         up = _capture_compose_up(DeployExecutor())[0]
         assert _project_of(up) == "omnibase-infra"
-        assert len(_files_of(up)) == 2
+        assert len(_files_of(up)) == 3
         assert "onex-api" in up
 
         builds = _capture_build(DeployExecutor())

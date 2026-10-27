@@ -199,6 +199,12 @@ def _gate(threads: list[dict[str, Any]], env: dict[str, Path]) -> Any:
     return gate.classify_threads(threads, never, judge_notes=notes)
 
 
+def _verdict(thread: dict[str, Any]) -> Any:
+    disposition = gate.latest_disposition(thread)
+    assert disposition is not None
+    return gate.judge_verdict_for(thread, disposition)
+
+
 class TestPendingFile:
     def test_the_judge_reads_the_finding_the_cited_lines_and_the_rejection(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -274,6 +280,68 @@ class TestPendingFile:
         )
         assert "absent at the head" in label
         assert "does not exist" in excerpt
+
+
+class TestHeadBoundJudgeProtocol:
+    """The default-branch producer must speak the head-bound PR gate protocol."""
+
+    def test_posted_verdict_binds_the_head_that_supplied_the_excerpt(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        _judged(env, _record())
+        # A push during the model call must not relabel the old judgement.
+        monkeypatch.setenv("HEAD_SHA", "b" * 40)
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        body = github.posts[0][2]["body"]
+        assert gate.parse_judge_reply(body)["head"] == head_repo["head"]
+        status = json.loads(env["status"].read_text())
+        assert status["judged"][0]["head_sha"] == head_repo["head"]
+        thread["comments"]["nodes"].append(_as_read_back(body))
+        assert _verdict(thread) is None
+        assert len(gate.pending_rejections([thread])[0]) == 1
+        monkeypatch.setenv("HEAD_SHA", head_repo["head"])
+        assert _verdict(thread).verdict == "accepted"
+        assert gate.pending_rejections([thread])[0] == []
+
+    @pytest.mark.parametrize("head", [None, "", "A" * 40, "b" * 39, 123])
+    def test_missing_or_invalid_recorded_head_posts_no_verdict(
+        self,
+        env: dict[str, Path],
+        head_repo: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        head: object,
+    ) -> None:
+        _pending(env, head_repo, monkeypatch, [_thread(_rejection())])
+        status = json.loads(env["status"].read_text())
+        target = status["replies"]["22"]
+        if head is None:
+            target.pop("head_sha", None)
+        else:
+            target["head_sha"] = head
+        env["status"].write_text(json.dumps(status))
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 1
+        assert github.posts == []
+        assert "head SHA" in json.loads(env["status"].read_text())["notes"]["22"]
+
+    def test_legacy_unbound_verdict_is_requeued_without_becoming_a_disposition(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _pending(env, head_repo, monkeypatch, [])
+        body = (
+            f"<!-- {gate.JUDGE_MARKER} rejection=22 digest={gate.body_digest(REJ)} "
+            f"verdict=accepted judge=rejection-judge identity={OPUS} -->\n"
+            "> the caller validates this input"
+        )
+        thread = _thread(_rejection(), _as_read_back(body))
+        assert gate.is_judge_reply(body)
+        assert gate.latest_disposition(thread).comment_id == 22
+        assert _verdict(thread) is None
+        assert len(gate.pending_rejections([thread])[0]) == 1
 
 
 class TestPostedVerdicts:

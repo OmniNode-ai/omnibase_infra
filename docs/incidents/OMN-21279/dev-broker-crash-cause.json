@@ -137,10 +137,46 @@
       "redpandadata/redpanda:v25.3.18"
     ],
     "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
-    "pending": "run fix_path.hop_proof.procedure on a copy of the 50 GB dev volume (omnibase-infra-redpanda-data on h201), then pin and deploy one hop at a time; not done",
+    "pending": "the first hop is proven on a copy of the dev data volume (hop_proof.data_copy_run) and v25.1.12 is pinned by OMN-21279; deploy v25.1.12 to the dev broker and read it back, then pin and deploy v25.2.14 and v25.3.18 one at a time; no hop is deployed yet",
     "hop_proof": {
       "guard": "tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py refuses a declared hop whose image needs a newer logical version than the previous image leaves, and a chain image with no measured entry",
       "scratch_run": "2026-10-26 on h200, synthetic v24.3.18 volume with 20 topics, 400 groups, 3000 records on hop-t0, a SCRAM superuser and enable_sasl true: cluster_version 14 -> 15 -> 16 -> 17 across v25.1.12, v25.2.14, v25.3.18; topics 20, groups 400, high watermark 3000, committed offset 3000, the user and the unauthenticated refusal unchanged at every hop; a second seeded volume repeated the same four hops with topics 20 and groups 400 at each",
+      "data_copy_run": {
+        "host": "h201",
+        "copy": "scratch volume copied from omnibase-infra-redpanda-data (49.2G) 2026-10-26T15:56Z-16:05Z with the live broker running; the live broker was not stopped or changed",
+        "flags": "--mode dev-container --smp 1 --memory 4G --set topic_partitions_per_shard=7000, nofile 65535, internal network alias redpanda",
+        "hops": [
+          {
+            "image": "redpandadata/redpanda:v25.1.12",
+            "healthy_at": "2026-10-26T16:07Z",
+            "cluster_version": 15,
+            "kafka_partitions": 4662,
+            "leaderless": 0,
+            "topics": 4635,
+            "groups": 14623,
+            "error_lines": 0,
+            "cluster_version_before": 13
+          },
+          {
+            "image": "redpandadata/redpanda:v25.2.14",
+            "healthy_at": "2026-10-26T16:08Z",
+            "cluster_version": 16,
+            "topics": 4635,
+            "groups": 14623,
+            "error_lines": 0
+          },
+          {
+            "image": "redpandadata/redpanda:v25.3.18",
+            "healthy_at": "2026-10-26T16:10Z",
+            "cluster_version": 17,
+            "topics": 4635,
+            "groups": 14623,
+            "error_lines": 0
+          }
+        ],
+        "cluster_version_before_reading": "The copy's active cluster_version read 13 before the first hop; the h200 synthetic volume in scratch_run, created fresh on v24.3.18, read 14 (v24.3.18 node_latest_version). Observed, cause not read. Both are at or above v25.1.12's node_earliest_version 12, so the first hop starts on either, and v25.1.12 finalized the copy at 15.",
+        "not_tested": "a direct v24.3.18 to v25.3.18 start on the copy; client traffic and the ListGroups race on any hop; the readiness probe on v25.1.12 (its tools bash, awk, sed, grep, curl and rpk are present in the image)"
+      },
       "negative_control": "v25.3.18 started directly on a v24.3 volume: 'Assert failure: (src/v/features/feature_table.cc:874) Attempted to upgrade from incompatible logical version 14 to logical version 17!', exit 133",
       "node_earliest_version": {
         "v24.3.18": 11,

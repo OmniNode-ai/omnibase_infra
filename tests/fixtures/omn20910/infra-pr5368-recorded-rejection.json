@@ -1,0 +1,38 @@
+{
+  "_provenance": {
+    "source": "onex scm pr-threads OmniNode-ai/omnibase_infra#5368 --bus-lane dev; node_github_repo_gateway_effect pr_review_threads; successful prior-lane capture, first thread only",
+    "captured_utc": "2026-10-27T02:17:06.461678+00:00",
+    "source_sha256": "e1cce9cfc923a8164162a55ef5ec1f967c45bac91f46972d6295a3220a0ea986",
+    "bus_correlation_id": "87b6134b-1a20-454a-a567-dadadedb7cc6",
+    "terminal_envelope_id": "772fa525-6ba8-5372-9d55-cdc2a133cdb8",
+    "ticket": "OMN-20910",
+    "redaction": "Human comment author replaced with pr-author; bodies, ids and wire field names unchanged. This is a recorded rejection, not a recording of a live judge verdict."
+  },
+  "response": {
+    "thread_id": "PRRT_kwDOPuAjtM6wPQIs",
+    "is_resolved": false,
+    "is_outdated": false,
+    "path": "src/omnibase_infra/handlers/lease/handler_lease_fence.py",
+    "line": 1,
+    "root_comment_id": 4376679729,
+    "comment_count": 2,
+    "comments": [
+      {
+        "comment_id": 4376679729,
+        "author": "github-actions",
+        "created_at": "2026-10-26T11:24:38Z",
+        "url": "https://github.com/OmniNode-ai/omnibase_infra/pull/5368#discussion_r4376679729",
+        "body": "<!-- hostile-reviewer-thread fp=af5f49fba9a4 -->\n**[MAJOR] hostile-reviewer (correctness)**\n\ncheck_fence returns UNKNOWN for a fence higher than all live revisions | When the supplied fence is strictly greater than every live create_revision in the prefix, the function falls through to return UNKNOWN. The contract states that check_fence returns stale for a lower fence, expired for an absent key, and unknown for an unreachable etcd, and never ok for them. A fence that is higher than the current live grant is not stale (it is not lower), not expired (the key is present), and not unreachable. Returni\n\n_Reply on this thread with a line `fixed-in <sha>` (the commit of this PR that changed these lines) or `rejected: <reason>`. The `Hostile Review Thread Gate` re-runs on the reply, checks it, and blocks a merge to dev while any finding has no accepted reply (OMN-17427)._",
+        "body_truncated": false
+      },
+      {
+        "comment_id": 4377974641,
+        "author": "pr-author",
+        "created_at": "2026-10-26T13:52:37Z",
+        "url": "https://github.com/OmniNode-ai/omnibase_infra/pull/5368#discussion_r4377974641",
+        "body": "rejected: check_fence authorizes only an exact live create_revision. A fence ahead of every live grant is unverified and must fail closed as UNKNOWN; STALE is reserved for a lower absent fence. UNKNOWN is never an OK authorization. A different diagnostic enum may be useful, but returning UNKNOWN here does not authorize a stale or forged grant.\n\nEvidence at PR head 87a1ecb649a8649e55c96849bb9a7c1f34d242dd: handler_lease_fence.py: fence in live -> OK; fence < max(live) -> STALE; otherwise UNKNOWN.\n\n<!-- onex-idempotency-key: scm-pr_thread_reply-4fc0c1baa8b93d740f67dc7a38c036cd6ed4d1ff -->",
+        "body_truncated": false
+      }
+    ]
+  }
+}

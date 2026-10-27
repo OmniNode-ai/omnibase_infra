@@ -329,8 +329,8 @@ def judge_verdict_for(
 
     A reply from any other login is ignored, whatever it claims. The verdict
     must name the rejection's comment id, its current body digest and the
-    current PR head. Legacy replies remain recognisable as judge replies,
-    but cannot clear a finding without the code binding.
+    current PR head. An unbound legacy marker is recognised as a judge reply
+    but cannot clear a finding or suppress a new judgement of the current code.
     """
     if disposition.kind != "rejected" or not disposition.comment_id:
         return None
@@ -994,7 +994,8 @@ def pending_rejections(
     """Rejections still to judge, and notes for those the bot will not judge.
 
     Only a thread's latest disposition counts, and a rejection that already
-    carries the onexbot App's verdict on its id, current body and head is done.
+    carries the onexbot App's verdict on its id, current body and reviewed
+    head is done. Legacy or prior-head verdicts remain pending.
     """
     pending: list[PendingRejection] = []
     notes: dict[str, str] = {}
