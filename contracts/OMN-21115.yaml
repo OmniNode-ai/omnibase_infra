@@ -1,0 +1,73 @@
+schema_version: 1.0.0
+ticket_id: OMN-21115
+title: Deliver the activation table grant required by TA.13 install confirmation
+summary: 'Infrastructure prerequisite only: vendor the activation migrations, derive the exact runtime grant and regenerate the static catalogs. Full P6 installation acceptance remains owned by omnimarket.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-install-confirm-boundary-algorithm
+    statement: The boundary algorithm derives installation facts and the current context from captured compact records, order-independently and without revising a fact once derived.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: on P6-recorded sessions, captured: a custom compaction yields `installed` with the boundary uuid; a tampered copy yields `install_mismatch`; custom then native (v6, corrected) keeps `installed` for the custom activation, records it `retired` at the native boundary in the current-context projection, and makes the native boundary current; an activation published before a native boundary and never installed yields `not_installed(native_compaction)`; native then custom yields `installed` for the custom one; a discarded precompute yields `not_installed(not_selected)`; a preserved message containing an older activation line is never selected; a truncated record yields `uncertain`; a resumed and a forked session (per P11c) select the boundary on their own active chain; a later captured turn with no compact record yields `uncertain(capture_gap)` -- falsifier: fixture table.'
+      - id: AC2
+        statement: 'AC2: every permutation of a fixture event set, with duplicates, folds to the same state per candidate and per activation, and to the same current-context state per session -- falsifier: two permutations with different states.'
+      - id: AC3
+        statement: 'AC3: no installation fact changes after it is first derived: replaying a session''s events with a later boundary appended leaves every earlier activation''s installation fact byte-identical -- falsifier: an installation fact that differs between the two replays.'
+      - id: AC4
+        statement: 'AC4: the writer reports `rows_upserted` greater than zero for a replayed event set -- falsifier: zero rows with committed offsets (the rule 7a symptom).'
+      - id: AC5
+        statement: 'AC5: replay rebuilds the table without invoking any node but the fold -- falsifier: a model, CLI or transcript read during replay.'
+evidence_requirements: []
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21115-grant-ac1
+    description: 'AC1 infrastructure prerequisite: activation read/write admission uses exactly INSERT, SELECT and UPDATE for omninode_runtime. This evidence supports the prerequisite only; the full ticket criterion is proved in omnimarket.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov
+    binds_ac:
+      - AC1
+  - id: dod-omn21115-grant-ac2
+    description: 'AC2 infrastructure prerequisite: activation read/write admission uses exactly INSERT, SELECT and UPDATE for omninode_runtime. This evidence supports the prerequisite only; the full ticket criterion is proved in omnimarket.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov
+    binds_ac:
+      - AC2
+  - id: dod-omn21115-grant-ac3
+    description: 'AC3 infrastructure prerequisite: activation read/write admission uses exactly INSERT, SELECT and UPDATE for omninode_runtime. This evidence supports the prerequisite only; the full ticket criterion is proved in omnimarket.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov
+    binds_ac:
+      - AC3
+  - id: dod-omn21115-grant-ac4
+    description: 'AC4 infrastructure prerequisite: activation read/write admission uses exactly INSERT, SELECT and UPDATE for omninode_runtime. This evidence supports the prerequisite only; the full ticket criterion is proved in omnimarket.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov
+    binds_ac:
+      - AC4
+  - id: dod-omn21115-grant-ac5
+    description: 'AC5 infrastructure prerequisite: activation read/write admission uses exactly INSERT, SELECT and UPDATE for omninode_runtime. This evidence supports the prerequisite only; the full ticket criterion is proved in omnimarket.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov
+    binds_ac:
+      - AC5
+  - id: dod-omn21115-grant-hosted
+    description: Hosted isolated container proves shipped activation privileges pass the real projection binding validator. Fails on the base, whose topology does not grant the activation relation. Does not access a running service.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env docker run --rm --volume "$PWD:/workspace:ro" --workdir /workspace --env UV_PROJECT_ENVIRONMENT=/tmp/infra-proof ghcr.io/astral-sh/uv:python3.12-bookworm sh -c 'uv sync --frozen --group dev --quiet && uv run --no-sync pytest tests/unit/topology/test_compaction_activations_grant_omn21115.py -q -p no:randomly --no-cov'
