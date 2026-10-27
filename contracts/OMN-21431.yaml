@@ -1,0 +1,57 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21431
+title: The pricing manifest prices Claude Opus 5.5, Opus 5 and Fable 5.x, so a typical Claude Code upload to the estimator is priced instead of shown as not priced
+summary: The manifest had no row for claude-opus-5-5, claude-opus-5, claude-fable-5 or claude-fable-5-1, so a Claude Code upload, mostly Opus 5.5 turns, put those prompts under Not priced. This PR adds the four rows at Anthropic's published rates read 2026-10-27 (Opus 5.5 $4/$20, Opus 5 $5/$25, Fable 5 and 5.1 $10/$50 per MTok) with the pricing page cited. AC2's dev-lane upload needs an omnibase_infra release and a runtime/onex-api image rebuild; here it is bound to the manifest lookup the estimator's node calls.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21431-infra
+    statement: The pricing manifest prices Claude Opus 5.5, Opus 5 and Fable 5.x, so a typical Claude Code upload to the estimator is priced instead of shown as not priced.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the manifest has rows for claude-opus-5-5, claude-opus-5 and each Fable 5.x model id, with input and output rates and a source_url to the provider''s published pricing table -- falsifier: uv run pytest tests/unit/configs -k opus_5_5 in omnibase_infra, which asserts each id is present and its rates equal the published table row'
+      - id: AC2
+        statement: 'AC2: uploading a Claude Code export that holds claude-opus-5-5 turns to the estimator on the dev lane prices those prompts, so the Not priced count for that model is 0 -- falsifier: the upload response lists claude-opus-5-5 under not_priced'
+evidence_requirements:
+  - kind: tests
+    description: claude-opus-5-5, claude-opus-5, claude-fable-5 and claude-fable-5-1 are each in the shipped manifest at the input and output rates of Anthropic's published pricing table (read 2026-10-27).
+    command: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_row_matches_the_published_rate
+  - kind: tests
+    description: Each of the four rows cites https://platform.claude.com/docs/en/about-claude/pricing as source_url, with its retrieval date, and claims no measured confidence.
+    command: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_row_cites_the_provider_page
+  - kind: tests
+    description: A prompt naming each of the four models resolves a cost through ModelPricingTable.estimate_cost, the lookup the estimator's prompt cost node uses, instead of resolving unpriced.
+    command: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_prompt_is_priced
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-21431-ac1-rates
+    description: claude-opus-5-5, claude-opus-5, claude-fable-5 and claude-fable-5-1 are each in the shipped manifest at the input and output rates of Anthropic's published pricing table (read 2026-10-27).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_row_matches_the_published_rate
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-21431-ac1-cited
+    description: Each of the four rows cites https://platform.claude.com/docs/en/about-claude/pricing as source_url, with its retrieval date, and claims no measured confidence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_row_cites_the_provider_page
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-21431-ac2-priced
+    description: A prompt naming each of the four models resolves a cost through ModelPricingTable.estimate_cost, the lookup the estimator's prompt cost node uses, instead of resolving unpriced.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/configs/test_pricing_manifest_opus_5_5_omn21431.py -q -k opus_5_5_family_prompt_is_priced
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
