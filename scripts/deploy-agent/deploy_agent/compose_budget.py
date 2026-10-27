@@ -176,6 +176,9 @@ def _merge_service_maps(documents: list[dict[str, Any]]) -> dict[str, dict[str, 
         if not isinstance(services, dict):
             continue
         for name, spec in services.items():
+            if spec is None:
+                merged.pop(str(name), None)
+                continue
             if not isinstance(spec, dict):
                 continue
             previous = merged.setdefault(str(name), {})
