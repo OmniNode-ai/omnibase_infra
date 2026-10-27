@@ -17,6 +17,12 @@ requirements:
       - id: "AC11"
         statement: |-
           AC11: apply-grants re-applies every declared grant to every issued principal in the lane (or the named ones), refuses a principal the broker does not hold, and never sets a password -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"
+  - id: "req-dev-broker-memory-6g"
+    statement: "The dev broker on the lab host runs --memory 6G inside an 8g container cap, declared in docker-compose.dev-lane.yml, under the operator consent of about 2026-10-27T00:45Z."
+    acceptance:
+      - id: "AC12"
+        statement: |-
+          AC12: the running dev broker container holds a memory cap of 8 GiB and its start command carries --memory 6G, and the deploy preflight accepts exactly that declaration -- falsifier: ssh to the dev lane host and docker inspect omnibase-infra-redpanda reads a Memory other than 8589934592 or a command without --memory 6G
 evidence_requirements:
   - kind: "tests"
     description: "AC10 and AC11: issuer tests."
@@ -41,4 +47,20 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: 'uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac12-dev-broker-memory-live"
+    description: "AC12: the live dev broker on the lab host holds an 8 GiB container cap and starts with --memory 6G."
+    source: "manual"
+    binds_ac: ["AC12"]
+    checks:
+      - check_type: "command"
+        check_value: 'ssh -o BatchMode=yes -o ConnectTimeout=6 "${DEV_LANE_HOST:?DEV_LANE_HOST names the dev lane host}" "docker inspect omnibase-infra-redpanda --format \"{{.HostConfig.Memory}} {{json .Config.Cmd}}\"" | grep -q "^8589934592 .*--memory 6G"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac12-preflight-bound"
+    description: "AC12: the deploy preflight accepts the 6G/8g declaration and refuses anything beyond it."
+    source: "manual"
+    binds_ac: ["AC12"]
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -p no:randomly'
         cwd: "${OMNI_HOME}/omnibase_infra"
