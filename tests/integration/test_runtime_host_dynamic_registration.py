@@ -13,6 +13,11 @@ from uuid import UUID, uuid4
 import pytest
 
 import omnibase_infra.runtime.runtime_host_process as runtime_host_module
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import InfraTimeoutError
+from omnibase_infra.models.errors.model_timeout_error_context import (
+    ModelTimeoutErrorContext,
+)
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
@@ -171,7 +176,14 @@ async def test_dynamic_registration_delivers_once_after_listener_retry(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise TimeoutError("registration join timed out")
+            raise InfraTimeoutError(
+                "registration join timed out",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="start_consumer",
+                    target_name=SUFFIX_NODE_REGISTRATION,
+                ),
+            )
         return await subscribe(**kwargs)
 
     monkeypatch.setattr(event_bus, "subscribe", attach)
