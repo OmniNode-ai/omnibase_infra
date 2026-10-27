@@ -52,7 +52,7 @@ def test_binding_declarations_preserve_publisher_transport() -> None:
 def test_binding_declarations_still_refuse_unknown_fields(invalid: str) -> None:
     lane = copy.deepcopy(_LANE)
     if invalid == "fallback":
-        lane["binding_fallback"] = ["inmemroy"]
+        lane["binding_falback"] = lane.pop("binding_fallback")
     elif invalid == "resolver":
         lane["secret_resolver"]["enable_convention_falback"] = True
     elif invalid == "source":
