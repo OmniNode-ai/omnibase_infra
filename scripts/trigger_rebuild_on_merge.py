@@ -226,6 +226,38 @@ class ModelCiBusLaneDelegationFaultRoute(BaseModel):
     no_escalation: bool
 
 
+class ModelCiBusLaneSecretSource(BaseModel):
+    """Where a lane's injected secret resolver reads one secret (OMN-20275), shape only."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    source_type: str
+    source_path: str
+
+
+class ModelCiBusLaneSecretMapping(BaseModel):
+    """One logical secret name and its source (OMN-20275), shape only."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    logical_name: str
+    source: ModelCiBusLaneSecretSource
+
+
+class ModelCiBusLaneSecretResolver(BaseModel):
+    """A lane's injected secret resolver declaration (OMN-20275), shape only.
+
+    Names and paths only. This publisher never resolves a secret, so it keeps
+    no policy here; it models the block so that ``extra="forbid"`` keeps
+    meaning "unknown key" instead of "key this script has not learned yet".
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    enable_convention_fallback: bool = False
+    mappings: tuple[ModelCiBusLaneSecretMapping, ...] = ()
+
+
 class ModelCiBusLane(BaseModel):
     """One checked-in CI control-bus lane declaration.
 
@@ -297,6 +329,11 @@ class ModelCiBusLane(BaseModel):
     broker_topology: ModelCiBusLaneBrokerTopology | None = None
     delegation_routes: tuple[ModelCiBusLaneDelegationRoute, ...] = ()
     delegation_fault_routes: tuple[ModelCiBusLaneDelegationFaultRoute, ...] = ()
+    # OMN-20275. Optional and unread by this publisher: the dev lane declares
+    # the ordered fallback buses and the injected secret resolver for the
+    # runtime bindings. Modelled so the strict overlay keeps validating.
+    binding_fallback: tuple[str, ...] = ()
+    secret_resolver: ModelCiBusLaneSecretResolver | None = None
 
     @field_validator("broker")
     @classmethod
@@ -393,6 +430,9 @@ ModelCiBusOverlay.model_rebuild(
         "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
         "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
         "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
+        "ModelCiBusLaneSecretResolver": ModelCiBusLaneSecretResolver,
+        "ModelCiBusLaneSecretMapping": ModelCiBusLaneSecretMapping,
+        "ModelCiBusLaneSecretSource": ModelCiBusLaneSecretSource,
     }
 )
 ModelCiBusLane.model_rebuild(
@@ -401,6 +441,9 @@ ModelCiBusLane.model_rebuild(
         "ModelCiBusLaneBrokerTopology": ModelCiBusLaneBrokerTopology,
         "ModelCiBusLaneDelegationRoute": ModelCiBusLaneDelegationRoute,
         "ModelCiBusLaneDelegationFaultRoute": ModelCiBusLaneDelegationFaultRoute,
+        "ModelCiBusLaneSecretResolver": ModelCiBusLaneSecretResolver,
+        "ModelCiBusLaneSecretMapping": ModelCiBusLaneSecretMapping,
+        "ModelCiBusLaneSecretSource": ModelCiBusLaneSecretSource,
     }
 )
 
