@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Shipped runtime fallback policy; override through event_bus.recovery.
+initial_backoff_seconds: 1
+max_backoff_seconds: 30
+backoff_multiplier: 2
+attempt_timeout_seconds: 120
