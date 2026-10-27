@@ -103,6 +103,7 @@ async def test_ac2_two_concurrent_holders_get_exactly_one_grant(
 ) -> None:
     a, b = two_stores
     _, resource, rows = SLICE6_KINDS[kind]
+    resource = f"{resource}-{uuid4().hex}"
     replies = list(
         await asyncio.gather(
             a.acquire(_request(kind, resource, "h201/lane-a")),
@@ -124,7 +125,7 @@ async def test_ac2_many_racing_holders_across_two_runtimes_get_one_grant(
 ) -> None:
     a, b = two_stores
     _, resource, _ = SLICE6_KINDS[kind]
-    resource = f"{resource}-race"
+    resource = f"{resource}-race-{uuid4().hex}"
     replies = list(
         await asyncio.gather(
             *(
@@ -150,7 +151,7 @@ async def test_expiring_kind_regrant_after_release_has_a_higher_fence(
 ) -> None:
     a, b = two_stores
     _, resource, _ = SLICE6_KINDS[kind]
-    resource = f"{resource}-regrant"
+    resource = f"{resource}-regrant-{uuid4().hex}"
     first = await a.acquire(_request(kind, resource, "first"))
     assert first.outcome == "lease-granted" and first.lease_id is not None
     released = await a.release(kind, resource, first.lease_id)
@@ -164,7 +165,7 @@ async def test_once_kind_is_insert_only_and_never_expires(
     two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], etcd: EtcdProcess
 ) -> None:
     a, b = two_stores
-    resource = "lane-key:sent-once"
+    resource = f"lane-key:sent-once-{uuid4().hex}"
     first = await a.acquire(_request("once", resource, "launchd-tick"))
     assert first.outcome == "lease-granted" and first.lease_id is not None
     assert first.ttl_s == 0
@@ -181,3 +182,26 @@ async def test_once_kind_is_insert_only_and_never_expires(
         assert refused.outcome == "lease-refused", refused
     again = await b.acquire(_request("once", resource, "session-tick"))
     assert again.outcome == "lease-refused"
+
+
+@pytest.mark.parametrize("kind", sorted(SLICE6_KINDS))
+async def test_kind_cases_can_repeat_on_the_same_etcd(
+    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], kind: str
+) -> None:
+    """Retained grants from an earlier invocation must not collide with a repeat."""
+    for _ in range(2):
+        await test_ac2_two_concurrent_holders_get_exactly_one_grant(two_stores, kind)
+        await test_ac2_many_racing_holders_across_two_runtimes_get_one_grant(
+            two_stores, kind
+        )
+        if SLICE6_KINDS[kind][0].expires:
+            await test_expiring_kind_regrant_after_release_has_a_higher_fence(
+                two_stores, kind
+            )
+
+
+async def test_insert_only_case_can_repeat_on_the_same_etcd(
+    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], etcd: EtcdProcess
+) -> None:
+    for _ in range(2):
+        await test_once_kind_is_insert_only_and_never_expires(two_stores, etcd)

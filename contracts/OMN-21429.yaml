@@ -65,3 +65,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/handlers/lease/test_lease_projection_omn21424.py -k equal_fence_sql_join -q
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21429-ac2-repeat-isolation
+    description: >-
+      Repeat the contention, regrant and insert-only cases against the same real etcd and lease stores. Each invocation uses a distinct resource; retained grants must not cause the next invocation to be refused. Fixed resource names fail these checks on the second invocation.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_slice6_lease_kinds_omn21429.py -k can_repeat -q
+        cwd: ${OMNI_HOME}/omnibase_infra
