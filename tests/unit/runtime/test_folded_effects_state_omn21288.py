@@ -129,3 +129,12 @@ def test_conflict_aborts_preflight_before_any_database_step(
     monkeypatch.setattr(entrypoint_preflight, "stamp_all_fingerprints", must_not_stamp)
     assert entrypoint_preflight.run_preflight(_env(tmp_path)) == 2
     assert "FOLDED_EFFECTS_STATE_REFUSED" in capsys.readouterr().err
+
+
+def test_unset_main_state_root_is_named(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env.pop("ONEX_STATE_DIR", None)
+    env.pop("ONEX_STATE_ROOT", None)
+    with pytest.raises(ValueError, match="ONEX_STATE_DIR or ONEX_STATE_ROOT"):
+        prepare_folded_effects_state(env)
+    assert not (tmp_path / "effects").exists()

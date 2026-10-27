@@ -90,6 +90,13 @@ from pydantic import (
     model_validator,
 )
 
+# CI syncs its environments with --no-install-project, and publish_lab_fact_event
+# runs this file in a subprocess without pytest's pythonpath, so the package is
+# importable there only from this checkout's src/.
+_SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+if importlib.util.find_spec("omnibase_infra") is None and _SRC_ROOT.is_dir():
+    sys.path.insert(0, str(_SRC_ROOT))
+
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
 )

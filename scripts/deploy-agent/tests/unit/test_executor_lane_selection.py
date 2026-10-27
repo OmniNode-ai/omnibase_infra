@@ -17,6 +17,7 @@ single-file; it layers exactly like stability-test and prod do.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -65,9 +66,18 @@ class TestLaneConfig:
         )
 
     def test_stability_test_lane_config(self) -> None:
-        policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
+        docker_dir = Path(__file__).resolve().parents[4] / "docker"
+        policy = docker_dir / "runtime-policy.env"
         with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
             cfg = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
+        # The committed overlay's main service container_name. The overlay uses
+        # compose's !override tags, so read that line rather than load the YAML.
+        overlay = (docker_dir / Path(cfg.compose_files[-1]).name).read_text()
+        match = re.search(
+            r"^  omninode-runtime:\n    container_name: (\S+)$", overlay, re.MULTILINE
+        )
+        assert match is not None
+        main_container = match.group(1)
         assert cfg.compose_project == "omnibase-infra-stability-test"
         assert cfg.postgres_container == "omnibase-infra-stability-test-postgres"
         # overlay must be layered on top of the base infra compose file
@@ -77,7 +87,6 @@ class TestLaneConfig:
         # docker-compose.stability-test.yml, not the dev-lane bare name.
         # OMN-21288: effects is folded into main, so both health ports resolve
         # to the one runtime container.
-        main_container = cfg.runtime_health_targets[0][0]
         assert cfg.runtime_health_targets == (
             (main_container, 18085),
             (main_container, 18086),

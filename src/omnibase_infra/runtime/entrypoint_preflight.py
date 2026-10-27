@@ -281,9 +281,14 @@ def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
     }
     if "effects" not in folded:
         raise ValueError("effects state handover requires the folded effects role")
-    main_root = Path(
+    main_configured = (
         env.get("ONEX_STATE_DIR", "").strip() or env.get("ONEX_STATE_ROOT", "").strip()
     )
+    if not main_configured:
+        raise ValueError(
+            "effects state handover requires ONEX_STATE_DIR or ONEX_STATE_ROOT"
+        )
+    main_root = Path(main_configured)
     effects_root = Path(configured)
     if not main_root.is_absolute() or not effects_root.is_absolute():
         raise ValueError("folded effects and main state roots must be absolute")
