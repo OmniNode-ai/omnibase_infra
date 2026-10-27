@@ -37,9 +37,20 @@ if [ "$(id -u)" -eq 0 ]; then
   chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
   # A folded effects role retains its original local delegation claims and
   # archives. Fresh named volumes need the same ownership bootstrap as data.
+  # Only the configured state root under the effects volume is walked, never
+  # the archives, and -h changes a link itself rather than what it names.
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
-    install -d -o omniinfra -g omniinfra /app/effects-data
-    chown -R omniinfra:omniinfra /app/effects-data
+    case "$ONEX_FOLDED_EFFECTS_STATE_ROOT" in
+      *..* | */ | /app/effects-data/*/*) folded_root_ok=0 ;;
+      /app/effects-data/?*) folded_root_ok=1 ;;
+      *) folded_root_ok=0 ;;
+    esac
+    if [ "$folded_root_ok" -ne 1 ]; then
+      echo "[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: ONEX_FOLDED_EFFECTS_STATE_ROOT must name one directory directly under /app/effects-data" >&2
+      exit 2
+    fi
+    install -d -o omniinfra -g omniinfra /app/effects-data "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
+    chown -hR omniinfra:omniinfra "$ONEX_FOLDED_EFFECTS_STATE_ROOT"
   fi
   # The runtime-owned secret store (OMN-17099): a named volume mounted under the
   # runtime user's home is root-owned when fresh, and the process below runs as

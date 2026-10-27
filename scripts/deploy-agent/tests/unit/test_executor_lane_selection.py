@@ -34,6 +34,24 @@ from deploy_agent.executor import (
 
 pytestmark = pytest.mark.unit
 
+# The repo's docker/ directory, resolved the way conftest.py resolves it.
+DOCKER_DIR = Path(__file__).resolve().parents[4] / "docker"
+
+
+def _overlay_container_name(overlay: str, service: str) -> str:
+    """Read one service's container_name from the committed overlay text.
+
+    The overlay uses compose's !override tags, so read that line rather than
+    load the YAML.
+    """
+    match = re.search(
+        rf"^  {re.escape(service)}:\n(?:    .*\n)*?    container_name: (\S+)$",
+        overlay,
+        re.MULTILINE,
+    )
+    assert match is not None, f"{service} has no container_name in the overlay"
+    return match.group(1)
+
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
     return None
@@ -66,18 +84,17 @@ class TestLaneConfig:
         )
 
     def test_stability_test_lane_config(self) -> None:
-        docker_dir = Path(__file__).resolve().parents[4] / "docker"
-        policy = docker_dir / "runtime-policy.env"
+        policy = DOCKER_DIR / "runtime-policy.env"
+        assert policy.is_file(), f"committed runtime policy missing at {policy}"
         with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
             cfg = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
-        # The committed overlay's main service container_name. The overlay uses
-        # compose's !override tags, so read that line rather than load the YAML.
-        overlay = (docker_dir / Path(cfg.compose_files[-1]).name).read_text()
-        match = re.search(
-            r"^  omninode-runtime:\n    container_name: (\S+)$", overlay, re.MULTILINE
-        )
-        assert match is not None
-        main_container = match.group(1)
+        # OMN-15181: the expected names come from the committed overlay, a file
+        # the executor's hardcoded lane config does not read. Which overlay it
+        # is stays pinned by the compose_files assertion below.
+        overlay = (DOCKER_DIR / Path(cfg.compose_files[-1]).name).read_text()
+        main_container = _overlay_container_name(overlay, "omninode-runtime")
+        effects_container = _overlay_container_name(overlay, "runtime-effects")
+        assert main_container != effects_container
         assert cfg.compose_project == "omnibase-infra-stability-test"
         assert cfg.postgres_container == "omnibase-infra-stability-test-postgres"
         # overlay must be layered on top of the base infra compose file
@@ -91,6 +108,7 @@ class TestLaneConfig:
             (main_container, 18085),
             (main_container, 18086),
         )
+        assert all(name != effects_container for name, _ in cfg.runtime_health_targets)
 
     def test_prod_lane_config(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.PROD)

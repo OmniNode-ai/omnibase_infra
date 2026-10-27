@@ -71,14 +71,17 @@ def test_runtime_image_installs_gosu_for_privilege_drop() -> None:
     assert "dropping to the non-root runtime user" in dockerfile
 
 
-@pytest.mark.parametrize("folded", [False, True])
-def test_effects_volume_is_owned_before_privilege_drop_only_when_folded(
-    tmp_path: Path, folded: bool
-) -> None:
+FOLDED_ROOT = "/app/effects-data/.onex_state_stability_test"
+
+
+def _run_root_bootstrap(
+    tmp_path: Path, folded_root: str | None
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the real root bootstrap with filesystem commands recorded, never executed."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls"
+    calls.touch()
     for name in ("id", "install", "chown", "gosu"):
         script = bin_dir / name
         script.write_text(
@@ -88,22 +91,57 @@ def test_effects_volume_is_owned_before_privilege_drop_only_when_folded(
         )
         script.chmod(0o755)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "CALLS": str(calls)}
-    if folded:
-        env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] = (
-            "/app/effects-data/.onex_state_stability_test"
-        )
-    subprocess.run(
+    if folded_root is not None:
+        env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] = folded_root
+    result = subprocess.run(
         ["sh", str(DOCKER_DIR / "entrypoint-runtime.sh"), "onex-runtime"],
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
     )
-    recorded = calls.read_text().splitlines()
-    repair = "chown -R omniinfra:omniinfra /app/effects-data"
+    return result, calls.read_text().splitlines()
+
+
+@pytest.mark.parametrize("folded", [False, True])
+def test_effects_state_root_is_owned_before_privilege_drop_only_when_folded(
+    tmp_path: Path, folded: bool
+) -> None:
+    result, recorded = _run_root_bootstrap(tmp_path, FOLDED_ROOT if folded else None)
+    assert result.returncode == 0, result.stderr
+    install = f"install -d -o omniinfra -g omniinfra /app/effects-data {FOLDED_ROOT}"
+    repair = f"chown -hR omniinfra:omniinfra {FOLDED_ROOT}"
     assert (repair in recorded) is folded
+    assert (install in recorded) is folded
+    # The archives beside the state root are never walked.
+    assert not any(
+        call.startswith("chown") and call.endswith(" /app/effects-data")
+        for call in recorded
+    )
     if folded:
-        assert recorded.index(repair) < next(
+        gosu = next(
             index for index, call in enumerate(recorded) if call.startswith("gosu ")
         )
+        assert recorded.index(install) < recorded.index(repair) < gosu
+
+
+@pytest.mark.parametrize(
+    "folded_root",
+    [
+        "/app/effects-data",
+        "/app/effects-data/",
+        "/app/effects-data/state/",
+        "/app/effects-data/../data",
+        "/app/effects-data/a/b",
+        "/etc",
+    ],
+)
+def test_folded_state_root_outside_the_effects_volume_refuses_boot(
+    tmp_path: Path, folded_root: str
+) -> None:
+    result, recorded = _run_root_bootstrap(tmp_path, folded_root)
+    assert result.returncode == 2
+    assert "FOLDED_EFFECTS_STATE_REFUSED" in result.stderr
+    assert not any(call.startswith("gosu ") for call in recorded)
+    assert not any("effects-data" in call or "/etc" in call for call in recorded)
