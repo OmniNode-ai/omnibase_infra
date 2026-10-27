@@ -44,13 +44,14 @@ KINDS = [
     ModelLeaseKindPolicy(kind="pair", capacity=2, ttl_s=30),
 ]
 H202_ANSWER_BOUND_S = 30.0
+AC1_BURST_TTL_S = 120
 
 
 def _request(
-    resource: str, holder: str, kind: str = "exclusive"
+    resource: str, holder: str, kind: str = "exclusive", ttl_s: int | None = None
 ) -> ModelLeaseAcquireRequest:
     return ModelLeaseAcquireRequest(
-        kind=kind, resource=resource, holder=holder, request_id=uuid4()
+        kind=kind, resource=resource, holder=holder, request_id=uuid4(), ttl_s=ttl_s
     )
 
 
@@ -76,16 +77,24 @@ async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
     two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
 ) -> None:
     a, b = two_stores
+    # The grant must outlive the whole burst: under the kind's 2 s TTL a slow
+    # runner's etcd frees the slot mid-burst and a later acquire is granted.
     replies = await asyncio.gather(
         *(
-            (a if i % 2 else b).acquire(_request("only-one", f"holder-{i}"))
+            (a if i % 2 else b).acquire(
+                _request("only-one", f"holder-{i}", ttl_s=AC1_BURST_TTL_S)
+            )
             for i in range(100)
         )
     )
     outcomes = [r.outcome for r in replies]
     assert outcomes.count("lease-granted") == 1, outcomes
     assert outcomes.count("lease-refused") == 99
-    assert len({r.lease_id for r in replies if r.outcome == "lease-granted"}) == 1
+    granted = [r for r in replies if r.outcome == "lease-granted"]
+    shown = await a.show("exclusive", "only-one")
+    assert [(r.lease_id, r.fence) for r in shown] == [
+        (granted[0].lease_id, granted[0].fence)
+    ]
 
 
 async def test_capacity_two_kind_grants_two_with_distinct_fences(

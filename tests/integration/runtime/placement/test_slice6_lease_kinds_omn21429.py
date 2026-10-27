@@ -133,7 +133,13 @@ async def test_ac2_many_racing_holders_across_two_runtimes_get_one_grant(
             )
         )
     )
-    assert len(_granted(replies)) == 1, (kind, replies)
+    granted = _granted(replies)
+    assert len(granted) == 1, (kind, replies)
+    assert [r.outcome for r in replies].count("lease-refused") == 19, (kind, replies)
+    shown = await a.show(kind, resource)
+    assert [(r.lease_id, r.fence) for r in shown] == [
+        (granted[0].lease_id, granted[0].fence)
+    ]
 
 
 @pytest.mark.parametrize(
