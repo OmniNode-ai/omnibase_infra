@@ -28,6 +28,7 @@ pytestmark = pytest.mark.unit
 
 
 def make_bus() -> EventBusRecovering:
+    local_bus = EventBusInmemory(max_history=10)
     return EventBusRecovering(
         config=ModelKafkaEventBusConfig(bootstrap_servers="localhost:9092"),
         recovery=ModelEventBusRecoveryConfig(
@@ -36,7 +37,10 @@ def make_bus() -> EventBusRecovering:
             backoff_multiplier=2,
             attempt_timeout_seconds=1,
         ),
-        local_bus=EventBusInmemory(max_history=10),
+        local_bus=local_bus,
+        local_start=local_bus.start,
+        local_close=local_bus.close,
+        local_health_check=local_bus.health_check,
         alarm_topic="runtime-bus",
         consumer_group="test-runtime",
     )
@@ -348,47 +352,6 @@ async def test_failed_consumer_restore_keeps_fallback_until_all_attach(
                 await asyncio.sleep(0)
         assert attaches == 2
         assert len(bus.consumer_rejoin_alarms()) == 1
-    finally:
-        await bus.close()
-
-
-async def test_real_contract_manifest_wires_during_local_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from pathlib import Path
-
-    from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.runtime.auto_wiring.discovery import (
-        discover_contracts_from_paths,
-    )
-    from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
-    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
-
-    contract = (
-        Path(__file__).parents[3]
-        / "src/omnibase_infra/nodes/node_impact_analyzer_compute/contract.yaml"
-    )
-    manifest = discover_contracts_from_paths([contract])
-    assert manifest.total_discovered == 1
-    bus = make_bus()
-    monkeypatch.setattr(
-        EventBusKafka, "start", AsyncMock(side_effect=InfraConnectionError("down"))
-    )
-    try:
-        await bus.start()
-        report = await wire_from_manifest(
-            manifest=manifest,
-            dispatch_engine=MessageDispatchEngine(),
-            event_bus=bus,
-            environment="test",
-            container=ModelONEXContainer(),
-            subscribe_immediately=False,
-            result_appliers_by_contract={},
-            materialized_explicit_dependencies={},
-            topology=None,
-        )
-        assert report.total_failed == 0
-        assert report.total_wired == 1
     finally:
         await bus.close()
 

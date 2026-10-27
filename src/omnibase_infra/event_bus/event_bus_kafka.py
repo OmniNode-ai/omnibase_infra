@@ -318,11 +318,11 @@ from omnibase_infra.models.model_event_bus_recovery_config import (
 from omnibase_infra.observability.wiring_health import (
     MixinEmissionCounter,
 )
+from omnibase_infra.protocols.protocol_pattern_b_broker_transport import (
+    ProtocolPatternBBrokerTransport,
+)
 from omnibase_infra.protocols.protocol_rejoinable_consumer import (
     ProtocolRejoinableConsumer,
-)
-from omnibase_infra.protocols.protocol_runtime_fallback_bus import (
-    ProtocolRuntimeFallbackBus,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import apply_instance_discriminator, compute_consumer_group_id
@@ -5578,6 +5578,9 @@ class EventBusRecovering(EventBusKafka):
     survive transport changes. Local receipts identify the in-memory transport;
     local deliveries are never replayed to Kafka. Shared-bus readiness remains
     false until producer startup and live subscription restoration complete.
+    The kernel supplies local delivery through the existing broker transport
+    protocol and binds lifecycle callbacks on its infra adapter. Kafka recovery
+    therefore does not import or construct the local adapter.
     Standalone EventBusKafka clients keep their existing startup policy.
     """
 
@@ -5586,13 +5589,19 @@ class EventBusRecovering(EventBusKafka):
         *,
         config: ModelKafkaEventBusConfig,
         recovery: ModelEventBusRecoveryConfig,
-        local_bus: ProtocolRuntimeFallbackBus,
+        local_bus: ProtocolPatternBBrokerTransport,
+        local_start: Callable[[], Awaitable[None]],
+        local_close: Callable[[], Awaitable[None]],
+        local_health_check: Callable[[], Awaitable[dict[str, object]]],
         alarm_topic: str,
         consumer_group: str,
     ) -> None:
         super().__init__(config=config)
         self._recovery_policy = recovery
         self._local_bus = local_bus
+        self._local_start = local_start
+        self._local_close = local_close
+        self._local_health_check = local_health_check
         self._alarm_topic = alarm_topic
         self._recovery_group = consumer_group
         self._fallback_active = False
@@ -5611,7 +5620,7 @@ class EventBusRecovering(EventBusKafka):
                 return
             self._recovery_closed = False
             self._recovery_stopped.clear()
-            await self._local_bus.start()
+            await self._local_start()
             try:
                 async with asyncio.timeout(
                     self._recovery_policy.attempt_timeout_seconds
@@ -5625,7 +5634,7 @@ class EventBusRecovering(EventBusKafka):
         if self._fallback_active or self._recovery_closed:
             return
         self._fallback_active = True
-        await self._local_bus.start()
+        await self._local_start()
         for key, attach in self._attachments.items():
             self._unsubscribes[key] = await attach(True)
         message = (
@@ -5738,6 +5747,19 @@ class EventBusRecovering(EventBusKafka):
             )
         await asyncio.shield(self._kafka_close_task)
 
+    async def _publish_locally(
+        self,
+        topic: str,
+        key: bytes | None,
+        value: bytes,
+        headers: ModelEventHeaders | None,
+    ) -> ModelPublishReceipt:
+        """Require the fallback transport to report its actual delivery coordinate."""
+        receipt = await self._local_bus.publish(topic, key, value, headers)
+        if receipt is None:
+            raise InfraUnavailableError("Local fallback transport returned no receipt")
+        return receipt
+
     async def publish(
         self,
         topic: str,
@@ -5747,7 +5769,7 @@ class EventBusRecovering(EventBusKafka):
     ) -> ModelPublishReceipt:
         """Deliver locally during an outage, with an explicitly local receipt."""
         if self._fallback_active:
-            return await self._local_bus.publish(topic, key, value, headers)
+            return await self._publish_locally(topic, key, value, headers)
         try:
             return await super().publish(topic, key, value, headers)
         except _CONNECT_ERRORS as exc:
@@ -5755,7 +5777,7 @@ class EventBusRecovering(EventBusKafka):
                 raise
             async with self._transport_lock:
                 await self._enter_fallback(exc)
-            return await self._local_bus.publish(topic, key, value, headers)
+            return await self._publish_locally(topic, key, value, headers)
 
     async def subscribe(
         self,
@@ -5813,7 +5835,7 @@ class EventBusRecovering(EventBusKafka):
         """Local delivery is live but explicitly degraded, never Kafka-ready."""
         if self._fallback_active:
             return {
-                **await self._local_bus.health_check(),
+                **await self._local_health_check(),
                 "degraded": True,
                 "transport": "inmemory",
                 "configured_transport": "kafka",
@@ -5850,7 +5872,7 @@ class EventBusRecovering(EventBusKafka):
                 pass
         async with self._transport_lock:
             await self._close_kafka_transport()
-            await self._local_bus.close()
+            await self._local_close()
             self._attachments.clear()
             self._unsubscribes.clear()
             self._fallback_active = False

@@ -2152,15 +2152,19 @@ async def bootstrap() -> int:
         if isinstance(event_bus, EventBusKafka):
             # Keep one injected identity across local fallback and Kafka recovery.
             # Standalone Kafka clients retain their existing fail-fast policy.
+            local_bus = EventBusInmemory(
+                environment=environment,
+                group=config.consumer_group,
+                max_history=config.event_bus.max_history,
+                circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
+            )
             event_bus = EventBusRecovering(
                 config=event_bus.config,
                 recovery=config.event_bus.recovery,
-                local_bus=EventBusInmemory(
-                    environment=environment,
-                    group=config.consumer_group,
-                    max_history=config.event_bus.max_history,
-                    circuit_breaker_threshold=config.event_bus.circuit_breaker_threshold,
-                ),
+                local_bus=local_bus,
+                local_start=local_bus.start,
+                local_close=local_bus.close,
+                local_health_check=local_bus.health_check,
                 alarm_topic=config.input_topic,
                 consumer_group=config.consumer_group,
             )
