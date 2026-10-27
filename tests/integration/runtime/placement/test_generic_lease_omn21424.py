@@ -47,10 +47,10 @@ H202_ANSWER_BOUND_S = 30.0
 
 
 def _request(
-    resource: str, holder: str, kind: str = "exclusive"
+    resource: str, holder: str, kind: str = "exclusive", ttl_s: int | None = None
 ) -> ModelLeaseAcquireRequest:
     return ModelLeaseAcquireRequest(
-        kind=kind, resource=resource, holder=holder, request_id=uuid4()
+        kind=kind, resource=resource, holder=holder, request_id=uuid4(), ttl_s=ttl_s
     )
 
 
@@ -76,9 +76,12 @@ async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
     two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
 ) -> None:
     a, b = two_stores
+    # The exclusive kind's 2 s TTL is for the expiry tests. Under load the 100
+    # acquires can outlast it, etcd then frees the slot and a later acquire is
+    # granted correctly, so this test pins a TTL the stampede cannot outlive.
     replies = await asyncio.gather(
         *(
-            (a if i % 2 else b).acquire(_request("only-one", f"holder-{i}"))
+            (a if i % 2 else b).acquire(_request("only-one", f"holder-{i}", ttl_s=60))
             for i in range(100)
         )
     )
