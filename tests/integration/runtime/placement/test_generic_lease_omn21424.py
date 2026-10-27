@@ -41,6 +41,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(180)]
 PROC = Path(__file__).with_name("lease_runtime_proc.py")
 KINDS = [
     ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=2),
+    # AC1's burst must not outlive the grant: a 2 s TTL can expire mid-burst
+    # on a loaded runner and admit a second, legitimate grant.
+    ModelLeaseKindPolicy(kind="exclusive-burst", capacity=1, ttl_s=30),
     ModelLeaseKindPolicy(kind="pair", capacity=2, ttl_s=30),
 ]
 H202_ANSWER_BOUND_S = 30.0
@@ -78,7 +81,9 @@ async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
     a, b = two_stores
     replies = await asyncio.gather(
         *(
-            (a if i % 2 else b).acquire(_request("only-one", f"holder-{i}"))
+            (a if i % 2 else b).acquire(
+                _request("only-one", f"holder-{i}", "exclusive-burst")
+            )
             for i in range(100)
         )
     )

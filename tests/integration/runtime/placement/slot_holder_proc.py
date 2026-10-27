@@ -5,7 +5,10 @@
 Places ``--count`` units onto ``--host`` through ``slot`` leases against the
 etcd member beside it, writes the grants to ``--ready`` as JSON, then renews
 them every second until it is killed. It keeps no lock file and no marker:
-the only record of the slots it holds is the etcd lease.
+the only record of the slots it holds is the etcd lease. A renew that raises
+or is not renewed is written to stderr and retried, so the process outlives a
+transient etcd error and only the test's kill ends it; the test checks it is
+still alive before the kill.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -40,14 +44,23 @@ async def main() -> None:
     grants = []
     for i in range(args.count):
         reply = await placement.place([args.host], f"unit-{i}", uuid4())
-        assert reply.outcome == "lease-granted", reply
+        if reply.outcome != "lease-granted" or reply.lease_id is None:
+            raise SystemExit(f"slot holder could not place unit-{i}: {reply!r}")
         grants.append(reply)
-    args.ready.write_text(json.dumps([g.model_dump(mode="json") for g in grants]))
+    staged = args.ready.with_name(args.ready.name + ".tmp")
+    staged.write_text(json.dumps([g.model_dump(mode="json") for g in grants]))
+    staged.replace(args.ready)
     while True:
         await asyncio.sleep(1.0)
         for grant in grants:
-            assert grant.lease_id is not None
-            await placement.renew(args.host, grant.lease_id)
+            assert grant.lease_id is not None  # checked at placement
+            try:
+                renewed = await placement.renew(args.host, grant.lease_id)
+            except (httpx.HTTPError, OSError) as exc:
+                print(f"renew {grant.lease_id} raised: {exc!r}", file=sys.stderr)
+                continue
+            if renewed.outcome != "lease-renewed":
+                print(f"renew {grant.lease_id} refused: {renewed!r}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -148,6 +148,8 @@ async def test_ac3_losing_the_slot_holding_host_frees_its_slots_at_expiry(
         assert (await other.place(["h-lost"], "early", uuid4())).outcome == (
             "lease-refused"
         )
+        # The holder is still renewing, so slot release below is the host loss.
+        assert holder.poll() is None, "the slot holder exited before the host loss"
         # The whole host goes: its placer and its etcd member.
         os.killpg(holder.pid, signal.SIGKILL)
         holder.wait(timeout=10)
