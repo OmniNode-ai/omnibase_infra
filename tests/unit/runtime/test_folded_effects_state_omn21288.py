@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""A role fold keeps existing delegation claims and refuses conflicting state."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from omnibase_infra.runtime import entrypoint_preflight
+from omnibase_infra.runtime.entrypoint_preflight import prepare_folded_effects_state
+
+pytestmark = pytest.mark.unit
+
+
+def _env(tmp_path: Path) -> dict[str, str]:
+    return {
+        "ONEX_RUNTIME_FOLDED_PROFILES": "effects",
+        "ONEX_STATE_DIR": str(tmp_path / "main"),
+        "ONEX_FOLDED_EFFECTS_STATE_ROOT": str(tmp_path / "effects"),
+    }
+
+
+def test_existing_claims_and_future_writes_keep_the_effects_volume(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    source = tmp_path / "effects/delegation"
+    source.mkdir(parents=True)
+    old = source / "delegation_claims.sqlite"
+    with sqlite3.connect(old) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE claims (id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO claims VALUES ('already-completed')")
+    main = tmp_path / "main"
+    main.mkdir()
+    (main / "unrelated-state").write_text("keep")
+
+    prepare_folded_effects_state(env)
+    new = main / "delegation/delegation_claims.sqlite"
+    assert new.samefile(old)
+    with sqlite3.connect(new) as db:
+        assert db.execute("SELECT id FROM claims").fetchall() == [
+            ("already-completed",)
+        ]
+        db.execute("INSERT INTO claims VALUES ('new-claim')")
+    with sqlite3.connect(old) as db:
+        assert db.execute("SELECT count(*) FROM claims").fetchone() == (2,)
+    assert (main / "unrelated-state").read_text() == "keep"
+    prepare_folded_effects_state(env)  # A restart retains the same directory.
+    assert new.samefile(old)
+
+
+@pytest.mark.parametrize("empty_destination", [False, True])
+def test_fresh_volume_or_empty_main_directory_can_boot(
+    tmp_path: Path, empty_destination: bool
+) -> None:
+    if empty_destination:
+        (tmp_path / "main/delegation").mkdir(parents=True)
+    prepare_folded_effects_state(_env(tmp_path))
+    assert (tmp_path / "main/delegation").is_dir()
+    assert (tmp_path / "main/delegation").samefile(tmp_path / "effects/delegation")
+
+
+def test_conflicting_main_claims_are_never_overwritten(tmp_path: Path) -> None:
+    target = tmp_path / "main/delegation"
+    target.mkdir(parents=True)
+    (target / "delegation_claims.sqlite").write_bytes(b"main-claims")
+    with pytest.raises(ValueError, match="conflicting delegation state"):
+        prepare_folded_effects_state(_env(tmp_path))
+    assert (target / "delegation_claims.sqlite").read_bytes() == b"main-claims"
+    assert not (tmp_path / "effects").exists()
+
+
+def test_wrong_existing_link_is_never_retargeted(tmp_path: Path) -> None:
+    target = tmp_path / "main/delegation"
+    target.parent.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    target.symlink_to(other, target_is_directory=True)
+    with pytest.raises(ValueError, match="conflicting directory"):
+        prepare_folded_effects_state(_env(tmp_path))
+    assert target.samefile(other)
+
+
+@pytest.mark.parametrize("invalid", ["relative", "overlap", "unfolded"])
+def test_invalid_state_handover_is_refused(tmp_path: Path, invalid: str) -> None:
+    env = _env(tmp_path)
+    if invalid == "relative":
+        env["ONEX_STATE_DIR"] = "relative"
+    elif invalid == "overlap":
+        env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] = env["ONEX_STATE_DIR"]
+    else:
+        env["ONEX_RUNTIME_FOLDED_PROFILES"] = "workers"
+    with pytest.raises(ValueError):
+        prepare_folded_effects_state(env)
+
+
+def test_unconfigured_lanes_are_unchanged(tmp_path: Path) -> None:
+    prepare_folded_effects_state({"ONEX_STATE_DIR": str(tmp_path / "main")})
+    assert not (tmp_path / "main").exists()
+
+
+def test_preflight_prepares_claim_state_before_handlers_can_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def stamp(env: dict[str, str]) -> int:
+        assert (tmp_path / "main/delegation").samefile(tmp_path / "effects/delegation")
+        return 0
+
+    monkeypatch.setattr(entrypoint_preflight, "stamp_all_fingerprints", stamp)
+    monkeypatch.setattr(entrypoint_preflight, "render_bifrost_contract", lambda env: 0)
+    monkeypatch.setattr(entrypoint_preflight, "render_resolver_config", lambda env: 0)
+    assert entrypoint_preflight.run_preflight(_env(tmp_path)) == 0
+
+
+def test_conflict_aborts_preflight_before_any_database_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "main/delegation"
+    target.mkdir(parents=True)
+    (target / "claim").write_text("keep")
+
+    def must_not_stamp(env: dict[str, str]) -> int:
+        pytest.fail("a conflicting claim store must abort before the database step")
+
+    monkeypatch.setattr(entrypoint_preflight, "stamp_all_fingerprints", must_not_stamp)
+    assert entrypoint_preflight.run_preflight(_env(tmp_path)) == 2
+    assert "FOLDED_EFFECTS_STATE_REFUSED" in capsys.readouterr().err

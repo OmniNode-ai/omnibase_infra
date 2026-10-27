@@ -77,6 +77,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
             "docker-compose.dev-tenant-fold.yml",
+            "docker-compose.dev-fold.yml",
         ),
         lane="compose-dev",
         lane_naming_services=_LANE_NAMING_SERVICES,

@@ -814,6 +814,7 @@ _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 # ``onex-runtime-deploy``.
 _DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
 _DEV_TENANT_FOLD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-tenant-fold.yml"
+_DEV_FOLD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-fold.yml"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -827,7 +828,12 @@ PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
 _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
-        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY),
+        compose_files=(
+            COMPOSE_FILE,
+            _DEV_LANE_OVERLAY,
+            _DEV_TENANT_FOLD_OVERLAY,
+            _DEV_FOLD_OVERLAY,
+        ),
         compose_project=COMPOSE_PROJECT,
         postgres_container="omnibase-infra-postgres",
         runtime_health_targets=RUNTIME_HEALTH_TARGETS,
@@ -977,18 +983,25 @@ def active_dev_instance() -> str:
 
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
+    folded = lane_folded_profiles(lane)
     if lane is EnumRuntimeLane.DEV:
         config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-        if "tenant-projection" in lane_folded_profiles(lane):
+        if "tenant-projection" in folded:
             config = config.model_copy(
                 update={
                     "disabled_services": config.disabled_services
                     | {"tenant-projection-writer"}
                 }
             )
-        return config
-    config = _LANE_CONFIGS[lane]
-    if "effects" in lane_folded_profiles(lane):
+        if "workers" in folded:
+            config = config.model_copy(
+                update={
+                    "disabled_services": config.disabled_services | {"runtime-worker"}
+                }
+            )
+    else:
+        config = _LANE_CONFIGS[lane]
+    if "effects" in folded:
         targets = list(config.runtime_health_targets)
         index = SERVICE_HEALTH_TARGET_INDEX["runtime-effects"]
         _, port = targets[index]
@@ -996,6 +1009,19 @@ def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
         targets[index] = (main, port)
         return config.model_copy(update={"runtime_health_targets": tuple(targets)})
     return config
+
+
+def folded_dev_services() -> frozenset[str]:
+    """Services the primary dev instance retired into its main runtime."""
+    folded = lane_folded_profiles(EnumRuntimeLane.DEV)
+    return frozenset(
+        service
+        for role, service in (
+            ("workers", "runtime-worker"),
+            ("tenant-projection", "tenant-projection-writer"),
+        )
+        if role in folded
+    )
 
 
 def lane_runs_phase(lane: EnumRuntimeLane, phase: EnumInstancePhase) -> bool:
@@ -6179,6 +6205,44 @@ class DeployExecutor:
             if result.returncode != 0:
                 raise RuntimeError("Cannot retire folded tenant projection container")
 
+    def _retire_folded_dev_workers(
+        self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
+    ) -> None:
+        """Retire the primary dev worker before main takes its role; keep volumes."""
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or active_dev_instance() != DEFAULT_DEV_INSTANCE
+        ):
+            return
+        config = lane_config_for(lane) if config is None else config
+        if "runtime-worker" not in config.disabled_services:
+            return
+        project = config.compose_project
+        census = _run(
+            [
+                "docker",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=runtime-worker",
+            ],
+            timeout=30,
+        )
+        if census.returncode != 0:
+            raise RuntimeError("Cannot read folded worker container census")
+        containers = census.stdout.split()
+        if not containers:
+            return
+        for command in (
+            ["docker", "stop", "--time", "30", *containers],
+            ["docker", "rm", *containers],
+        ):
+            result = _run(command, timeout=60)
+            if result.returncode != 0:
+                raise RuntimeError("Cannot retire folded worker container")
+
     def _compose_up(
         self,
         phase: Phase,
@@ -6197,7 +6261,13 @@ class DeployExecutor:
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
         if lane is EnumRuntimeLane.DEV and services and not requested_services:
-            # A retired-role-only request must never start the whole profile.
+            # A request naming only a retired role must never widen to the profile.
+            unfolded = set(without_gateway_services(services)) - folded_dev_services()
+            if unfolded:
+                raise RuntimeError(
+                    f"{phase.value}: dev instance disables requested services "
+                    f"{sorted(unfolded)}"
+                )
             on_phase_update(phase, PhaseStatus.SUCCESS)
             return
         # For runtime scope, verification MUST be bounded by the requested
@@ -6261,6 +6331,7 @@ class DeployExecutor:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
             self._retire_folded_dev_tenant_projections(lane, config)
+            self._retire_folded_dev_workers(lane, config)
         cmd = [
             "docker",
             "compose",
@@ -7383,6 +7454,14 @@ class DeployExecutor:
             return failed, timed_out
         budget = runtime_health_probe_budget(lane, service)
         config = lane_config_for(lane)
+        if service == "omninode-runtime":
+            # Main must not start beside a live folded worker (same groups).
+            try:
+                self._retire_folded_dev_tenant_projections(lane, config)
+                self._retire_folded_dev_workers(lane, config)
+            except RuntimeError as exc:
+                logger.warning("%s not recreated: %s", service, exc)
+                return failed, timed_out
         argv = [
             "docker",
             "compose",

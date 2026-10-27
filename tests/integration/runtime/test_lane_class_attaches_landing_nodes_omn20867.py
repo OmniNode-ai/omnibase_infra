@@ -112,7 +112,9 @@ def _instance_overlays() -> list[str]:
     found: list[str] = []
     for path in sorted(DOCKER.glob("docker-compose.*.yml")):
         document = yaml.safe_load(
-            path.read_text(encoding="utf-8").replace("!override", "")
+            path.read_text(encoding="utf-8")
+            .replace("!override", "")
+            .replace("!reset", "")
         )
         services = document.get("services") if isinstance(document, dict) else None
         runtime = (

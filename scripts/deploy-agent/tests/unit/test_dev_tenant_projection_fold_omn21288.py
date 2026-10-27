@@ -33,7 +33,7 @@ def test_primary_dev_disables_the_tenant_carrier_only(
     )
     config = lane_config_for(EnumRuntimeLane.DEV)
     assert config.disabled_services == frozenset({"tenant-projection-writer"})
-    assert config.compose_files[-1].endswith("docker-compose.dev-tenant-fold.yml")
+    assert config.compose_files[-2].endswith("docker-compose.dev-tenant-fold.yml")
     assert "tenant-projection" in lane_folded_profiles(EnumRuntimeLane.DEV)
     monkeypatch.setattr(
         "deploy_agent.executor.active_dev_instance",
@@ -163,7 +163,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    assert [c[1] for c in calls] == ["ps", "stop", "rm", "compose"]
+    assert [c[1] for c in calls] == ["ps", "stop", "rm", "ps", "stop", "rm", "compose"]
     assert "omninode-runtime" in calls[-1]
     assert "tenant-projection-writer" not in calls[-1]
     assert "tenant-projection-writer" not in verify.call_args.args[0]

@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21288
 title: "Projection writers, event consumers and effect processes run as nodes inside the one runtime container"
 summary: >-
-  Folds the primary dev tenant-projection carrier into main, removes its container definition through a primary-dev-only overlay, and refuses a restored carrier even with an image-only definition. The thirteen other dev workloads remain on the shrink-only list; the worker fold is owned by a separate lane. AC2's final end state remains pending.
+  Folds the primary dev workers and tenant-projection roles into main, preserves both fold overlays, and refuses either retired carrier's return. Twelve dev workloads remain on the shrink-only list. AC2's complete end state, live folded lab rollout and consumer-offset handover remain pending.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -59,27 +59,27 @@ dod_evidence:
     binds_ac: [AC1]
   - id: dod-omn21288-ac2-real-dev-stack
     description: >-
-      Run the registered hook's entry after requiring its files pattern to match the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the thirteen listed services still run outside the runtime container.
+      Run the registered hook's entry after requiring its files pattern to match the real dev compose paths. It executes the stack tests and refuses workloads outside the shrink-only list, or stale list entries. The merge base has no such hook even with the head tests copied onto it. This proves the gate half of AC2 only; the twelve listed services still run outside the runtime container.
     source: manual
     checks:
       - check_type: test_passes
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml docker/docker-compose.dev-fold.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn21288-hosted-stack-deploy-check
     description: >-
-      Hosted-runner deployment-definition check: run the registered hook's entry after requiring its files pattern to match the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the thirteen remaining services into the runtime.
+      Hosted-runner deployment-definition check: run the registered hook's entry after requiring its files pattern to match the real dev compose paths and execute its fixture and stack assertions. No Docker daemon, running lane or credentials are required. This checks the stack gate's deployment wiring, not migration of the twelve remaining services into the runtime.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml
+          uv run --frozen python -c 'import re, shlex, subprocess, sys, yaml; hooks = [h for r in yaml.safe_load(open(".pre-commit-config.yaml"))["repos"] for h in r["hooks"] if h["id"] == "dev-stack-runtime-only"]; sys.exit(1 if len(hooks) != 1 or not all(re.search(hooks[0]["files"], p) for p in sys.argv[1:]) else subprocess.call(shlex.split(hooks[0]["entry"])))' docker/docker-compose.infra.yml docker/docker-compose.dev-lane.yml docker/docker-compose.dev-fold.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
   - id: dod-omn21288-ac3-lab-lane-effects-folded-deploy
     description: >-
-      Hosted-runner check: the lab proof lane's runtime policy and compose overlay fold effects into main (exactly one lane folds effects, the rendered env carries that fold while primary dev independently folds tenant projections, main reads it, and the runtime-effects service is opt-in only under the folded-effects profile), from tests/unit/docker/test_stability_lane_effects_folded_omn21288.py. This test file is new on this branch, so the check fails at the merge base. The live probe on the lab proof lane (no runtime-effects container of the lane's compose project, and main logged "Auto-wiring folded roles") is PENDING a lab refresh carrying this change and is not claimed here; refresh_stability_lane.sh runs that probe after its health gate.
+      Hosted-runner check: the lab proof lane's runtime policy and compose overlay fold effects into main (exactly one lane folds effects, the rendered env carries that fold while primary dev folds workers and tenant projections, main reads it, and the runtime-effects service is opt-in only under the folded-effects profile), from tests/unit/docker/test_stability_lane_effects_folded_omn21288.py. This test file is new on this branch, so the check fails at the merge base. The live probe on the lab proof lane (no runtime-effects container of the lane's compose project, and main logged "Auto-wiring folded roles") is PENDING a lab refresh carrying this change and is not claimed here; refresh_stability_lane.sh runs that probe after its health gate.
     source: manual
     checks:
       - check_type: test_passes
@@ -169,7 +169,37 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-dev-worker-fold
+    description: >-
+      Hosted check of the primary dev instance's final compose overlay, real contract discovery, and deploy filtering. The old worker service is removed with !reset null and permanently refused if restored. The main runtime attaches the workers role. This is one step toward AC2; twelve other services still require migration. Live lab proof remains pending.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py tests/unit/docker/test_dev_worker_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21288-reconciled-effects-fold
+    description: >-
+      Reconcile the original effects-fold tests with the already merged fold. Main reads the rendered role, retains both health ports and memory network, and writes archives on the preserved effects volume. The retired effects definition remains opt-in so other lanes retain their inherited definition. The deploy-agent lane test reads the committed policy rather than an ambient host file, and requires both lab health ports to resolve to main. This checks the deployment definition; live rollout remains pending.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -k fold -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_executor_lane_selection.py scripts/deploy-agent/tests/unit/test_agent_deps_convergence_omn18692.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21288-folded-effects-claims
+    description: >-
+      Hosted deployment-definition check: the real lab overlay points the folded role at its preserved effects state root. Boot aliases main's delegation directory to that volume before handler construction, retains existing SQLite claims and future writes, refuses conflicting main state, and repairs fresh-volume ownership before dropping privileges. No Docker daemon, running lane or credentials are required. This does not claim a live rollout or an offset handover.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py tests/unit/docker/test_stability_lane_effects_folded_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
 context:
-  remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
+  remaining_after_this_change: "AC2 end state: twelve dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
-  worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
+  worker_integration: "Both overlays and main.folded_profiles [workers, tenant-projection] are retained; runtime-worker and tenant-projection-writer are removed from SEPARATE_SERVICES."
