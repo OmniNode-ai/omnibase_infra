@@ -62,9 +62,8 @@ dod_evidence:
         check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_trigger_learns_binding_fallback_omn20275.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20275-ac13-dev-broker-memory-live"
-    description: "AC13: the live dev broker on the lab host holds a 16 GiB container cap and starts with --memory 12G."
+    description: "Post-deploy: the live dev broker on the lab host holds a 16 GiB container cap and starts with --memory 12G. It reads the lab host's running container, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion; AC13 is bound by the hosted preflight and deploy-probe items."
     source: "manual"
-    binds_ac: ["AC13"]
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
