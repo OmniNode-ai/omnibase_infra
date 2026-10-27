@@ -1,0 +1,2 @@
+# OMN-21288: required variables of docker-compose.dev-tenant-fold.yml.
+DEV_RUNTIME_MAIN_FOLDED_PROFILES

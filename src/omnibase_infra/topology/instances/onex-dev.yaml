@@ -93,6 +93,7 @@ databases:
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
+              - compaction_activations
               - compaction_current_context
               - compaction_receipts
               - consumer_flow_windows
