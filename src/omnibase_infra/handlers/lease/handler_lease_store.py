@@ -160,13 +160,15 @@ class HandlerLeaseStore:
                 with contextlib.suppress(Exception):
                     revoke_safe = await self._adapter.get(request_key) is None
             if revoke_safe:
-                with contextlib.suppress(Exception):
-                    await self._revoke(etcd_lease)
+                await self._revoke(etcd_lease)
             raise
 
     async def _revoke(self, etcd_lease: int) -> None:
+        # Best effort: a failed revoke must not mask the reply or error it
+        # accompanies, and the etcd lease expires on its TTL regardless.
         if etcd_lease:
-            await self._adapter.lease_revoke(etcd_lease)
+            with contextlib.suppress(Exception):
+                await self._adapter.lease_revoke(etcd_lease)
 
     def _insert_only(self, kind: str, resource: str, lease_id: UUID) -> ModelLeaseReply:
         return ModelLeaseReply(

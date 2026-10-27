@@ -112,6 +112,28 @@ async def test_unknown_kind_is_refused_without_etcd_calls(operation: str) -> Non
     assert adapter.calls == []
 
 
+async def test_refusal_survives_a_failed_revoke() -> None:
+    class _Refusing(_FakeEtcd):
+        async def txn(
+            self,
+            *,
+            compare: list[dict[str, object]],
+            success: list[dict[str, object]],
+            failure: list[dict[str, object]],
+        ) -> tuple[bool, int, list[dict[str, object]]]:
+            self.calls.append(("txn", 123))
+            return False, 7, []
+
+    adapter = _Refusing()
+    adapter.revoke_error = InfraConnectionError("revoke failed")
+    store = HandlerLeaseStore(adapter, [ModelLeaseKindPolicy(kind="worker")])
+
+    reply = await store.acquire(_request())
+
+    assert reply.outcome == "lease-refused"
+    assert ("revoke", 123) in adapter.calls
+
+
 @pytest.mark.parametrize("revoke_fails", [False, True])
 async def test_txn_failure_revokes_grant_and_preserves_original_error(
     revoke_fails: bool,
