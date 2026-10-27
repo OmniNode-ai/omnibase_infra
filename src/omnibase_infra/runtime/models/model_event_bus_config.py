@@ -10,6 +10,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
+from omnibase_infra.models.model_event_bus_recovery_config import (
+    ModelEventBusRecoveryConfig,
+)
 from omnibase_infra.runtime.models.enum_event_bus_profile import EnumEventBusProfile
 
 
@@ -75,6 +78,10 @@ class ModelEventBusConfig(BaseModel):
         default=5,
         ge=1,
         description="Failure count before circuit breaker trips",
+    )
+    recovery: ModelEventBusRecoveryConfig = Field(
+        default_factory=ModelEventBusRecoveryConfig.from_contract,
+        description="Runtime fallback and reconnect policy, loaded from the shipped contract",
     )
 
     @model_validator(mode="after")
