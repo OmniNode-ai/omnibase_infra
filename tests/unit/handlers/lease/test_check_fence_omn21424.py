@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import socket
+from typing import cast
 
 import httpx
 import pytest
@@ -29,3 +30,34 @@ async def test_ac6_unreachable_etcd_is_unknown() -> None:
         await adapter.aclose()
     assert status is EnumLeaseFenceStatus.UNKNOWN
     assert status is not EnumLeaseFenceStatus.OK
+
+
+class _Entries:
+    """A prefix read returning fixed slot create_revisions."""
+
+    def __init__(self, revisions: tuple[int, ...]) -> None:
+        self._revisions = revisions
+
+    async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
+        return [(f"{prefix}{i}", "{}", rev, 1) for i, rev in enumerate(self._revisions)]
+
+
+@pytest.mark.parametrize(
+    ("live", "fence", "expected"),
+    [
+        ((), 5, EnumLeaseFenceStatus.EXPIRED),
+        ((5,), 5, EnumLeaseFenceStatus.OK),
+        ((9,), 5, EnumLeaseFenceStatus.STALE),
+        ((5,), 9, EnumLeaseFenceStatus.EXPIRED),
+        ((3, 9), 9, EnumLeaseFenceStatus.OK),
+        ((3, 9), 5, EnumLeaseFenceStatus.STALE),
+        ((3, 9), 12, EnumLeaseFenceStatus.EXPIRED),
+    ],
+)
+async def test_ac6_a_readable_store_never_answers_unknown(
+    live: tuple[int, ...], fence: int, expected: EnumLeaseFenceStatus
+) -> None:
+    """A fence missing from the linearizable read names no live grant."""
+    adapter = cast("HandlerPlacementEtcd", _Entries(live))
+    status = await check_fence(adapter, kind="k", resource="r", fence=fence)
+    assert status is expected

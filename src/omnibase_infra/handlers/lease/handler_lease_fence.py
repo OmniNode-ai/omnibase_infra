@@ -4,8 +4,10 @@
 
 An effect target calls it before it acts on a fenced effect. It answers ``ok``
 only when a live slot of the resource carries exactly that fence; never ``ok``
-for a lower fence (``stale``), an absent key (``expired``) or an unreachable
-etcd (``unknown``).
+for a fence below a live grant's (``stale``), a fence with no live grant at or
+above it (``expired``: the resource is free, or the fence's own slot key is gone
+while only older grants remain) or an unreachable etcd (``unknown``). The prefix
+read is linearizable, so a fence missing from it names no live grant.
 """
 
 from __future__ import annotations
@@ -37,13 +39,11 @@ async def check_fence(
     except InfraConnectionError:
         return EnumLeaseFenceStatus.UNKNOWN
     live = {create_revision for _, _, create_revision, _ in entries}
-    if not live:
-        return EnumLeaseFenceStatus.EXPIRED
     if fence in live:
         return EnumLeaseFenceStatus.OK
-    if fence < max(live):
+    if live and fence < max(live):
         return EnumLeaseFenceStatus.STALE
-    return EnumLeaseFenceStatus.UNKNOWN
+    return EnumLeaseFenceStatus.EXPIRED
 
 
 class HandlerLeaseFence:

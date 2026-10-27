@@ -10,9 +10,9 @@ from enum import StrEnum
 class EnumLeaseFenceStatus(StrEnum):
     """Whether a fence still names the live grant of its resource.
 
-    ``OK``: the fence is the live grant's. ``STALE``: a newer grant holds the
-    resource. ``EXPIRED``: no grant holds the resource. ``UNKNOWN``: the store
-    could not be read, or the fence is above every live grant's.
+    ``OK``: the fence is the live grant's. ``STALE``: a grant with a higher
+    fence holds the resource. ``EXPIRED``: no live grant has this fence or a
+    higher one. ``UNKNOWN``: the store could not be read.
     """
 
     OK = "ok"

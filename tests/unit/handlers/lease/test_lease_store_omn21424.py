@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.lease.handler_lease_store import HandlerLeaseStore
@@ -19,7 +20,12 @@ from omnibase_infra.handlers.placement.handler_placement_etcd import (
     b64,
     unb64,
 )
-from omnibase_infra.models.lease import ModelLeaseAcquireRequest, ModelLeaseKindPolicy
+from omnibase_infra.models.lease import (
+    ModelLeaseAcquireRequest,
+    ModelLeaseKindPolicy,
+    ModelLeaseReleaseRequest,
+    ModelLeaseRenewRequest,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -35,12 +41,15 @@ class _FakeEtcd:
         self.txn_raises = txn_raises
         self.revoked: list[int] = []
         self.slots: dict[str, tuple[str, int, int]] = {}
-        self.request_value: str | None = None
+        self.requests: dict[str, str] = {}
+        self.read_keys: list[str] = []
 
     async def get(self, key: str) -> tuple[str, int] | None:
-        if self.request_value is None:
+        self.read_keys.append(key)
+        value = self.requests.get(key)
+        if value is None:
             return None
-        return self.request_value, _REQUEST_REVISION
+        return value, _REQUEST_REVISION
 
     async def lease_grant(self, ttl_s: int) -> tuple[int, int]:
         return 7, ttl_s
@@ -62,6 +71,9 @@ class _FakeEtcd:
         key = unb64(put["key"])
         value = unb64(put["value"])
         self.slots[key] = (value, _SLOT_REVISION, int(str(put["lease"])))
+        request_put = success[1]["requestPut"]
+        assert isinstance(request_put, dict)
+        self.requests[unb64(request_put["key"])] = unb64(request_put["value"])
         return (
             True,
             _HEADER_REVISION,
@@ -124,8 +136,10 @@ async def test_a_replayed_request_is_fenced_by_its_slot_not_its_request_key() ->
     request = _request()
     granted = await store.acquire(request)
     held = next(iter(fake.slots.values()))[0]
-    fake.request_value = held
     replayed = await store.acquire(request)
+    assert (
+        fake.read_keys == [f"/onex/lease-request/exclusive/r1/{request.request_id}"] * 2
+    )
     assert replayed.reason == "replayed request_id"
     assert replayed.lease_id == granted.lease_id
     assert replayed.fence == _SLOT_REVISION
@@ -158,13 +172,28 @@ async def test_cleanup_preserves_the_original_acquire_failure(
         assert any("InfraConnectionError" in note for note in failure.__notes__)
 
 
-async def test_cleanup_failure_after_refusal_is_reported(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("revoke_fails", [False, True])
+async def test_a_refusal_survives_a_failed_cleanup_of_its_unused_lease(
+    revoke_fails: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _FakeEtcd()
-    failure = InfraConnectionError("revoke failed")
+    revoke = AsyncMock(
+        side_effect=InfraConnectionError("revoke failed") if revoke_fails else None
+    )
     monkeypatch.setattr(fake, "txn", AsyncMock(return_value=(False, 0, [])))
-    monkeypatch.setattr(fake, "lease_revoke", AsyncMock(side_effect=failure))
-    with pytest.raises(InfraConnectionError) as caught:
-        await _store(fake).acquire(_request())
-    assert caught.value is failure
+    monkeypatch.setattr(fake, "lease_revoke", revoke)
+    reply = await _store(fake).acquire(_request())
+    assert reply.outcome == "lease-refused"
+    revoke.assert_awaited_once_with(7)
+
+
+@pytest.mark.parametrize("kind", ["a/b", "exclusive/r1", "../x", "Upper"])
+def test_a_kind_outside_the_key_alphabet_is_refused(kind: str) -> None:
+    with pytest.raises(ValidationError):
+        ModelLeaseAcquireRequest(
+            kind=kind, resource="r1", holder="runtime-a", request_id=uuid4()
+        )
+    with pytest.raises(ValidationError):
+        ModelLeaseRenewRequest(kind=kind, resource="r1", lease_id=uuid4())
+    with pytest.raises(ValidationError):
+        ModelLeaseReleaseRequest(kind=kind, resource="r1", lease_id=uuid4())

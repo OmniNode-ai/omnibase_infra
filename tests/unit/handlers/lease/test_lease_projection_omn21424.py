@@ -271,3 +271,45 @@ def test_ac4_equal_rank_conflicting_lease_ids_converge_in_sql_and_reducer() -> N
             assert db.execute(
                 "SELECT lease_id, fence, holder, state FROM lease_projection"
             ).fetchall() == [(str(_L2), 10, "a", "expired")], order
+
+
+def test_ac4_sql_upsert_matches_the_reducer_for_every_pair_of_rows() -> None:
+    """Every ordered pair over fence, state, lease ID and holder lands the reducer's row."""
+    sql = re.sub(r"\$(\d+)", r"?\1", UPSERT_LEASE_PROJECTION_SQL)
+    rows = [
+        ModelLeaseProjectionRow(
+            kind="k",
+            resource="r",
+            lease_id=lease_id,
+            fence=fence,
+            holder=holder,
+            state=cast("Any", state),
+        )
+        for fence in (10, 11)
+        for state in ("held", "released", "expired")
+        for lease_id in (_L1, _L2)
+        for holder in ("", "a", "b")
+    ]
+    outcome = {"held": "lease-granted", "released": "lease-released"}
+    for first, second in itertools.product(rows, repeat=2):
+        state: dict[tuple[str, str], ModelLeaseProjectionRow] = {("k", "r"): first}
+        event = ModelLeaseReply(
+            outcome=cast("Any", outcome.get(second.state, "lease-expired")),
+            kind="k",
+            resource="r",
+            holder=second.holder,
+            lease_id=second.lease_id,
+            fence=second.fence,
+        )
+        state, _ = reduce_lease_event(state, event)
+        want = state[("k", "r")]
+        with _sqlite_with_migration() as db:
+            db.execute(sql, lease_projection_params(first))
+            db.execute(sql, lease_projection_params(second))
+            found = db.execute(
+                "SELECT lease_id, fence, holder, state FROM lease_projection"
+            ).fetchall()
+        assert found == [(str(want.lease_id), want.fence, want.holder, want.state)], (
+            first,
+            second,
+        )

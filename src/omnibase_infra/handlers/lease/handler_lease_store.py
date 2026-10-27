@@ -17,6 +17,7 @@ the same ``request_id`` reads back the grant it made.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
@@ -102,7 +103,10 @@ class HandlerLeaseStore:
                 )
             raise
         if not bound:
-            await self._adapter.lease_revoke(etcd_lease)
+            # The unused lease holds no key, so a failed revoke leaves nothing
+            # to clean up beyond its TTL; the refusal or replay stays the answer.
+            with contextlib.suppress(InfraConnectionError):
+                await self._adapter.lease_revoke(etcd_lease)
         return reply
 
     async def _grant(

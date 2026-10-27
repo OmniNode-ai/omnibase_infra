@@ -14,7 +14,7 @@ class ModelLeaseAcquireRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    kind: str = Field(min_length=1)
+    kind: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
     resource: str = Field(min_length=1, pattern=r"^[^/]+$")
     holder: str = Field(min_length=1)
     request_id: UUID

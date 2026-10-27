@@ -176,7 +176,7 @@ async def test_ac6_check_fence_stale_expired_and_ok(
             await check_fence(
                 adapter, kind="pair", resource="fenced", fence=new.fence + 1000
             )
-            is EnumLeaseFenceStatus.UNKNOWN
+            is EnumLeaseFenceStatus.EXPIRED
         )
         etcd.stop()
         unreachable = await check_fence(

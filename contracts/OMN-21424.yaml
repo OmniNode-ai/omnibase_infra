@@ -130,9 +130,18 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21424-ac6-readable-store-classification
+    description: >-
+      check_fence over a readable store answers ok only for a live slot's fence, stale below a live grant's fence and expired for a fence with no live grant at or above it, including a fence above every live grant; unknown is kept for an unreachable store.
+    source: manual
+    binds_ac: [AC6]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/lease/test_check_fence_omn21424.py -q -k test_ac6_a_readable_store_never_answers_unknown
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21424-ac3-cleanup-failure
     description: >-
-      Acquisition preserves its original transaction failure or cancellation when revoking the unused etcd lease fails; a cleanup failure after a normal refusal still propagates. These tests need no service or container daemon and can run on the hosted runner.
+      Acquisition preserves its original transaction failure or cancellation when revoking the unused etcd lease fails; a failed revoke of the unused lease after a normal refusal leaves the refusal as the reply. These tests need no service or container daemon and can run on the hosted runner.
     source: manual
     binds_ac: [AC3]
     checks:
