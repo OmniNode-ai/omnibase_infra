@@ -15,6 +15,10 @@ v25.2.14 and v25.3.18 started healthy in turn on a copy of the dev data volume,
 under the same ruling's rule that the dev broker moves to a version proven on
 a data copy.
 
+On 2026-10-27 h201 read back v25.1.12 healthy at logical version 15. The
+pin now moves to the proven v25.2.14 hop; v25.3.18 remains pending its live
+readback.
+
 The image is spelled in several files: the catalog services, the base compose
 file (``docker-compose.infra.yml``: the broker and its partition-cap one-shot)
 and the dev-lane overlay (``docker-compose.dev-lane.yml``: the SCRAM and SASL
@@ -42,7 +46,7 @@ from tests.unit.docker.conftest import DOCKER_DIR
 
 pytestmark = [pytest.mark.unit]
 
-DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.1.12"
+DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.2.14"
 
 CATALOG_DIR = DOCKER_DIR / "catalog" / "services"
 DEV_COMPOSE_FILES = ("docker-compose.infra.yml", "docker-compose.dev-lane.yml")

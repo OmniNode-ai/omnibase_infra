@@ -7,7 +7,7 @@ logical version it finalizes at (``latest``) and the oldest one it starts on
 (``earliest``), read from ``/v1/features`` on scratch brokers. A Redpanda image
 refuses a volume whose cluster_version is below its ``earliest``: v25.3.18 on a
 v24.3 volume asserted "incompatible logical version 14 to logical version 17".
-These tests walk the catalog pin and the declared path and refuse a hop whose
+These tests walk the live readback, the catalog pin and the declared path, refusing a hop whose
 image cannot start on what the previous image left, and an image on the chain
 with no measured entry.
 """
@@ -56,7 +56,11 @@ def hop_refusals(chain: list[str], versions: dict[str, dict[str, int]]) -> list[
 def test_declared_chain_starts_every_hop() -> None:
     declared = _declaration()
     pin = str(yaml.safe_load(CATALOG_BROKER.read_text())["image"])
-    chain = [pin, *(str(image) for image in declared["path"])]
+    chain = [
+        str(declared["deployed_readback"]["image"]),
+        pin,
+        *(str(image) for image in declared["path"]),
+    ]
     assert hop_refusals(chain, declared["logical_versions"]) == []
 
 
@@ -66,6 +70,8 @@ def test_declared_chain_starts_every_hop() -> None:
         (["redpandadata/redpanda:v24.3.18", "redpandadata/redpanda:v25.3.18"], True),
         (["redpandadata/redpanda:v24.3.18", "redpandadata/redpanda:v25.2.14"], True),
         (["redpandadata/redpanda:v24.3.18", "redpandadata/redpanda:v25.1.12"], False),
+        (["redpandadata/redpanda:v25.1.12", "redpandadata/redpanda:v25.2.14"], False),
+        (["redpandadata/redpanda:v25.1.12", "redpandadata/redpanda:v25.3.18"], True),
         (["redpandadata/redpanda:v25.2.14", "redpandadata/redpanda:v25.3.18"], False),
         (["redpandadata/redpanda:v24.3.18", "redpandadata/redpanda:v25.1.99"], True),
     ],

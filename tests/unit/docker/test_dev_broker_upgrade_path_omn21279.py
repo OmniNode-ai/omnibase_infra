@@ -20,6 +20,7 @@ hop, and every path hop to have been proven on a copy of the dev data volume.
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -49,6 +50,41 @@ def _version(image: str) -> tuple[int, int, int]:
 def _feature(image: str) -> str:
     major, minor, _ = _version(image)
     return f"{major}.{minor}"
+
+
+def _assert_deployed_readback(declared: dict[str, Any]) -> None:
+    """Advancing the deployed release requires a finalized, healthy live readback."""
+    observed = declared["deployed_readback"]
+    image = observed["image"]
+    assert _feature(image) == declared["deployed_feature_release"]
+    assert observed["cluster_version"] == declared["logical_versions"][image]["latest"]
+    assert observed["node_latest_version"] == observed["cluster_version"]
+    assert observed["health"] == "healthy"
+    assert observed["restart_count"] == 0
+    assert observed["host"] == "h201"
+    assert observed["container"] == "omnibase-infra-redpanda"
+
+
+def test_deployed_release_has_a_finalized_live_readback() -> None:
+    _assert_deployed_readback(_declaration())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"image": "redpandadata/redpanda:v24.3.18"},
+        {"cluster_version": 14},
+        {"node_latest_version": 16},
+        {"health": "starting"},
+        {"restart_count": 1},
+        {"container": "scratch-redpanda"},
+    ],
+)
+def test_incomplete_or_wrong_broker_readback_is_refused(change: dict[str, Any]) -> None:
+    declared = deepcopy(_declaration())
+    declared["deployed_readback"].update(change)
+    with pytest.raises(AssertionError):
+        _assert_deployed_readback(declared)
 
 
 def pin_refusal(
@@ -164,6 +200,9 @@ def test_every_path_hop_was_proven_on_a_data_copy() -> None:
         ("redpandadata/redpanda:v25.2.14", "24.3", True),
         ("redpandadata/redpanda:v25.3.18", "24.3", True),
         ("redpandadata/redpanda:v24.2.7", "24.3", True),
+        ("redpandadata/redpanda:v25.2.14", "25.1", False),
+        ("redpandadata/redpanda:v25.3.18", "25.1", True),
+        ("redpandadata/redpanda:v24.3.18", "25.1", True),
         ("redpandadata/redpanda:v25.3.18", "25.2", False),
     ],
 )

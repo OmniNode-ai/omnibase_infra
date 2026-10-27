@@ -16,11 +16,10 @@
 #
 # tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py and
 # test_dev_broker_hop_logical_versions_omn21279.py read this file.
-deployed_feature_release: "24.3"
+deployed_feature_release: "25.1"
 first_fixed_release: "25.3.16"
 feature_releases: ["24.2", "24.3", "25.1", "25.2", "25.3", "26.1"]
 path:
-  - redpandadata/redpanda:v25.1.12
   - redpandadata/redpanda:v25.2.14
   - redpandadata/redpanda:v25.3.18
 # Logical versions read from /v1/features on scratch brokers on 2026-10-26
@@ -57,3 +56,16 @@ proven_on_data_copy:
   - image: redpandadata/redpanda:v25.3.18
     started_healthy_at: "2026-10-26T16:10Z"
     cluster_version: 17
+# First hop read back live on h201; this is not proof that the crash is fixed.
+# Commands: docker inspect omnibase-infra-redpanda; in-container GET /v1/features.
+deployed_readback:
+  observed_at: "2026-10-27T16:31:45Z"
+  host: "h201"
+  container: "omnibase-infra-redpanda"
+  image: "redpandadata/redpanda:v25.1.12"
+  cluster_version: 15
+  node_latest_version: 15
+  node_earliest_version: 12
+  started_at: "2026-10-27T11:44:44.219360767Z"
+  restart_count: 0
+  health: "healthy"

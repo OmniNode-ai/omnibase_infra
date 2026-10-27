@@ -29,13 +29,47 @@
       "frames": [
         "0x4a621dc kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x1cc"
       ],
-      "source": "ledger STATUS 2026-10-26T01:22:19Z lane=broker-crash-cause-0110 (binary offset); symbolized by this lane"
+      "source": "ledger STATUS 2026-10-26T01:22:19Z lane=broker-crash-cause-0110 (binary offset); symbolized by this lane",
+      "host_memory_bracketing_samples": [
+        {
+          "at": "2026-10-25 20:50:00 UTC",
+          "kbmemfree": 3881696,
+          "kbavail": 42532696,
+          "kbmemused": 42550028,
+          "kbswpused": 59407068
+        },
+        {
+          "at": "2026-10-25 21:00:00 UTC",
+          "kbmemfree": 4579756,
+          "kbavail": 40971656,
+          "kbmemused": 44437376,
+          "kbswpused": 53297140
+        }
+      ],
+      "host_memory_source": "h201 /var/log/sysstat/sa25, sadf -d -- -r and -S, read 2026-10-27; 10-minute samples in UTC, not an instantaneous measurement at the crash"
     },
     {
       "at": "2026-10-25T22:48:33Z",
       "kind": "libc++abi terminating, Aborting on shard 0, then SIGSEGV si_code 128",
       "frames": [],
-      "source": "ledger STATUS 2026-10-26T01:22:19Z; frames not retained, the container was recreated at 2026-10-26T07:28:46Z"
+      "source": "ledger STATUS 2026-10-26T01:22:19Z; frames not retained, the container was recreated at 2026-10-26T07:28:46Z",
+      "host_memory_bracketing_samples": [
+        {
+          "at": "2026-10-25 22:40:00 UTC",
+          "kbmemfree": 5770420,
+          "kbavail": 53142380,
+          "kbmemused": 31848096,
+          "kbswpused": 58395932
+        },
+        {
+          "at": "2026-10-25 22:50:00 UTC",
+          "kbmemfree": 9801184,
+          "kbavail": 39158036,
+          "kbmemused": 45865016,
+          "kbswpused": 45418180
+        }
+      ],
+      "host_memory_source": "h201 /var/log/sysstat/sa25, sadf -d -- -r and -S, read 2026-10-27; 10-minute samples in UTC, not an instantaneous measurement at the crash"
     },
     {
       "at": "2026-10-26T00:59:10Z",
@@ -43,7 +77,24 @@
       "frames": [
         "0x4950374 nearest dynamic symbol kafka::group::handle_offset_fetch +0x3604 (distance too large to trust; unverified)"
       ],
-      "source": "ledger STATUS 2026-10-26T01:22:19Z (binary offset); symbolized by this lane"
+      "source": "ledger STATUS 2026-10-26T01:22:19Z (binary offset); symbolized by this lane",
+      "host_memory_bracketing_samples": [
+        {
+          "at": "2026-10-26 00:50:00 UTC",
+          "kbmemfree": 1711880,
+          "kbavail": 53912264,
+          "kbmemused": 30986280,
+          "kbswpused": 56020408
+        },
+        {
+          "at": "2026-10-26 01:00:00 UTC",
+          "kbmemfree": 2141664,
+          "kbavail": 41888236,
+          "kbmemused": 43170232,
+          "kbswpused": 45807328
+        }
+      ],
+      "host_memory_source": "h201 /var/log/sysstat/sa25, sadf -d -- -r and -S, read 2026-10-27; 10-minute samples in UTC, not an instantaneous measurement at the crash"
     },
     {
       "at": "2026-10-26T12:19:27Z",
@@ -137,7 +188,7 @@
       "redpandadata/redpanda:v25.3.18"
     ],
     "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
-    "pending": "the first hop is proven on a copy of the dev data volume (hop_proof.data_copy_run) and v25.1.12 is pinned by OMN-21279; deploy v25.1.12 to the dev broker and read it back, then pin and deploy v25.2.14 and v25.3.18 one at a time; no hop is deployed yet",
+    "pending": "First hop v25.1.12 is live on h201 at cluster_version 15 (rollout_readback_2026_10_27). This change pins the next proven hop v25.2.14 in the repo. After that hop deploys and /v1/features reads cluster_version 16, advance the declaration and pin v25.3.18. The crash fix is not deployed or verified yet.",
     "hop_proof": {
       "guard": "tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py refuses a declared hop whose image needs a newer logical version than the previous image leaves, and a chain image with no measured entry",
       "scratch_run": "2026-10-26 on h200, synthetic v24.3.18 volume with 20 topics, 400 groups, 3000 records on hop-t0, a SCRAM superuser and enable_sasl true: cluster_version 14 -> 15 -> 16 -> 17 across v25.1.12, v25.2.14, v25.3.18; topics 20, groups 400, high watermark 3000, committed offset 3000, the user and the unauthenticated refusal unchanged at every hop; a second seeded volume repeated the same four hops with topics 20 and groups 400 at each",
@@ -284,5 +335,27 @@
     },
     "reading": "The 3G arena is below what this volume's 4605 topics and the 8100 client connections need: the broker aborts on allocation failure at the cap, in fetch handling and in start-up recovery, where it did not at 12G. The cap replaced a crash about every 3.4 h (5 in 17 h, three of them with ListGroups frames) with an allocation-failure abort about every 14 min (12 in 170 min). The ListGroups fix path in fix_path is unchanged and still pending. Not measured: the smallest arena this volume survives (no copy of the 51 GB volume was started on the loaded h201: load average 57, swap in use), and which client calls drive the metadata volume.",
     "decision_needed": "OPERATOR-CONSENT 2026-10-25T17:53:44Z approved a 2-4 GB cap and scripts/preflight_required_compose_env.py refuses anything outside 2-4 GiB, so this lane did not move the arena. Options for the operator: restore the 12G arena (the floor docker-compose.dev-bus-ha.yml records), set an arena between 4 GiB and 12G with a matching container limit, or cut the topic and connection count first (deleting topics is destructive and needs a named list)."
+  },
+  "historical_readback_2026_10_27": {
+    "kernel": "journalctl --utc -k over 2026-10-25T20:55:30Z to 2026-10-26T01:01:00Z confirms segfault at 40 at 20:56:59Z, general protection fault in libc.so.6 at 22:48:33Z and segfault at 61b at 00:59:10Z; no OOM entry in the queried interval",
+    "limits": "The crashed container was removed. Its broker log and flags are retained only in the earlier lane records cited above. coredumpctl is not installed; /proc/sys/kernel/core_pattern points to apport and /var/crash has no redpanda report. No core or new symbolization obtained. Available memory in bracketing samples does not rule out allocator fragmentation, corruption or transient pressure."
+  },
+  "rollout_readback_2026_10_27": {
+    "observed_at": "2026-10-27T16:31:45Z",
+    "host": "h201",
+    "container": "omnibase-infra-redpanda",
+    "image": "redpandadata/redpanda:v25.1.12",
+    "cluster_version": 15,
+    "node_latest_version": 15,
+    "node_earliest_version": 12,
+    "started_at": "2026-10-27T11:44:44.219360767Z",
+    "restart_count": 0,
+    "health": "healthy",
+    "memory_flags": "PID 1 cmdline read through /proc/1/cmdline at 2026-10-27T16:33Z: --overprovisioned --unsafe-bypass-fsync=true --memory=12G --lock-memory=false --smp=1 --default-log-level=warn --reserve-memory=0M",
+    "container_memory_limit_bytes": 17179869184,
+    "container_memory_reservation_bytes": 4294967296,
+    "container_memory_swap_bytes": 34359738368,
+    "oom_killed": false,
+    "scope": "Read-only observation of the existing first-hop deployment. v25.2.14 is proposed in repo only; no live container or volume changed by cx-dev-broker-crash-1835. Earlier scratch reproductions and data-copy hop proofs above were read, not rerun."
   }
 }
