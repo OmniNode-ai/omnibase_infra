@@ -76,10 +76,13 @@ def test_checker_accepts_the_real_dev_broker_configuration() -> None:
         ("1G", "8g"),
         ("12G", "8g"),
         ("7G", "8g"),
+        ("6145M", "8g"),
         ("3G", 0),
         ("3G", "9g"),
+        ("3G", "8193m"),
         ("3G", "1g"),
         ("6G", "5g"),
+        ("4097M", "4g"),
         ("oops", "8g"),
     ],
 )
@@ -95,6 +98,8 @@ def test_checker_refuses_unruled_or_missing_memory(memory: str, limit: object) -
     [
         ("2G", "4g"),
         ("3G", 4 * 1024**3),
+        ("4G", "4g"),
+        ("6G", "6g"),
         ("6G", "8g"),
         ("6G", 8 * 1024**3),
         ("2048M", "4096m"),
