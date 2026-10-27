@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.enums import EnumInfraTransportType
-from omnibase_infra.errors import InfraTimeoutError
+from omnibase_infra.errors import InfraTimeoutError, ProtocolConfigurationError
 from omnibase_infra.models.errors.model_timeout_error_context import (
     ModelTimeoutErrorContext,
 )
@@ -57,9 +57,9 @@ def _recovery_config(
     }
 
 
-def _retry_delays(caplog: pytest.LogCaptureFixture) -> list[str]:
+def _retry_delays(caplog: pytest.LogCaptureFixture) -> list[float]:
     return [
-        str(r.args[0])
+        float(r.args[0])
         for r in caplog.records
         if r.getMessage().startswith("Dynamic contract listener unavailable")
     ]
@@ -163,7 +163,7 @@ class TestStartDynamicContractListener:
             await process._start_dynamic_contract_listener()
 
         assert process._event_bus.subscribe.await_count == 4
-        assert _retry_delays(caplog) == ["0.001", "0.002", "0.003"]
+        assert _retry_delays(caplog) == pytest.approx([0.001, 0.002, 0.003])
         assert process._dynamic_contract_unsubscribe is unsubscribe
         process._event_bus.close.assert_not_awaited()
 
@@ -243,9 +243,54 @@ class TestStartDynamicContractListener:
                 with pytest.raises(asyncio.CancelledError):
                     await task
 
-        assert _retry_delays(caplog) == [str(policy.initial_backoff_seconds)]
+        assert _retry_delays(caplog) == pytest.approx([policy.initial_backoff_seconds])
         process._event_bus.subscribe.assert_awaited_once()
         assert process._dynamic_contract_unsubscribe is None
+
+    @pytest.mark.asyncio
+    async def test_timeout_not_from_attempt_deadline_is_not_retried(self) -> None:
+        """A TimeoutError raised inside subscribe while the attempt deadline
+        has not expired is not a transient join failure and must propagate."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = _recovery_config(initial=0.001, attempt_timeout=60)
+        process._event_bus.subscribe.side_effect = TimeoutError("unrelated")
+
+        with pytest.raises(TimeoutError, match="unrelated"):
+            await process._start_dynamic_contract_listener()
+
+        process._event_bus.subscribe.assert_awaited_once()
+        assert process._dynamic_contract_unsubscribe is None
+
+    @pytest.mark.asyncio
+    async def test_malformed_recovery_config_fails_before_subscribing(self) -> None:
+        """An invalid recovery block is a configuration error, raised before
+        any listener consumer is created."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = {
+            "event_bus": {
+                "environment": "dev",
+                "recovery": {"initial_backoff_seconds": -1},
+            }
+        }
+
+        with pytest.raises(ProtocolConfigurationError):
+            await process._start_dynamic_contract_listener()
+
+        process._event_bus.subscribe.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_mapping_event_bus_config_fails_before_subscribing(self) -> None:
+        """A non-mapping event_bus config is not silently replaced by defaults."""
+        process = _make_process()
+        process._kafka_contract_source.environment = "dev"
+        process._config = {"event_bus": "not-a-mapping"}
+
+        with pytest.raises(ProtocolConfigurationError, match="must be a mapping"):
+            await process._start_dynamic_contract_listener()
+
+        process._event_bus.subscribe.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_dynamic_listener_configuration_error_is_not_retried(self) -> None:
