@@ -48,8 +48,8 @@ evidence_requirements:
     description: "The generic lease suites (two lease stores on a real etcd, two runtime processes on a three-member etcd, the projection and check_fence unit tests) pass."
     command: "uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease tests/integration/nodes/test_lease_nodes_contract_discovery_omn21424.py -q -n 0"
   - kind: manual
-    description: "Deploy validation command for the caller-contract deploy gate: the committed lease source read at the checkout commit. It starts nothing and touches no running lane."
-    command: "deploy: gh api contents of handler_lease_store.py, handler_lease_projection.py and handlers/lease/handler_lease_fence.py at HEAD"
+    description: "Deploy validation command for hosted runners: lease acquisition cleanup preserves transaction failures and cancellation when etcd revoke fails."
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=landing-l17664-lab uv run pytest tests/unit/handlers/lease/test_lease_store_omn21424.py -q -k cleanup"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -129,4 +129,13 @@ dod_evidence:
             base64 -d | grep -F 'WHERE lease_projection.fence <= EXCLUDED.fence' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21424-ac3-cleanup-failure
+    description: >-
+      Acquisition preserves its original transaction failure or cancellation when revoking the unused etcd lease fails; a cleanup failure after a normal refusal still propagates. These tests need no service or container daemon and can run on the hosted runner.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 COMPOSE_PROJECT_NAME=landing-l17664-lab uv run pytest tests/unit/handlers/lease/test_lease_store_omn21424.py -q -k cleanup
         cwd: ${OMNI_HOME}/omnibase_infra

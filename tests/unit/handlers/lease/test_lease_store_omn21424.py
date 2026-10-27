@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -128,3 +130,41 @@ async def test_a_replayed_request_is_fenced_by_its_slot_not_its_request_key() ->
     assert replayed.lease_id == granted.lease_id
     assert replayed.fence == _SLOT_REVISION
     assert UUID(json.loads(held)["lease_id"]) == granted.lease_id
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        InfraConnectionError("txn failed"),
+        ValueError("invalid txn"),
+        asyncio.CancelledError(),
+    ],
+)
+@pytest.mark.parametrize("revoke_fails", [False, True])
+async def test_cleanup_preserves_the_original_acquire_failure(
+    failure: BaseException, revoke_fails: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _FakeEtcd()
+    revoke = AsyncMock(
+        side_effect=InfraConnectionError("revoke failed") if revoke_fails else None
+    )
+    monkeypatch.setattr(fake, "txn", AsyncMock(side_effect=failure))
+    monkeypatch.setattr(fake, "lease_revoke", revoke)
+    with pytest.raises(type(failure)) as caught:
+        await _store(fake).acquire(_request())
+    assert caught.value is failure
+    revoke.assert_awaited_once_with(7)
+    if revoke_fails:
+        assert any("InfraConnectionError" in note for note in failure.__notes__)
+
+
+async def test_cleanup_failure_after_refusal_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeEtcd()
+    failure = InfraConnectionError("revoke failed")
+    monkeypatch.setattr(fake, "txn", AsyncMock(return_value=(False, 0, [])))
+    monkeypatch.setattr(fake, "lease_revoke", AsyncMock(side_effect=failure))
+    with pytest.raises(InfraConnectionError) as caught:
+        await _store(fake).acquire(_request())
+    assert caught.value is failure

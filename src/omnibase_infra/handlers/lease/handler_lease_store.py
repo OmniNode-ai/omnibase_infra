@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -84,18 +85,25 @@ class HandlerLeaseStore:
             if replayed is not None:
                 return replayed
         etcd_lease, ttl = await self._adapter.lease_grant(request.ttl_s or policy.ttl_s)
-        bound = False
         try:
             reply, bound = await self._grant(
                 request, policy, request_key, etcd_lease, ttl
             )
-            return reply
-        finally:
-            # Every exit that did not bind this etcd lease to a slot revokes it,
-            # including a transaction that raised, so no lease outlives its TTL
-            # unused.
-            if not bound:
+        except BaseException as failure:
+            # Cancellation also releases the unused lease. If etcd is still
+            # unreachable, retain the acquisition failure rather than replacing
+            # it with the cleanup error; etcd's TTL bounds the remaining lease.
+            try:
                 await self._adapter.lease_revoke(etcd_lease)
+            except InfraConnectionError as cleanup_error:
+                failure.add_note(
+                    "Unused etcd lease cleanup failed with "
+                    f"{type(cleanup_error).__name__}; the lease remains TTL-bounded."
+                )
+            raise
+        if not bound:
+            await self._adapter.lease_revoke(etcd_lease)
+        return reply
 
     async def _grant(
         self,
