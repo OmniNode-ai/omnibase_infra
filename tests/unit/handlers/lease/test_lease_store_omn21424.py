@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.errors import InfraConnectionError, RuntimeHostError
 from omnibase_infra.handlers.lease.handler_lease_store import HandlerLeaseStore
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
@@ -144,6 +144,25 @@ async def test_a_replayed_request_is_fenced_by_its_slot_not_its_request_key() ->
     assert replayed.lease_id == granted.lease_id
     assert replayed.fence == _SLOT_REVISION
     assert UUID(json.loads(held)["lease_id"]) == granted.lease_id
+
+
+@pytest.mark.parametrize(
+    "revoke_error",
+    [InfraConnectionError("revoke failed"), RuntimeHostError("gateway")],
+)
+async def test_any_revoke_error_leaves_the_original_failure_and_the_refusal(
+    revoke_error: Exception, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failure = ValueError("invalid txn")
+    fake = _FakeEtcd()
+    monkeypatch.setattr(fake, "txn", AsyncMock(side_effect=failure))
+    monkeypatch.setattr(fake, "lease_revoke", AsyncMock(side_effect=revoke_error))
+    with pytest.raises(ValueError) as caught:
+        await _store(fake).acquire(_request())
+    assert caught.value is failure
+    monkeypatch.setattr(fake, "txn", AsyncMock(return_value=(False, 0, [])))
+    reply = await _store(fake).acquire(_request())
+    assert reply.outcome == "lease-refused"
 
 
 @pytest.mark.parametrize(

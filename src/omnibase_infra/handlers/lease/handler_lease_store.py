@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.handlers.placement.handler_placement_etcd import (
     HandlerPlacementEtcd,
     b64,
@@ -96,7 +96,7 @@ class HandlerLeaseStore:
             # it with the cleanup error; etcd's TTL bounds the remaining lease.
             try:
                 await self._adapter.lease_revoke(etcd_lease)
-            except InfraConnectionError as cleanup_error:
+            except RuntimeHostError as cleanup_error:
                 failure.add_note(
                     "Unused etcd lease cleanup failed with "
                     f"{type(cleanup_error).__name__}; the lease remains TTL-bounded."
@@ -105,7 +105,7 @@ class HandlerLeaseStore:
         if not bound:
             # The unused lease holds no key, so a failed revoke leaves nothing
             # to clean up beyond its TTL; the refusal or replay stays the answer.
-            with contextlib.suppress(InfraConnectionError):
+            with contextlib.suppress(RuntimeHostError):
                 await self._adapter.lease_revoke(etcd_lease)
         return reply
 
