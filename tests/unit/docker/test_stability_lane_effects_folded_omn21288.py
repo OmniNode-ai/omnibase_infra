@@ -77,6 +77,9 @@ def test_main_reads_the_fold_and_preserves_the_effects_archive_volume() -> None:
         "effects_logs:/app/effects-logs:ro" in services["omninode-runtime"]["volumes"]
     )
     assert "effects_data:/app/data" in services["runtime-effects"]["volumes"]
+    assert main_env["ONEX_FOLDED_EFFECTS_STATE_ROOT"] == effects_env[
+        "ONEX_STATE_DIR"
+    ].replace("/app/data/", "/app/effects-data/")
     for key, value in ARCHIVE_DIRS.items():
         assert effects_env[key] == value
         # Both runtime paths address the same directory in the old volume.

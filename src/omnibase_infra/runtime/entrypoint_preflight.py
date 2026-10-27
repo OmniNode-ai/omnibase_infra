@@ -262,11 +262,67 @@ def render_resolver_config(env: Mapping[str, str]) -> int:
     return render_resolver_main()
 
 
+def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
+    """Alias only delegation state; refuse to overwrite any existing main state.
+
+    The effects container must be retired before main starts. Its mounted state
+    root remains authoritative for delegation claims, including SQLite's WAL
+    and SHM files. Linking the directory preserves all three together without
+    copying a live database or moving main's other state onto the effects volume.
+    An installation with two nonempty delegation directories needs an explicit
+    reconciliation; choosing either silently would reopen completed claims.
+    """
+    configured = env.get("ONEX_FOLDED_EFFECTS_STATE_ROOT", "").strip()
+    if not configured:
+        return
+    folded = {
+        role.strip().lower()
+        for role in env.get("ONEX_RUNTIME_FOLDED_PROFILES", "").split(",")
+    }
+    if "effects" not in folded:
+        raise ValueError("effects state handover requires the folded effects role")
+    main_root = Path(
+        env.get("ONEX_STATE_DIR", "").strip() or env.get("ONEX_STATE_ROOT", "").strip()
+    )
+    effects_root = Path(configured)
+    if not main_root.is_absolute() or not effects_root.is_absolute():
+        raise ValueError("folded effects and main state roots must be absolute")
+    source = effects_root / "delegation"
+    destination = main_root / "delegation"
+    source_path = source.resolve()
+    destination_path = destination.resolve()
+    if destination.is_symlink():
+        if destination_path != source_path:
+            raise ValueError("main delegation state links to a conflicting directory")
+        source.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return
+    if source_path.is_relative_to(destination_path) or destination_path.is_relative_to(
+        source_path
+    ):
+        raise ValueError("folded effects and main delegation directories overlap")
+    if destination.exists() and (
+        not destination.is_dir() or any(destination.iterdir())
+    ):
+        raise ValueError(
+            "main has conflicting delegation state; reconcile it before folding"
+        )
+    source.mkdir(parents=True, exist_ok=True, mode=0o700)
+    main_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if destination.exists():
+        destination.rmdir()  # Only an empty directory can reach this point.
+    destination.symlink_to(source, target_is_directory=True)
+
+
 def run_preflight(env: MutableMapping[str, str]) -> int:
     """Run every preflight step in the shell's original order.
 
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
+    try:
+        prepare_folded_effects_state(env)
+    except (OSError, ValueError) as exc:
+        _echo_err(f"[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: {exc}")
+        return 2
     rc = stamp_all_fingerprints(env)
     if rc != 0:
         return rc

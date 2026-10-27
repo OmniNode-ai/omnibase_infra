@@ -148,5 +148,26 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_installers_omn21288.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
+  - id: dod-omn21288-reconciled-effects-fold
+    description: >-
+      Reconcile the original effects-fold tests with the already merged fold. Main reads the rendered role, retains both health ports and memory network, and writes archives on the preserved effects volume. The retired effects definition remains opt-in so other lanes retain their inherited definition. The deploy-agent lane test reads the committed policy rather than an ambient host file, and requires both lab health ports to resolve to main. This checks the deployment definition; live rollout remains pending.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_stability_test_runtime_lane.py -k fold -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_executor_lane_selection.py scripts/deploy-agent/tests/unit/test_agent_deps_convergence_omn18692.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21288-folded-effects-claims
+    description: >-
+      Hosted deployment-definition check: the real lab overlay points the folded role at its preserved effects state root. Boot aliases main's delegation directory to that volume before handler construction, retains existing SQLite claims and future writes, refuses conflicting main state, and repairs fresh-volume ownership before dropping privileges. No Docker daemon, running lane or credentials are required. This does not claim a live rollout or an offset handover.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_folded_effects_state_omn21288.py tests/unit/docker/test_runtime_entrypoint_volume_bootstrap.py tests/unit/docker/test_stability_lane_effects_folded_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
 context:
   remaining_after_this_change: "AC2 end state: fourteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
