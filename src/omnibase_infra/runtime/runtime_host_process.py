@@ -6393,21 +6393,34 @@ class RuntimeHostProcess:
             ModelEventBusRecoveryConfig,
         )
 
-        event_bus_config = (getattr(self, "_config", None) or {}).get("event_bus", {})
-        recovery_config = (
-            event_bus_config.get("recovery")
-            if isinstance(event_bus_config, dict)
-            else None
+        config_context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="dynamic_contract_listener.recovery_config",
         )
-        recovery = (
-            ModelEventBusRecoveryConfig.model_validate(recovery_config)
-            if recovery_config is not None
-            else ModelEventBusRecoveryConfig.from_contract()
-        )
+        event_bus_config = (self._config or {}).get("event_bus", {})
+        if not isinstance(event_bus_config, dict):
+            raise ProtocolConfigurationError(
+                "runtime config 'event_bus' must be a mapping",
+                context=config_context,
+            )
+        recovery_config = event_bus_config.get("recovery")
+        try:
+            recovery = (
+                ModelEventBusRecoveryConfig.model_validate(recovery_config)
+                if recovery_config is not None
+                else ModelEventBusRecoveryConfig.from_contract()
+            )
+        except ValidationError as exc:
+            raise ProtocolConfigurationError(
+                "invalid event_bus.recovery configuration for the dynamic "
+                f"contract listener: {sanitize_error_message(exc)}",
+                context=config_context,
+            ) from exc
         delay = recovery.initial_backoff_seconds
         while True:
             try:
-                async with asyncio.timeout(recovery.attempt_timeout_seconds):
+                attempt_deadline = asyncio.timeout(recovery.attempt_timeout_seconds)
+                async with attempt_deadline:
                     self._dynamic_contract_unsubscribe = (
                         await self._event_bus.subscribe(
                             topic=SUFFIX_NODE_REGISTRATION,
@@ -6423,6 +6436,10 @@ class RuntimeHostProcess:
                 InfraUnavailableError,
                 TimeoutError,
             ) as exc:
+                if isinstance(exc, TimeoutError) and not attempt_deadline.expired():
+                    # A TimeoutError from inside subscribe that is not this
+                    # attempt's own deadline is not a transient join failure.
+                    raise
                 # A late registration join used to unwind start(), closing all
                 # already-live delegation consumers after a lengthy cold boot.
                 # Keep startup/readiness pending and retry this listener only.
