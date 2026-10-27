@@ -128,10 +128,23 @@ def test_effects_state_root_is_owned_before_privilege_drop_only_when_folded(
 
 @pytest.mark.parametrize(
     "folded_root",
+    ["/app/effects-data/state..v2", "/app/effects-data/.onex..state"],
+)
+def test_folded_state_root_with_a_double_dot_in_its_name_boots(
+    tmp_path: Path, folded_root: str
+) -> None:
+    result, recorded = _run_root_bootstrap(tmp_path, folded_root)
+    assert result.returncode == 0, result.stderr
+    assert f"chown -hR omniinfra:omniinfra {folded_root}" in recorded
+
+
+@pytest.mark.parametrize(
+    "folded_root",
     [
         "/app/effects-data",
         "/app/effects-data/",
         "/app/effects-data/.",
+        "/app/effects-data/..",
         "/app/effects-data/state/",
         "/app/effects-data/../data",
         "/app/effects-data/a/b",

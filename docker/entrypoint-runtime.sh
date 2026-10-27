@@ -39,7 +39,9 @@ if [ "$(id -u)" -eq 0 ]; then
   # the archives, and -h changes a link itself rather than what it names.
   if [ -n "${ONEX_FOLDED_EFFECTS_STATE_ROOT:-}" ]; then
     case "$ONEX_FOLDED_EFFECTS_STATE_ROOT" in
-      *..* | */ | /app/effects-data/. | /app/effects-data/*/*) folded_root_ok=0 ;;
+      # Traversal is refused by segment, not substring: a name such as
+      # state..v2 is one ordinary directory under the volume.
+      */ | /app/effects-data/. | /app/effects-data/.. | /app/effects-data/*/*) folded_root_ok=0 ;;
       /app/effects-data/?*) folded_root_ok=1 ;;
       *) folded_root_ok=0 ;;
     esac
