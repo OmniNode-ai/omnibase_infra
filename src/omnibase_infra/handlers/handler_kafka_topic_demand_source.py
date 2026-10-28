@@ -24,6 +24,7 @@ from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
+from omnibase_infra.event_bus.kafka_transport import create_groupless_consumer
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
@@ -68,12 +69,7 @@ class HandlerKafkaTopicDemandSource:
             if not entry.get("error_code")
             for partition in entry["partitions"]
         ]
-        consumer = AIOKafkaConsumer(
-            bootstrap_servers=self._config.bootstrap_servers,
-            group_id=None,
-            enable_auto_commit=False,
-            **auth,
-        )
+        consumer = create_groupless_consumer(self._config)
         await consumer.start()
         low: dict[TopicPartition, int] = {}
         high: dict[TopicPartition, int] = {}

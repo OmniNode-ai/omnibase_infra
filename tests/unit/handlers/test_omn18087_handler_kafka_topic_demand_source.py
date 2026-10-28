@@ -9,6 +9,7 @@ import asyncio
 import pytest
 from aiokafka.structs import TopicPartition
 
+from omnibase_infra.event_bus import kafka_transport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers import handler_kafka_topic_demand_source as module
 from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
@@ -109,7 +110,7 @@ def broker(monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[int, int]]:
         consumer.offsets = offsets
         return consumer
 
-    monkeypatch.setattr(module, "AIOKafkaConsumer", build)
+    monkeypatch.setattr(kafka_transport, "AIOKafkaConsumer", build)
     monkeypatch.setattr(module, "AIOKafkaAdminClient", lambda **_: FakeAdmin(offsets))
     return offsets
 
