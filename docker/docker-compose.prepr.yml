@@ -285,6 +285,10 @@ services:
   # profile (which every dependency now is), and a slot must not wait on, or
   # be able to restart, a dev-lane container.
   # =========================================================================
+  # OMN-21433: every slot service restarts at most three times on failure. The
+  # inherited `unless-stopped` looped a service that cannot start (three writers
+  # exit in a slot on the dev-principal check) 9047 times against the shared
+  # Postgres; now it stays exited and the slot reports it.
   # OMN-21279: the dev overlay's build-only infra image, which the slot's
   # runtime services build omnimarket's composed image FROM. Compose refuses a
   # `service:` build context that names a service outside the active profile,
@@ -298,6 +302,7 @@ services:
       - omnibase-infra-network
   omninode-runtime:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime"
     depends_on: !override []
     ports: !override
@@ -331,6 +336,7 @@ services:
       # turn a branch defect into an intermittent one.
   runtime-effects:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-effects"
     depends_on: !override []
     ports: !override
@@ -383,6 +389,7 @@ services:
       - "com.omninode.layer=runtime"
   runtime-worker:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-worker"
     depends_on: !override []
     environment:
@@ -399,6 +406,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-api:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-api"
     depends_on: !override []
     ports: !override
@@ -411,6 +419,7 @@ services:
       - "com.omninode.layer=runtime"
   tenant-projection-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-tenant-projection-writer"
     depends_on: !override []
     environment:
@@ -445,6 +454,7 @@ services:
   # -------------------------------------------------------------------------
   projection-tenant-registry-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-registry-writer"
     depends_on: !override []
     environment:
@@ -456,6 +466,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-delegation-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-delegation-writer"
     depends_on: !override []
     environment:
@@ -467,6 +478,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-registration-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-registration-writer"
     depends_on: !override []
     environment:
@@ -478,6 +490,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-savings-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-savings-writer"
     depends_on: !override []
     environment:
@@ -489,6 +502,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-tenant-credentials-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-credentials-writer"
     depends_on: !override []
     environment:
@@ -500,6 +514,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-live-events-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-live-events-writer"
     depends_on: !override []
     environment:
@@ -532,6 +547,7 @@ services:
   # -------------------------------------------------------------------------
   onex-api:
     profiles: !override ["prepr-gateway"]
+    restart: "on-failure:3"
     container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
     depends_on: !override []
     ports: !override
