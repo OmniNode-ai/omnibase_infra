@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19996"
+title: "Vendor the credential last-used migration"
+summary: >-
+  Deployment component of AC1: carry omnimarket's node_projection_tenant_credentials migration 0010 (a nullable last_used_at on tenant_inference_credentials) byte for byte, with its exact tenant ledger binding and expand-only classification. This identity check does not prove the projection writer, a lane application or the dashboard column, which are omnimarket#4526 and omnidash#472.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-credential-last-used-deployment"
+    statement: "The deployment artifact must carry the same last-used migration as the credentials projection writer."
+    acceptance:
+      - id: "AC1"
+        statement: "After a delegation on key ref X, the Credentials exposure row for X carries a last-used time equal to that run's terminal time -- falsifier: the omnimarket projection test run with uv run pytest finds a null or different value"
+evidence_requirements:
+  - kind: "tests"
+    description: "Exact migration source bytes, unique tenant ledger binding and expand-only classification."
+    command: "uv run pytest tests/unit/migrations/test_omn19996_last_used_vendor.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn19996-last-used-migration-vendor"
+    description: "AC1 deployment identity only: a missing or altered 0010, a wrong ledger binding or a wrong classification fails."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn19996_last_used_vendor.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
