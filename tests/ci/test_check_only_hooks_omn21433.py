@@ -47,7 +47,9 @@ TMP_ID = "refuse-staged-tmp-files"
 TRAILER_ID = "refuse-ai-coauthor-trailer"
 SELF_TEST_ID = "check-no-credential-in-log-self-test"
 
-WRITING_TOKENS = ("--fix", "--exit-non-zero-on-fix", "rm ", "perl -i", "sed -i")
+WRITING_TOKENS = frozenset(
+    {"--fix", "--exit-non-zero-on-fix", "rm", "perl", "sed", "-i", "-pi"}
+)
 
 
 def _hooks() -> dict[str, dict[str, Any]]:
@@ -132,6 +134,7 @@ def _run_hook(
             "PATH": _tool_path(),
             "HOME": str(tmp_path),
             "PRE_COMMIT_HOME": str(tmp_path / "pc"),
+            "RUFF_CACHE_DIR": str(tmp_path / "ruff-cache"),
         },
     )
     return done.returncode, done.stdout + done.stderr, before, _snapshot(work)
@@ -153,7 +156,7 @@ class TestConfigShape:
     def test_hook_entry_cannot_write(self, hook_id: str) -> None:
         hook = _hooks()[hook_id]
         text = " ".join([str(hook["entry"]), *map(str, hook.get("args", []))])
-        assert [t for t in WRITING_TOKENS if t in text] == []
+        assert WRITING_TOKENS.intersection(shlex.split(text)) == set()
 
     def test_ruff_format_is_check_mode(self) -> None:
         assert "--check" in str(_hooks()[RUFF_FORMAT_ID]["entry"]).split()
