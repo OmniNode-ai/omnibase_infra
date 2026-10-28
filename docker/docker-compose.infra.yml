@@ -660,7 +660,7 @@ services:
   #            All broker addresses are hardcoded literals in compose.
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
   redpanda:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.3.18
     ulimits:
       nofile:
         soft: 65535
@@ -778,7 +778,7 @@ services:
   # this container to complete before starting, to avoid hitting partition limits
   # on fresh Redpanda volumes.
   redpanda-partition-cap:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.3.18
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
     extends:
