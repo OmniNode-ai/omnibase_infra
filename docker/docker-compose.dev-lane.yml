@@ -504,9 +504,8 @@ services:
   redpanda:
     # OMN-20275: OPERATOR-CONSENT 2026-10-27T06:37:48Z authorizes only
     # this dev broker (19092) at a 12G arena inside a 16g container cap.
-    # The deploy agent reuses this command on every refresh. Literal bounds
-    # prevent a stale operator env from restoring the exhausted 3G/6G arena
-    # or exceeding consent. Leave 4 GiB for non-Seastar allocations.
+    # Values are rendered from runtime policy, including its private overlay.
+    # The policy model and deploy preflight enforce the consent ceiling.
     command:
       - redpanda
       - start
@@ -519,10 +518,10 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory 12G
+      - --memory ${DEV_REDPANDA_MEMORY:?DEV_REDPANDA_MEMORY must be rendered from runtime policy}
       - --default-log-level=warn
       - --set topic_partitions_per_shard=7000
-    mem_limit: 16g
+    mem_limit: ${DEV_REDPANDA_MEM_LIMIT:?DEV_REDPANDA_MEM_LIMIT must be rendered from runtime policy}
     mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}
     environment:
       DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
@@ -764,7 +763,7 @@ services:
   # the existing order after the SASL flip on both cold and warm deploys.
   redpanda-partition-cap:
     environment:
-      REDPANDA_PROFILE_MEMORY: "12G"
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:?DEV_REDPANDA_MEMORY must be rendered from runtime policy}
       RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set}
       REDPANDA_CONTROL_PLANE_TOPIC: onex.tenant.events

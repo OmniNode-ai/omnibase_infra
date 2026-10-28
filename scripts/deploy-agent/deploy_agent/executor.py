@@ -1984,6 +1984,47 @@ def resolve_lane_overlay_dir(
     return None
 
 
+def _dev_broker_policy_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Render dev-201's broker contract at each read, after all settings.
+
+    Other lanes and brokers never consume this private contract overlay.
+    Use the deploy source's renderer/model, rather than the installed wheel,
+    so a source refresh and its validation change together.
+    """
+    allowed = env.get(ENV_ALLOWED_LANES, "").strip()
+    if (
+        not allowed
+        or not is_lab_dev_fence(parse_allowed_lanes(allowed))
+        or _ActiveDeployLane.lane not in (None, EnumRuntimeLane.DEV)
+        or active_dev_instance() != "dev-201"
+    ):
+        return {}
+    command = [
+        sys.executable,
+        f"{REPO_DIR}/scripts/render_runtime_policy_env.py",
+        "--dev-broker-only",
+        "--format",
+        "json",
+    ]
+    overlay_root = env.get(LANE_OVERLAY_DIR_ENV)
+    if overlay_root:
+        command.extend(["--overlay-root", overlay_root])
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
+    if result.returncode:
+        # Do not echo subprocess stderr; policy validation may include input.
+        raise RuntimeError("dev broker runtime policy rendering refused")
+    rendered = json.loads(result.stdout)
+    if (
+        not isinstance(rendered, dict)
+        or set(rendered) != {"DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"}
+        or not all(isinstance(value, str) and value for value in rendered.values())
+    ):
+        raise RuntimeError("dev broker runtime policy renderer returned invalid values")
+    return rendered
+
+
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     # OMN-18475: `update`, not `setdefault`. The process environment is the
@@ -2043,6 +2084,8 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # explicit per-dispatch pinned-image resolution.
     if extra_env:
         env.update(extra_env)
+    # Contract values win over inherited, operator, lane-fragment and caller settings.
+    env.update(_dev_broker_policy_env(env))
     return env
 
 
