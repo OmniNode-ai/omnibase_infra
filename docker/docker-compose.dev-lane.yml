@@ -2146,6 +2146,13 @@ services:
   # `pull_policy: never`: the image exists in no registry, and a pull attempt
   # would only replace a clear "no such image" with a registry error.
   #
+  # FAILURE MODE, stated: because every dev-lane deploy names this service, a
+  # lab host on which the image is absent fails that deploy's recreate step with
+  # "No such image: ...cost-estimator-web:dev-lane", the same way onex-api fails
+  # when its pinned tag has been collected. Image GC removes only images no
+  # container uses, so a running page keeps its image. Recovery is the build
+  # above followed by the deploy again; nothing else in the lane depends on it.
+  #
   # The lane has no login, so the next-auth names carry non-secret
   # placeholders that pass the front end's own validators: AUTH_URL must not be
   # a loopback origin (OMN-16209), so it names a reserved never-resolvable

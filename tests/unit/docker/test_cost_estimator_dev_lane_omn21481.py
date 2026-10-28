@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -173,16 +174,66 @@ def test_ac3_the_page_sits_outside_the_runtime_profile() -> None:
     assert profiles == ["cost-estimator"]
 
 
-def test_ac3_rt6_certifies_the_page_by_its_source_repo_label() -> None:
-    """A recreated tag-referenced container is read back by its source repo.
+def _image_build_labels() -> dict[str, str]:
+    """The ``--label k=v`` pairs of the image build the compose comment spells."""
+    compose = _DEV_LANE.read_text(encoding="utf-8")
+    block = compose[
+        compose.index(f"  {_SERVICE}:") - 4000 : compose.index(f"  {_SERVICE}:")
+    ]
+    labels = dict(re.findall(r"--label ([a-z.-]+)=(\S+)", block))
+    assert labels, "the cost-estimator-web comment spells no image build labels"
+    return labels
 
-    The page's image is stamped with the source-repo and revision labels at
-    build; the readback must keep reading them rather than comparing the image
-    with this repository's ref, or every refresh that recreates it would fail.
+
+def _resolve_source_repo(tmp_path: Path, labels: dict[str, str]) -> str:
+    """Run onex-runtime-deploy's own resolve_service_source_repo on a stub docker.
+
+    The function is cut out of the handler verbatim, so this exercises the
+    readback's real routing decision, not a restatement of it.
     """
     handler = _HANDLER.read_text(encoding="utf-8")
-    assert '"ai.omninode.image.source-repo"' in handler
-    assert "readback_foreign_sourced_service" in handler
-    compose = _DEV_LANE.read_text(encoding="utf-8")
-    assert "--label ai.omninode.image.source-repo=" in compose
-    assert "--label org.opencontainers.image.revision=" in compose
+    match = re.search(
+        r"^resolve_service_source_repo\(\) \{\n.*?^\}\n", handler, re.S | re.M
+    )
+    assert match is not None, "resolve_service_source_repo not found in the handler"
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    docker = stub_dir / "docker"
+    lines = ["#!/usr/bin/env bash", 'fmt="$3"']
+    for key, value in labels.items():
+        lines.append(f'[[ "$fmt" == *\'"{key}"\'* ]] && {{ echo "{value}"; exit 0; }}')
+    lines.append('echo "<no value>"')
+    docker.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    docker.chmod(0o755)
+    script = (
+        match.group(0) + 'resolve_service_source_repo "omninode-cost-estimator-web"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={"PATH": f"{stub_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def test_ac3_rt6_routes_the_page_to_the_foreign_sourced_readback(
+    tmp_path: Path,
+) -> None:
+    """RT-6 certifies a recreated container by the repository that built it.
+
+    An image built the way the compose comment spells reads back as foreign
+    sourced, so the readback checks its own revision label instead of comparing
+    it with this repository's ref, which it could never match.
+    """
+    labels = _image_build_labels()
+    assert "org.opencontainers.image.revision" in labels
+    source = _resolve_source_repo(tmp_path, labels)
+    assert source
+    assert source != "omnibase_infra"
+
+
+def test_ac3_rt6_control_an_unlabelled_image_is_not_foreign(tmp_path: Path) -> None:
+    """Positive control: without the label the readback treats it as its own."""
+    assert _resolve_source_repo(tmp_path, {}) == ""
