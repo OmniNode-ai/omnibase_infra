@@ -26,6 +26,15 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/unit/migrations/test_omn21217_ordered_models_vendor.py -q -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn21217-lab-proof-composed-image"
+    description: >-
+      Lab-proof delivery component, not an AC: the catalog CLI that the omnimarket lab proof calls carries the image-containers command, so the proof can name every container that runs the composed omnimarket image. A tree without it fails.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/docker/catalog/cli.py?ref=f1e5be301c80e4df9eda733b0e3e54778058a888' --jq .content | base64 -d | grep -q 'def cmd_image_containers'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
 emergency_bypass:
   enabled: false
   justification: ""
