@@ -334,6 +334,10 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # runtime excludes the node, so a deploy that left it behind would
         # certify a lane on which that projection runs a stale image.
         "projection-claude-hook-events-writer",
+        # OMN-21481: the eleventh. The cost estimator page is recreated by every
+        # dev-lane deploy so it comes back after one, which puts it in the
+        # readback's scope too.
+        "cost-estimator-web",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -355,6 +359,7 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "projection-claude-hook-events-writer": (
             "omnimarket-projection-claude-hook-events-writer"
         ),
+        "cost-estimator-web": "omninode-cost-estimator-web",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not

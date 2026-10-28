@@ -283,6 +283,10 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     # excludes the node, so an agent scope that could not reach it would leave
     # that projection running an image the rest of the lane had moved past.
     "projection-claude-hook-events-writer",
+    # OMN-21481: the public cost estimator page. Tag-referenced (see the set
+    # below); a member so every dev deploy recreates it, which is what brings
+    # it back after a redeploy with no manual step.
+    "cost-estimator-web",
 )
 
 # OMN-18108: the members of the array above that carry an ``image:`` and no
@@ -297,7 +301,13 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
 # leaving an operator to discover that a "successful" deploy left the tag where
 # it was. Advancing it needs an image build plus an env repoint, and no
 # sanctioned script does either.
-DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset({"onex-api"})
+#
+# OMN-21481 adds ``cost-estimator-web`` for the same reason: its image is built
+# out of the web front end's repository on the lab host and carries that
+# repository's revision (docker/docker-compose.dev-lane.yml spells the build).
+DEV_LANE_ONLY_TAG_REFERENCED_SERVICES: frozenset[str] = frozenset(
+    {"onex-api", "cost-estimator-web"}
+)
 
 # The subset ``docker compose build`` can be handed. Derived, never a second
 # hand-written list.
