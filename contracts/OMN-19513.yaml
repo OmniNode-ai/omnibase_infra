@@ -60,6 +60,9 @@ evidence_requirements:
   - kind: tests
     description: "The exclusion and selection partition the node between the main runtime and the writer, and the dev lane renders both halves with the shared instance id."
     command: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "Real contract discovery plus the profile filter, fed the environment the dev-lane and base compose files render, leave the projection with exactly one owner and the writer on the main runtime's instance id."
+    command: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
 emergency_bypass:
   enabled: false
   justification: ""
