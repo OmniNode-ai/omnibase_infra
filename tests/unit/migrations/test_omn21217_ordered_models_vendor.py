@@ -5,7 +5,7 @@
 0007 carries the ordered models; 0009 the credential models and version.
 
 Catch a missing or edited vendor, an absent/wrong tenant-ledger binding, and
-an incorrect expand-only class for a backfill that adds constraints.
+a class other than forward-only for a backfill that adds constraints.
 """
 
 from __future__ import annotations
@@ -63,7 +63,11 @@ def test_vendor_is_the_exact_ordered_models_source(vendor: Vendor) -> None:
 @pytest.mark.parametrize("vendor", VENDORS, ids=[v.filename for v in VENDORS])
 def test_tenant_ledger_binds_the_exact_vendor_once(vendor: Vendor) -> None:
     artifact = f"nodes/{vendor.node}/{vendor.filename}"
-    lines = (FORWARD / "_ledger/application-migrations.tsv").read_text().splitlines()
+    lines = (
+        (FORWARD / "_ledger/application-migrations.tsv")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     rows = [line.split("\t") for line in lines if line.split("\t", 1)[0] == artifact]
     assert rows == [
         [
@@ -80,5 +84,18 @@ def test_tenant_ledger_binds_the_exact_vendor_once(vendor: Vendor) -> None:
 @pytest.mark.parametrize("vendor", VENDORS, ids=[v.filename for v in VENDORS])
 def test_backfill_and_constraints_are_classified_forward_only(vendor: Vendor) -> None:
     artifact = f"nodes/{vendor.node}/{vendor.filename}"
-    classes = yaml.safe_load((ROOT / "config/migration_classes.yaml").read_text())
+    classes = yaml.safe_load(
+        (ROOT / "config/migration_classes.yaml").read_text(encoding="utf-8")
+    )
     assert classes["migrations"].get(f"forward/{artifact}") == "forward-only"
+
+
+@pytest.mark.parametrize("vendor", VENDORS, ids=[v.filename for v in VENDORS])
+def test_ledger_sha_is_the_vendored_file_hash(vendor: Vendor) -> None:
+    """The ledger row's sha256 is the vendored file's own hash, not just a constant."""
+    artifact = f"nodes/{vendor.node}/{vendor.filename}"
+    data = (FORWARD / artifact).read_bytes()
+    lines = (FORWARD / "_ledger/application-migrations.tsv").read_text(encoding="utf-8")
+    rows = [line.split("\t") for line in lines.splitlines()]
+    [row] = [row for row in rows if row[0] == artifact]
+    assert row[-1] == hashlib.sha256(data).hexdigest()
