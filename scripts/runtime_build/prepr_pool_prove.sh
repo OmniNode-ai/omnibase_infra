@@ -341,7 +341,7 @@ fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
 # it boots the composed stack: omnimarket's Dockerfile.runtime built on the infra
 # image this run just built, and the local-market bundle rendered with that image
 # on every service that runs the runtime or the market image. `build` writes the
-# container names of that render to $W/composed-containers (composed_build); no
+# container names of that render to $W/composed-containers in composed_build, and no
 # name is listed here. The two kernels are always read, the composed services
 # beside them. A proof without omnimarket reads the two kernels, as before. A
 # proof with omnimarket and no list reads nothing, and the judge fails a subject
