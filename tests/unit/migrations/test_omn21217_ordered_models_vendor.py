@@ -35,8 +35,8 @@ VENDORS = (
     Vendor(
         node="node_delegation_routing_reducer",
         filename="0007_add_credential_ordered_models.sql",
-        sha256="8f8a591ca8969219d32e4095804f83846aa11f3e2bde8680f518b7dc1b7e1865",
-        blob="50de5a6c37d0c6cbfb0d46c563f349ae509cbfd4",
+        sha256="52508b6a27a8956ad0739940364377b96bb1773588974b8a026a890f75da2233",
+        blob="2cb17409d7b5974a3d06bd6f732c93ffc6fb8c12",
     ),
     Vendor(
         node="node_projection_tenant_credentials",

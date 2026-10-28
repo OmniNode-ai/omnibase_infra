@@ -10,6 +10,14 @@ WHERE models = '[]'::JSONB
   AND btrim(model_name) <> ''
   AND model_name <> 'byok-model-unresolved';
 
+-- Drop before add, as 0009 does, so a replayed or partly applied run does not
+-- fail on a constraint that already exists.
 ALTER TABLE delegation_routing_tenant_overlay
-    ADD CONSTRAINT credential_route_version_positive CHECK (version > 0),
+    DROP CONSTRAINT IF EXISTS credential_route_version_positive;
+ALTER TABLE delegation_routing_tenant_overlay
+    ADD CONSTRAINT credential_route_version_positive CHECK (version > 0);
+
+ALTER TABLE delegation_routing_tenant_overlay
+    DROP CONSTRAINT IF EXISTS credential_route_models_array;
+ALTER TABLE delegation_routing_tenant_overlay
     ADD CONSTRAINT credential_route_models_array CHECK (jsonb_typeof(models) = 'array');
