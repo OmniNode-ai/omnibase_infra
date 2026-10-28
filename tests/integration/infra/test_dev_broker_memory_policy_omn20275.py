@@ -21,7 +21,7 @@ from omnibase_infra.runtime.models.model_runtime_policy_contract import (
     ModelRuntimePolicyContract,
 )
 from scripts.preflight_required_compose_env import _check_broker_memory
-from scripts.render_runtime_policy_env import format_dotenv, render_env
+from scripts.render_runtime_policy_env import format_dotenv, load_contract, render_env
 from tests.ci._compose_render_omn21099 import load_compose
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -70,14 +70,33 @@ def test_rendered_policy_passes_preflight_and_matches_the_overlay() -> None:
     )
 
     broker = load_compose("docker-compose.dev-lane.yml")["services"]["redpanda"]
-    assert f"--memory {rendered['DEV_REDPANDA_MEMORY']}" in broker["command"]
-    assert broker["mem_limit"] == rendered["DEV_REDPANDA_MEM_LIMIT"]
-    _check_broker_memory(broker)
+    assert any(
+        arg.startswith("--memory ${DEV_REDPANDA_MEMORY:?") for arg in broker["command"]
+    )
+    assert broker["mem_limit"].startswith("${DEV_REDPANDA_MEM_LIMIT:?")
+    profile = load_compose("docker-compose.dev-lane.yml")["services"][
+        "redpanda-partition-cap"
+    ]
+    assert profile["environment"]["REDPANDA_PROFILE_MEMORY"].startswith(
+        "${DEV_REDPANDA_MEMORY:?"
+    )
 
 
 @pytest.mark.parametrize(
     ("memory", "limit"),
-    [("3G", "4g"), ("6G", "8g"), ("12G", "8g"), ("13G", "16g"), ("12G", "17g")],
+    [
+        ("0G", "16g"),
+        ("3G", "4g"),
+        ("6G", "8g"),
+        ("12G", "8g"),
+        ("13G", "16g"),
+        ("12G", "17g"),
+        ("12.00000000000000000000000001G", "16g"),
+        ("12G", "16.00000000000000000000000001g"),
+        ("12289M", "16g"),
+        ("12G", "16385m"),
+        ("oops", "16g"),
+    ],
 )
 def test_contract_model_refuses_unconsented_dev_broker_memory(
     memory: str, limit: str
@@ -90,3 +109,37 @@ def test_contract_model_refuses_unconsented_dev_broker_memory(
         ModelRuntimePolicyContract.model_validate(raw)
     with pytest.raises(ValueError):
         _check_broker_memory({"command": ["--memory", memory], "mem_limit": limit})
+
+
+@pytest.mark.parametrize(
+    ("memory", "limit"), [("12GiB", "16GiB"), ("12G", "16g"), ("12288M", "16384m")]
+)
+def test_contract_overlay_is_read_and_validated_each_time(
+    tmp_path: Path, memory: str, limit: str
+) -> None:
+    overlay = tmp_path / "runtime_policy.contract.yaml"
+    overlay.write_text(
+        yaml.safe_dump({"dev_redpanda_memory": memory, "dev_redpanda_mem_limit": limit})
+    )
+    rendered = render_env(load_contract(CONTRACT_PATH, overlay_root=tmp_path))
+    assert rendered["DEV_REDPANDA_MEMORY"] == memory
+    assert rendered["DEV_REDPANDA_MEM_LIMIT"] == limit
+    _check_broker_memory({"command": ["--memory", memory], "mem_limit": limit})
+    overlay.write_text("dev_redpanda_memory: 13G\ndev_redpanda_mem_limit: 16g\n")
+    with pytest.raises(ValidationError):
+        load_contract(CONTRACT_PATH, overlay_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "dev_redpanda_memory: 6G\n",
+        "dev_redpanda_memory: 6G\ndev_redpanda_mem_limit: 8g\nprofiles: {}\n",
+    ],
+)
+def test_broker_overlay_refuses_partial_or_foreign_policy(
+    tmp_path: Path, contents: str
+) -> None:
+    (tmp_path / "runtime_policy.contract.yaml").write_text(contents)
+    with pytest.raises(ValidationError):
+        load_contract(CONTRACT_PATH, overlay_root=tmp_path)
