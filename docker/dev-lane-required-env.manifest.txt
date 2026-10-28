@@ -57,6 +57,9 @@ DEV_KAFKA_SASL_PASSWORD
 DEV_KAFKA_SASL_USERNAME
 # Broker advertised address, shared with the base command (OMN-21279).
 DEV_REDPANDA_ADVERTISE_HOST
+# Dev broker values are contract-rendered; private runtime-policy overlays use the same bounds.
+DEV_REDPANDA_MEMORY
+DEV_REDPANDA_MEM_LIMIT
 # OMN-20533 provenance: runtime-effects' resolver config with the tenant
 # credential namespace rule. Contract-rendered into docker/runtime-policy.env,
 # never an operator value.
