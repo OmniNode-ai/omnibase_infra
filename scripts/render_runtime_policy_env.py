@@ -18,6 +18,9 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from omnibase_infra.models.contracts.model_dev_broker_memory_policy import (
+    ModelDevBrokerMemoryPolicy,
+)
 from omnibase_infra.runtime.models.model_runtime_policy_contract import (
     ModelRuntimePolicyContract,
     RuntimeProfileName,
@@ -86,10 +89,26 @@ def _secret_resolver_config_json(
     )
 
 
-def load_contract(path: Path = _DEFAULT_CONTRACT) -> ModelRuntimePolicyContract:
-    """Load the runtime policy contract."""
+def load_contract(
+    path: Path = _DEFAULT_CONTRACT, *, overlay_root: Path | None = None
+) -> ModelRuntimePolicyContract:
+    """Load policy with an optional strict, dev-broker-only private overlay.
+
+    The existing ONEX_LANE_OVERLAY_DIR holds runtime_policy.contract.yaml
+    alongside the private Bifrost lane contracts. No cached env or host setting
+    can override these two values; a present invalid overlay refuses the read.
+    """
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return ModelRuntimePolicyContract.model_validate(raw)
+    base = ModelRuntimePolicyContract.model_validate(raw)
+    if overlay_root is not None:
+        overlay_path = overlay_root / "runtime_policy.contract.yaml"
+        if overlay_path.exists():
+            overlay = ModelDevBrokerMemoryPolicy.model_validate(
+                yaml.safe_load(overlay_path.read_text(encoding="utf-8"))
+            )
+            raw = raw | overlay.model_dump()
+            return ModelRuntimePolicyContract.model_validate(raw)
+    return base
 
 
 def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
@@ -223,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--format",
-        choices=("dotenv", "shell"),
+        choices=("dotenv", "shell", "json"),
         default="dotenv",
         help="Output format.",
     )
@@ -233,13 +252,27 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Compare rendered dotenv output with this env file.",
     )
-    args = parser.parse_args(argv)
-
-    rendered = (
-        format_shell(render_env(load_contract(args.contract)))
-        if args.format == "shell"
-        else format_dotenv(render_env(load_contract(args.contract)))
+    parser.add_argument(
+        "--overlay-root",
+        type=Path,
+        default=None,
+        help="Private lane-overlay root; reads runtime_policy.contract.yaml when present.",
     )
+    parser.add_argument(
+        "--dev-broker-only",
+        action="store_true",
+        help="Emit only the two dev broker memory values.",
+    )
+    args = parser.parse_args(argv)
+    env = render_env(load_contract(args.contract, overlay_root=args.overlay_root))
+    if args.dev_broker_only:
+        env = {
+            key: env[key] for key in ("DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT")
+        }
+    if args.format == "json":
+        rendered = json.dumps(env, sort_keys=True) + "\n"
+    else:
+        rendered = format_shell(env) if args.format == "shell" else format_dotenv(env)
 
     if args.check_env_file is not None:
         expected = args.check_env_file.read_text(encoding="utf-8")

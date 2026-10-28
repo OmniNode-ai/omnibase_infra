@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import dotenv_values
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKER_DIR = REPO_ROOT / "docker"
@@ -125,6 +126,10 @@ def _compose_environment(
                 environment[variable] = str(REPO_ROOT / "placeholder")
             else:
                 environment[variable] = "placeholder"
+    policy = dotenv_values(DOCKER_DIR / "runtime-policy.env")
+    for key in ("DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"):
+        if key in environment and policy.get(key):
+            environment[key] = str(policy[key])
     environment.update(overrides)
     return environment
 
