@@ -47,11 +47,25 @@ SLOT_SERVICES = (
 )
 
 
+# The slot is rendered by prepr_verify_lane.sh from these three files, in this
+# order; a later file's ``restart`` replaces an earlier one's, and ``!reset``
+# drops it back to the default (no restart).
+COMPOSE_CHAIN = (
+    REPO_ROOT / "docker" / "docker-compose.infra.yml",
+    REPO_ROOT / "docker" / "docker-compose.dev-lane.yml",
+    OVERLAY,
+)
+
+_RESET = object()
+
+
 class _TagTolerantLoader(yaml.SafeLoader):
-    """Load the overlay without resolving compose's ``!override``/``!reset``."""
+    """Load a compose file, marking ``!reset`` and passing other tags through."""
 
 
-def _passthrough(loader: Any, _suffix: str, node: Any) -> Any:
+def _tag(loader: Any, suffix: str, node: Any) -> Any:
+    if suffix == "reset":
+        return _RESET
     if isinstance(node, yaml.SequenceNode):
         return loader.construct_sequence(node, deep=True)
     if isinstance(node, yaml.MappingNode):
@@ -59,24 +73,35 @@ def _passthrough(loader: Any, _suffix: str, node: Any) -> Any:
     return loader.construct_scalar(node)
 
 
-_TagTolerantLoader.add_multi_constructor("!", _passthrough)
-_TagTolerantLoader.add_multi_constructor("tag:yaml.org,2002:merge", _passthrough)
+_TagTolerantLoader.add_multi_constructor("!", _tag)
 
 
-def _services() -> dict[str, Any]:
-    text = re.sub(r"\$\{[A-Z_]+[^}]*\}", "1", OVERLAY.read_text(encoding="utf-8"))
+def _services(path: Path) -> dict[str, Any]:
+    text = re.sub(r"\$\{[A-Z_]+[^}]*\}", "1", path.read_text(encoding="utf-8"))
     loader = _TagTolerantLoader(text)
     try:
-        return loader.get_single_data()["services"]
+        return loader.get_single_data().get("services") or {}
     finally:
         loader.dispose()
 
 
+def _rendered_restart(name: str) -> object:
+    """The ``restart`` value the chain renders for ``name``, last file wins."""
+    policy: object = None
+    for path in COMPOSE_CHAIN:
+        service = _services(path).get(name)
+        if not isinstance(service, dict) or "restart" not in service:
+            continue
+        value = service["restart"]
+        policy = None if value is _RESET else value
+    return policy
+
+
 @pytest.mark.parametrize("name", SLOT_SERVICES)
 def test_every_slot_service_has_a_bounded_restart_policy(name: str) -> None:
-    policy = str(_services()[name].get("restart", ""))
-    assert re.fullmatch(r"on-failure:[1-5]", policy), (
-        f"{name} restart policy is {policy!r}. The slot inherits unless-stopped "
-        f"from the dev-lane overlay, which loops a failing service forever on "
-        f"the shared Postgres (OMN-21433)."
+    policy = _rendered_restart(name)
+    assert policy == "on-failure:3", (
+        f"{name} renders restart policy {policy!r} from the infra, dev-lane and "
+        f"prepr chain. The slot must stop after three failed restarts instead of "
+        f"looping on the shared Postgres (OMN-21433)."
     )
