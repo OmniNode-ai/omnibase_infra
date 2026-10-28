@@ -137,6 +137,7 @@ migrations:
   forward/nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql: forward-only # ALTER TABLE ADD CONSTRAINT DELEGATION_ROUTING_TENANT_OVERLAY_PROVIDER_TOKEN
   forward/nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql: forward-only # UPDATE
   forward/nodes/node_delegation_routing_reducer/0006_grant_app_dashboard_overlay.sql: expand-only
+  forward/nodes/node_delegation_routing_reducer/0007_add_credential_ordered_models.sql: forward-only # UPDATE backfill; ADD CONSTRAINT
   forward/nodes/node_deployment_evidence_reducer/0001_create_deployment_evidence_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT DEPLOYMENT_EVIDENCE_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT DEPLOYMENT
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
@@ -439,6 +440,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0006_tenant_credentials_expires_at.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0007_tenant_credentials_bound_host.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0008_tenant_credentials_workspace_id.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0009_tenant_credentials_models_and_version.sql: forward-only # UPDATE backfill; ADD CONSTRAINT
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
