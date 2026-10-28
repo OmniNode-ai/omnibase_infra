@@ -1,0 +1,81 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18087
+title: >-
+  Runtime startup joins consumer groups serially, one per topic; join only the topics in use
+summary: >
+  The dev runtime joined 522 consumer groups at boot one at a time, about 3 s each, so plugin activation took 2207 s and delegation had no consumer for 37 minutes after each recreate. EventBusRecovering.subscribe held its transport lock across the group join; the join now runs outside it. The runtime config contract declares boot_subscriptions.policy=in_use, so only contracts whose topics hold a record on the broker join at boot and every other contract joins on its first request. Plugin consumers, delegation's among them, start before the auto-wired interleave.
+
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - protocols
+requirements:
+  - id: req-omn18087-concurrent-joins
+    statement: Concurrent subscribes on the runtime bus join the broker concurrently.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: three concurrent EventBusRecovering.subscribe calls are inside the broker join at once, and a join overtaken by the fallback or by close releases its stale consumer
+  - id: req-omn18087-in-use-boot-set
+    statement: The boot interleave joins only contracts whose topics are in use.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: with a demand source, a contract whose subscribe topics hold no record is not joined at boot and is reported DEMAND_DEFERRED
+      - id: AC3
+        statement: >-
+          AC3: the first record on an idle topic attaches its contract, reading from earliest so that record is consumed
+  - id: req-omn18087-plugin-consumers-first
+    statement: Plugin consumers start before the auto-wired interleave.
+    acceptance:
+      - id: AC4
+        statement: >-
+          AC4: bootstrap starts plugin consumers before it calls subscribe_wired_contract_topics
+evidence_requirements:
+  - kind: tests
+    description: "Boot subscription tests pass"
+    command: "uv run pytest tests/unit/runtime/test_omn18087_recovering_bus_concurrent_subscribe.py tests/unit/runtime/auto_wiring/test_omn18087_boot_subscribes_only_topics_in_use.py -q --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn18087-ac1-concurrent-joins
+    description: >-
+      Concurrent subscribes overlap inside the join, and a join overtaken by fallback or close is released. Fails at the merge base, where the lock serialises the joins.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_omn18087_recovering_bus_concurrent_subscribe.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac2-ac3-in-use-boot-set
+    description: >-
+      An idle contract is not joined at boot and its first request attaches it from earliest. Fails at the merge base, which has no demand source.
+    source: manual
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_subscribes_only_topics_in_use.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac4-plugin-consumers-first
+    description: >-
+      Bootstrap starts plugin consumers before the auto-wired interleave. Fails at the merge base, which starts them after.
+    source: manual
+    binds_ac: [AC4]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/runtime/test_kernel.py -q --no-cov -k plugin_consumers_before_auto_wired_joins"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-deploy-probe
+    description: >-
+      Deploy probe: the running dev runtime imports the demand source and reports the in_use boot split in its log.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'import omnibase_infra.handlers.handler_kafka_topic_demand_source'
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'docker logs ${RUNTIME_CONTAINER:-omninode-runtime} 2>&1 | grep -F "Boot subscription split:" > /dev/null'
