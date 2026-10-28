@@ -259,6 +259,7 @@ readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     projection-live-events-writer
     infra-routing-decisions-consumer
     onex-api
+    cost-estimator-web
 )
 
 # OMN-18012: dev-lane Kafka clients that are declared in the BASE compose file
