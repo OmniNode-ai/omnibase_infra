@@ -619,7 +619,7 @@ services:
   # built with no credentials at all -- does not. The IAM leg stays a staging
   # concern.
   redpanda-scram-user:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     container_name: omnibase-infra-redpanda-scram-user
     entrypoint: ["/bin/sh", "-c"]
     environment:
@@ -724,7 +724,7 @@ services:
   # are AWS_MSK_IAM over SASL_SSL. The mechanism differs; the failure mode
   # pinned -- a client built with no credentials at all -- does not.
   redpanda-sasl-enable:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     container_name: omnibase-infra-redpanda-sasl-enable
     entrypoint: ["/bin/sh", "-c"]
     environment:

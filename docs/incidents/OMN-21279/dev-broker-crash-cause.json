@@ -66,6 +66,16 @@
       ],
       "source": "docker logs omnibase-infra-redpanda and journalctl -k on h201, read 2026-10-26T15:5xZ by lane fill-defect-dev-broker-crash-cause-20261026T1538Z",
       "note": "Container restarted 14:00:21Z by unless-stopped; RestartCount 2, OOMKilled false, --memory=12G --reserve-memory=0M --smp=1 --overprovisioned. Host h201 at 15:50Z: 94164 MB RAM, 42984 MB available, swap 59110 of 204799 MB used."
+    },
+    {
+      "at": "2026-10-28T08:35:30Z",
+      "kind": "SIGSEGV on shard 0 in scheduling group kafka (si_code 4294967290), on redpandadata/redpanda:v25.1.12",
+      "frames": [
+        "0x4a6742b kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x1cb (nm -D over /opt/redpanda/libexec/redpanda of the running v25.1.12 container; the offset is the same +0x1cb as the v24.3.18 crashes of 2026-10-26T12:19:27Z and 14:00:12Z)",
+        "0xae61b1c, 0xaee4262, 0x4070f: nearest dynamic symbols are operator delete[] and permit_unsafe_log_operation::_flag, far too large a distance to trust (unverified)"
+      ],
+      "source": "lane dev-broker-unhealthy-0945 (backtrace head), symbolized by lane dev-broker-crash-fix-1025 (OMN-20769) on h201 2026-10-28; container started 2026-10-27T11:44:31Z, RestartCount 1, OOMKilled false, cluster_version 15",
+      "note": "v25.1.12 is the first hop, not the fix: the CORE-16883 backport shipped in v25.3.16, and no v25.2.x release carries it. One crash in about 21 hours on v25.1.12 against 5 in 17 hours on v24.3.18 before the memory cap."
     }
   ],
   "symbolization": "nm -D --defined-only over /opt/redpanda/libexec/redpanda copied out of the running container; PIE, so backtrace addresses are offsets; nearest preceding dynamic symbol. The binary carries no debug info.",
@@ -137,7 +147,7 @@
       "redpandadata/redpanda:v25.3.18"
     ],
     "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
-    "pending": "the first hop is proven on a copy of the dev data volume (hop_proof.data_copy_run) and v25.1.12 is pinned by OMN-21279; deploy v25.1.12 to the dev broker and read it back, then pin and deploy v25.2.14 and v25.3.18 one at a time; no hop is deployed yet",
+    "pending": "v25.1.12 is live on the dev broker (read back 2026-10-28: image v25.1.12, cluster_version 15) and crashed in list_groups +0x1cb; OMN-20769 pins v25.2.14 (second hop, no fix in it) and moves deployed_feature_release to 25.1; deploy it and read it back, then pin v25.3.18, the first image on the path that carries the fix",
     "hop_proof": {
       "guard": "tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py refuses a declared hop whose image needs a newer logical version than the previous image leaves, and a chain image with no measured entry",
       "scratch_run": "2026-10-26 on h200, synthetic v24.3.18 volume with 20 topics, 400 groups, 3000 records on hop-t0, a SCRAM superuser and enable_sasl true: cluster_version 14 -> 15 -> 16 -> 17 across v25.1.12, v25.2.14, v25.3.18; topics 20, groups 400, high watermark 3000, committed offset 3000, the user and the unauthenticated refusal unchanged at every hop; a second seeded volume repeated the same four hops with topics 20 and groups 400 at each",
