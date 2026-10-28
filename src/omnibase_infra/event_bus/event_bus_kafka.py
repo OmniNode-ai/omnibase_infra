@@ -5609,6 +5609,17 @@ class EventBusRecovering(EventBusKafka):
         self._recovery_task: asyncio.Task[None] | None = None
         self._kafka_close_task: asyncio.Task[None] | None = None
         self._transport_lock = asyncio.Lock()
+        # OMN-18087: advanced under the transport lock each time the transport
+        # switches to local delivery. A Kafka attach runs outside the lock, so
+        # it reads this before joining and compares after: a change means the
+        # consumer it made belongs to a transport that has been replaced.
+        self._transport_generation = 0
+        # Kafka joins still running outside the lock. Recovery restores only
+        # once they have settled, so a join begun on the old transport cannot
+        # hold a consumer reservation that a restore would then skip.
+        self._kafka_joins_in_flight = 0
+        self._kafka_joins_settled = asyncio.Event()
+        self._kafka_joins_settled.set()
         self._attachments: dict[str, _Attach] = {}
         self._unsubscribes: dict[str, _Unsubscribe] = {}
         self._recovery_stopped = asyncio.Event()
@@ -5634,6 +5645,7 @@ class EventBusRecovering(EventBusKafka):
         if self._fallback_active or self._recovery_closed:
             return
         self._fallback_active = True
+        self._transport_generation += 1
         await self._local_start()
         for key, attach in self._attachments.items():
             self._unsubscribes[key] = await attach(True)
@@ -5678,6 +5690,7 @@ class EventBusRecovering(EventBusKafka):
                     # subscriptions must work even while a connect/join hangs.
                     await self._close_kafka_transport()
                     await super().start()
+                    await self._kafka_joins_settled.wait()
                 await self._restore_subscriptions()
                 logger.info("Runtime event bus recovered; Kafka subscriptions restored")
                 return
@@ -5818,14 +5831,26 @@ class EventBusRecovering(EventBusKafka):
             )
 
         key = str(uuid4())
-        async with self._transport_lock:
-            # With Kafka live, a failed attach is this subscription's own
-            # failure (e.g. an unprovisioned topic): raise it to the caller as
-            # EventBusKafka does. Degrading the whole bus would retain an
-            # attachment that recovery can never restore.
-            unsubscribe = await attach(self._fallback_active)
-            self._attachments[key] = attach
-            self._unsubscribes[key] = unsubscribe
+        while True:
+            async with self._transport_lock:
+                if self._fallback_active:
+                    # Local delivery is in-memory, so attaching under the lock
+                    # costs nothing and keeps the switch atomic.
+                    self._unsubscribes[key] = await attach(True)
+                    self._attachments[key] = attach
+                    break
+                generation = self._transport_generation
+                self._kafka_joins_in_flight += 1
+                self._kafka_joins_settled.clear()
+            try:
+                unsubscribe = await self._join_kafka(attach, generation, key, topic)
+            finally:
+                async with self._transport_lock:
+                    self._kafka_joins_in_flight -= 1
+                    if self._kafka_joins_in_flight == 0:
+                        self._kafka_joins_settled.set()
+            if unsubscribe is not None:
+                break
 
         async def unsubscribe_current() -> None:
             async with self._transport_lock:
@@ -5835,6 +5860,62 @@ class EventBusRecovering(EventBusKafka):
                     await current()
 
         return unsubscribe_current
+
+    async def _join_kafka(
+        self,
+        attach: _Attach,
+        generation: int,
+        key: str,
+        topic: str,
+    ) -> _Unsubscribe | None:
+        """Join on Kafka outside the lock; record ownership if the transport held.
+
+        Returns the unsubscribe once recorded, or None when the transport was
+        replaced during the join and the caller must attach again.
+        """
+        # OMN-18087: the Kafka attach is a consumer-group join (about 3 s on
+        # the dev broker, its group_initial_rebalance_delay). Holding the
+        # transport lock across it serialised every subscription in the
+        # process: 522 boot subscriptions took 2207 s on the dev lane on 2026-10-28
+        # although auto-wiring attaches contracts concurrently. The join
+        # runs outside the lock; ownership is recorded under it.
+        #
+        # With Kafka live, a failed attach is this subscription's own
+        # failure (e.g. an unprovisioned topic): raise it to the caller as
+        # EventBusKafka does. Degrading the whole bus would retain an
+        # attachment that recovery can never restore.
+        try:
+            unsubscribe = await attach(False)
+        except Exception:
+            async with self._transport_lock:
+                replaced = self._transport_generation != generation
+                closed = self._recovery_closed
+            if not replaced or closed:
+                raise
+            return None  # the transport changed under the join; attach again
+        async with self._transport_lock:
+            if self._transport_generation == generation:
+                self._attachments[key] = attach
+                self._unsubscribes[key] = unsubscribe
+                return unsubscribe
+            closed = self._recovery_closed
+        # The transport was replaced (fallback) or closed while this join
+        # ran, and whatever re-attached the retained subscriptions did not
+        # see this one. Its consumer belongs to the old transport.
+        try:
+            await unsubscribe()
+        except (*_CONNECT_ERRORS, OSError, RuntimeError):
+            # A stale consumer's teardown never masks the outcome below.
+            logger.warning(
+                "Stale Kafka subscription teardown failed (topic=%s)",
+                topic,
+                exc_info=True,
+            )
+        if closed:
+            raise InfraUnavailableError(
+                f"Runtime event bus closed while subscribing to {topic}"
+            )
+        return None
 
     async def health_check(self) -> dict[str, object]:
         """Local delivery is live but explicitly degraded, never Kafka-ready."""
@@ -5876,6 +5957,7 @@ class EventBusRecovering(EventBusKafka):
             except asyncio.CancelledError:
                 pass
         async with self._transport_lock:
+            self._transport_generation += 1
             await self._close_kafka_transport()
             await self._local_close()
             self._attachments.clear()

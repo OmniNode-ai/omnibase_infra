@@ -4503,6 +4503,45 @@ async def bootstrap() -> int:
             )
             health_server.attach_manifest(_introspection_manifest)
 
+        # --- Pass 2: Start consumers for ready plugins only ---
+        # OMN-18087: Pass 2 runs BEFORE the auto-wired interleave below. Plugin
+        # consumers (delegation among them) are a handful of topics; behind the
+        # interleave they waited for every auto-wired group join, and on the dev lane on
+        # 2026-10-28 delegation had no consumer for 37 minutes of that wait.
+        # ready_plugins is a subset of activated_plugins: only plugins that
+        # completed wire_handlers() successfully. This prevents starting
+        # consumers for plugins with no handlers/dispatchers wired.
+        for plugin in ready_plugins:
+            plugin_id = plugin.plugin_id
+            try:
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if not consumer_result.success:
+                    logger.warning(
+                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
+                        plugin_id,
+                        consumer_result.get_error_message_or_default(
+                            consumer_result.message or "unknown"
+                        ),
+                        correlation_id,
+                    )
+                    continue
+                if consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+                logger.info(
+                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                    exc_info=True,
+                )
+
         # OMN-13768: the long-running Kafka subscription work (per-contract
         # boot interleave, plugin consumer start, ContractRegistrationEventRouter
         # wiring) now runs AFTER RuntimeHostProcess is created/registered/attached
@@ -4591,6 +4630,28 @@ async def bootstrap() -> int:
             # Without this the gate waits forever on a contract the interleave
             # filtered out, and /ready is 503 for the life of the process.
             _attach_exclusions: list[ModelContractAttachExclusion] = []
+            # OMN-18087: the runtime config contract declares which contracts
+            # join at boot. ``in_use`` joins only the contracts whose topics
+            # hold a record on the broker and starts each of the rest on its
+            # first request; the in-memory bus has no broker to ask, so it
+            # joins every contract as before.
+            from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
+                HandlerKafkaTopicDemandSource,
+            )
+
+            _demand_source: HandlerKafkaTopicDemandSource | None = None
+            if config.boot_subscriptions.policy == "in_use" and isinstance(
+                event_bus, EventBusKafka
+            ):
+                _demand_source = HandlerKafkaTopicDemandSource(event_bus.config)
+            logger.info(
+                "Boot subscription policy=%s demand_start=%s (OMN-18087, "
+                "correlation_id=%s)",
+                config.boot_subscriptions.policy,
+                _demand_source is not None,
+                correlation_id,
+            )
+            _demand_watch_stops: list[Callable[[], Awaitable[None]]] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -4604,7 +4665,10 @@ async def bootstrap() -> int:
                 exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+                demand_source=_demand_source,
+                demand_watch_stops_out=_demand_watch_stops,
             )
+            plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
             _gate_status = _contract_attach_gate.status()
@@ -4771,41 +4835,6 @@ async def bootstrap() -> int:
                     len(_unattached_at_boot),
                     sorted(r.contract_name for r in _unattached_at_boot),
                     correlation_id,
-                )
-
-        # --- Pass 2: Start consumers for ready plugins only ---
-        # ready_plugins is a subset of activated_plugins: only plugins that
-        # completed wire_handlers() successfully. This prevents starting
-        # consumers for plugins with no handlers/dispatchers wired.
-        for plugin in ready_plugins:
-            plugin_id = plugin.plugin_id
-            try:
-                consumer_result = await plugin.start_consumers(plugin_config)
-                if not consumer_result.success:
-                    logger.warning(
-                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
-                        plugin_id,
-                        consumer_result.get_error_message_or_default(
-                            consumer_result.message or "unknown"
-                        ),
-                        correlation_id,
-                    )
-                    continue
-                if consumer_result.unsubscribe_callbacks:
-                    plugin_unsubscribe_callbacks.extend(
-                        consumer_result.unsubscribe_callbacks
-                    )
-                logger.info(
-                    "Plugin '%s' consumers started (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                    exc_info=True,
                 )
 
         plugin_activation_duration = time.time() - plugin_activation_start

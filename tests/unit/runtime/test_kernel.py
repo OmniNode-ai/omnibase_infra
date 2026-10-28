@@ -1159,6 +1159,100 @@ class TestBootstrap:
         assert exit_code == 0
         assert order == ["wire", "freeze", "subscribe"]
 
+    async def test_bootstrap_starts_plugin_consumers_before_auto_wired_joins(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+    ) -> None:
+        """OMN-18087: plugin consumers (delegation's among them) join first.
+
+        Behind the auto-wired interleave they waited for every auto-wired
+        group join; on the dev lane on 2026-10-28 that left delegation without a
+        consumer for 37 minutes after a recreate.
+        """
+        from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+        from omnibase_infra.runtime.models.model_domain_plugin_config import (
+            ModelDomainPluginConfig,
+        )
+        from omnibase_infra.runtime.models.model_domain_plugin_result import (
+            ModelDomainPluginResult,
+        )
+
+        order: list[str] = []
+        manifest = ModelAutoWiringManifest(
+            contracts=(
+                ModelDiscoveredContract(
+                    name="node_registration_orchestrator",
+                    node_type="ORCHESTRATOR_GENERIC",
+                    contract_version=ModelContractVersion(major=1, minor=1, patch=0),
+                    contract_path=Path("/fake/contract.yaml"),
+                    entry_point_name="node_registration_orchestrator",
+                    package_name="omnibase_infra",
+                    event_bus=ModelEventBusWiring(
+                        subscribe_topics=("onex.evt.platform.node-introspection.v1",),
+                        publish_topics=(),
+                    ),
+                    handler_routing=None,
+                ),
+            ),
+            errors=(),
+        )
+        original_start_consumers = PluginLlm.start_consumers
+
+        async def record_plugin_consumers(
+            self: PluginLlm, config: ModelDomainPluginConfig
+        ) -> ModelDomainPluginResult:
+            order.append("plugin_consumers")
+            return await original_start_consumers(self, config)
+
+        async def fake_wire_from_manifest(**kwargs: object) -> ModelAutoWiringReport:
+            return ModelAutoWiringReport(
+                results=(
+                    ModelContractWiringResult(
+                        contract_name="node_registration_orchestrator",
+                        package_name="omnibase_infra",
+                        outcome=EnumWiringOutcome.WIRED,
+                    ),
+                ),
+                duplicates=(),
+            )
+
+        async def fake_subscribe_wired_contract_topics(
+            **kwargs: object,
+        ) -> dict[str, tuple[str, ...]]:
+            order.append("auto_wired_joins")
+            return {}
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                side_effect=fake_wire_from_manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.subscribe_wired_contract_topics",
+                side_effect=fake_subscribe_wired_contract_topics,
+            ),
+            patch.object(PluginLlm, "start_consumers", new=record_plugin_consumers),
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as mock_event,
+        ):
+            event_instance = MagicMock()
+            event_instance.wait = AsyncMock(return_value=None)
+            mock_event.return_value = event_instance
+
+            exit_code = await bootstrap()
+
+        assert exit_code == 0
+        assert "plugin_consumers" in order
+        assert "auto_wired_joins" in order
+        assert order.index("plugin_consumers") < order.index("auto_wired_joins")
+
     async def test_bootstrap_fails_when_kafka_configured_without_bootstrap_servers(
         self,
         mock_wire_infrastructure: MagicMock,
