@@ -25,6 +25,7 @@ import yaml
 
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver, ResolvedStack
+from omnibase_infra.topology import validate_docker_catalog_parity
 
 pytestmark = pytest.mark.unit
 
@@ -112,9 +113,11 @@ def test_dev_lane_writer_names_the_lane_the_node_is_scoped_to() -> None:
 def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None:
     resolver = CatalogResolver(catalog_dir=str(DOCKER / "catalog"))
     manifest = resolver._manifests[WRITER]
-    rendered = generate_compose(
+    services = generate_compose(
         ResolvedStack(manifests={WRITER: manifest}, required_env=set(), injected_env={})
-    )["services"][WRITER]
+    )["services"]
+    assert isinstance(services, dict)
+    rendered = services[WRITER]
     env = rendered["environment"]
     overlay_env = _env("docker-compose.dev-lane.yml", WRITER)
 
@@ -134,7 +137,18 @@ def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None
         assert env[key].split(":?", 1)[0] == overlay_env[key].split(":?", 1)[0]
         assert env[key].startswith("${DEV_KAFKA_SASL_")
     assert "${ROLE_OMNIDASH_PASSWORD:?" in env["OMNIDASH_ANALYTICS_DB_URL"]
+    assert "OMNINODE_INTERNAL_DB_URL" in manifest.required_env
+    assert env["OMNINODE_INTERNAL_DB_URL"].startswith("${OMNINODE_INTERNAL_DB_URL:?")
     assert rendered["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
+
+
+def test_catalog_writer_declares_its_application_database_bindings() -> None:
+    catalog = yaml.safe_load((DOCKER / "catalog/database-consumers.yaml").read_text())
+    assert set(catalog["consumers"][WRITER]["bindings"]) == {
+        "omninode_runtime_service",
+        "app_dashboard",
+    }
+    validate_docker_catalog_parity()
 
 
 def _derived_dev_overlays() -> list[str]:

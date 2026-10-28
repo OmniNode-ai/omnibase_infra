@@ -11,12 +11,11 @@ running lane where the projection silently has no owner or two.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
 
 import pytest
-import yaml
 
 from omnibase_infra.models.runtime.model_runtime_node_selection import (
     ENV_RUNTIME_NODE_EXCLUSION,
@@ -24,19 +23,12 @@ from omnibase_infra.models.runtime.model_runtime_node_selection import (
 )
 from omnibase_infra.runtime.auto_wiring import filter_manifest_for_runtime_profile
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
+from tests.unit.infra.test_broker_profile_omn19419 import _render
 
 pytestmark = pytest.mark.integration
 
-DOCKER = Path(__file__).resolve().parents[3] / "docker"
 NODE = "projection_claude_hook_events"
 OTHER = "node_other_omn19513"
-
-
-def _service_env(compose: str, service: str) -> dict[str, str]:
-    text = (DOCKER / compose).read_text(encoding="utf-8")
-    services: dict[str, Any] = yaml.safe_load(text.replace("!override", ""))["services"]
-    environment = services[service]["environment"]
-    return {str(key): str(value) for key, value in environment.items()}
 
 
 def _write_contract(root: Path, name: str) -> Path:
@@ -69,9 +61,24 @@ def test_lane_environment_gives_the_projection_exactly_one_owner(
     assert manifest.total_errors == 0
     assert {contract.name for contract in manifest.contracts} == {NODE, OTHER}
 
-    main_env = _service_env("docker-compose.dev-lane.yml", "omninode-runtime")
-    writer_env = _service_env(
-        "docker-compose.infra.yml", "projection-claude-hook-events-writer"
+    # Compose resolves anchors, interpolation and !override across the actual
+    # deployment stack; parsing each YAML file alone cannot prove the handoff.
+    services = _render(
+        "dev",
+        {
+            "COMPOSE_PROJECT_NAME": os.environ.get(
+                "COMPOSE_PROJECT_NAME", "omn19513-render"
+            )
+        },
+    )["services"]
+    main_env = services["omninode-runtime"]["environment"]
+    writer_service = services["projection-claude-hook-events-writer"]
+    writer_env = writer_service["environment"]
+    assert writer_service["profiles"] == ["runtime", "full"]
+    assert writer_env["ONEX_RUNTIME_LANE"] == main_env["ONEX_RUNTIME_LANE"]
+    assert writer_env["ONEX_WIRING_STRICT_MODE"] == "1"
+    assert writer_env["OMNINODE_INTERNAL_DB_URL"].startswith(
+        "postgresql://omninode_runtime:"
     )
 
     main = filter_manifest_for_runtime_profile(

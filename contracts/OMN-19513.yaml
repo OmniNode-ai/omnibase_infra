@@ -157,3 +157,14 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py -k test_catalog_writer_preserves_dev_lane_placement_and_broker_policy -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC5]
+  - id: "dod-omn19513-writer-database-inventory-and-compose-handoff"
+    description: "The writer declares its internal and analytics database bindings; Docker Compose renders the base plus dev overlay before the real discovery/filter handoff assertions."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]

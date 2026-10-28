@@ -14,6 +14,8 @@ required_env:
   - DEV_KAFKA_SASL_USERNAME
   - DEV_KAFKA_SASL_PASSWORD
   - ROLE_OMNIDASH_PASSWORD
+  # The selected internal-domain projection resolves this topology binding.
+  - OMNINODE_INTERNAL_DB_URL
   - ONEX_RUNTIME_LANE
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
