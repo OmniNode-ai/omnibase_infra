@@ -8,8 +8,9 @@ costs no group join (each join costs the broker's group_initial_rebalance_delay,
 3 s on the dev lane) and moves no offset a real consumer will later read from.
 
 A topic is in use when any of its partitions holds a retained record (its high
-watermark is above its low watermark). The measure is the broker's own state at
-boot; nothing in it is a list of topics or nodes.
+watermark is above its low watermark), or when it cannot be read at all, so that
+a topic not yet provisioned keeps its contract on the boot path. The measure is
+the broker's own state at boot; nothing in it is a list of topics or nodes.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from aiokafka.structs import TopicPartition
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +48,35 @@ class HandlerKafkaTopicDemandSource:
             enable_auto_commit=False,
             **build_aiokafka_auth_kwargs(self._config),
         )
+        # The bus addresses a lane-namespaced physical topic for each contract
+        # topic; read the same physical topics and report contract names back.
+        logical_of = {apply_topic_namespace(topic): topic for topic in topics}
         await consumer.start()
         try:
             # topics() refreshes cluster metadata for every topic the principal
-            # can describe; a topic it cannot see is left out and stays idle.
+            # can describe.
             visible = await consumer.topics()
             partitions = [
-                TopicPartition(topic, partition)
-                for topic in sorted(set(topics) & visible)
-                for partition in sorted(consumer.partitions_for_topic(topic) or ())
+                TopicPartition(physical, partition)
+                for physical in sorted(set(logical_of) & visible)
+                for partition in sorted(consumer.partitions_for_topic(physical) or ())
             ]
             low = await consumer.beginning_offsets(partitions) if partitions else {}
             high = await consumer.end_offsets(partitions) if partitions else {}
         except BaseException:
             await consumer.stop()
             raise
-        in_use = frozenset(tp.topic for tp in partitions if high[tp] > low[tp])
-        watched = [tp for tp in partitions if tp.topic not in in_use]
+        # A topic that cannot be read here (not yet provisioned, or not visible
+        # to this principal) counts as in use: it cannot be watched, so its
+        # contract joins at boot exactly as it did before.
+        with_records = {tp.topic for tp in partitions if high[tp] > low[tp]}
+        readable = {tp.topic for tp in partitions}
+        in_use = frozenset(
+            logical
+            for physical, logical in logical_of.items()
+            if physical in with_records or physical not in readable
+        )
+        watched = [tp for tp in partitions if tp.topic not in with_records]
         if not watched:
             await consumer.stop()
 
@@ -74,8 +88,12 @@ class HandlerKafkaTopicDemandSource:
         consumer.assign(watched)
         for tp in watched:
             consumer.seek(tp, high[tp])
+
+        async def on_first_physical_record(physical: str) -> None:
+            await on_first_record(logical_of[physical])
+
         task = asyncio.create_task(
-            self._watch(consumer, watched, on_first_record),
+            self._watch(consumer, watched, on_first_physical_record),
             name="boot-subscription-demand-watch",
         )
 

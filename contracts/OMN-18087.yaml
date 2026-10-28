@@ -25,6 +25,9 @@ requirements:
       - id: AC3
         statement: >-
           AC3: the first record on an idle topic attaches its contract, reading from earliest so that record is consumed
+      - id: AC5
+        statement: >-
+          AC5: the reader measures the lane's physical (namespaced) topics, reports contract topic names, keeps a topic it cannot read on the boot path, and joins no consumer group
   - id: req-omn18087-plugin-consumers-first
     statement: Plugin consumers start before the auto-wired interleave.
     acceptance:
@@ -57,6 +60,15 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_omn18087_boot_subscribes_only_topics_in_use.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-ac5-demand-reader
+    description: >-
+      The group-less reader splits and watches only empty readable topics on the lane's namespace. The module does not exist at the merge base.
+    source: manual
+    binds_ac: [AC5]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py -q --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: dod-omn18087-ac4-plugin-consumers-first
     description: >-
