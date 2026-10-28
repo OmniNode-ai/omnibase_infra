@@ -1,0 +1,43 @@
+schema_version: 1.0.0
+ticket_id: OMN-20769
+title: The dev message service stops crashing
+summary: >-
+  The dev Redpanda broker moves along its declared upgrade path from v25.1.12 to v25.2.14, the second hop toward v25.3.18, the first image on the path that carries the group erase race fix.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-dev-broker-second-hop
+    statement: Declared by this pull request under the ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: every dev broker image site pins redpandadata/redpanda:v25.2.14, deployed_feature_release is 25.1 and v25.1.12 has left the declared path -- falsifier: test_dev_broker_image_pin_omn17427.py, which fails on the v25.1.12 image, and test_dev_broker_upgrade_path_omn21279.py, which refuses any pin that is not the next proven hop
+evidence_requirements:
+  - kind: tests
+    description: The dev broker image is the same in every site and takes the next proven hop of the declared path.
+    command: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q -n 0 --no-cov -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20769-second-hop
+    description: >-
+      AC1. The pin tests hold every dev broker site to v25.2.14 and the declared path to its next proven hop.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC1"
+  - id: dod-omn20769-second-hop-deploy-probe
+    description: >-
+      AC1, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration names the deployed 25.1 feature release. At the merge base the catalog pins v25.1.12. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("deployed_feature_release: \"25.1\"")' | grep -qx true
+    binds_ac:
+      - "AC1"
