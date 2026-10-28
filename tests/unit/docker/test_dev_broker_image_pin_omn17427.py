@@ -18,8 +18,9 @@ a data copy.
 On 2026-10-28 the live v25.1.12 broker (cluster_version 15, read back on h201)
 crashed at ``kafka::group_manager::list_groups`` +0x1cb, the same frame as the
 v24.3.18 crashes: v25.1.12 is a hop, not the fix, which first ships in v25.3.16.
-The pin moved to v25.2.14, the second hop, and v25.3.18 follows once v25.2.14 is
-live and read back (OMN-20769).
+The pin moved to v25.2.14, the second hop, and then to v25.3.18, the first image
+on the path that carries the fix, once v25.2.14 was live and read back
+(OMN-20769).
 
 The image is spelled in several files: the catalog services, the base compose
 file (``docker-compose.infra.yml``: the broker and its partition-cap one-shot)
@@ -48,7 +49,15 @@ from tests.unit.docker.conftest import DOCKER_DIR
 
 pytestmark = [pytest.mark.unit]
 
-DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.2.14"
+DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.3.18"
+# Hops on the declared path that do not carry the CORE-16883 fix. A site left on
+# one of them keeps the dev broker on a build that crashes in ListGroups
+# (OMN-20769).
+SUPERSEDED_BROKER_IMAGES = (
+    "redpandadata/redpanda:v24.3.18",
+    "redpandadata/redpanda:v25.1.12",
+    "redpandadata/redpanda:v25.2.14",
+)
 
 CATALOG_DIR = DOCKER_DIR / "catalog" / "services"
 DEV_COMPOSE_FILES = ("docker-compose.infra.yml", "docker-compose.dev-lane.yml")
@@ -176,3 +185,13 @@ def test_no_other_compose_file_inherits_the_dev_broker_image() -> None:
                 continue
             inherited.append(f"{path.name}:{service}")
     assert not inherited, f"services inheriting the dev broker image: {inherited}"
+
+
+def test_no_dev_broker_site_stays_on_a_hop_without_the_fix() -> None:
+    declared = _declared_dev_images()
+    stale = {
+        where: image
+        for where, image in declared.items()
+        if image in SUPERSEDED_BROKER_IMAGES
+    }
+    assert not stale, f"dev broker site still on a build without the fix: {stale}"
