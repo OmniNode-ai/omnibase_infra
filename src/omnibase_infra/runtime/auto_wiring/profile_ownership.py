@@ -58,6 +58,8 @@ from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_L
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.models.runtime.model_runtime_lane_class_selection import (
     ModelRuntimeLaneClassSelection,
 )
@@ -371,8 +373,9 @@ def filter_manifest_for_runtime_profile(
     contract it does not name, listed in ``node_selection_excluded_contracts``;
     a name it carries that no discovered contract has adds a discovery error.
     A deployment node exclusion (``ONEX_RUNTIME_NODE_EXCLUSION``, OMN-19513)
-    drops the contracts it names on the same terms, and a name it carries that
-    no discovered contract has adds a discovery error.
+    drops the contracts it names. An undiscovered excluded name raises
+    ``RuntimeHostError`` before any contract can be wired: merely recording a
+    discovery error would let a typo leave this process owning a handed-off node.
 
     Args:
         environ: Override for the process environment the runtime lane is read
@@ -406,19 +409,17 @@ def filter_manifest_for_runtime_profile(
             )
             logger.error("Auto-wiring node selection: %s", record.error)
             lane_errors.append(record)
-    for name in node_selection.excluded:
-        if name not in discovered_names:
-            record = ModelDiscoveryError(
-                entry_point_name=name,
-                error=(
-                    f"{ENV_RUNTIME_NODE_EXCLUSION} names {name!r}, which no "
-                    "discovered contract is; a node handed to another process "
-                    "must exist or the exclusion is a typo that leaves two "
-                    "owners, fail-closed (OMN-19513)."
-                ),
-            )
-            logger.error("Auto-wiring node exclusion: %s", record.error)
-            lane_errors.append(record)
+    missing_exclusions = sorted(set(node_selection.excluded) - discovered_names)
+    if missing_exclusions:
+        raise RuntimeHostError(
+            f"{ENV_RUNTIME_NODE_EXCLUSION} names undiscovered contracts "
+            f"{missing_exclusions}; refusing runtime startup before wiring "
+            "because a misspelled handoff can leave two owners (OMN-19513).",
+            context=ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="filter_manifest_for_runtime_profile",
+            ),
+        )
     selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
     if selection.refusal:
         lane_errors.append(_lane_class_error(ENV_RUNTIME_LANE_CLASS, selection.refusal))

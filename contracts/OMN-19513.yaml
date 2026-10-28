@@ -138,3 +138,22 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC5]
+  - id: "dod-omn19513-handoff-refuses-unknown-exclusion"
+    description: "An unknown excluded contract refuses wiring with RuntimeHostError, including an empty discovery manifest; valid handoffs still wire real installed handlers with the kernel's wiring arguments."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/test_auto_wiring_real_manifest.py -k test_real_manifest_node_selection_wires_only_selected_contracts -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]
+  - id: "dod-omn19513-deploy-writer-catalog-policy"
+    description: "Hosted-runner deploy configuration probe: render the catalog writer and compare placement, strict wiring, broker policy, secret references and nofile limits with its dev-lane deployment."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py -k test_catalog_writer_preserves_dev_lane_placement_and_broker_policy -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]

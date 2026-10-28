@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_EXCLUSION,
     ENV_RUNTIME_NODE_SELECTION,
 )
 from omnibase_infra.runtime.auto_wiring import (
@@ -284,7 +285,10 @@ async def test_real_manifest_wiring_has_no_failures(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_real_manifest_node_selection_wires_only_selected_contracts() -> None:
+@pytest.mark.parametrize("handoff", [False, True])
+async def test_real_manifest_node_selection_wires_only_selected_contracts(
+    handoff: bool,
+) -> None:
     """A deployment node selection attaches only the named real contracts (OMN-17427).
 
     The kernel filters the discovered manifest through the ownership filter
@@ -309,16 +313,22 @@ async def test_real_manifest_node_selection_wires_only_selected_contracts() -> N
     )[:3]
     assert selected, "the real manifest offers no main-profile contract to select"
 
+    handed_off = selected[:1] if handoff else []
     result = filter_manifest_for_runtime_profile(
         manifest,
         "main",
-        environ={ENV_RUNTIME_NODE_SELECTION: ",".join(selected)},
+        environ={
+            ENV_RUNTIME_NODE_SELECTION: ",".join(selected),
+            ENV_RUNTIME_NODE_EXCLUSION: ",".join(handed_off),
+        },
     )
 
-    assert sorted(c.name for c in result.manifest.contracts) == selected
+    attached = [name for name in selected if name not in handed_off]
+    assert attached, "the real manifest offers no contract remaining after handoff"
+    assert sorted(c.name for c in result.manifest.contracts) == attached
     assert len(result.manifest.errors) == len(manifest.errors)
     assert len(result.node_selection_excluded_contracts) == (
-        manifest.total_discovered - len(selected) - len(result.skipped_contracts)
+        manifest.total_discovered - len(attached) - len(result.skipped_contracts)
     )
 
     report = await wire_from_manifest(
@@ -328,7 +338,7 @@ async def test_real_manifest_node_selection_wires_only_selected_contracts() -> N
         container=ModelONEXContainer(),
         subscribe_immediately=False,
     )
-    assert {r.contract_name for r in report.results} == set(selected)
+    assert {r.contract_name for r in report.results} == set(attached)
     failed = [r for r in report.results if str(r.outcome).endswith("FAILED")]
     assert not failed, "\n".join(f"  {r.contract_name}: {r.reason}" for r in failed)
 

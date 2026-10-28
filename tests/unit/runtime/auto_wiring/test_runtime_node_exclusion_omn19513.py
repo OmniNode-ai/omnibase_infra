@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.models.runtime.model_runtime_node_selection import (
     ENV_RUNTIME_NODE_EXCLUSION,
     ENV_RUNTIME_NODE_SELECTION,
@@ -98,16 +99,21 @@ def test_exclusion_wins_over_selection() -> None:
     assert _names(result.manifest.contracts) == {KEPT}
 
 
-def test_exclusion_naming_an_undiscovered_contract_is_a_discovery_error() -> None:
-    environ = {ENV_RUNTIME_NODE_EXCLUSION: f"{HANDED_OFF},node_missing_omn19513"}
+@pytest.mark.parametrize(
+    "excluded", ["node_missing_omn19513", f"{HANDED_OFF},node_missing_omn19513"]
+)
+@pytest.mark.parametrize("manifest", [MANIFEST, ModelAutoWiringManifest()])
+def test_exclusion_naming_an_undiscovered_contract_refuses_wiring(
+    excluded: str, manifest: ModelAutoWiringManifest
+) -> None:
+    """A typo must stop boot before main can subscribe the handed-off node."""
+    with pytest.raises(RuntimeHostError) as error:
+        filter_manifest_for_runtime_profile(
+            manifest, "main", environ={ENV_RUNTIME_NODE_EXCLUSION: excluded}
+        )
 
-    result = filter_manifest_for_runtime_profile(MANIFEST, "main", environ=environ)
-
-    assert _names(result.manifest.contracts) == {KEPT}
-    errors = [error.error for error in result.manifest.errors]
-    assert len(errors) == 1
-    assert "node_missing_omn19513" in errors[0]
-    assert ENV_RUNTIME_NODE_EXCLUSION in errors[0]
+    assert "node_missing_omn19513" in str(error.value)
+    assert ENV_RUNTIME_NODE_EXCLUSION in str(error.value)
 
 
 def test_raw_ownership_honours_exclusion() -> None:

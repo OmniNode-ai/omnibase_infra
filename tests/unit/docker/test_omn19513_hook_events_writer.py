@@ -23,6 +23,9 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.resolver import CatalogResolver, ResolvedStack
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +107,34 @@ def test_dev_lane_writer_names_the_lane_the_node_is_scoped_to() -> None:
     assert env["ONEX_RUNTIME_LANE_HEALTH_SPEAKER"] == "false"
     assert "ONEX_RUNTIME_LANE_HEALTH_SPEAKER" not in main_env
     assert env["ONEX_WIRING_STRICT_MODE"] == "1"
+
+
+def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None:
+    resolver = CatalogResolver(catalog_dir=str(DOCKER / "catalog"))
+    manifest = resolver._manifests[WRITER]
+    rendered = generate_compose(
+        ResolvedStack(manifests={WRITER: manifest}, required_env=set(), injected_env={})
+    )["services"][WRITER]
+    env = rendered["environment"]
+    overlay_env = _env("docker-compose.dev-lane.yml", WRITER)
+
+    for key in (
+        "ONEX_RUNTIME_LANE_HEALTH_SPEAKER",
+        "ONEX_WIRING_STRICT_MODE",
+        "KAFKA_SECURITY_PROTOCOL",
+        "KAFKA_SASL_MECHANISM",
+        "KAFKA_MAX_POLL_INTERVAL_MS",
+    ):
+        assert env.get(key) == overlay_env[key], key
+    # Public catalogs require the deployment's registered lane as input.
+    assert "ONEX_RUNTIME_LANE" in manifest.required_env
+    assert env["ONEX_RUNTIME_LANE"].startswith("${ONEX_RUNTIME_LANE:?")
+    for key in ("KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"):
+        # Bind the same operator secret; required-var messages may differ.
+        assert env[key].split(":?", 1)[0] == overlay_env[key].split(":?", 1)[0]
+        assert env[key].startswith("${DEV_KAFKA_SASL_")
+    assert "${ROLE_OMNIDASH_PASSWORD:?" in env["OMNIDASH_ANALYTICS_DB_URL"]
+    assert rendered["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
 
 
 def _derived_dev_overlays() -> list[str]:

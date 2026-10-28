@@ -11,10 +11,20 @@ required_env:
   - VALKEY_PASSWORD
   - KEYCLOAK_ADMIN_CLIENT_SECRET
   - ONEX_SERVICE_CLIENT_SECRET
+  - DEV_KAFKA_SASL_USERNAME
+  - DEV_KAFKA_SASL_PASSWORD
+  - ROLE_OMNIDASH_PASSWORD
+  - ONEX_RUNTIME_LANE
 hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
+  OMNIDASH_ANALYTICS_DB_URL: 'postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD required}@postgres:5432/omnidash_analytics'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+  KAFKA_SASL_MECHANISM: SCRAM-SHA-256
+  KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME required}
+  KAFKA_SASL_PASSWORD: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD required}
+  KAFKA_MAX_POLL_INTERVAL_MS: '1800000'
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   BUS_ID: local
   ONEX_CONTRACTS_DIR: /app/contracts
@@ -28,6 +38,9 @@ hardcoded_env:
   KEYCLOAK_ADMIN_URL: http://keycloak:8080
   OTEL_SERVICE_NAME: omnimarket-projection-claude-hook-events-writer
   RUNTIME_PROFILE: main
+  # The deployment supplies its registered lane; this is placement identity only.
+  ONEX_RUNTIME_LANE_HEALTH_SPEAKER: 'false'
+  ONEX_WIRING_STRICT_MODE: '1'
   # The one contract this process loads. The main runtime names the same
   # contract in ONEX_RUNTIME_NODE_EXCLUSION where the lane starts this service.
   ONEX_RUNTIME_NODE_SELECTION: projection_claude_hook_events
@@ -71,6 +84,10 @@ depends_on:
   - service: postgres
     condition: service_healthy
 restart: unless-stopped
+ulimits:
+  nofile:
+    soft: 65535
+    hard: 65535
 resources:
   cpus: '1.0'
   memory: 1536M
