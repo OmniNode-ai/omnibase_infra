@@ -1,22 +1,22 @@
 schema_version: 1.0.0
 ticket_id: OMN-20769
-title: The dev message service takes the second upgrade hop, v25.2.14, which does not carry the crash fix
+title: Declare the dev broker's second upgrade hop to v25.2.14 without claiming crash resolution
 summary: >-
-  The dev Redpanda broker moves along its declared upgrade path from v25.1.12 to v25.2.14, the second hop toward v25.3.18, the first image on the path that carries the group erase race fix.
+  The dev Redpanda configuration pins v25.2.14 as the next hop from the deployed v25.1.12 volume. This intermediate release does not carry the group erase race fix. Deployment and its live readback must precede a separate change to v25.3.18, the first fixed image on the declared path; this contract accepts the configuration milestone, not crash resolution.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-dev-broker-second-hop
-    statement: Declared by this pull request under the ticket; not transcribed from the ticket body.
+    statement: Advance the dev broker configuration by one proven feature release so its volume can subsequently take the fixed v25.3.18 hop. Keep the recorded deployed release at 25.1 until the second hop is deployed and read back; this change neither claims crash mitigation nor closes the crash investigation.
     acceptance:
       - id: AC1
         statement: >-
-          AC1: every dev broker image site pins redpandadata/redpanda:v25.2.14, deployed_feature_release is 25.1 and v25.1.12 has left the declared path -- falsifier: test_dev_broker_image_pin_omn17427.py, which fails on the v25.1.12 image, and test_dev_broker_upgrade_path_omn21279.py, which refuses any pin that is not the next proven hop
+          AC1: every dev broker image site pins redpandadata/redpanda:v25.2.14, deployed_feature_release is 25.1 and the remaining path is exactly v25.2.14 then v25.3.18, excluding v25.1.12 -- falsifiers: test_dev_broker_image_pin_omn17427.py holds all seven image sites to the pin, test_dev_broker_upgrade_path_omn21279.py refuses a skipped or unproven hop, and the parsed declaration check below asserts the deployed release and exact remaining path.
 evidence_requirements:
   - kind: tests
     description: The dev broker image is the same in every site and takes the next proven hop of the declared path.
-    command: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q -n 0 --no-cov -p no:randomly
+    command: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q --no-cov -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -28,16 +28,25 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q -n 0 --no-cov -p no:randomly
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_image_pin_omn17427.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py -q --no-cov -p no:randomly
     binds_ac:
       - "AC1"
-  - id: dod-omn20769-second-hop-deploy-probe
-    description: >-
-      AC1, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration names the deployed 25.1 feature release. At the merge base the catalog pins v25.1.12. The hosted runner runs it; it needs no Docker and no live host.
+  - id: dod-omn20769-remaining-path
+    description: AC1. Parse the declaration and require the recorded deployed release and both remaining hops, refusing a retained v25.1.12 entry or an extra, missing or reordered hop.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("deployed_feature_release: \"25.1\"")' | grep -qx true
+          uv run --frozen python -c 'from pathlib import Path; import yaml; declaration = yaml.safe_load(Path("docker/redpanda/dev_broker_upgrade_path.yaml").read_text()); assert declaration["deployed_feature_release"] == "25.1"; assert declaration["path"] == ["redpandadata/redpanda:v25.2.14", "redpandadata/redpanda:v25.3.18"]'
+    binds_ac:
+      - "AC1"
+  - id: dod-omn20769-second-hop-deploy-probe
+    description: >-
+      AC1, hosted configuration probe, not a live deployment readback. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the published commit checked out by CI, parses their YAML and requires the root image field, recorded deployed release and exact remaining path. Comments and unrelated keys cannot satisfy it. At the merge base the catalog pins v25.1.12. The hosted runner needs no Docker or lab access; an unpublished local commit is not a supported API ref.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content' | uv run --frozen python -c 'import base64, sys, yaml; service = yaml.safe_load(base64.b64decode(sys.stdin.read())); assert service["image"] == "redpandadata/redpanda:v25.2.14"' && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content' | uv run --frozen python -c 'import base64, sys, yaml; declaration = yaml.safe_load(base64.b64decode(sys.stdin.read())); assert declaration["deployed_feature_release"] == "25.1"; assert declaration["path"] == ["redpandadata/redpanda:v25.2.14", "redpandadata/redpanda:v25.3.18"]'
     binds_ac:
       - "AC1"
