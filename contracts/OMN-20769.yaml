@@ -1,6 +1,6 @@
 schema_version: 1.0.0
 ticket_id: OMN-20769
-title: The dev message service stops crashing
+title: The dev message service takes the second upgrade hop, v25.2.14, which does not carry the crash fix
 summary: >-
   The dev Redpanda broker moves along its declared upgrade path from v25.1.12 to v25.2.14, the second hop toward v25.3.18, the first image on the path that carries the group erase race fix.
 is_seam_ticket: false
