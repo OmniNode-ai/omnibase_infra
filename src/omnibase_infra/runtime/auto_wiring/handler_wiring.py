@@ -139,9 +139,6 @@ from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLik
 from omnibase_infra.protocols.protocol_projection_write_connection import (
     ProtocolProjectionWriteConnection,
 )
-from omnibase_infra.protocols.protocol_topic_demand_source import (
-    ProtocolTopicDemandSource,
-)
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
@@ -407,6 +404,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.enums import EnumMessageCategory
     from omnibase_infra.handlers.handler_infisical import HandlerInfisical
+    from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
+        HandlerKafkaTopicDemandSource,
+    )
     from omnibase_infra.models.dispatch.model_dispatch_result import (
         ModelDispatchResult,
     )
@@ -10302,7 +10302,7 @@ async def subscribe_wired_contract_topics(
     exclusions_out: list[ModelContractAttachExclusion] | None = None,
     core_runtime_topics: frozenset[str] = frozenset(),
     core_runtime_owners: Mapping[str, str] | None = None,
-    demand_source: ProtocolTopicDemandSource | None = None,
+    demand_source: HandlerKafkaTopicDemandSource | None = None,
     demand_watch_stops_out: list[Callable[[], Awaitable[None]]] | None = None,
 ) -> dict[str, tuple[str, ...]]:
     """Subscribe Kafka topics for contracts that already wired successfully.
@@ -10538,7 +10538,7 @@ async def subscribe_wired_contract_topics(
 async def _split_boot_set_by_demand(
     eligible: list[tuple[ModelContractWiringResult, ModelDiscoveredContract]],
     *,
-    demand_source: ProtocolTopicDemandSource,
+    demand_source: HandlerKafkaTopicDemandSource,
     start: Callable[
         [ModelContractWiringResult, ModelDiscoveredContract],
         Awaitable[ModelContractAttachResult],
