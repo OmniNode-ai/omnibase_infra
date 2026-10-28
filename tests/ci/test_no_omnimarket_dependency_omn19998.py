@@ -19,6 +19,23 @@ It refuses omnimarket on the package dependency surface:
 * ``src/omnibase_infra``: an ``import omnimarket`` or ``from omnimarket ...``
   executed at import time, that is anywhere outside a function body.
 
+OMN-21279 extends the guard past the package surface to the three places the
+ruling (RULING 2026-10-15T21:52:44Z) also names:
+
+* ``docker/Dockerfile.runtime``: any instruction line naming omnimarket, so the
+  runtime image installs, copies from, pins or imports no omnimarket.
+* CI install steps: a workflow or composite-action ``run`` step that installs
+  omnimarket (``pip install``, ``uv pip install``, ``uv sync``, ``uv add``).
+  The checker refuses any workflow text. The live-tree scan covers ``ci.yml``
+  (the workflow behind the required CI Summary gate) and every composite
+  action. Three other workflows (``pr-title-check``, ``r1-front-door-probe``,
+  ``evidence-autoclose-sweep``) still install omnimarket to run market nodes
+  from infra's CI; moving those jobs into omnimarket is the remaining work of
+  OMN-21279 AC1 and is not scanned until they are moved.
+* test fixtures: any ``import omnimarket`` / ``from omnimarket ...`` anywhere
+  in ``tests/`` (function scope included), or an ``importlib.import_module`` /
+  ``pytest.importorskip`` call naming omnimarket.
+
 There is no allowlist and no suppression marker. The negative controls below
 feed the same checkers a manifest, a lock and a module that do depend on
 omnimarket and assert each one fires.
@@ -34,6 +51,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPO_ROOT / "src" / "omnibase_infra"
@@ -170,8 +188,128 @@ def source_findings(source: str, label: str) -> list[str]:
     ]
 
 
+_FORBIDDEN_PATTERN = re.compile(FORBIDDEN, re.IGNORECASE)
+_INSTALL_VERB = re.compile(
+    r"\b(?:pip3?\s+install|uv\s+pip\s+install|uv\s+sync|uv\s+add|uv\s+tool\s+install"
+    r"|poetry\s+add)\b"
+)
+
+
+def _logical_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(first physical line, text)`` per backslash-joined logical line.
+
+    Whole-line ``#`` comments are dropped, as Docker and the shell both do.
+    """
+    pending: list[str] = []
+    start = 0
+    for number, raw in enumerate(text.splitlines(), start=1):
+        if not pending and raw.lstrip().startswith("#"):
+            continue
+        if raw.lstrip().startswith("#"):
+            continue
+        if not pending:
+            start = number
+        body = raw.rstrip()
+        if body.endswith("\\"):
+            pending.append(body[:-1])
+            continue
+        pending.append(body)
+        yield start, " ".join(part.strip() for part in pending)
+        pending = []
+    if pending:
+        yield start, " ".join(part.strip() for part in pending)
+
+
+def dockerfile_findings(text: str, label: str) -> list[str]:
+    """``label:line`` for each Dockerfile instruction line naming omnimarket."""
+    return [
+        f"{label}:{line}: names {FORBIDDEN}: {logical[:100]}"
+        for line, logical in _logical_lines(text)
+        if _FORBIDDEN_PATTERN.search(logical)
+    ]
+
+
+def _workflow_steps(document: object) -> Iterator[Mapping[str, object]]:
+    """Every step of every job, plus the steps of a composite action."""
+    if not isinstance(document, dict):
+        return
+    jobs = document.get("jobs", {})
+    containers = list(jobs.values()) if isinstance(jobs, dict) else []
+    runs = document.get("runs")
+    if isinstance(runs, dict):
+        containers.append(runs)
+    for container in containers:
+        steps = container.get("steps", []) if isinstance(container, dict) else []
+        for step in steps:
+            if isinstance(step, dict):
+                yield step
+
+
+def workflow_findings(text: str, label: str) -> list[str]:
+    """Each ``run`` step in a workflow or action that installs omnimarket."""
+    findings: list[str] = []
+    for step in _workflow_steps(yaml.safe_load(text)):
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        for _, logical in _logical_lines(run):
+            if _INSTALL_VERB.search(logical) and _FORBIDDEN_PATTERN.search(logical):
+                findings.append(
+                    f"{label}: step {step.get('name', '<unnamed>')!r} installs "
+                    f"{FORBIDDEN}: {logical[:100]}"
+                )
+    return findings
+
+
+class _AnyScopeImports(ast.NodeVisitor):
+    """Collect every omnimarket import and dynamic-import call, any scope."""
+
+    def __init__(self) -> None:
+        self.lines: list[int] = []
+
+    def visit_Import(self, node: ast.Import) -> None:
+        if any(alias.name.split(".")[0] == FORBIDDEN for alias in node.names):
+            self.lines.append(node.lineno)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.level == 0 and (node.module or "").split(".")[0] == FORBIDDEN:
+            self.lines.append(node.lineno)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        first = node.args[0] if node.args else None
+        if (
+            name in {"import_module", "importorskip", "__import__"}
+            and isinstance(first, ast.Constant)
+            and isinstance(first.value, str)
+            and first.value.split(".")[0] == FORBIDDEN
+        ):
+            self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+
+def fixture_findings(source: str, label: str) -> list[str]:
+    """``label:line`` for each omnimarket import in a test module, any scope."""
+    visitor = _AnyScopeImports()
+    visitor.visit(ast.parse(source, filename=label))
+    return [f"{label}:{line}: test imports {FORBIDDEN}" for line in visitor.lines]
+
+
 def _src_files() -> list[Path]:
     return sorted(SRC_ROOT.rglob("*.py"))
+
+
+def _workflow_files() -> list[Path]:
+    github = REPO_ROOT / ".github"
+    return [
+        github / "workflows" / "ci.yml",
+        *sorted(github.glob("actions/**/action.yml")),
+    ]
+
+
+def _test_files() -> list[Path]:
+    return sorted((REPO_ROOT / "tests").rglob("*.py"))
 
 
 # --- the live tree ---------------------------------------------------------
@@ -205,6 +343,55 @@ def test_src_imports_no_omnimarket_at_import_time() -> None:
     assert findings == [], (
         "omnibase_infra must not depend on omnimarket (OMN-19998); move the code "
         "to omnimarket or invert the dependency:\n" + "\n".join(findings)
+    )
+
+
+def test_runtime_dockerfile_names_no_omnimarket() -> None:
+    path = REPO_ROOT / "docker" / "Dockerfile.runtime"
+    text = path.read_text(encoding="utf-8")
+    # Positive control: the walk reads real instruction lines.
+    assert len(list(_logical_lines(text))) > 100
+    assert dockerfile_findings(text, "docker/Dockerfile.runtime") == []
+
+
+def test_ci_install_steps_install_no_omnimarket() -> None:
+    files = _workflow_files()
+    # Positive control: the scan reaches the real jobs, steps and sibling installs.
+    assert len(files) > 5
+    assert (
+        sum(len(list(_workflow_steps(yaml.safe_load(p.read_text())))) for p in files)
+        > 300
+    )
+    assert "uv pip install --no-deps -e ../omnibase_compat" in files[0].read_text(
+        encoding="utf-8"
+    )
+    findings = [
+        finding
+        for path in files
+        for finding in workflow_findings(
+            path.read_text(encoding="utf-8"), str(path.relative_to(REPO_ROOT))
+        )
+    ]
+    assert findings == [], (
+        "omnibase_infra CI must not install omnimarket (OMN-21279); run the job "
+        "from omnimarket or invert the dependency:\n" + "\n".join(findings)
+    )
+
+
+def test_test_fixtures_import_no_omnimarket() -> None:
+    files = _test_files()
+    # Positive control: the scan reaches the real test modules.
+    assert len(files) > 1000
+    findings = [
+        finding
+        for path in files
+        for finding in fixture_findings(
+            path.read_text(encoding="utf-8"), str(path.relative_to(REPO_ROOT))
+        )
+    ]
+    assert findings == [], (
+        "omnibase_infra tests must not import omnimarket (OMN-21279); move the "
+        "test to omnimarket:\n" + "\n".join(findings)
     )
 
 
@@ -311,3 +498,101 @@ def test_recorded_omnimarket_manifest_depends_on_infra(
     assert pyproject_findings(manifest.format(json.dumps([*deps, reverse]))) == [
         f"project.dependencies: {reverse!r}"
     ]
+
+
+# --- negative controls for the image, CI and test-fixture surfaces ---------
+
+_CLEAN_DOCKERFILE = """\
+FROM python:3.12-slim AS builder
+# omnimarket named in a comment is history, not an install.
+RUN uv-with-retry pip install --no-deps \\
+    "https://example.invalid/omnibase_compat.tar.gz"
+"""
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "ARG OMNIMARKET_REF=dev\n",
+        "RUN uv pip install --no-deps omnimarket\n",
+        'RUN uv-with-retry pip install --no-deps \\\n    "git+https://github.com/OmniNode-ai/omnimarket.git@dev#egg=omnimarket"\n',
+        "COPY --from=builder /app/.venv/lib/python3.12/site-packages/omnimarket/configs/x.yaml /app/x.yaml\n",
+        "RUN python -c 'from omnimarket.nodes import node_x'\n",
+        'RUN uv pip install "omnimarket @ file:///workspace/sibling-repos/omnimarket"\n',
+    ],
+)
+def test_dockerfile_checker_fires_on_omnimarket(line: str) -> None:
+    assert dockerfile_findings(_CLEAN_DOCKERFILE + line, "Dockerfile.runtime") != []
+
+
+def test_dockerfile_checker_passes_a_clean_image_and_comments() -> None:
+    # Positive control: the clean fixture parses into real instruction lines.
+    assert len(list(_logical_lines(_CLEAN_DOCKERFILE))) == 2
+    assert dockerfile_findings(_CLEAN_DOCKERFILE, "Dockerfile.runtime") == []
+
+
+def _workflow(run: str) -> str:
+    body = "\n".join(f"          {line}" for line in run.splitlines())
+    return (
+        "name: x\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n      - name: install\n        run: |\n" + body + "\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "uv pip install --no-deps omnimarket",
+        'uv pip install --quiet --no-deps "omnimarket==0.4.310"',
+        "pip install -e ../omnimarket",
+        "uv pip install --no-deps -e ../omnibase_compat -e ../omnimarket -e ../omnimemory",
+        'uv pip install --python "$PY" --no-deps \\\n  "omnimarket @ git+https://example.invalid/omnimarket@abc"',
+        "uv sync --project omnimarket",
+        "uv add OmniMarket",
+    ],
+)
+def test_workflow_checker_fires_on_omnimarket_install(run: str) -> None:
+    assert workflow_findings(_workflow(run), "wf.yml") != []
+
+
+def test_workflow_checker_fires_in_a_composite_action() -> None:
+    action = (
+        "name: a\nruns:\n  using: composite\n  steps:\n"
+        "    - shell: bash\n      run: uv pip install omnimarket\n"
+    )
+    assert workflow_findings(action, "action.yml") != []
+
+
+def test_workflow_checker_ignores_non_install_mentions() -> None:
+    clean = _workflow("uv pip install --no-deps -e ../omnibase_compat")
+    assert workflow_findings(clean, "wf.yml") == []
+    # Positive control: the same step shape does fire once omnimarket is added.
+    assert workflow_findings(clean + "          uv pip install omnimarket\n", "wf.yml")
+    mention = _workflow("# uv pip install omnimarket\necho omnimarket is not installed")
+    assert workflow_findings(mention, "wf.yml") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import omnimarket\n",
+        "def test_x():\n    import omnimarket\n",
+        "def test_x():\n    from omnimarket.nodes import node_x\n",
+        'import importlib\nm = importlib.import_module("omnimarket")\n',
+        'import pytest\npytest.importorskip("omnimarket.nodes")\n',
+        'm = __import__("omnimarket")\n',
+    ],
+)
+def test_fixture_checker_fires_on_omnimarket_import(source: str) -> None:
+    assert fixture_findings(source, "test_x.py") != []
+
+
+def test_fixture_checker_ignores_lookalikes() -> None:
+    assert (
+        fixture_findings(
+            "import omnimarketing\nfrom . import omnimarket\n"
+            'import importlib\nimportlib.import_module("omnibase_core")\n',
+            "test_x.py",
+        )
+        == []
+    )

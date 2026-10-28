@@ -243,13 +243,15 @@ def test_accept_commit_failure_runs_the_job_and_says_so(
 
 
 @pytest.mark.unit
-def test_rewind_refused_before_the_wait_still_runs_the_command(
+def test_rewind_refused_before_the_wait_still_reexecs(
     tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:  # type: ignore[no-untyped-def]
     """A member already dropped when the boundary starts cannot rewind.
 
-    The boundary's own error rail logs that and proceeds on the current image;
-    the accept-commit property then has to carry the job to completion.
+    OMN-17427: the refused rewind is logged and does not escape, so the re-exec
+    goes ahead and nothing is accepted. The replacement process reads from the
+    last committed offset, which is this command's own once the record before
+    it was committed, and runs it on the new code.
     """
     job_store = JobStore(state_dir=tmp_path / "jobs")
     member = _GroupMember()
@@ -264,13 +266,15 @@ def test_rewind_refused_before_the_wait_still_runs_the_command(
 
     with (
         patch("deploy_agent.consumer.verify_command", return_value=True),
-        caplog.at_level(logging.ERROR, logger="deploy_agent.consumer"),
+        caplog.at_level(logging.WARNING, logger="deploy_agent.consumer"),
+        pytest.raises(_ReexecNow),
     ):
-        cmd, reason = consumer._process_message(_message(correlation_id))
+        consumer._process_message(_message(correlation_id))
 
-    assert reason is None
-    assert cmd is not None
-    assert job_store.load(uuid.UUID(correlation_id)) is not None
-    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
-    assert any("friction_type=self_update_boundary_failed" in m for m in messages)
-    assert any("friction_type=accept_commit_failed" in m for m in messages)
+    assert member.committed == {}
+    assert job_store.load(uuid.UUID(correlation_id)) is None
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "commit_refused_rejoin" in m and "last committed offset" in m for m in messages
+    )
+    assert not any("friction_type=self_update_boundary_failed" in m for m in messages)

@@ -459,6 +459,35 @@ jobs:
             PROMOTION_CLASS=stability-candidate
             NON_MAIN_LINEAGE=true
 
+      # OMN-21279: infra carries no omnimarket since #5261; the dev lane composes
+      # omnimarket's runtime layer since #5353. Delivery run 40272282023 failed
+      # with "FATAL omnimarket contracts unresolvable: No module named 'omnimarket'".
+      # Replace the candidate tag so the Trivy scan, source-hash attestation,
+      # lineage-label and config-path checks, and push below use the composed image.
+      - name: Compose the omnimarket layer onto the candidate (OMN-21279)
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.meta.outputs.tags }}
+          OMNIMARKET_TREE: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket
+        run: |
+          set -euo pipefail
+          if [ ! -f "${OMNIMARKET_TREE}/Dockerfile.runtime" ]; then
+            echo "::error::missing ${OMNIMARKET_TREE}/Dockerfile.runtime"; exit 1
+          fi
+          OMNIMARKET_VCS_REF="$(jq -r '.siblings.omnimarket.vcs_ref // ""' workspace/sibling-vcs-provenance.json)"
+          if [ -z "${OMNIMARKET_VCS_REF}" ]; then
+            echo "::error::omnimarket vcs_ref is empty in workspace/sibling-vcs-provenance.json"; exit 1
+          fi
+          INFRA_IMAGE="${CANDIDATE_IMAGE}-infra"
+          docker tag "${CANDIDATE_IMAGE}" "${INFRA_IMAGE}"
+          docker buildx build --load --platform linux/amd64 \
+            --file "${OMNIMARKET_TREE}/Dockerfile.runtime" \
+            --build-arg "INFRA_RUNTIME_IMAGE=${INFRA_IMAGE}" \
+            --build-arg "OMNIMARKET_VCS_REF=${OMNIMARKET_VCS_REF}" \
+            --tag "${CANDIDATE_IMAGE}" "${OMNIMARKET_TREE}"
+          docker run --rm --entrypoint /app/.venv/bin/python "${CANDIDATE_IMAGE}" \
+            -c "import omnimarket, importlib.metadata; print('omnimarket', importlib.metadata.version('omnimarket'))"
+
       # OMN-16229: same unignored audit as the prod build path
       # (build-and-push-runtime.yml). The policy check must prove every ignore
       # is present in this exact image and has no fixed version.

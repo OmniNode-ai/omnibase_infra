@@ -70,7 +70,7 @@ def test_job_runs_the_sasl_check_after_the_boot_and_before_the_probes() -> None:
     names = [s.get("name") for s in _steps()]
     boot = names.index("Boot the laptop profile (make up-local)")
     check = names.index(_SASL_STEP)
-    probe = names.index("Delegate-skill command topic has a live consumer group")
+    probe = names.index("Every health-checked laptop service reports healthy")
     assert boot < check < probe
     run = _step(_SASL_STEP)["run"]
     assert "make check-sasl-local" in run

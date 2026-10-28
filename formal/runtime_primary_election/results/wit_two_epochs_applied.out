@@ -1,0 +1,186 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 80 and seed 8286656981902538276 with 4 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 86758] (Mac OS X 26.4.1 aarch64, Oracle Corporation 20.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file RuntimePrimaryElection.tla
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file <tmp> (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module RuntimePrimaryElection
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module RuntimePrimaryElection
+Starting... (2026-10-25 20:24:02)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-25 20:24:03.
+Error: Invariant NotTwoEpochsApplied is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ holder = none
+/\ now = 0
+/\ epoch = 0
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {}
+/\ role = (n1 :> "follower" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 0
+/\ issued = 0
+/\ deadline = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+
+State 2: <Tick line 93, col 3 to line 96, col 49 of module RuntimePrimaryElection>
+/\ holder = none
+/\ now = 1
+/\ epoch = 0
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {}
+/\ role = (n1 :> "follower" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 0
+/\ issued = 0
+/\ deadline = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+
+State 3: <Campaign(n1) line 108, col 3 to line 116, col 54 of module RuntimePrimaryElection>
+/\ holder = n1
+/\ now = 1
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 0
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 4: <Tick line 93, col 3 to line 96, col 49 of module RuntimePrimaryElection>
+/\ holder = n1
+/\ now = 2
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 0
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 5: <Issue(n1) line 139, col 3 to line 144, col 36 of module RuntimePrimaryElection>
+/\ holder = n1
+/\ now = 2
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 1
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 6: <Tick line 93, col 3 to line 96, col 49 of module RuntimePrimaryElection>
+/\ holder = n1
+/\ now = 3
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 1
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 7: <Tick line 93, col 3 to line 96, col 49 of module RuntimePrimaryElection>
+/\ holder = n1
+/\ now = 4
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 1
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 8: <Expire line 100, col 3 to line 104, col 49 of module RuntimePrimaryElection>
+/\ holder = none
+/\ now = 4
+/\ epoch = 1
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "follower")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ storeExp = 4
+/\ issued = 1
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 0)
+
+State 9: <Campaign(n3) line 108, col 3 to line 116, col 54 of module RuntimePrimaryElection>
+/\ holder = n3
+/\ now = 4
+/\ epoch = 2
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "primary")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 2)
+/\ storeExp = 7
+/\ issued = 1
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 6)
+
+State 10: <Issue(n3) line 139, col 3 to line 144, col 36 of module RuntimePrimaryElection>
+/\ holder = n3
+/\ now = 4
+/\ epoch = 2
+/\ applied = <<>>
+/\ tgtEpoch = 0
+/\ net = {<<1, 1>>, <<2, 2>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "primary")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 2)
+/\ storeExp = 7
+/\ issued = 2
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 6)
+
+State 11: <Next line 159, col 6 to line 159, col 30 of module RuntimePrimaryElection>
+/\ holder = n3
+/\ now = 4
+/\ epoch = 2
+/\ applied = <<1>>
+/\ tgtEpoch = 1
+/\ net = {<<2, 2>>}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "primary")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 2)
+/\ storeExp = 7
+/\ issued = 2
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 6)
+
+State 12: <Next line 159, col 6 to line 159, col 30 of module RuntimePrimaryElection>
+/\ holder = n3
+/\ now = 4
+/\ epoch = 2
+/\ applied = <<1, 2>>
+/\ tgtEpoch = 2
+/\ net = {}
+/\ role = (n1 :> "primary" @@ n2 :> "follower" @@ n3 :> "primary")
+/\ myEpoch = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 2)
+/\ storeExp = 7
+/\ issued = 2
+/\ deadline = (n1 :> 3 @@ n2 :> 0 @@ n3 :> 6)
+
+7777 states generated, 3309 distinct states found, 1279 states left on queue.
+The depth of the complete state graph search is 14.
+Finished in 00s at (2026-10-25 20:24:03)
+Trace exploration spec path: RuntimePrimaryElection_TTrace_1792974242.tla

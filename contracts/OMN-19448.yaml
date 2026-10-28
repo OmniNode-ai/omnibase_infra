@@ -1,0 +1,89 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19448
+title: delegation_events admits data_source experiment through vendored node migration 0064
+summary: Vendors omnimarket node_projection_delegation migration 0064 from omnimarket#4343 head dd4d9349e7cf byte for byte (sha256 834545f00a20b83cf817282cdff9f05921797df13b375493cfbeefb3fa42277f). It replaces delegation_events_data_source_check with CHECK (data_source IN ('real', 'fixture', 'experiment')) NOT VALID, without scanning or rewriting existing rows. One ledger row (tenant domain) and a forward-only class declaration accompany it, so the next omnibase_infra dev tag vendors the file omnimarket#4343 adds.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19448-vendored-0064
+    statement: The data_source experiment value reaches delegation_events through a migration this repository vendors byte-identical from omnimarket.
+    acceptance:
+      - id: AC1
+        statement: "AC1: the projection writes the terminal's cause, operational_outcome and content_verdict unchanged"
+      - id: AC2
+        statement: "AC2: the new columns arrive through a vendored migration and are written from the terminal -- falsifier: a pytest applying the migration and projecting a terminal asserting each column"
+      - id: AC3
+        statement: "AC3: on the lab, no failed row written after the deploy has a null cause"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0064 matches the omnimarket source's checksum, has its tenant ledger row and forward-only class, and replaces the data_source check with experiment admitted and NOT VALID, rewriting no row.
+    command: uv run --frozen pytest tests/unit/migrations/test_omn19448_data_source_experiment_vendored.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19448-vendored-0064-test
+    description: The vendored 0064 matches the omnimarket#4343 source checksum, has its tenant ledger row and forward-only class, and drops and re-adds delegation_events_data_source_check admitting experiment NOT VALID without rewriting a row. At the merge base the file is absent and the test fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn19448_data_source_experiment_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19448-postgres-0064-readback
+    description: On an isolated PostgreSQL 16 container, apply the vendored 0049 to a minimal delegation_events table, show experiment is refused, apply the vendored 0064, then assert experiment is accepted, an unknown value is still refused, existing real and fixture rows are kept and the check stays NOT VALID. Readiness is checked over TCP. At the merge base 0064 is absent and the probe fails. The hosted runner needs Docker only; no credentials or remote database are used.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |
+          bash -eu -o pipefail <<'PROBE'
+          migrations=docker/migrations/forward/nodes/node_projection_delegation
+          name="omn19448-readback-$$"
+          docker run --detach --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine >/dev/null
+          trap 'docker rm -f "$name" >/dev/null' EXIT
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = 1
+          psql() { docker exec "$name" psql -X -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -qAt "$@" </dev/null; }
+          apply() { docker exec -i "$name" psql -X -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -q < "$migrations/$1"; }
+          psql -c "CREATE TABLE delegation_events (id serial PRIMARY KEY)"
+          apply 0049_delegation_events_data_source.sql
+          psql -c "INSERT INTO delegation_events (data_source) VALUES ('real'), ('fixture')"
+          if psql -c "INSERT INTO delegation_events (data_source) VALUES ('experiment')" 2>/dev/null; then echo "experiment accepted before 0064"; exit 1; fi
+          apply 0064_delegation_events_data_source_experiment.sql
+          psql -c "INSERT INTO delegation_events (data_source) VALUES ('experiment')"
+          if psql -c "INSERT INTO delegation_events (data_source) VALUES ('bogus')" 2>/dev/null; then echo "bogus accepted after 0064"; exit 1; fi
+          test "$(psql -c "SELECT string_agg(data_source, ',' ORDER BY id) FROM delegation_events")" = "real,fixture,experiment"
+          test "$(psql -c "SELECT convalidated FROM pg_constraint WHERE conname = 'delegation_events_data_source_check'")" = "f"
+          echo "READBACK PASS"
+          PROBE
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19448-terminal-columns-vendored
+    description: >-
+      Infra's part of AC1 and AC2: the columns the projection copies the terminal's cause, operational_outcome and content_verdict into (0029, 0045) and the eight new terminal columns (0052, 0053, 0058) are added by vendored migrations whose ledger checksum is the file's, each nullable with no default, so a value the terminal did not send stays NULL. The writers that copy the values are proven in the omnimarket contract for this ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn19448_terminal_columns_vendored.py -q -n 0 -k 'copied_into or new_terminal_columns'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn19448-terminal-failure-cause-unrestricted
+    description: >-
+      Infra's part of AC3: no vendored migration restricts terminal_failure_cause to a value list, so a cause the vocabulary gained later (refused_before_dispatch) is stored rather than refused. The lab readback of AC3 (no failed row with a NULL cause after the deploy) is recorded in the omnimarket contract for this ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/migrations/test_omn19448_terminal_columns_vendored.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

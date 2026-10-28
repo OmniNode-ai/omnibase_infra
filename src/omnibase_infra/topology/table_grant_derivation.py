@@ -365,6 +365,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
+    # OMN-17427: durable delegation execution ownership and its outbox,
+    # vendored infra-first ahead of omnimarket#4277. Both carry the source
+    # contract's read_write access and table-name role. Removable once the
+    # pin advances past that pull request; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_lab_jobs",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+            "0000_delegation_lab_job_execution.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_lab_jobs",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+                "0000_delegation_lab_job_execution.sql"
+            ),
+            access="read_write",
+            role="delegation_lab_jobs",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_lab_job_outbox",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+            "0000_delegation_lab_job_execution.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_lab_job_outbox",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
+                "0000_delegation_lab_job_execution.sql"
+            ),
+            access="read_write",
+            role="delegation_lab_job_outbox",
+        ),
+    ),
+    #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access
@@ -388,6 +429,99 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
+        ),
+    ),
+    # OMN-21115: activation ingestion precedes the omnimarket contract pin.
+    # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+    # when node_context_install_confirm_trigger_effect reaches the pin.
+    ContractTableDeclaration(
+        node="legacy_migration:compaction_activations",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
+            "0000_create_compaction_activations.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="compaction_activations",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
+                "0000_create_compaction_activations.sql"
+            ),
+            access="read_write",
+            role="compaction_activations",
+        ),
+    ),
+    # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
+    # omnimarket node contract, as compaction_receipts below. 0001 grants
+    # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
+    # USAGE. The ownership declaration names access read_write, role
+    # compaction_current_context. Retired when the
+    # node_projection_compaction_current_context contract merges and the
+    # omnimarket pin advances past it; the OMN-18863 expiry module names this
+    # bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:compaction_current_context",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
+            "0000_create_compaction_current_context.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="compaction_current_context",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
+                "0000_create_compaction_current_context.sql"
+            ),
+            access="read_write",
+            role="compaction_current_context",
+        ),
+    ),
+    # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
+    # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
+    # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
+    # names access read_write, role compaction_receipts. Retired when the
+    # node_projection_compaction_receipts contract merges and the omnimarket
+    # pin advances past it; the OMN-18863 expiry module names this bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:compaction_receipts",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
+            "0000_create_compaction_receipts.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="compaction_receipts",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
+                "0000_create_compaction_receipts.sql"
+            ),
+            access="read_write",
+            role="compaction_receipts",
+        ),
+    ),
+    # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
+    # lands its node contract (head 677d2941ff7e). This bridge expires once the
+    # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
+    # advancing past it; the OMN-18863 expiry module names this bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_capability_cells",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+            "0000_create_delegation_capability_cells.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_capability_cells",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
+                "0000_create_delegation_capability_cells.sql"
+            ),
+            access="read_write",
+            role="delegation_capability_cells",
         ),
     ),
     # OMN-19988: the same infra-first window; this repo vendors

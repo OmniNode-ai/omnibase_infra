@@ -23,7 +23,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
@@ -41,6 +42,7 @@ from deploy_agent.compose_budget import (
     derive_runtime_phase_budget,
 )
 from deploy_agent.events import (
+    DEV_LANE_BUILD_SERVICES,
     DEV_LANE_CLOUD_DB_SERVICES,
     DEV_LANE_GATEWAY_SERVICES,
     DEV_LANE_ONLY_BUILDABLE_SERVICES,
@@ -126,6 +128,121 @@ SCOPE_BUNDLES: dict[Scope, list[str]] = {
     Scope.FULL: ["core", "runtime"],
 }
 
+if TYPE_CHECKING:
+    from omnibase_infra.handlers.handler_dev_boot_guard import HandlerDevBootGuard
+    from omnibase_infra.models.model_dev_boot_report_config import (
+        ModelDevBootReportConfig,
+    )
+
+
+# Run in the candidate image with its compose environment and mounts, before
+# any live service is replaced. No kernel, broker or package install is run.
+IMAGE_PREFLIGHT_SCRIPT = r"""
+import importlib.util
+import os
+from pathlib import Path
+
+if os.environ.get("BIFROST_CONTRACT_PATH", ""):
+    value = os.environ.get("BIFROST_BASE_CONTRACT_PATH", "").strip()
+    if not value:
+        raise SystemExit("BIFROST_BASE_CONTRACT_PATH is unset or blank; there is no default")
+    if not Path(value).is_file():
+        raise SystemExit("BIFROST_BASE_CONTRACT_PATH points to a missing file/package")
+for package in os.environ.get("ONEX_ACTIVE_RUNTIME_PACKAGES", "").split(","):
+    package = package.strip()
+    if not package:
+        continue
+    try:
+        present = importlib.util.find_spec(package) is not None
+    except (ImportError, ValueError, AttributeError):
+        present = False
+    if not present:
+        raise SystemExit("ONEX_ACTIVE_RUNTIME_PACKAGES points to missing package: " + package)
+"""
+
+
+def load_dev_boot_guard() -> ModuleType:
+    """Load the repo's canonical host effect beside this standalone agent.
+
+    The agent has its own published-infra venv; its host effect must come from
+    the same checkout as the agent, without waiting for a package release.
+    """
+    name = "omnibase_infra.handlers.handler_dev_boot_guard"
+    if name in sys.modules:
+        return sys.modules[name]
+    root = Path(__file__).resolve().parents[3] / "src" / "omnibase_infra"
+    for relative in (
+        "models/model_dev_boot_health_status.py",
+        "models/model_dev_boot_state.py",
+        "models/model_dev_boot_healthcheck.py",
+        "models/model_dev_boot_container_config.py",
+        "models/model_dev_boot_container.py",
+        "models/model_dev_boot_report_config.py",
+        "models/model_dev_boot_point.py",
+        "models/model_dev_boot_request.py",
+        "models/model_dev_boot_result.py",
+        "handlers/handler_dev_boot_guard.py",
+    ):
+        module_name = "omnibase_infra." + relative.removesuffix(".py").replace("/", ".")
+        spec = importlib.util.spec_from_file_location(module_name, root / relative)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Cannot load dev boot effect: {relative}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def dev_boot_report_config() -> ModelDevBootReportConfig:
+    """Resolve host transport settings before crossing the canonical effect port."""
+    load_dev_boot_guard()
+    from omnibase_infra.models.model_dev_boot_report_config import (
+        ModelDevBootReportConfig,
+    )
+
+    registry_root = Path(
+        os.environ.get("UNIT_DRIFT_REGISTRY_ROOT")
+        or os.environ.get("OMNI_HOME")
+        or Path(REPO_DIR).parent
+    ).expanduser()
+    plugin_setting = os.environ.get("DEPLOY_AGENT_REPORT_PLUGIN_DIR") or os.environ.get(
+        "CLAUDE_PLUGIN_ROOT"
+    )
+    return ModelDevBootReportConfig(
+        registry_root=registry_root,
+        plugin_dir=Path(plugin_setting) if plugin_setting else None,
+        ledger_via_bus=os.environ.get("ONEX_LEDGER_WRITE_VIA") == "bus",
+    )
+
+
+def DevBootGuard(executor: DeployExecutor, state_dir: Path) -> HandlerDevBootGuard:
+    return cast(
+        "HandlerDevBootGuard",
+        load_dev_boot_guard().HandlerDevBootGuard(
+            state_dir,
+            config_hashes=lambda services: executor.dev_boot_config_hashes(services),
+            verify_recovery=lambda update: executor.verify_dev_boot_recovery(
+                on_phase_update=update
+            ),
+            execution=sys.modules[__name__],
+            reporting=dev_boot_report_config(),
+        ),
+    )
+
+
+def preflight_dev_images(lane: EnumRuntimeLane, services: list[str]) -> None:
+    if lane is EnumRuntimeLane.DEV:
+        load_dev_boot_guard().preflight_dev_images(
+            lane, services, execution=sys.modules[__name__]
+        )
+
+
+def deliver_dev_boot_reports(root: Path) -> None:
+    load_dev_boot_guard().deliver_reports(
+        root, execution=sys.modules[__name__], config=dev_boot_report_config()
+    )
+
+
 logger = logging.getLogger(__name__)
 
 REPO_DIR = os.environ.get(
@@ -154,6 +271,7 @@ COMPOSE_GEN_OUTPUT_FILE = f"{REPO_DIR}/docker/docker-compose.generated.yml"
 SELF_UPDATE_KNOWN_BYPRODUCT_PATHS: tuple[str, ...] = (
     "workspace/sibling-pin-comparison.json",
     "workspace/sibling-vcs-provenance.json",
+    "workspace/routing_tiers.yaml",
 )
 COMPOSE_PROJECT = "omnibase-infra"
 # OMN-18640: the deps-convergence observation runs before the deps leg and
@@ -695,6 +813,7 @@ _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 # Must stay matched with ``resolve_compose_file_args`` in
 # ``onex-runtime-deploy``.
 _DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
+_DEV_TENANT_FOLD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-tenant-fold.yml"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
 # env var that repoints its `image:` field (docker-compose.prod.yml). This is
@@ -708,7 +827,7 @@ PROD_IMAGE_ENV_VAR_FOR_SERVICE: dict[str, str] = {
 _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
     EnumRuntimeLane.DEV: ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
-        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY),
+        compose_files=(COMPOSE_FILE, _DEV_LANE_OVERLAY, _DEV_TENANT_FOLD_OVERLAY),
         compose_project=COMPOSE_PROJECT,
         postgres_container="omnibase-infra-postgres",
         runtime_health_targets=RUNTIME_HEALTH_TARGETS,
@@ -859,8 +978,24 @@ def active_dev_instance() -> str:
 def lane_config_for(lane: EnumRuntimeLane) -> ModelLaneConfig:
     """Return the compose/project/health configuration for a runtime lane."""
     if lane is EnumRuntimeLane.DEV:
-        return DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
-    return _LANE_CONFIGS[lane]
+        config = DEV_INSTANCE_LANE_CONFIGS[_DevInstanceSelection.name]
+        if "tenant-projection" in lane_folded_profiles(lane):
+            config = config.model_copy(
+                update={
+                    "disabled_services": config.disabled_services
+                    | {"tenant-projection-writer"}
+                }
+            )
+        return config
+    config = _LANE_CONFIGS[lane]
+    if "effects" in lane_folded_profiles(lane):
+        targets = list(config.runtime_health_targets)
+        index = SERVICE_HEALTH_TARGET_INDEX["runtime-effects"]
+        _, port = targets[index]
+        main, _ = targets[SERVICE_HEALTH_TARGET_INDEX["omninode-runtime"]]
+        targets[index] = (main, port)
+        return config.model_copy(update={"runtime_health_targets": tuple(targets)})
+    return config
 
 
 def lane_runs_phase(lane: EnumRuntimeLane, phase: EnumInstancePhase) -> bool:
@@ -891,6 +1026,48 @@ SERVICE_HEALTH_TARGET_INDEX: dict[str, int] = {
     "runtime-effects": 1,
 }
 
+# OMN-21279: run the candidate image's own boot-path resolution and base-file
+# loader with the service's compose env/mounts. No render, shared-file writes,
+# endpoint probes, broker consumers or full runtime startup in this one-shot.
+RUNTIME_BOOT_PROBE = """\
+import inspect
+import os
+from omnibase_infra.runtime.render_bifrost_delegation_contract import (
+    _load_mapping, _resolve_canonical_source_path, _resolve_target_path,
+)
+if _resolve_target_path(target_path=None, env=os.environ) is not None:
+    # The known-good rollback image resolves its packaged base with no args.
+    # Use the candidate's API; do not reject it merely for predating env binding.
+    resolver = _resolve_canonical_source_path
+    source = resolver(os.environ) if inspect.signature(resolver).parameters else resolver()
+    _load_mapping(source, label="Bifrost base contract")
+"""
+# Share the runtime migration-preflight bound; a cold candidate import may
+# take over a minute on a busy build host.
+RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS = PHASE_TIMEOUTS[Phase.RUNTIME]
+
+LANE_POLICY_PREFIX: dict[EnumRuntimeLane, str] = {
+    EnumRuntimeLane.DEV: "DEV",
+    EnumRuntimeLane.STABILITY_TEST: "STABILITY_TEST",
+}
+
+
+def lane_folded_profiles(
+    lane: EnumRuntimeLane, policy_env: Mapping[str, str] | None = None
+) -> frozenset[str]:
+    """Return the profiles folded into a lane's main runtime."""
+    if lane is EnumRuntimeLane.DEV and active_dev_instance() != DEFAULT_DEV_INSTANCE:
+        return frozenset()
+    prefix = LANE_POLICY_PREFIX.get(lane)
+    if prefix is None:
+        return frozenset()
+    env = _load_runtime_policy_env() if policy_env is None else policy_env
+    return frozenset(
+        entry.strip().lower()
+        for entry in env.get(f"{prefix}_RUNTIME_MAIN_FOLDED_PROFILES", "").split(",")
+        if entry.strip()
+    )
+
 
 def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
     """Return the lane-qualified container name for a canonical service name.
@@ -901,6 +1078,10 @@ def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
     regardless of which service the request actually targeted, wrongly
     rejecting a runtime-effects command carrying its own (genuinely
     stability-proven) effects digest.
+
+    OMN-21288: a service whose profile the lane folds into its main runtime
+    (``lane_folded_profiles``) resolves to the main runtime's container, so
+    its digest is the main runtime's; an unfolded one reads its own container.
     """
     index = SERVICE_HEALTH_TARGET_INDEX.get(service)
     if index is None:
@@ -908,6 +1089,8 @@ def _health_target_container(lane: EnumRuntimeLane, service: str) -> str:
             f"no runtime_health_targets mapping for service {service!r}; known "
             f"services: {sorted(SERVICE_HEALTH_TARGET_INDEX)}"
         )
+    # lane_config_for already maps folded health targets to main. Resolve once
+    # so a policy-file update cannot split this lookup across two snapshots.
     container_name, _ = lane_config_for(lane).runtime_health_targets[index]
     return container_name
 
@@ -935,6 +1118,21 @@ def _compose_file_args(lane: EnumRuntimeLane) -> list[str]:
     for compose_file in lane_config_for(lane).compose_files:
         args.extend(["-f", compose_file])
     return args
+
+
+@contextlib.contextmanager
+def candidate_probe_file_args(
+    lane: EnumRuntimeLane, service: str
+) -> Iterator[list[str]]:
+    """Use the already-built candidate image for a one-shot boot probe."""
+    # OMN-21279: Compose v5.1.0 rebuilds on run for a service: additional context.
+    with tempfile.TemporaryDirectory(prefix="onex-boot-probe-") as directory:
+        path = Path(directory) / "no-build.yml"
+        path.write_text(
+            f"services:\n  {service}:\n    build: !reset null\n"
+            f"    image: {lane_config_for(lane).compose_project}-{service}\n"
+        )
+        yield [*_compose_file_args(lane), "-f", str(path)]
 
 
 def assert_prod_request_has_stability_digest(
@@ -3099,6 +3297,20 @@ class PreflightScriptUnavailableError(RuntimeError):
 
 
 class DeployExecutor:
+    def dev_boot_config_hashes(self, services: Sequence[str]) -> dict[str, str]:
+        return self._rendered_config_hashes(
+            EnumRuntimeLane.DEV, services, profile="runtime"
+        )
+
+    def verify_dev_boot_recovery(
+        self, *, on_phase_update: Callable[[StrEnum, StrEnum], None]
+    ) -> None:
+        self.verify(
+            on_phase_update=on_phase_update,
+            lane=EnumRuntimeLane.DEV,
+            recover_runtime=False,
+        )
+
     def __init__(self, *, migration_record_dir: Path | None = None) -> None:
         self._migration_record_dir = migration_record_dir
         # OMN-18057: services a phase left in a non-running state, and whether
@@ -4475,6 +4687,7 @@ class DeployExecutor:
                     lane=lane,
                     git_ref=git_ref,
                 )
+                self._preflight_runtime_boot([], on_phase_update, lane=lane)
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -4527,6 +4740,7 @@ class DeployExecutor:
                     lane=lane,
                     git_ref=git_ref,
                 )
+                self._preflight_runtime_boot(services, on_phase_update, lane=lane)
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -4543,6 +4757,84 @@ class DeployExecutor:
                 services if services else services_for_scope(scope, lane=lane), lane
             )
         )
+
+    def _preflight_runtime_boot(
+        self,
+        services: list[str],
+        on_phase_update: PhaseCallback,
+        *,
+        lane: EnumRuntimeLane,
+    ) -> None:
+        """Refuse a dev image with a broken boot contract before any compose up.
+
+        The post-swap health verification and rollback remain in place. This
+        earlier gate preserves the running containers even if no healthy
+        rollback point could be captured. FULL also probes before its core up.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return
+        config = lane_config_for(lane)
+        kernels = [*SERVICE_HEALTH_TARGET_INDEX, "runtime-worker"]
+        targets = _without_disabled_services(
+            [service for service in kernels if not services or service in services],
+            lane,
+        )
+        for service in targets:
+            name = f"onex-boot-probe-{uuid4().hex}"
+            with candidate_probe_file_args(lane, service) as file_args:
+                cmd = [
+                    "docker",
+                    "compose",
+                    *file_args,
+                    "-p",
+                    config.compose_project,
+                    "--profile",
+                    "runtime",
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "--pull",
+                    "never",
+                    "-T",
+                    "--name",
+                    name,
+                    "--user",
+                    "omniinfra",
+                    "--entrypoint",
+                    "/app/.venv/bin/python",
+                    service,
+                    "-c",
+                    RUNTIME_BOOT_PROBE,
+                ]
+                self._record_compose_invocation(Phase.RUNTIME, cmd)
+                try:
+                    result = _run(
+                        cmd,
+                        timeout=RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS,
+                        env=_compose_env(),
+                    )
+                    if result.returncode != 0:
+                        detail = (result.stderr or result.stdout).strip()[-2000:]
+                        raise RuntimeError(
+                            f"Candidate boot probe failed for {service} (exit "
+                            f"{result.returncode}); running containers kept: {detail}"
+                        )
+                except subprocess.TimeoutExpired as exc:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise RuntimeError(
+                        f"Candidate boot probe timed out for {service} after "
+                        f"{RUNTIME_BOOT_PROBE_TIMEOUT_SECONDS}s; running containers kept"
+                    ) from exc
+                except Exception:
+                    on_phase_update(Phase.RUNTIME, PhaseStatus.FAILED)
+                    raise
+                finally:
+                    # A timed-out compose client can leave its one-shot running.
+                    # Remove only this probe's unique name, never a lane service.
+                    try:
+                        _run(["docker", "rm", "-f", name], timeout=30)
+                    except (OSError, subprocess.TimeoutExpired):
+                        logger.warning("Could not remove boot probe %s", name)
 
     def _without_failed_cloud_consumers(self, services: list[str]) -> list[str]:
         # OMN-18496: a stopped cloud consumer is neither restarted nor read back.
@@ -4763,12 +5055,14 @@ class DeployExecutor:
     ) -> None:
         """Build the DEV lane's own runtime services (OMN-18108). No-op elsewhere.
 
-        These are declared only in ``docker/docker-compose.dev-lane.yml``, which
-        the lane-agnostic build above never passes, so without this command the
+        The lane-only services are declared in ``docker/docker-compose.dev-lane.yml``,
+        which the lane-agnostic build above never passes, so without this command the
         up phase recreates them from whatever image they already carry and
         reports success. That is exactly what left eight services ~35 commits
         behind on the .201 dev lane while the deploy agent's own terminal event
         said the deploy succeeded.
+
+        OMN-21279 also rebuilds base-file services on the composed image via the overlay.
 
         Additive and explicit: a SECOND build naming the services, rather than
         widening the first one's compose files, so prod and stability-test issue
@@ -4776,13 +5070,13 @@ class DeployExecutor:
         excluded by ``DEV_LANE_ONLY_BUILDABLE_SERVICES`` -- ``docker compose
         build`` has nothing to do for a service that carries only an ``image:``.
         """
-        if lane != EnumRuntimeLane.DEV or not DEV_LANE_ONLY_BUILDABLE_SERVICES:
+        if lane != EnumRuntimeLane.DEV or not DEV_LANE_BUILD_SERVICES:
             return
         logger.info(
-            "_build_dev_lane_only_services: building %d dev-lane-only services "
-            "the base compose file does not declare: %s",
-            len(DEV_LANE_ONLY_BUILDABLE_SERVICES),
-            ", ".join(DEV_LANE_ONLY_BUILDABLE_SERVICES),
+            "_build_dev_lane_only_services: building %d dev-lane services "
+            "with the lane overlay: %s",
+            len(DEV_LANE_BUILD_SERVICES),
+            ", ".join(DEV_LANE_BUILD_SERVICES),
         )
         self._compose_build(
             Scope.RUNTIME,
@@ -4792,7 +5086,7 @@ class DeployExecutor:
             runtime_lane=lane,
             git_ref=git_ref,
             compose_files=lane_config_for(lane).compose_files,
-            services=DEV_LANE_ONLY_BUILDABLE_SERVICES,
+            services=DEV_LANE_BUILD_SERVICES,
             stage_workspace=False,
         )
 
@@ -4951,6 +5245,8 @@ class DeployExecutor:
         stability-test for the REQUESTED service — resolved per-service
         (OMN-15181 round 4, Finding 11) via the single shared
         ``_health_target_container`` mapping, no second hardcoded map.
+        A folded profile reads the main runtime's container and digest; an
+        unfolded profile reads its own container and digest.
         Defaults to ``"omninode-runtime"`` (the pre-round-4 behavior) when no
         service is given. Returns ``None`` (fail-closed via the caller) when
         the stability-test container for that service cannot be inspected.
@@ -4970,10 +5266,9 @@ class DeployExecutor:
         FAILS CLOSED (raises ``DigestMismatchError``) on any mismatch. Must run
         before health checks so a lane is never marked healthy while serving an
         artifact that does not match the pinned digest. Resolved per-service
-        (OMN-15181 round 4, Finding 11) so a targeted runtime-effects deploy is
-        verified against its own container, not the runtime container by
-        default (``service`` defaults to ``"omninode-runtime"``, the
-        pre-round-4 behavior, when the caller does not name one).
+        (OMN-15181 round 4, Finding 11): a folded profile reads the main runtime's
+        container and digest, and an unfolded one reads its own container.
+        ``service`` defaults to ``"omninode-runtime"`` when not specified.
         """
         container = _health_target_container(lane, service)
         observed = _container_image_id(container)
@@ -5846,6 +6141,44 @@ class DeployExecutor:
             f"{was_down or 'no absent service'}"
         )
 
+    def _retire_folded_dev_tenant_projections(
+        self, lane: EnumRuntimeLane, config: ModelLaneConfig | None = None
+    ) -> None:
+        """Retire the primary dev tenant projection carrier before main takes its role; keep volumes."""
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or active_dev_instance() != DEFAULT_DEV_INSTANCE
+        ):
+            return
+        config = lane_config_for(lane) if config is None else config
+        if "tenant-projection-writer" not in config.disabled_services:
+            return
+        project = config.compose_project
+        census = _run(
+            [
+                "docker",
+                "ps",
+                "-aq",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=tenant-projection-writer",
+            ],
+            timeout=30,
+        )
+        if census.returncode != 0:
+            raise RuntimeError("Cannot read folded tenant projection container census")
+        containers = census.stdout.split()
+        if not containers:
+            return
+        for command in (
+            ["docker", "stop", "--time", "30", *containers],
+            ["docker", "rm", *containers],
+        ):
+            result = _run(command, timeout=60)
+            if result.returncode != 0:
+                raise RuntimeError("Cannot retire folded tenant projection container")
+
     def _compose_up(
         self,
         phase: Phase,
@@ -5863,6 +6196,10 @@ class DeployExecutor:
         config = lane_config_for(lane)
         profile = "core" if scope == Scope.CORE else "runtime"
         requested_services = _requested_services_for_up(scope, services, lane=lane)
+        if lane is EnumRuntimeLane.DEV and services and not requested_services:
+            # A retired-role-only request must never start the whole profile.
+            on_phase_update(phase, PhaseStatus.SUCCESS)
+            return
         # For runtime scope, verification MUST be bounded by the requested
         # runtime service list so the runtime-only rebuild never implicitly
         # waits on core infra containers (OMN-9455). The same list bounds the
@@ -5873,6 +6210,11 @@ class DeployExecutor:
             if requested_services
             else services_for_scope(scope, lane=lane)
         )
+
+        # OMN-21279: run the candidate's setting/package check before any
+        # runtime replacement (and never on a prod or stability runner).
+        if lane is EnumRuntimeLane.DEV and scope is Scope.RUNTIME and build:
+            preflight_dev_images(lane, expected)
 
         # OMN-18692: the DEPS recreate is supervised rather than bounded by a
         # `subprocess.run` timeout. It is the one phase whose cancellation can
@@ -5917,6 +6259,8 @@ class DeployExecutor:
                     )
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
+        if scope is Scope.RUNTIME and "omninode-runtime" in requested_services:
+            self._retire_folded_dev_tenant_projections(lane, config)
         cmd = [
             "docker",
             "compose",
@@ -6490,6 +6834,7 @@ class DeployExecutor:
         on_phase_update: PhaseCallback,
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
+        recover_runtime: bool = True,
     ) -> list[ModelHealthCheck]:
         on_phase_update(Phase.VERIFICATION, PhaseStatus.IN_PROGRESS)
         timeout = PHASE_TIMEOUTS[Phase.VERIFICATION]
@@ -6598,6 +6943,9 @@ class DeployExecutor:
         settled: list[ModelHealthCheck] = []
         pending_timeout: subprocess.TimeoutExpired | None = None
         earlier_target_failed = False
+        # A parked boot may exit from inside either wait below. Preserve all
+        # up-front target readings even when settling cannot finish.
+        self.health_checks = checks + [check for _, _, check, _ in probes]
         for service, port, check, timed_out in probes:
             if check.status == "fail":
                 if earlier_target_failed:
@@ -6632,7 +6980,12 @@ class DeployExecutor:
                             }
                         )
                 earlier_target_failed = True
-            if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+            if (
+                check.status == "fail"
+                and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
+            ):
+                self._assert_boot_can_progress(lane=lane, service=service, failed=check)
                 check, timed_out = self._await_declared_start(
                     lane=lane,
                     service=service,
@@ -6644,6 +6997,7 @@ class DeployExecutor:
             if (
                 check.status == "fail"
                 and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
                 and answering is not None
             ):
                 # OMN-20864: up, answering, and its monitor naming a finding.
@@ -6652,7 +7006,11 @@ class DeployExecutor:
                 check = self._decline_recreate_answering(
                     lane=lane, service=service, failed=check, reading=answering
                 )
-            elif check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+            elif (
+                check.status == "fail"
+                and lane in VERIFY_RECREATE_LANES
+                and recover_runtime
+            ):
                 check, timed_out = self._force_recreate_and_reverify(
                     lane=lane,
                     service=service,
@@ -6690,6 +7048,44 @@ class DeployExecutor:
 
         on_phase_update(Phase.VERIFICATION, PhaseStatus.SUCCESS)
         return checks
+
+    def _assert_boot_can_progress(
+        self, *, lane: EnumRuntimeLane, service: str, failed: ModelHealthCheck
+    ) -> None:
+        """Stop a dev boot wait when the entrypoint has exhausted its retries.
+
+        The entrypoint parks forever after this marker (OMN-18550). Neither
+        another health timeout nor recreating the same image can repair the
+        failed boot. Raise into the agent's retained-image restore while it
+        still holds the lane lock. Read only this lane's service container,
+        with bounded logs and time; unreadable logs confer no health verdict.
+        """
+        if lane != EnumRuntimeLane.DEV:
+            return
+        container = self._compose_service_container(lane, service)
+        if not container:
+            return
+        try:
+            result = _run(
+                ["docker", "logs", "--tail", "100", container],
+                timeout=RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        if result.returncode != 0 or not any(
+            line.startswith("[entrypoint] RETRIES EXHAUSTED:")
+            for line in f"{result.stdout or ''}\n{result.stderr or ''}".splitlines()
+        ):
+            return
+        check = failed.model_copy(
+            update={"detail": "boot retries exhausted; entrypoint is parked"}
+        )
+        self.health_checks = [
+            existing
+            for existing in self.health_checks
+            if existing.endpoint != check.endpoint
+        ] + [check]
+        raise VerificationFailedError([check])
 
     def _probe_runtime_health(
         self, *, service: str, port: int, lane: EnumRuntimeLane | None = None
@@ -6825,6 +7221,7 @@ class DeployExecutor:
                 "runtime_health_keep_waiting", str(elapsed), str(budget), state
             ):
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             delay = min(
                 2 ** min(_attempt, 4), VERIFY_RECREATE_POLL_SECONDS, budget - elapsed
             )
@@ -7066,6 +7463,7 @@ class DeployExecutor:
             )
             if check.status == "pass":
                 break
+            self._assert_boot_can_progress(lane=lane, service=service, failed=check)
             remaining = budget - (time.monotonic() - started)
             if remaining <= 0:
                 break
@@ -7192,11 +7590,13 @@ class DeployRolledBackError(VerificationFailedError):
 
     def __init__(
         self,
-        original: VerificationFailedError,
+        original: VerificationFailedError | subprocess.TimeoutExpired,
         outcome: ModelRollbackOutcome,
         point: ModelRollbackPoint,
     ) -> None:
-        super().__init__(original.failures)
+        super().__init__(
+            original.failures if isinstance(original, VerificationFailedError) else []
+        )
         self.outcome = outcome
         image_ids = ", ".join(
             dict.fromkeys(
@@ -7254,7 +7654,21 @@ def capture_rollback_point(
         }
         images: list[ModelRetainedImage] = []
         retention: dict[str, str] = {}
-        for index, (container, _) in enumerate(targets):
+        service_by_target: dict[str, str] = {}
+        for index, (target, _) in enumerate(targets):
+            # Folded profiles share the main runtime's target and container.
+            service_by_target.setdefault(target, service_by_index[index])
+        for index, (target, _) in enumerate(targets):
+            service = service_by_target[target]
+            container = executor._compose_service_container(lane, service)
+            if not container:
+                logger.warning(
+                    "Cannot capture rollback for %s: no unique container for %s in %s",
+                    lane.value,
+                    service,
+                    lane_config_for(lane).compose_project,
+                )
+                return None
             result = _run(
                 ["docker", "inspect", "--format", "{{.Config.Image}}", container],
                 timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],

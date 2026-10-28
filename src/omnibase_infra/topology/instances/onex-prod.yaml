@@ -83,8 +83,13 @@ databases:
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
+              - compaction_activations
+              - compaction_current_context
+              - compaction_receipts
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - delegation_lab_job_outbox
+              - delegation_lab_jobs
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
@@ -226,6 +231,7 @@ databases:
               - context_roi_scores
               - delegation_budget_applied_events
               - delegation_budget_state
+              - delegation_capability_cells
               - delegation_dispositions
               - delegation_eval_item_verdicts
               - delegation_eval_items

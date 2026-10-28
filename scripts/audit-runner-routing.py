@@ -272,7 +272,9 @@ def _variable_value(values: list[dict[str, Any]], name: str) -> str | None:
 
 
 def _audit_trusted_style_variable(
-    variable: dict[str, Any], repositories: list[Any]
+    variable: dict[str, Any],
+    repositories: list[Any],
+    is_private_fleet_shadow: Callable[[str, str], bool] | None = None,
 ) -> list[Finding]:
     """Audit one org+per-repo variable declaration of the trusted-seam shape.
 
@@ -348,6 +350,10 @@ def _audit_trusted_style_variable(
             findings.append(Finding(repo_name, f"{name} is not valid JSON: {actual!r}"))
             continue
         if normalized != repo_expected:
+            if is_private_fleet_shadow is not None and is_private_fleet_shadow(
+                repo_name, normalized
+            ):
+                continue
             findings.append(
                 Finding(
                     repo_name,
@@ -355,6 +361,46 @@ def _audit_trusted_style_variable(
                 )
             )
     return findings
+
+
+def _private_fleet_shadow_check(policy: dict[str, Any]) -> Callable[[str, str], bool]:
+    """Accept a private repository's public-PR shadow equal to its trusted fleet value.
+
+    OMN-20413: private repositories never run CI on GitHub-hosted runners
+    (RULING 2026-10-16T07:07:09Z), so a fork pull request in one -- opened by an
+    account that can already read it -- belongs on the same fleet as its trusted
+    jobs. A repo shadow of the public-PR variable that equals the trusted-seam
+    override the policy declares for that repository is that placement, not the
+    OMN-16683 drift this audit exists to catch. Without this, the audit and a
+    private repository's own placement gate demand opposite values of one
+    variable, and every flip turns one of them red for every pull request.
+
+    Nothing else is accepted: a public repository, a repository with no declared
+    trusted override, or any other value is still drift. Visibility is read live,
+    once, and only when a shadow would otherwise be reported.
+    """
+    trusted = policy.get("trusted_runner_variable") or {}
+    overrides = trusted.get("repository_overrides") or {}
+    fleet_values = {
+        str(repo): _canonical_json(str(override["expected_json"]))
+        for repo, override in overrides.items()
+        if isinstance(override, dict) and "expected_json" in override
+    }
+    private: set[str] = set()
+    read = False
+
+    def check(repo_name: str, normalized: str) -> bool:
+        nonlocal read
+        if fleet_values.get(repo_name) != normalized:
+            return False
+        if not read:
+            private.update(
+                name for name, is_private in _live_repository_visibility() if is_private
+            )
+            read = True
+        return repo_name in private
+
+    return check
 
 
 def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
@@ -367,10 +413,17 @@ def audit_github_variables(policy: dict[str, Any]) -> list[Finding]:
     # at all. It has no repository_overrides declared in the live policy today
     # (every repository is expected to inherit the org value), so any repo
     # carrying a value is drift by construction, which is exactly the
-    # OMN-16683 shape this closes.
+    # OMN-16683 shape this closes -- except, since OMN-20413, a private
+    # repository's shadow equal to its own declared trusted fleet value.
     public_pr_variable = policy.get("public_pr_runner_variable")
     if public_pr_variable is not None:
-        findings.extend(_audit_trusted_style_variable(public_pr_variable, repositories))
+        findings.extend(
+            _audit_trusted_style_variable(
+                public_pr_variable,
+                repositories,
+                _private_fleet_shadow_check(policy),
+            )
+        )
     return findings
 
 

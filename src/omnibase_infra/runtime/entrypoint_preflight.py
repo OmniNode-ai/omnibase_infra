@@ -46,7 +46,8 @@ Related Tickets:
     - OMN-18550: unbounded, unreported restart loop on a malformed contract.
     - OMN-17372: runtime boot latency — four cold interpreters before the kernel.
     - OMN-13666: required (own DB) vs best-effort (non-owned DB) stamp policy.
-    - OMN-15807: the Bifrost renderer always rebuilds from the packaged base.
+    - OMN-15807: the Bifrost renderer rebuilds from the deploy-provided base
+      contract at BIFROST_BASE_CONTRACT_PATH.
 """
 
 from __future__ import annotations
@@ -234,9 +235,10 @@ def stamp_all_fingerprints(env: Mapping[str, str]) -> int:
 def render_bifrost_contract(env: Mapping[str, str]) -> int:
     """Render the Bifrost delegation contract when its target path is declared.
 
-    OMN-15807: the renderer always rebuilds from the packaged base contract and
-    the mounted typed lane overlay; no endpoint or model environment binding is
-    accepted, so a stale volume cannot route.
+    OMN-15807: the renderer rebuilds from the deploy-provided base contract
+    at BIFROST_BASE_CONTRACT_PATH and the mounted typed lane overlay; no
+    endpoint or model environment binding is accepted, so a stale volume
+    cannot route.
     """
     if not env.get("BIFROST_CONTRACT_PATH"):
         return 0

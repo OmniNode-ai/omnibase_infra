@@ -1177,6 +1177,95 @@ check_postgres_backup_freshness() {
     "$age_hours" "$workflow" "$branch"
 }
 
+# OMN-20266: catch dev broker crashes between the 15-minute ticks. A restart
+# takes about 20 seconds, so docker ps rarely reports Restarting at a tick.
+# Hold a restart-policy restart CRITICAL for an hour by default: CONFIRM_TICKS
+# requires two consecutive 15-minute ticks at the same status before paging;
+# a one-tick row would never page. A recreate gets a new container with
+# RestartCount=0, so a deploy does not alarm. RestartCount counts only
+# restart-policy restarts after the process exited on its own.
+# Also inspect the running --memory argument: an operator-env override can
+# silently put it below the compose default, as the 6G crash incident did.
+check_dev_broker() {
+  local container="${OMNINODE_ALERT_DEV_BROKER_CONTAINER:-omnibase-infra-redpanda}"
+  local hold="${OMNINODE_ALERT_DEV_BROKER_RESTART_HOLD_SECONDS:-3600}"
+  local floor_mb="${OMNINODE_ALERT_DEV_BROKER_MEMORY_FLOOR_MB:-12288}"
+  # Declared seams let tests drive the real parsing and thresholds with a
+  # recorded inspect line and a fixed clock, without reaching the docker host.
+  local inspect_cmd="${OMNINODE_DEV_BROKER_INSPECT_CMD:-}"
+  local now_epoch="${OMNINODE_ALERT_DEV_BROKER_NOW_EPOCH:-}"
+  local body restart_count started_at state cmd started_epoch started_seconds
+  if [[ "${OMNINODE_ALERT_DEV_BROKER_CHECK_ENABLED:-1}" != "1" ]]; then
+    return 0
+  fi
+  if [[ -n "$inspect_cmd" ]]; then
+    body=$($inspect_cmd 2>/dev/null) || body=""
+  else
+    body=$(docker inspect --format '{{.RestartCount}}|{{.State.StartedAt}}|{{.State.Status}}|{{json .Config.Cmd}}' "$container" 2>/dev/null) || body=""
+  fi
+  if [[ -z "${body//[[:space:]]/}" ]]; then
+    printf 'broker|CRITICAL|dev-broker-restart|could not inspect %s; dev broker state unknown\n' "$container"
+    return 0
+  fi
+
+  IFS='|' read -r restart_count started_at state cmd <<<"$body"
+  # A stopped or restarting broker is unavailable regardless of how old its
+  # last start is or whether its restart policy has recorded a restart yet.
+  if [[ "$state" != "running" ]]; then
+    printf 'broker|CRITICAL|dev-broker-restart|%s state=%s; dev broker is not running\n' "$container" "${state:-unknown}"
+    return 0
+  fi
+  started_seconds=$(sed 's/\.[0-9][0-9]*Z$/Z/' <<<"$started_at")
+  started_epoch=""
+  if [[ -n "$started_seconds" ]]; then
+    started_epoch=$(date -u -d "$started_seconds" +%s 2>/dev/null) \
+      || started_epoch=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$started_seconds" +%s 2>/dev/null) \
+      || started_epoch=""
+  fi
+  if [[ -z "$started_epoch" ]]; then
+    printf 'broker|CRITICAL|dev-broker-restart|%s StartedAt=%s could not be parsed\n' "$container" "$started_at"
+  elif [[ ! "$restart_count" =~ ^[0-9]+$ ]]; then
+    printf 'broker|CRITICAL|dev-broker-restart|%s RestartCount=%s could not be parsed\n' "$container" "$restart_count"
+  else
+    if [[ -z "$now_epoch" ]]; then
+      now_epoch=$(date -u +%s)
+    fi
+    if (( 10#$restart_count > 0 && now_epoch - started_epoch < hold )); then
+      printf 'broker|CRITICAL|dev-broker-restart|%s RestartCount=%s StartedAt=%s; restart within hold window %ss\n' \
+        "$container" "$restart_count" "$started_at" "$hold"
+    else
+      printf 'broker|OK|dev-broker-restart|restart_count=%s started_at=%s\n' "$restart_count" "$started_at"
+    fi
+  fi
+
+  # Compose passes "--memory 6G" as one JSON string; also accept "--memory=6G".
+  local memory_value memory_mb memory_unit
+  memory_value=$(awk -F'"' '{
+    for (i=2; i<=NF; i+=2) {
+      if ($i ~ /^--memory([[:space:]]+|=)/) {
+        value=$i; sub(/^--memory([[:space:]]+|=)/, "", value)
+        print value; exit
+      }
+    }
+  }' <<<"$cmd")
+  if [[ ! "$memory_value" =~ ^([0-9]+)([GgMm])$ ]]; then
+    printf 'broker|WARNING|dev-broker-memory|%s running --memory could not be read from Cmd\n' "$container"
+    return 0
+  fi
+  memory_mb=$((10#${BASH_REMATCH[1]}))
+  memory_unit="${BASH_REMATCH[2]}"
+  if [[ "$memory_unit" == [Gg] ]]; then
+    memory_mb=$((memory_mb * 1024))
+  fi
+  if (( memory_mb < floor_mb )); then
+    printf 'broker|WARNING|dev-broker-memory|%s running --memory %s (%s MB) below floor %s MB; docker/docker-compose.infra.yml declares --memory ${DEV_REDPANDA_MEMORY:-12G}\n' \
+      "$container" "$memory_value" "$memory_mb" "$floor_mb"
+  else
+    printf 'broker|OK|dev-broker-memory|%s running --memory %s (%s MB); floor %s MB\n' \
+      "$container" "$memory_value" "$memory_mb" "$floor_mb"
+  fi
+}
+
 # OMN-18949: surface LANE CENSUS drift -- the live hourly census on this host
 # against the committed lane manifest.
 #
@@ -1299,7 +1388,9 @@ PY
     # interpreter is overridable because this checker needs PyYAML and the
     # host's bare python3 may not have it.
     errfile=$(mktemp)
-    json=$(timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
+    # This probe reports LIVE lane health, even when invoked from a pull-request
+    # job. Do not inherit the CI checker's pull-request advisory policy here.
+    json=$(env -u GITHUB_EVENT_NAME timeout "${OMNINODE_CENSUS_PROBE_TIMEOUT:-60}" "$python_bin" "$checker" \
              --manifest "$manifest" --snapshot "$live" --json 2>"$errfile")
     rc=$?
     err=$(tail -n1 "$errfile" 2>/dev/null | tr -d '\r' | cut -c1-160)
@@ -1458,6 +1549,7 @@ collect() {
     check_gh_read_identity
     check_postgres_backup_freshness
     check_census_drift
+    check_dev_broker
   }
 }
 
@@ -1629,7 +1721,7 @@ recovered_keys=$(awk -F'\t' '$1=="RECOVERED" { print $2 }' <<<"$decisions")
 
 format_digest() {
   local title="$1"
-  local lines endpoint_lines ci_lines tree_lines fleet_lines backup_lines census_lines issue_lines
+  local lines endpoint_lines ci_lines tree_lines fleet_lines backup_lines census_lines broker_lines issue_lines
   lines=$(awk -F'|' '$1=="disk" {printf "- `%s`: %s, %s, %s (%s)\n", $3, $4, $5, $6, $2} $1=="docker" {printf "- Docker `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   # STARTING is rendered here with the rest (OMN-18435). A booting lane that
   # vanished from this section would be the BLIND direction of monitor failure,
@@ -1663,9 +1755,13 @@ format_digest() {
   # because there is nothing wrong.
   census_lines=$(awk -F'|' '$1=="census" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
   [[ -n "$census_lines" ]] || census_lines="- No lane census rows this tick"
+  # OMN-20266. Same reasoning: "the dev broker has not restarted" and "nothing
+  # inspected the dev broker" must not render the same.
+  broker_lines=$(awk -F'|' '$1=="broker" {printf "- `%s`: %s (%s)\n", $3, $4, $2}' <<<"$snapshot")
+  [[ -n "$broker_lines" ]] || broker_lines="- No dev broker rows this tick"
   # `next` keeps the three row shapes mutually exclusive so a `ci` row cannot
   # also be rendered by the generic column-2 branch below it.
-  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet" || $1=="backup" || $1=="census") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
+  issue_lines=$(awk -F'|' '($1=="ci" || $1=="runner-tree" || $1=="fleet" || $1=="backup" || $1=="census" || $1=="broker") && ($2=="WARNING" || $2=="CRITICAL") {printf "- %s `%s`: %s\n", $2, $3, $4; next} $2=="WARNING" || $2=="CRITICAL" {printf "- %s `%s`: %s %s %s\n", $2, $3, $4, $5, $6; next} $1=="WARNING" || $1=="CRITICAL" {printf "- %s `%s`: HTTP %s %s\n", $1, $2, $3, $4}' <<<"$snapshot")
   if [[ -z "$issue_lines" ]]; then
     issue_lines="- No active warning/critical checks"
   fi
@@ -1688,6 +1784,8 @@ $fleet_lines
 $backup_lines
 *Lane census*
 $census_lines
+*Dev broker*
+$broker_lines
 *Active issues*
 $issue_lines
 MSG

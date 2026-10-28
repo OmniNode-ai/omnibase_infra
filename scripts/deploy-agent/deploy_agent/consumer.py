@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -407,9 +408,44 @@ class DeployConsumer:
         if not ordered:
             return None, None
         self._return_other_partitions_to_fetch(records, ordered[0])
+        if lookahead_usable:
+            priority = self._priority_message(ordered)
+            if priority is not None:
+                return self._process_message(priority, replay_from=ordered[0])
         return self._process_message(
             ordered[0], lookahead=ordered[1:] if lookahead_usable else []
         )
+
+    def _priority_message(self, ordered: list[Any]) -> Any | None:
+        """Run an operator's signed dev-tag restore ahead of queued forwards.
+
+        The declaration attributes the operator's choice of a known-good tag;
+        a moving branch or an undeclared tag is not a recovery request. All
+        acceptance checks still run. Only one partition is scanned, and only
+        commands for the head's lane and this instance qualify. Durable dedup
+        prevents selecting the restore again when skipped forwards are replayed.
+        """
+        head = self._decode_for_lookahead(ordered[0])
+        if head is None or head.runtime_lane != EnumRuntimeLane.DEV or head.rollback:
+            return None
+        for msg in ordered[1:]:
+            cmd = self._decode_for_lookahead(msg)
+            if (
+                cmd is not None
+                and cmd.runtime_lane == head.runtime_lane
+                and cmd.rollback is not None
+                and re.fullmatch(
+                    r"(?:refs/tags/)?dev-[0-9]{14}-[0-9a-f]{7,40}", cmd.git_ref
+                )
+                and not self.job_store.is_duplicate(cmd.correlation_id)
+            ):
+                logger.info(
+                    "Prioritizing signed tag restore %s ahead of forward %s",
+                    cmd.correlation_id,
+                    head.correlation_id,
+                )
+                return msg
+        return None
 
     def _maybe_resume_after_load_gate(self) -> None:
         """Resume a partition a deferral paused, once a re-check opens the gate.
@@ -538,7 +574,7 @@ class DeployConsumer:
         return reason.value
 
     def _process_message(
-        self, msg: Any, lookahead: list[Any] | None = None
+        self, msg: Any, lookahead: list[Any] | None = None, *, replay_from: Any = None
     ) -> tuple[ModelRebuildRequested | None, str | None]:
         payload = msg.value
 
@@ -551,7 +587,7 @@ class DeployConsumer:
                 detail=payload.error,
                 raw_preview=payload.raw_preview,
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(
                 EnumRejectionReason.UNDECODABLE_PAYLOAD, raw=payload.raw_preview
             )
@@ -564,7 +600,7 @@ class DeployConsumer:
                 "Rejecting command (correlation_id=%s): invalid_signature",
                 correlation_id_str,
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(
                 EnumRejectionReason.INVALID_SIGNATURE, raw=payload
             )
@@ -587,7 +623,7 @@ class DeployConsumer:
                 detail=str(e),
                 raw_preview=None,
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.INVALID_PAYLOAD, raw=payload)
 
         # Step 4: Lane fence (OMN-16939). The dev control bus carries both dev
@@ -601,7 +637,7 @@ class DeployConsumer:
             logger.warning(
                 "Rejecting command %s: lane_not_allowed (%s)", cmd.correlation_id, e
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.LANE_NOT_ALLOWED, cmd=cmd)
 
         # Step 4a: Instance routing (OMN-19506). A command the routing table,
@@ -621,7 +657,7 @@ class DeployConsumer:
                     decision.basis,
                     self.router.instance.name,
                 )
-                self._commit_through(msg)
+                self._commit_through(msg, replay_from=replay_from)
                 return None, None
 
         # Step 4b: Freeze (lane flags). After routing, so a command for another
@@ -640,13 +676,13 @@ class DeployConsumer:
                 cmd.requested_by,
                 frozen,
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.FROZEN, cmd=cmd)
 
         # Step 5: Check busy
         if self.job_store.has_active_job():
             logger.info("Rejecting command %s: agent busy", cmd.correlation_id)
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
 
         # Step 5a: Host slot (OMN-19544 AC1). On a host this agent shares with
@@ -664,7 +700,7 @@ class DeployConsumer:
                     cmd.correlation_id,
                     holder.describe(),
                 )
-                self._commit_through(msg)
+                self._commit_through(msg, replay_from=replay_from)
                 return None, self._reject(EnumRejectionReason.BUSY, cmd=cmd)
 
         # Step 5b: Load gate (OMN-19507). After routing, so a command for
@@ -679,7 +715,10 @@ class DeployConsumer:
             gate = self.load_gate.check()
             if gate.verdict is EnumLoadGateVerdict.DEFER:
                 topic_partition = TopicPartition(msg.topic, msg.partition)
-                self.consumer.seek(topic_partition, msg.offset)
+                self.consumer.seek(
+                    topic_partition,
+                    replay_from.offset if replay_from is not None else msg.offset,
+                )
                 self.consumer.pause(topic_partition)
                 self.load_gate_paused = topic_partition
                 logger.info(
@@ -692,7 +731,7 @@ class DeployConsumer:
         # Step 6: Check dedup
         if self.job_store.is_duplicate(cmd.correlation_id):
             logger.info("Rejecting command %s: duplicate", cmd.correlation_id)
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.DUPLICATE, cmd=cmd)
 
         # Step 6a: Lineage fence (OMN-19270). Compared with the build the lane
@@ -712,7 +751,7 @@ class DeployConsumer:
             logger.warning(
                 "Rejecting command %s: %s", cmd.correlation_id, lineage.journal_line()
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(EnumRejectionReason.DIVERGENT_REF, cmd=cmd)
         if lineage is not None and lineage.verdict.supersedes:
             logger.info(
@@ -723,7 +762,7 @@ class DeployConsumer:
                 command=self._command_payload(msg),
                 lineage=lineage,
             )
-            self._commit_through(msg)
+            self._commit_through(msg, replay_from=replay_from)
             return None, self._reject(
                 EnumRejectionReason.SUPERSEDED_BY_RUNNING_BUILD, cmd=cmd
             )
@@ -752,7 +791,11 @@ class DeployConsumer:
         # the command is processed on the current image, exactly as the
         # method's own dirty-tree and fetch-failure rails already do.
         try:
-            self.self_update_hook(lambda: self._rewind_committed_offset_to(runner_msg))
+            self.self_update_hook(
+                lambda: self._rewind_committed_offset_to(
+                    replay_from if replay_from is not None else runner_msg
+                )
+            )
         except Exception as e:  # noqa: BLE001
             logger.error(  # noqa: TRY400
                 "Self-update at the pre-accept boundary failed for %s, "
@@ -783,6 +826,8 @@ class DeployConsumer:
 
         # Step 9: Commit offset. The runner's offset is at or past every
         # superseded record's, so one commit covers the whole group.
+        # A priority restore instead retains replay_from, the earliest
+        # forward record it skipped; only its own durable job is accepted.
         #
         # OMN-20133: the job is already on disk as accepted, so a refused
         # commit must not escape. Raising here killed the process, the
@@ -791,16 +836,15 @@ class DeployConsumer:
         # deployed (job 7b970ab9, 2026-09-30). The job runs instead. The
         # uncommitted record is redelivered after the group rejoin and is then
         # refused as the duplicate it really is.
-        try:
-            self._commit_through(runner_msg)
-        except CommitFailedError as e:
-            logger.error(  # noqa: TRY400
+        commit_error = self._commit_through(runner_msg, replay_from=replay_from)
+        if commit_error is not None:
+            logger.error(
                 "Accepted command %s but its offset commit was refused, "
                 "running it anyway; its redelivery after the group rejoin "
                 "will be refused as a duplicate: %s "
                 "friction_type=accept_commit_failed",
                 runner_cmd.correlation_id,
-                e,
+                commit_error,
             )
 
         # Step 10: Return accepted command
@@ -1083,8 +1127,10 @@ class DeployConsumer:
                 )
             )
 
-    def _commit_through(self, msg: Any) -> None:
-        """Commit past THIS record and no further, and fetch from just after it.
+    def _commit_through(
+        self, msg: Any, *, replay_from: Any = None
+    ) -> CommitFailedError | None:
+        """Commit and seek past this record, or AT the skipped replay frontier.
 
         A bare ``self.consumer.commit()`` commits the consumer's POSITION for
         every assigned partition. After a ``poll()`` that returned a batch the
@@ -1116,19 +1162,49 @@ class DeployConsumer:
         comment notes that re-reading a refused command forever "would stall
         every command behind it". What is bounded here is the reach of that
         advance, not its direction.
+
+        A REFUSED COMMIT IS A REJOIN, NOT A CRASH (OMN-17427). The agent does
+        not poll while a job runs, so a job longer than kafka-python's
+        ``max_poll_interval_ms`` costs the group membership and the next commit
+        of any kind raises ``CommitFailedError``. On 2026-10-22T00:13Z that was
+        a routing skip right after a 12-minute job, and the agent exited 1.
+        kafka-python has already reset the generation and requested the rejoin
+        when it raises, so the next ``poll()`` rejoins and re-reads the fetch
+        position from the committed offset: this record is redelivered and
+        decided again. So the refusal is logged and returned, never raised, and
+        nothing is sought or sampled, because nothing was committed. Returns
+        ``None`` when the commit landed.
         """
+        # A priority restore was processed out of order. Commit and seek AT
+        # the earliest skipped forward, never past it. The accepted restore is
+        # already durable and is deduplicated when its offset is reached again.
+        next_offset = replay_from.offset if replay_from is not None else msg.offset + 1
         topic_partition = TopicPartition(msg.topic, msg.partition)
-        self.consumer.commit(
-            {
-                topic_partition: OffsetAndMetadata(
-                    msg.offset + 1, PROCESSED_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
-                )
-            }
-        )
-        self.consumer.seek(topic_partition, msg.offset + 1)
+        try:
+            self.consumer.commit(
+                {
+                    topic_partition: OffsetAndMetadata(
+                        next_offset, PROCESSED_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
+                    )
+                }
+            )
+        except CommitFailedError as e:
+            logger.warning(
+                "commit_refused_rejoin: the offset commit past %s@%d:%d was "
+                "refused (%s); the next poll rejoins the group and the record is "
+                "redelivered, so a refused or skipped record is refused or "
+                "skipped again and an accepted one is refused as a duplicate",
+                msg.topic,
+                msg.partition,
+                msg.offset,
+                e,
+            )
+            return e
+        self.consumer.seek(topic_partition, next_offset)
         # OMN-18144: what the next lag sample measures against.
         if self.lag_sampler is not None:
-            self.lag_sampler.note_commit(topic_partition, msg.offset + 1)
+            self.lag_sampler.note_commit(topic_partition, next_offset)
+        return None
 
     def _rewind_committed_offset_to(self, msg: Any) -> None:
         """Commit this message's own offset so it is re-read, not skipped.
@@ -1142,16 +1218,34 @@ class DeployConsumer:
         consumer is configured ``auto_offset_reset="latest"``, so a group with
         no committed offset yet -- the first command a freshly created group
         ever sees -- would resume past the message and lose it.
+
+        A refused rewind (OMN-17427) is logged and does not escape: the
+        replacement process then reads from the last committed offset, which is
+        this command's own offset when the record before it was committed, and
+        past it only for a group that has never committed one.
         """
         topic_partition = TopicPartition(msg.topic, msg.partition)
         self.consumer.seek(topic_partition, msg.offset)
-        self.consumer.commit(
-            {
-                topic_partition: OffsetAndMetadata(
-                    msg.offset, SELF_UPDATE_REWIND_METADATA, UNKNOWN_LEADER_EPOCH
-                )
-            }
-        )
+        try:
+            self.consumer.commit(
+                {
+                    topic_partition: OffsetAndMetadata(
+                        msg.offset, SELF_UPDATE_REWIND_METADATA, UNKNOWN_LEADER_EPOCH
+                    )
+                }
+            )
+        except CommitFailedError as e:
+            logger.warning(
+                "commit_refused_rejoin: the self-update rewind to %s@%d:%d was "
+                "refused (%s); the replacement process reads from the last "
+                "committed offset, which re-reads this command unless the group "
+                "never committed one",
+                msg.topic,
+                msg.partition,
+                msg.offset,
+                e,
+            )
+            return
         # OMN-18144: a rewind moves the committed offset BACK, and a lag
         # measured against the old value would under-report the record this
         # rewind exists to have re-read.
@@ -1182,6 +1276,7 @@ class DeployConsumer:
         being lost silently.
         """
         advanced: list[dict[str, Any]] = []
+        refused = False
         for tp in sorted(
             self.consumer.assignment(), key=lambda p: (p.topic, p.partition)
         ):
@@ -1190,13 +1285,31 @@ class DeployConsumer:
             if position is None or highwater is None or position >= highwater:
                 continue
             self.consumer.seek(tp, position + 1)
-            self.consumer.commit(
-                {
-                    tp: OffsetAndMetadata(
-                        position + 1, QUARANTINE_COMMIT_METADATA, UNKNOWN_LEADER_EPOCH
-                    )
-                }
-            )
+            try:
+                self.consumer.commit(
+                    {
+                        tp: OffsetAndMetadata(
+                            position + 1,
+                            QUARANTINE_COMMIT_METADATA,
+                            UNKNOWN_LEADER_EPOCH,
+                        )
+                    }
+                )
+            except CommitFailedError as e:
+                # OMN-17427: nothing advanced. The next poll rejoins, re-reads
+                # the position from the committed offset, fails this fetch
+                # again, and quarantines it as a live member.
+                logger.warning(
+                    "commit_refused_rejoin: the quarantine commit to %s@%d:%d was "
+                    "refused (%s); the next poll rejoins the group and this "
+                    "fetch is quarantined again",
+                    tp.topic,
+                    tp.partition,
+                    position + 1,
+                    e,
+                )
+                refused = True
+                continue
             # OMN-18144: a quarantined record has been dealt with, so the lag
             # must not keep counting it.
             if self.lag_sampler is not None:
@@ -1216,6 +1329,9 @@ class DeployConsumer:
             "reason": f"{type(exc).__name__}: {exc}",
             "advanced": advanced,
         }
+
+        if not advanced and refused:
+            return "undecodable_fetch_commit_refused"
 
         if not advanced:
             # Honest rather than silent: the stall was NOT cleared, and saying

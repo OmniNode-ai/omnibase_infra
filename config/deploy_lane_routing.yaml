@@ -20,6 +20,13 @@
 # that predates this file, routes to the default, so every version of the
 # table must agree on it.
 #
+# AVAILABILITY (OMN-21402). An instance may declare `available: false`; a
+# route naming it resolves to default_instance in the deploy agent
+# (deploy_agent/routing.py) and the CI verify-route resolver
+# (scripts/ci/deploy_lane_verify_route.py) alike. The default instance may
+# never be unavailable. Absent means available. Keep the route row so restoring
+# the instance takes one value change.
+#
 # consumer_group: each instance must read EVERY record, so each has its own
 # group. dev-201 keeps the historical group name so the running .201 agent's
 # committed offsets carry over on its self-update; a new group would start at
@@ -129,6 +136,12 @@ instances:
   dev-202:
     hostnames: [omnipc2]
     consumer_group: onex-deploy-agent-dev-202
+    # OMN-21402: this instance's host is out for hardware repair (operator,
+    # 2026-10-25), so none of its agents reads the control topic and the
+    # default instance skipped every omnimarket rebuild routed here. While it
+    # is out, the omnimarket route below resolves to the default instance. Set
+    # true when the host is back.
+    available: false
     flags:
       max_dev_lag_minutes: 20
     lane:

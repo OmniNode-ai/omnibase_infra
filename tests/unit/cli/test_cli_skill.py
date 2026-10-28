@@ -904,159 +904,6 @@ def test_gap_mapping_routes_positional_subcommand_to_node(
     assert payload["scope"] == "local"
 
 
-def test_gap_payload_validates_against_request_model() -> None:
-    """The gap mapping builds a payload the node's request model accepts.
-
-    omnimarket is the backing-node package and is not a hard test dependency
-    of omnibase_infra; skip when it is not installed (CI parity with the other
-    omnimarket-optional tests in this suite).
-    """
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_gap_compute.models.model_gap_compute_request"
-    )
-    ModelGapComputeRequest = request_module.ModelGapComputeRequest
-
-    registry = load_skill_registry()
-    gap = registry.get("gap")
-    assert gap is not None
-    assert gap.node_name == "node_gap_compute"
-    payload = _parse_skill_args(
-        gap, ("detect", "--scope", "local", "--severity-threshold", "CRITICAL")
-    )
-    request = ModelGapComputeRequest.model_validate(payload)
-    assert request.subcommand.value == "detect"
-    assert request.scope == "local"
-    assert request.severity_threshold.value == "CRITICAL"
-
-
-def test_contract_sweep_payload_validates_against_request_model() -> None:
-    """The OMN-13511 contract_sweep mapping builds an acceptable payload.
-
-    The node request model is ``extra="forbid"``, so every CLI arg the mapping
-    surfaces must be a real request-model field — this proves it for the
-    newly-registered sweep rather than only that it dispatches.
-    """
-    handler_module = pytest.importorskip(
-        "omnimarket.nodes.node_contract_sweep.handlers.handler_contract_sweep"
-    )
-    ContractSweepRequest = handler_module.ContractSweepRequest
-
-    registry = load_skill_registry()
-    contract_sweep = registry.get("contract_sweep")
-    assert contract_sweep is not None
-    assert contract_sweep.node_name == "node_contract_sweep"
-    payload = _parse_skill_args(
-        contract_sweep, ("--repos", "omnibase_core,omnibase_infra", "--dry-run")
-    )
-    request = ContractSweepRequest.model_validate(payload)
-    assert request.repos == ["omnibase_core", "omnibase_infra"]
-    assert request.dry_run is True
-
-
-def test_runtime_sweep_payload_validates_against_request_model() -> None:
-    """The OMN-13511 runtime_sweep mapping builds an acceptable payload."""
-    handler_module = pytest.importorskip(
-        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
-    )
-    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
-
-    registry = load_skill_registry()
-    runtime_sweep = registry.get("runtime_sweep")
-    assert runtime_sweep is not None
-    assert runtime_sweep.node_name == "node_runtime_sweep"
-    payload = _parse_skill_args(runtime_sweep, ("--dry-run",))
-    request = RuntimeSweepRequest.model_validate(payload)
-    assert request.dry_run is True
-
-
-def test_runtime_sweep_scope_arg_wired_and_forwarded() -> None:
-    """OMN-13715: --scope is accepted by the CLI mapping and forwarded to the payload.
-
-    Before this fix, runtime_sweep was missing the scope arg in skill_mapping.yaml.
-    Passing --scope caused `Unknown argument '--scope'` (ClickException). After the
-    fix, --scope maps to the ``scope`` payload field and the RuntimeSweepRequest
-    model validates it cleanly (extra="forbid" — if the field is absent from the
-    model the validate call raises).
-    """
-    handler_module = pytest.importorskip(
-        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
-    )
-    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
-
-    registry = load_skill_registry()
-    runtime_sweep = registry.get("runtime_sweep")
-    assert runtime_sweep is not None
-
-    # Before fix: _parse_skill_args raised ClickException("Unknown argument '--scope'")
-    payload = _parse_skill_args(runtime_sweep, ("--scope", "omnidash-only"))
-    assert payload.get("scope") == "omnidash-only"
-
-    # Payload must validate against the request model (extra="forbid").
-    request = RuntimeSweepRequest.model_validate(payload)
-    assert request.scope == "omnidash-only"  # type: ignore[attr-defined]
-
-
-def test_runtime_sweep_scope_arg_omitted_gives_none() -> None:
-    """OMN-13715: omitting --scope leaves scope absent from payload (no default injected)."""
-    handler_module = pytest.importorskip(
-        "omnimarket.nodes.node_runtime_sweep.handlers.handler_runtime_sweep"
-    )
-    RuntimeSweepRequest = handler_module.RuntimeSweepRequest
-
-    registry = load_skill_registry()
-    runtime_sweep = registry.get("runtime_sweep")
-    assert runtime_sweep is not None
-
-    payload = _parse_skill_args(runtime_sweep, ())
-    # Scope omitted → not in payload → model defaults to None.
-    assert "scope" not in payload or payload.get("scope") is None
-    request = RuntimeSweepRequest.model_validate(payload)
-    assert request.scope is None  # type: ignore[attr-defined]
-
-
-def test_integration_sweep_payload_validates_against_request_model() -> None:
-    """The OMN-13511 integration_sweep mapping builds an acceptable payload."""
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_integration_sweep_orchestrator.models."
-        "model_integration_sweep_orchestrator_request"
-    )
-    ModelIntegrationSweepOrchestratorRequest = (
-        request_module.ModelIntegrationSweepOrchestratorRequest
-    )
-
-    registry = load_skill_registry()
-    integration_sweep = registry.get("integration_sweep")
-    assert integration_sweep is not None
-    assert integration_sweep.node_name == "node_integration_sweep_orchestrator"
-    payload = _parse_skill_args(
-        integration_sweep, ("--scope", "post-merge", "--tickets", "OMN-1,OMN-2")
-    )
-    request = ModelIntegrationSweepOrchestratorRequest.model_validate(payload)
-    assert request.scope == "post-merge"
-    assert request.tickets == ["OMN-1", "OMN-2"]
-    # run_surface_probes defaults to True via the mapping default.
-    assert request.run_surface_probes is True
-
-
-def test_skill_functional_audit_payload_validates_against_request_model() -> None:
-    """The OMN-13511 skill_functional_audit mapping builds an acceptable payload."""
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_skill_functional_audit_compute.models."
-        "model_skill_functional_audit_compute_request"
-    )
-    ModelSkillFunctionalAuditComputeRequest = (
-        request_module.ModelSkillFunctionalAuditComputeRequest
-    )
-
-    registry = load_skill_registry()
-    audit = registry.get("skill_functional_audit")
-    assert audit is not None
-    assert audit.node_name == "node_skill_functional_audit_compute"
-    payload = _parse_skill_args(audit, ("--skills-filter", "merge_sweep,gap"))
-    request = ModelSkillFunctionalAuditComputeRequest.model_validate(payload)
-    assert request.skills_filter == ["merge_sweep", "gap"]
-
-
 # --------------------------------------------------------------------------- #
 # OMN-13918: `redeploy` was documented (docs/) but had no skill_mapping.yaml
 # entry — `onex skill redeploy` returned "Unknown skill" and the .201 runtime
@@ -1082,91 +929,6 @@ def test_redeploy_registered_with_no_default_lane() -> None:
     )
     assert lane_spec.default is None
     assert lane_spec.required is False
-
-
-def test_redeploy_payload_validates_against_request_model() -> None:
-    """The OMN-13918 redeploy mapping builds a payload the command model accepts.
-
-    ``ModelRedeployStartCommand`` is ``extra="forbid"`` — every CLI arg the
-    mapping surfaces must be a real field on that model. ``correlation_id`` is
-    a required field the mapping intentionally does NOT expose as a CLI arg
-    (RuntimeLocal auto-injects it, OMN-13591); the test supplies one directly
-    to validate the rest of the CLI-constructed payload.
-    """
-    command_module = pytest.importorskip(
-        "omnimarket.nodes.node_redeploy_orchestrator.models."
-        "model_redeploy_start_command"
-    )
-    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
-
-    registry = load_skill_registry()
-    redeploy = registry.get("redeploy")
-    assert redeploy is not None
-    payload = _parse_skill_args(
-        redeploy,
-        ("--lane", "dev", "--scope", "full", "--git-ref", "origin/main", "--dry-run"),
-    )
-    assert "correlation_id" not in payload
-    payload["correlation_id"] = str(uuid4())
-
-    request = ModelRedeployStartCommand.model_validate(payload)
-    assert request.runtime_lane.value == "dev"
-    assert request.scope.value == "full"
-    assert request.git_ref == "origin/main"
-    assert request.dry_run is True
-
-
-def test_redeploy_lane_omitted_defaults_to_dev_never_prod() -> None:
-    """Omitting `--lane` must never silently resolve to prod (OMN-13918 DoD).
-
-    The mapping sets no default for `lane`, so the payload field is absent
-    entirely; ``ModelRedeployStartCommand.runtime_lane`` then applies its own
-    "dev" default. Prod is reachable ONLY via an explicit ``--lane prod``.
-    """
-    command_module = pytest.importorskip(
-        "omnimarket.nodes.node_redeploy_orchestrator.models."
-        "model_redeploy_start_command"
-    )
-    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
-
-    registry = load_skill_registry()
-    redeploy = registry.get("redeploy")
-    assert redeploy is not None
-    payload = _parse_skill_args(redeploy, ())
-    assert "runtime_lane" not in payload
-    payload["correlation_id"] = str(uuid4())
-
-    request = ModelRedeployStartCommand.model_validate(payload)
-    assert request.runtime_lane.value == "dev"
-
-
-def test_redeploy_prod_lane_is_explicit_and_still_requires_the_gate() -> None:
-    """`--lane prod` is honored explicitly but never bypasses the promotion gate.
-
-    This proves only the mapping/payload layer: the CLI faithfully forwards an
-    explicit `--lane prod` request unmodified. The orchestrator itself (tested
-    in omnimarket) always routes a prod ``ModelRedeployStartCommand`` through
-    the out-of-band grant-resolve -> gate-evaluate chain and never trusts a
-    caller-attached grant — dry-run included, which reports BLOCKED rather
-    than fabricating a passing gate decision.
-    """
-    command_module = pytest.importorskip(
-        "omnimarket.nodes.node_redeploy_orchestrator.models."
-        "model_redeploy_start_command"
-    )
-    ModelRedeployStartCommand = command_module.ModelRedeployStartCommand
-
-    registry = load_skill_registry()
-    redeploy = registry.get("redeploy")
-    assert redeploy is not None
-    payload = _parse_skill_args(redeploy, ("--lane", "prod", "--dry-run"))
-    payload["correlation_id"] = str(uuid4())
-
-    request = ModelRedeployStartCommand.model_validate(payload)
-    assert request.runtime_lane.value == "prod"
-    # promotion_grant is not a CLI-exposed field — a caller cannot self-grant.
-    assert "promotion_grant" not in payload
-    assert request.promotion_grant is None
 
 
 def test_command_writes_payload_under_state_root_not_tmp(
@@ -1253,70 +1015,6 @@ def test_dep_cascade_dedup_registered_and_wired() -> None:
     )
 
 
-def test_dep_cascade_dedup_payload_validates_against_request_model() -> None:
-    """The OMN-13995 mapping builds a payload ModelDepCascadeDedupRequest accepts.
-
-    ``ModelDepCascadeDedupRequest`` is ``extra="forbid"``, so every CLI arg the
-    mapping surfaces must be a real request-model field. This proves the sweep
-    resolves its roots/repos (``--repos`` → the ``repos`` field it scans), not
-    merely that the skill name is registered. omnimarket is the backing-node
-    package and is not a hard test dependency of omnibase_infra; skip when it is
-    not installed (CI parity with the other omnimarket-optional tests here).
-    """
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
-        "model_dep_cascade_dedup_request"
-    )
-    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
-
-    registry = load_skill_registry()
-    dedup = registry.get("dep_cascade_dedup")
-    assert dedup is not None
-    assert dedup.node_name == "node_dep_cascade_dedup_orchestrator"
-    payload = _parse_skill_args(
-        dedup,
-        (
-            "--repos",
-            "omnibase_core,omnibase_infra",
-            "--dependency-type",
-            "python",
-            "--label",
-            "dependencies",
-            "--dry-run",
-        ),
-    )
-    request = ModelDepCascadeDedupRequest.model_validate(payload)
-    # repos = the sweep's roots/repos it scans for superseded dep-bump PRs.
-    assert request.repos == ("omnibase_core", "omnibase_infra")
-    assert request.dependency_type == "python"
-    assert request.label == "dependencies"
-    assert request.dry_run is True
-
-
-def test_dep_cascade_dedup_dry_run_omitted_defaults_false() -> None:
-    """Omitting ``--dry-run`` yields a wet-run payload the model accepts.
-
-    Guards the boolean-default wiring: the mapping declares ``dry-run`` with
-    ``default: false`` so an omitted flag produces ``dry_run=False`` rather than
-    dropping the field.
-    """
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_dep_cascade_dedup_orchestrator.models."
-        "model_dep_cascade_dedup_request"
-    )
-    ModelDepCascadeDedupRequest = request_module.ModelDepCascadeDedupRequest
-
-    registry = load_skill_registry()
-    dedup = registry.get("dep_cascade_dedup")
-    assert dedup is not None
-    payload = _parse_skill_args(dedup, ())
-    assert payload["dry_run"] is False
-    request = ModelDepCascadeDedupRequest.model_validate(payload)
-    assert request.dry_run is False
-    # repos defaults to the empty tuple → node discovers all OmniNode-ai repos.
-    assert request.repos == ()
-
-
 # --------------------------------------------------------------------------- #
 # OMN-13995 / CLAUDE.md rule #8: the sweep-repo-fallback must FAIL FAST.
 #
@@ -1367,51 +1065,6 @@ def test_sweep_repo_fallback_fails_fast_without_env(
         handler_cls._resolve_root("")
 
 
-def test_pr_state_payload_validates_against_request_model() -> None:
-    """OMN-14374: the pr_state mapping builds a payload node_github_repo_gateway_effect accepts.
-
-    Wires the EXISTING read-only status reader (OMN-14307) so `onex skill
-    pr_state` returns one small typed row per operation instead of a raw
-    `gh pr view/checks --json ...` dump. --pr is required only for the 5
-    PR-scoped operations; the request model's own validator enforces that
-    (not the CLI mapping), so this proves both the scoped and unscoped shape.
-    """
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_github_repo_gateway_effect.models.model_gateway_io"
-    )
-    ModelGithubGatewayRequest = request_module.ModelGithubGatewayRequest
-
-    registry = load_skill_registry()
-    pr_state = registry.get("pr_state")
-    assert pr_state is not None
-    assert pr_state.node_name == "node_github_repo_gateway_effect"
-
-    # PR-scoped operation.
-    payload = _parse_skill_args(
-        pr_state,
-        (
-            "--operation",
-            "pr_status",
-            "--repo",
-            "OmniNode-ai/omnimarket",
-            "--pr",
-            "1704",
-        ),
-    )
-    request = ModelGithubGatewayRequest.model_validate(payload)
-    assert request.operation.value == "pr_status"
-    assert request.repo == "OmniNode-ai/omnimarket"
-    assert request.pr_number == 1704
-
-    # Repo-scoped operation — --pr omitted, still validates.
-    payload = _parse_skill_args(
-        pr_state, ("--operation", "open_prs_list", "--repo", "OmniNode-ai/omnimarket")
-    )
-    request = ModelGithubGatewayRequest.model_validate(payload)
-    assert request.operation.value == "open_prs_list"
-    assert request.pr_number is None
-
-
 def test_json_arg_type_coerces_object() -> None:
     """OMN-14529: the ``json`` arg_type parses a raw CLI string into a dict.
 
@@ -1447,62 +1100,6 @@ def test_decision_store_registered_and_wired() -> None:
     decision_store = registry.get("decision_store")
     assert decision_store is not None
     assert decision_store.node_name == "node_decision_store_orchestrator"
-
-
-def test_decision_store_record_payload_validates_against_request_model() -> None:
-    """The decision_store `record` mapping builds a payload the orchestrator's
-    ModelDecisionStoreRequest accepts, including the nested `entry` object
-    built from the `json` arg_type (OMN-14529).
-    """
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
-    )
-    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
-
-    registry = load_skill_registry()
-    decision_store = registry.get("decision_store")
-    assert decision_store is not None
-
-    entry_json = json.dumps(
-        {
-            "decision_type": "TECH_STACK_CHOICE",
-            "domain": "api",
-            "layer": "architecture",
-            "summary": "Use Kafka for all inter-service transport",
-            "rationale": "Replay, ordering, and backpressure guarantees.",
-        }
-    )
-    payload = _parse_skill_args(
-        decision_store, ("--action", "record", "--entry", entry_json)
-    )
-    request = ModelDecisionStoreRequest.model_validate(payload)
-    assert request.action.value == "record"
-    assert request.entry is not None
-    assert request.entry.domain == "api"
-    assert request.dry_run is False
-
-
-def test_decision_store_query_payload_validates_against_request_model() -> None:
-    """The decision_store `query` mapping builds a valid nested query_filter."""
-    request_module = pytest.importorskip(
-        "omnimarket.nodes.node_decision_store_orchestrator.models.model_decision_store_request"
-    )
-    ModelDecisionStoreRequest = request_module.ModelDecisionStoreRequest
-
-    registry = load_skill_registry()
-    decision_store = registry.get("decision_store")
-    assert decision_store is not None
-
-    query_filter_json = json.dumps({"domain": "api", "limit": 5})
-    payload = _parse_skill_args(
-        decision_store,
-        ("--action", "query", "--query-filter", query_filter_json),
-    )
-    request = ModelDecisionStoreRequest.model_validate(payload)
-    assert request.action.value == "query"
-    assert request.query_filter is not None
-    assert request.query_filter.domain == "api"
-    assert request.query_filter.limit == 5
 
 
 # --------------------------------------------------------------------------- #
@@ -1826,6 +1423,12 @@ def test_claude_code_binding_install_entry_resolves() -> None:
     assert entry.result_model == (
         "omnibase_core.models.claude_code_binding.ModelBindingInstallResult"
     )
+    # OMN-21335: the rows to install ride in as a required JSON list; without the
+    # arg the request failed validation with "bindings Field required".
+    bindings_arg = next(a for a in entry.args if a.name == "bindings")
+    assert bindings_arg.payload_field == "bindings"
+    assert bindings_arg.arg_type is EnumSkillArgType.JSON
+    assert bindings_arg.required is True
 
     # The catalog leg runs wherever the sibling omnimarket checkout is
     # resolvable (CI wires OMNIMARKET_SRC for the catalog job; the whole-table

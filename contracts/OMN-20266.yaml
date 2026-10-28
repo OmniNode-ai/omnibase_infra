@@ -1,0 +1,87 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20266
+title: Dev broker alarms and canonical clone metadata reconciliation
+summary: >-
+  Preserve the previously landed broker alarm evidence under this ticket ID and add the canonical clone origin/HEAD repair needed by host clone parity. AC4 below is a repository-local reconciliation requirement for this repair; it does not claim completion of the live ticket's pool probe, placement admission or queue-status acceptance criteria.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20266-broker-alarm
+    statement: The dev broker cannot read healthy while unavailable or within the restart hold window, and insufficient running memory is visible.
+    acceptance:
+      - id: AC1
+        statement: Recent restart-policy restarts remain critical across confirmation ticks and expire at the configured second boundary; a running fresh recreate does not alarm.
+      - id: AC2
+        statement: Non-running container states and unreadable inspect, start time or restart count produce a critical restart row.
+      - id: AC3
+        statement: The reporter compares the running memory argument to its floor and includes broker rows in the digest and active issues.
+  - id: req-omn20266-clone-origin-head
+    statement: After a successful origin fetch, canonical clone reconciliation refreshes the cached remote default branch used by clone parity.
+    acceptance:
+      - id: AC4
+        statement: A clone made while origin defaults to main reconciles onto the dev tip and refreshes origin/HEAD when the remote default moves to dev.
+evidence_requirements:
+  - kind: tests
+    description: The deployed shell function runs with controlled inspect and clock inputs on Linux without contacting Docker or Slack.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20266-restart-window
+    description: Confirmation ticks, the second before expiration, expiration, the second after expiration, old fractional starts and fresh recreates exercise the restart hold.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k 'confirmation_ticks or hold or fresh_recreate'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn20266-unavailable
+    description: Unavailable broker states and invalid inspect fields fail closed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k 'non_running or inspect or unparseable'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20266-memory-digest
+    description: Memory parsing, configurable floors and digest integration exercise the broker's reported health.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k 'memory or digest or thresholds'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/scripts/test_omninode_system_slack_report.py -q -k dev_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn20266-deploy-probe
+    description: Hosted-runner deploy check extracts the reporter function at the checked-out head and runs it under Bash with inspect and clock seams. It fails on the previous code that reports an exited broker as OK after the hold expires. It does not claim the host installation has changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/scripts/test_dev_broker_restart_row_omn20266.py -q -k non_running_broker
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20266-clone-origin-head
+    description: >-
+      Run the reconciler CLI against a local origin whose default moved from main to dev after cloning. Assert the reconciled branch and cached origin/HEAD both name dev. The same test fails against the merge-base reconciler, which leaves origin/HEAD at main. This binds only the repository-local AC4 repair, not the live ticket's full host parity probe.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_reconcile_refreshes_origin_head_omn20266.py -q -k test_reconcile_refreshes_a_stale_origin_head_symref
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20266-clone-deploy-probe
+    description: >-
+      Hosted-runner deploy check runs the checked-out reconciliation script against disposable local Git repositories. It verifies the deployed script's metadata refresh behavior without needing lab hosts, credentials or Docker. It does not claim any host installation has changed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/scripts/test_deploy_reconcile_refreshes_origin_head_omn20266.py -q -k test_reconcile_refreshes_a_stale_origin_head_symref
+        cwd: ${OMNI_HOME}/omnibase_infra

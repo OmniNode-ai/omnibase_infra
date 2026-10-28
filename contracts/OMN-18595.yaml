@@ -37,6 +37,11 @@ requirements:
         statement: "AC7: a run that finds the release branch on the remote with no open PR rebuilds it with a lease push and opens the PR, instead of failing a plain push -- falsifier: uv run pytest tests/scripts -k release_pr_orphan_branch_rebuilt"
       - id: AC8
         statement: "AC8: an open release PR whose body carries no readable candidate line is refused with a named reason and is never force-pushed -- falsifier: uv run pytest tests/scripts -k release_pr_unreadable_candidate_refuses"
+  - id: req-omn18595-cascade-core-0-47-57-runtime
+    statement: The core 0.47.57 cascade resolves the triggering release and admits the installed dependency at runtime.
+    acceptance:
+      - id: AC9
+        statement: "AC9: uv.lock resolves omnibase-core at least 0.47.57, the pyproject override agrees with the lock, and the installed distribution matches the lock and passes runtime version admission -- falsifier: the cascade test overlaid on the merge base fails because its lock still resolves 0.47.56"
 evidence_requirements:
   - kind: ci
     description: At a head that changes CHANGELOG.md, the top changelog heading names the pyproject version.
@@ -127,13 +132,60 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: uv run --frozen python -c "import importlib.metadata as m; assert m.version('omnibase-core') == '0.47.53', m.version('omnibase-core')"
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.53'), v"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
         check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-18595-core-0-47-55-runner-lock
+    description: The core 0.47.55 cascade (omnibase_infra#5324) pins omnibase-core 0.47.55, relocks with only that package moving, regenerates docker/runners/runner-image.lock.json, and judges the OMN-20696 change by the findings it adds over its parent under core 0.47.55's shell-script rule (OMN-21332).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.55'), v"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py tests/ci/test_omn20696_noncanonical_files.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-18595-core-0-47-56-runner-lock
+    description: The core 0.47.56 cascade (omnibase_infra#5340) pins omnibase-core 0.47.56, relocks with only that package moving, and regenerates docker/runners/runner-image.lock.json so the runner image identity matches the bumped uv.lock.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -c "import importlib.metadata as m; from packaging.version import Version as V; v = m.version('omnibase-core'); assert V(v) >= V('0.47.56'), v"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/test_core_release_cascade_omn18595.py tests/unit/runtime/test_core_cascade_contract_floors_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv run --frozen python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-18595-core-0-47-57-runtime
+    description: The core 0.47.57 cascade in omnibase_infra#5380 resolves the triggering release, keeps the manifest and lock consistent, and admits the installed distribution at runtime.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/runtime/test_core_release_cascade_omn18595.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9
+  - id: dod-deploy-core-0-47-57-lock-readback
+    description: Hosted deploy-scope readback of uv.lock at the evaluated commit; the published checkout must resolve core at least 0.47.57. The merge base resolves 0.47.56.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          bash -o pipefail -c 'curl --fail --silent --show-error "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/uv.lock" | python3 -c "import sys,tomllib; from packaging.version import Version; lock=tomllib.loads(sys.stdin.read()); v=next(p[\"version\"] for p in lock[\"package\"] if p[\"name\"] == \"omnibase-core\"); print(v); assert Version(v) >= Version(\"0.47.57\"), v"'
+        cwd: ${OMNI_HOME}/omnibase_infra

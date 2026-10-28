@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21015
 title: Infra support for transactional per-run savings storage, the tier-mix and the usage tier-share node migrations
 summary: >-
-  Infra half only: vendors delegation migrations 0059 (AC3) and 0060 (model-routing tier models, AC2) and usage migration 0003 (usage tier share, AC4, expand-only by Jonah's ruling of 2026-10-15: it keeps the three-column key and adds a four-column unique index, which a later contract migration makes the key) and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
+  This contract also owns the dev-only SELECT grant prerequisite for lakshman_ro on usage_by_model_day, usage_by_model_day_calls and llm_call_metrics. The grant proof does not accept any dashboard figure or amend the ticket criteria. Infra half only: vendors delegation migrations 0059 (AC3) and 0060 (model-routing tier models, AC2) and usage migration 0003 (usage tier share, AC4, expand-only by Jonah's ruling of 2026-10-15: it keeps the three-column key and adds a four-column unique index, which a later contract migration makes the key) and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -25,6 +25,12 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: Usage shows tokens in and tokens out per day as a stacked series split by model (requirement US-1), and its by-model table shows each model's share of calls and its tier beside the calls column it already has -- falsifier: the window sums differ from `onex metering --json`, or the shares do not sum to 100"
+  - id: req-omn21015-ac17-infra-vendor
+    statement: >-
+      Migration 100 is deployed byte-identical to the omnimarket source it was copied from, with one checksum-bound tenant ledger row and the forward-only class.
+    acceptance:
+      - id: AC17
+        statement: "AC17: `cost.savings-overview.v1` serves `tokens_input_total` = `COALESCE(SUM(prompt_tokens), 0)` and `tokens_output_total` = `COALESCE(SUM(completion_tokens), 0)` over the same `combined_runs` rows, tenant and window as `tokens_total`, so the two sum to it -- falsifier: a real-Postgres test in hosted CI, with runs from both sources for two tenants, fails when either column is absent from the served row, when input + output differs from `tokens_total` for a tenant, or when the two directions are swapped"
 evidence_requirements:
   - kind: tests
     description: Infra storage half only; real owned Postgres proves the generic atomic write and refusal controls. It does not calculate a saving or render the page.
@@ -38,6 +44,9 @@ evidence_requirements:
   - kind: tests
     description: Infra deployment half only; the vendored 0003 bytes, its kept three-column key, ledger checksum and forward-only class match the pinned omnimarket source.
     command: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
+  - kind: tests
+    description: Infra deployment half only; the vendored 100 bytes, tenant ledger checksum and forward-only class match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn21015_overview_token_directions_vendored.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -128,3 +137,28 @@ dod_evidence:
         check_value: uv run pytest tests/unit/migrations/test_omn21015_usage_tier_key_vendor.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn21015-ac17-infra-vendor-100
+    description: Infra half only. Pins 100's source bytes, its exact tenant ledger checksum and forward-only class; at the merge base the file is absent, so it fails there. It does not prove the view's sums or the Overview page.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21015_overview_token_directions_vendored.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17]
+  - id: dod-omn21015-ac4-dev-read-only-access
+    description: >-
+      AC4 infrastructure prerequisite only. On an owned ephemeral Postgres cluster, the contractor cannot count any of the three tables before applying the tracked grant file, can count each afterwards, and cannot insert, update, delete or truncate. Reapplying is safe and other database/runner contexts refuse. This proves read access, not the Usage chart or monetary figures.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_dev_contractor_usage_grants_omn21015.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn21015-dev-grants-deploy-probe
+    description: >-
+      Deploy probe runnable on a hosted runner without lab access or credentials. Imports the shipped ACL apply command, refuses prod and collaborator compose projects, target overrides and other ports, and verifies dry run does not apply SQL. The test is absent at the merge base. Live counts on dev are recorded in the PR Lab line; this probe does not claim hosted access to that database.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/unit/scripts/test_dev_contractor_usage_grants_omn21015.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra

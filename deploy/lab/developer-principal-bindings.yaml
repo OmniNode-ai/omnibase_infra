@@ -38,12 +38,23 @@
 # reads the two terminals under `local.omnimarket.work_ledger_append_client.consume.v1.`
 # plus a per-call suffix.
 #
+# THE LEDGER READ PATH: a machine publishes the query node's request and reads its
+# completed terminal. Query replies use `local.omnimarket.work_ledger_query_client.consume.v1.`
+# plus a per-call suffix, separate from runtime command-consumer groups. The caller
+# cannot consume query commands or produce query results.
+# OMN-20740: `onex ledger query --bus-lane dev --stdin` is the caller for
+# ONEX_LEDGER_BUS_READ_COMMAND (ledger-ask and catchup --source db). Its packaged
+# work_ledger_query_client.contract.yaml is checked against these six grants;
+# apply-grants can install them for an existing issued identity without rotation.
+#
 # PR HANDOFF: `onex work-ledger handoff` publishes one request and reads acceptance or
 # a terminal; its per-call group is `pr-handoff-request.<correlation_id prefix>`.
 #
 # SOURCE-CONTROL READS: `onex scm <read verb>` publishes one github-repo-gateway read
 # command and reads its one terminal, under `local.omnimarket.scm_command_client.consume.v1.`
-# plus a per-call suffix. The write node's topics are deliberately not granted.
+# plus a per-call suffix. The write node's topics are not shared grants; h105's
+# consented terminal reads are in h105-scm-pr-create-bindings.yaml, selected only
+# for dev-jonah-omnibook by developer-principal-grants.yaml.
 #
 # MEMORY LIFECYCLE PROOF (OMN-21045): a machine proves the omnimemory lifecycle by
 # publishing `expire-memory` and reading the two outcomes the lifecycle orchestrator
@@ -69,6 +80,13 @@
 # instance `morning_phase`, whose reply group is `<env>.rr.morning_phase.<boot nonce>`
 # (RequestResponseWiring); a developer machine's env token is `local`. The prefix names
 # that one instance, so a developer principal cannot join another instance's reply group.
+# MORNING FRICTION SWEEP (OMN-21400): the operator machine's scheduled sweep caller
+# (`handler_friction_sweep_cli`) publishes the `omnibase-internal` sweep's start command and
+# reads its two terminals through a request_response instance named `friction-run-<correlation
+# id>`, whose reply group is `<env>.rr.friction-run-<correlation id>.<boot nonce>`
+# (RequestResponseWiring); a developer machine's env token is `local`. The prefix
+# `local.rr.friction-run-` names the caller's instances only. The lab runtime publishes both
+# terminals, so a developer principal gets no write on them.
 # DOD CLOSEOUT PROOF (OMN-21048): a machine proves the DoD closeout sweep by publishing
 # `dod-closeout-sweep-decide-requested` and reading the one `dod-closeout-sweep-decided`
 # event the node's contract declares as its terminal event, by correlation id. The
@@ -101,6 +119,23 @@
 # stay a separate, consented grant. A class whose fan-out names an ungranted topic is
 # dead-lettered by the drainer after its first failures, so the machine keeps
 # publishing the rest.
+# COMPACTION RECEIPT-MODE REPLIES (OMN-21099): the Claude Code hook's `compaction`
+# binding publishes the compaction command and awaits its reply, through
+# HandlerReceiptModePublishAwait (implemented by OMN-21341). OMN-21099 grants
+# this existing client access. It subscribes to the three
+# `awaited_events` topics of the binding in node_claude_code_hook_adapter_effect's
+# contract under a fresh group `receipt-mode-client.<12 hex>` for each call.
+# The `.call` binding values below are representative members of that prefix,
+# following the other per-call bindings in this file; they are not runtime IDs.
+# HandlerBrokerGrantDerive suppresses literal group rows covered by the prefix.
+# Reply TOPIC grants are READ and DESCRIBE only. The request TOPIC grant is WRITE
+# and DESCRIBE only, on `onex.cmd.omniintelligence.context-compaction-requested.v1`.
+# GROUP grants are READ and DESCRIBE on the receipt-mode-client. prefix on dev.
+# This is a shared developer-lane client prefix, not isolation between machines:
+# principals may join each other's receipt groups and read the shared reply topics.
+# The handler's correlation filter selects responses; it is not an ACL boundary.
+# Runtime command-consumer groups use separate prefixes. Per-principal receipt
+# isolation requires changing the client's group IDs and reply topic routing too.
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -113,6 +148,8 @@ bindings:
     direction: produce
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-completed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-append-failed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_append_client.consume.v1.call}
+  - {broker: dev, physical_topic: onex.cmd.omnimarket.work-ledger-query-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-query-completed.v1, direction: consume, consumer_group: local.omnimarket.work_ledger_query_client.consume.v1.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.pr-handoff-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-accepted.v1, direction: consume, consumer_group: pr-handoff-request.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.pr-handoff-handed-off.v1, direction: consume, consumer_group: pr-handoff-request.call}
@@ -133,6 +170,9 @@ bindings:
   - {broker: dev, physical_topic: onex.cmd.omnibase-infra.delegation-request.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-completed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
   - {broker: dev, physical_topic: onex.evt.omnibase-infra.delegation-failed.v1, direction: consume, consumer_group: local.rr.morning_phase.call}
+  - {broker: dev, physical_topic: onex.cmd.omnibase-internal.morning-friction-sweep.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnibase-internal.morning-friction-sweep-completed.v1, direction: consume, consumer_group: local.rr.friction-run-.call}
+  - {broker: dev, physical_topic: onex.evt.omnibase-internal.morning-friction-sweep-failed.v1, direction: consume, consumer_group: local.rr.friction-run-.call}
   - {broker: dev, physical_topic: onex.cmd.omnimarket.dod-closeout-sweep-decide-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omnimarket.dod-closeout-sweep-decided.v1, direction: consume, consumer_group: local.omnimarket.dod_closeout_probe.consume.v1.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.projection-delegation-applied.v1, direction: consume, consumer_group: local.omnibase_core.runtime_local_terminal}
@@ -168,13 +208,20 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-requested.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-fallback.v1, direction: consume, consumer_group: receipt-mode-client.call}
 group_prefixes:
   - {broker: dev, prefix: local.omnibase_core.runtime_local_}
   - {broker: dev, prefix: local.omnimarket.work_ledger_append_client.consume.v1.}
+  - {broker: dev, prefix: local.omnimarket.work_ledger_query_client.consume.v1.}
   - {broker: dev, prefix: pr-handoff-request.}
   - {broker: dev, prefix: local.omnimarket.scm_command_client.consume.v1.}
   - {broker: dev, prefix: local.omnimemory.memory_lifecycle_probe.consume.v1.}
   - {broker: dev, prefix: local.rr.morning_phase.}
+  - {broker: dev, prefix: local.rr.friction-run-}
   - {broker: dev, prefix: local.omnimarket.dod_closeout_probe.consume.v1.}
+  - {broker: dev, prefix: receipt-mode-client.}
 described_groups:
   - {broker: dev, group: "*"}

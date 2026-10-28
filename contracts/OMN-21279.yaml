@@ -1,0 +1,384 @@
+schema_version: 1.0.0
+ticket_id: OMN-21279
+title: omnibase_infra's runtime image, CI and tests never install or import omnimarket
+summary: >-
+  The dev deploy agent now checks the candidate image's Bifrost boot-contract path and readability before any container replacement, refusing the candidate and recording a failed job while preserving the running containers. The post-swap health gate and rollback remain intact. Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the layering check refuses omnimarket named in Dockerfile.runtime, any CI install step or any test fixture of omnibase_infra -- falsifier: pytest of the layering check over fixture Dockerfile and workflow lines'
+      - id: AC2
+        statement: 'AC2: Dockerfile.runtime installs no omnimarket and the runtime still boots -- falsifier: the runtime-boot-smoke job on the PR head, plus the layering pytest over the real file'
+  - id: req-restore-point-protection
+    statement: Restore-point protection for non-prod runtime rebuilds, declared by this pull request (OmniNode-ai/omnibase_infra#5360) under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: rollback capture resolves each runtime service to its container by compose project and service labels, refuses a missing, ambiguous or failed lookup, and a non-prod, non-dev runtime or full rebuild refuses to start without a retained point -- falsifier: test_auto_rollback.py capture and refusal cases'
+  - id: req-deploy-agent-recovery-follow-up
+    statement: >-
+      Operational follow-up from lane proc-rollback-preempt-0055, separate from the ticket author's unchanged AC1 and AC2: the dev recovery command must not wait behind a boot that has already exhausted its retries.
+    acceptance:
+      - id: AC5
+        statement: >-
+          An exhausted dev boot ends verification without waiting out the remaining start or recreate budget; a runtime/full job restores its captured healthy images under the lane lock, remains failed, and releases the lock. Probe timeouts also attempt that restore.
+      - id: AC4
+        statement: >-
+          A signed, declared rollback to a dev tag is selected ahead of queued forward jobs for the same lane and instance in the fetched partition; earlier forwards remain uncommitted for replay and the durable rollback job is deduplicated. Single-flight and acceptance checks stand.
+  - id: req-boot-probe-no-rebuild
+    statement: Boot probe follow-up from lane boot-probe-timeout-0710, separate from the ticket author's unchanged AC1 and AC2; not transcribed from the ticket body.
+    acceptance:
+      - id: AC8
+        statement: >-
+          Both dev candidate probes (the runtime boot probe and the image preflight) run the already-built candidate image through a temporary compose override that resets build and pins image <project>-<service>, so docker compose run never rebuilds the composed runtime image; the override is removed after each probe and the probe flags, scripts and timeouts are unchanged.
+  - id: req-rebuild-trigger-lan-label
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. The runtime-rebuild publishers' fallback runner set requires arch-amd64 so the job cannot land on h203-light runners that carry no uv.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the trigger-rebuild jobs of runtime-rebuild-trigger.yml and runtime-rebuild-trigger-reusable.yml and the trigger-delivery job of onex-api-lab-delivery-reusable.yml fall back to [self-hosted, omnibase-ci, arch-amd64], a label set the h203-light runners do not satisfy -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0'
+  - id: req-dev-broker-memory-reservation
+    statement: Memory protection for the dev Redpanda broker on the shared lab host, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: the dev lane renders a memory reservation of at least 4 GiB on its Redpanda broker, and the base docker-compose.infra.yml that every other lane merges carries none -- falsifier: test_dev_lane_memory_reservation_omn21279.py over the rendered dev and base compose'
+  - id: req-dev-broker-hop-proof
+    statement: Reproduction of the dev broker crash and measured logical versions of the declared upgrade hops from lane fill-defect-dev-broker-crash-cause-20261026T1538Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: docker/redpanda/dev_broker_upgrade_path.yaml records the measured logical version each image finalizes at and the oldest it starts on, and a declared chain from the catalog pin is refused when a hop needs a newer logical version than the previous image leaves -- falsifier: test_dev_broker_hop_logical_versions_omn21279.py, whose fixtures refuse v25.3.18 and v25.2.14 directly over v24.3.18'
+  - id: req-dev-broker-upgrade-path
+    statement: Dev broker crash cause and upgrade path from lane fill-defect-dev-broker-crash-cause-20261026T1235Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: docker/redpanda/dev_broker_upgrade_path.yaml declares the feature release the dev broker volume has run and a hop path to a Redpanda release carrying the ListGroups crash fix, and the dev pin is refused when it is more than one feature release past that volume -- falsifier: test_dev_broker_upgrade_path_omn21279.py, whose fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume'
+  - id: req-dev-broker-memory-cap
+    statement: >-
+      Lane broker-cap-1600 implements OPERATOR-CONSENT 2026-10-25T17:53:44Z (called RULING in the brief): only h201 dev broker port 19092 may be recreated with a 2-4 GB cap. This is separate from the ticket author's unchanged layering criteria AC1 and AC2; rollout belongs to the deploy agent after merge, never a hand-edited live compose project.
+    acceptance:
+      - id: AC10
+        statement: >-
+          The dev overlay renders Redpanda --memory 3G and mem_limit 4g even with stale DEV_REDPANDA_MEMORY=12G; deploy preflight refuses a flag or limit outside 2-4 GiB or an arena larger than its limit.
+  - id: req-pr-time-criterion-label-check
+    statement: >-
+      Declared by this pull request under the same ticket; not transcribed from the ticket body. Green omnibase_infra#5370 was removed from the merge queue three times because its AC7 repeated a label dev already held, which only the full suite checked.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: every pull request CI run executes the ticket-contract criterion-label check by name in one test split, whatever the change-aware selector picks -- falsifier: tests/ci/test_contract_criterion_labels_wired_omn21279.py over .github/workflows/ci.yml
+  - id: req-dev-broker-arena-exhaustion
+    statement: The dev broker's allocation-failure aborts after the 3G arena landed, from lane fill-defect-dev-broker-crash-cause-20261026T2139Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: docs/incidents/OMN-21279/dev-broker-crash-cause.json records the allocation-failure aborts since the 3G arena, with the load on the arena and the decision it leaves to the operator, and the record is internally consistent -- falsifier: test_dev_broker_arena_exhaustion_record_omn21279.py, which fails on an unordered abort list, a count that differs from the list, or a cited 12G floor that is no longer declared'
+  - id: req-dev-broker-first-hop
+    statement: First hop of the dev broker upgrade path from lane fill-defect-dev-broker-crash-cause-20261026T1538Z, declared by this pull request under the same ticket; not transcribed from the ticket body.
+    acceptance:
+      - id: AC14
+        statement: 'AC14: every dev broker image site (the catalog redpanda, redpanda-partition-cap and redpanda-local-sasl services, and the four dev redpanda services of docker-compose.infra.yml and docker-compose.dev-lane.yml) pins redpandadata/redpanda:v25.1.12, the first hop of dev_broker_upgrade_path.yaml, and a dev pin past the deployed feature release is refused unless it is the next path hop and is listed in proven_on_data_copy -- falsifier: test_dev_broker_upgrade_path_omn21279.py and test_dev_broker_image_pin_omn17427.py, whose fixtures refuse an unproven v25.1.12 as unproven, an off-path v25.1.11 as off path even when it is listed as proven, a later hop taken before the next one, and, after deployed_feature_release advances and the hop leaves path, any pin but the new next hop'
+evidence_requirements:
+  - kind: tests
+    description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
+    command: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q
+  - kind: tests
+    description: The layering pytest over fixture Dockerfile, workflow and test-module text refuses omnimarket, and over the real Dockerfile.runtime finds none.
+    command: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+  - kind: tests
+    description: The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-21279-ac2-pre-swap-boot-contract
+    description: >-
+      AC2, dev deployment safety. The 2026-10-25 scrubbed crash-loop reason BIFROST_BASE_CONTRACT_PATH unset is returned by a candidate-image probe. Runtime and full rebuilds must fail before any compose up, retain the running containers and persist the boot reason on a failed job. Positive controls permit a readable contract and preserve post-swap verification; timeout controls refuse the swap and clean only the disposable probe. Red first: the original four regressions failed at the base because no probe ran and the job was recorded successful. This hosted-runner check uses the repository lockfile and the verifier-prepared root environment, with the deploy-agent and runtime source paths from this head, and exercises the deploy agent without Docker or live runtime dependencies; it does not claim a full runtime boot or replace runtime-boot-smoke.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py -q
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-dev-boot-recovery
+    description: >-
+      Regression for job 3a55c329: RETRIES EXHAUSTED during the initial probe, declared-start wait or recreate wait fails promptly; transient failures retain their health checks. Verification failures and probe timeouts restore the job's own point before unlock, keep the failed verdict, and allow the next job. Before this change the exhausted-boot and timeout cases failed. This is recovery evidence, not a substitute for AC2's runtime-boot-smoke job or the layering evidence below.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q -k 'boot or failure_restores'
+    binds_ac:
+      - AC5
+  - id: dod-omn-21279-dev-queue-priority
+    description: >-
+      Regression for rollback 70315f50 to dev-20261025120130-26d49cec3536: it runs before earlier forwards, Kafka commits retain the skipped frontier across restart and self-update, duplicate rollback delivery does not execute again, and other lanes, instances, unsigned requests and moving refs get no priority. The priority cases failed before the fix.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev --frozen pytest scripts/deploy-agent/tests/unit/test_rollback_preempt_omn21279.py -q -k 'priority or tag_rollback'
+    binds_ac:
+      - AC4
+  - id: dod-omn-21279-deploy-agent-recovery-probe
+    description: >-
+      Deploy-scope source readback runnable on a hosted runner with no lab route, lab credentials, Docker daemon or live deploy. Reads the evaluated revision through GitHub and checks that each verifier wait invokes the exhausted-boot guard, and that the poll path selects priority work while preserving a replay frontier. The merge base lacks both methods. These source-wiring assertions supplement the behavioral regressions above; they do not claim that the live agent has been updated.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/executor.py?ref=$(git rev-parse HEAD)" --jq '.content | @base64d' | python3 -c 'import ast,sys; tree=ast.parse(sys.stdin.read()); cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="DeployExecutor"); methods={n.name:n for n in cls.body if isinstance(n,ast.FunctionDef)}; guard=methods["_assert_boot_can_progress"]; assert any(isinstance(n,ast.Constant) and isinstance(n.value,str) and "RETRIES EXHAUSTED:" in n.value for n in ast.walk(guard)); assert all(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="_assert_boot_can_progress" for n in ast.walk(methods[name])) for name in ("verify","_await_declared_start","_force_recreate_and_reverify"))' &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/consumer.py?ref=$(git rev-parse HEAD)" --jq '.content | @base64d' | python3 -c 'import ast,sys; tree=ast.parse(sys.stdin.read()); cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="DeployConsumer"); methods={n.name:n for n in cls.body if isinstance(n,ast.FunctionDef)}; assert "_priority_message" in methods; poll=methods["poll_and_accept"]; assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="_priority_message" for n in ast.walk(poll)); assert any(isinstance(n,ast.keyword) and n.arg=="replay_from" for n in ast.walk(poll)); commit=methods["_commit_through"]; assert any(isinstance(n,ast.Attribute) and isinstance(n.value,ast.Name) and n.value.id=="replay_from" and n.attr=="offset" for n in ast.walk(commit))'
+    binds_ac:
+      - AC4
+      - AC5
+  - id: dod-omn-21279-ac1-layering-check-refuses-fixtures
+    description: >-
+      AC1. The negative controls of the layering module feed the Dockerfile, workflow and test-module checkers fixture lines that name omnimarket (an ARG, a pip install, a COPY from the wheel, an editable sibling install, a heredoc-continued install, a function-scope import, an importorskip) and assert each one fires; clean and look-alike lines pass. Red first: before the change the module held no such checker and the three live-tree tests it added failed against the base (the Dockerfile named omnimarket, ci.yml installed it as a sibling, five test modules imported it). The check also runs the live-tree Dockerfile and CI install-step tests, which fail at the merge base.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly -k "dockerfile_checker or workflow_checker or fixture_checker or runtime_dockerfile_names_no_omnimarket or ci_install_steps_install_no_omnimarket"
+    binds_ac:
+      - "AC1"
+  - id: dod-omn-21279-ac2-dockerfile-no-omnimarket
+    description: >-
+      AC2, static half. The layering pytest reads the real docker/Dockerfile.runtime and finds no instruction line naming omnimarket, and the Dockerfile-derived tests agree: the foundation import smoke imports compat, core and infra, the routing ladder is COPYed from the tracked workspace/routing_tiers.yaml, and no git install of an ONEX package remains. The boot half of AC2 is the runtime-boot-smoke job on the pull request head, run by CI.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py tests/unit/docker/test_delegation_import_smoke_guard.py tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py tests/scripts/test_dockerfile_runtime_git_refresh.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-deploy-probe-dockerfile
+    description: >-
+      AC2, deploy-scope probe. Reads docker/Dockerfile.runtime through the GitHub API at the commit that carries this contract and exits nonzero unless no instruction line outside a comment names omnimarket and the routing ladder is COPYed from the build context. At the merge base the file installs omnimarket and copies the ladder out of the wheel, so the probe prints false there; the runtime-boot-smoke job on the pull request head is the boot half of AC2 and runs on a hosted runner.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | split("\n") as $l | (($l | map(select(test("^\\s*#") | not) | select(test("omnimarket"; "i"))) | length) == 0) and ($l | map(contains("COPY --chown=omniinfra:omniinfra workspace/routing_tiers.yaml /app/config/delegation/routing_tiers.yaml")) | any)' | grep -qx true
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-local-kernels-infra-only
+    description: >-
+      AC2, laptop boot. The catalog-local boot on head 17272c32b failed because the local bundle's kernels, on the infra image without omnimarket, read ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra,omnimarket from docker/runtime-policy.env and runtime_local_ingress imported omnimarket (ModuleNotFoundError, BOOT FAILED 5/5). The local bundle now renders ONEX_ACTIVE_RUNTIME_PACKAGES as ${ONEX_LOCAL_RUNTIME_PACKAGES:-omnibase_infra} and local-market restores omnibase_infra,omnimarket through env_default_overrides. These tests render both bundles and resolve the local value against the policy file; all three fail with the bundle file of 17272c32b.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "local_kernels_activate_only_omnibase_infra or local_market_kernels_activate_omnimarket or local_kernel_packages_resolve_without_omnimarket"
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-projection-api-market-only
+    description: >-
+      AC2, laptop boot. The catalog-local boot on head c17ecc7e0 failed with projection-api unhealthy after 6 restarts: its command is omnimarket's console script omnimarket-projection-api, which the infra-only image does not carry. projection-api now ships in local-market on omnimarket-runtime:latest with its 3102 port and its depends_on on omninode-runtime and redpanda-local-sasl, and the local bundle no longer renders it. These tests fail with the bundle and manifest files of c17ecc7e0.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_catalog_local_profile.py -q -n 0 --no-cov -p no:randomly -k "excludes_the_market_projection_api or local_market_projection_api or every_market_module_uses_the_project_scoped_market_image or local_market_adds_the_projection_api"
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-lane-composed-image
+    description: >-
+      AC2, dev-lane boot. At 03ea9377f the dev lane built omninode-runtime, runtime-effects and runtime-worker from the infra Dockerfile.runtime, which sets no BIFROST_BASE_CONTRACT_PATH, and each exhausted 5 boots on ProtocolConfigurationError ONEX_CORE_041. docker/docker-compose.dev-lane.yml now builds every dev-lane runtime-image service from the staged omnimarket sibling's Dockerfile.runtime FROM a build-only infra image. The check refuses a dev-lane service on the infra-only image that renders Bifrost without a base contract or runs an omnimarket command; over the 03ea9377f overlay it flags 11 services.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-names-composed
+    description: >-
+      AC2, dev-lane build. The deploy agent's lane-agnostic runtime build passes only docker-compose.infra.yml; its dev-lane build now names DEV_LANE_BUILD_SERVICES, the lane-only buildable services plus the base services the overlay composes, so they are rebuilt on the composed image. Fails at 03ea9377f, where DEV_LANE_BUILD_SERVICES does not exist.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_composed_build_omn21279.py scripts/deploy-agent/tests/unit/test_executor_build_path_omn16442.py -q -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-deploy-probe-dev-overlay
+    description: >-
+      AC2, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the composed build context on the staged omnimarket sibling and the build-only infra image it builds FROM. At the merge base neither line exists.
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("context: ../workspace/sibling-repos/omnimarket") and contains("infra-runtime: \"service:dev-lane-infra-runtime-image\""))' | grep -qx true
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-build-context-classification
+    description: >-
+      AC2, composed build regression. Resolve Dockerfiles against their Compose build contexts before checking infra rebuild exclusions. The staged market Dockerfile belongs to the sibling repository; an excluded infra Dockerfile remains visible to the guard. The fixture covers anchored sibling builds, Compose merge tags and an excluded local infra Dockerfile. Run the composed-image regression alongside the exclusion guard: the guard alone also passes on the merge base, whose dev overlay still builds market workloads on the infra-only image. The composed-image tests read that product overlay and fail there, binding this item to the AC2 runtime-image change.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC2"
+  - id: dod-omn-21279-ac2-dev-deploy-boot-recovery
+    description: >-
+      AC2, dev deployment guard. Replays the 2026-10-25 c37f6142 incident's BOOT FAILED 5/5 with BIFROST_BASE_CONTRACT_PATH unset. All three dev runtime services must become Docker healthy within their declared health window. Compose errors, exhausted boots and probe timeouts keep the job failed and forward-redeploy the retained healthy image revision and its resolved compose settings, with no git revert, image build, pull or deps restart. Candidate setting/package checks run before runtime replacement. STATUS and exception reports name the failed commit and boot cause and remain durable until their independent deliveries are acknowledged. Non-dev jobs never construct this guard. These are isolated replays; the live runtime-boot-smoke job remains the boot gate on the PR head.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q
+    binds_ac:
+      - "AC2"
+  - id: dod-omn21279-restore-point-labels-and-refusal
+    description: >-
+      Restore-point lane regression evidence. Replays service runtime-effects in project omnibase-infra with a differently named container, missing and ambiguous matches and failed Docker lookup; runtime/full rebuilds must refuse when capture returns no point. It binds AC3, the restore-point criterion this pull request declares under req-restore-point-protection, and claims neither layering criterion AC1 nor AC2.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q
+    binds_ac:
+      - "AC3"
+  - id: dod-omn21279-restore-point-hosted-deploy-check
+    description: >-
+      Hosted-runner check of the deploy agent's restore capture and rebuild refusal. Docker is faked and all state is temporary; no live lane or credentials are needed. Falsified by the base implementation, which inspects service names and rebuilds without a retained point.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_auto_rollback.py -q -k 'resolves_dev_effects or refuses_rebuild'
+    binds_ac:
+      - "AC3"
+  - id: dod-omn21279-boot-probe-no-rebuild
+    description: >-
+      AC8. Docker Compose v5.1.0 rebuilt the composed runtime image and its service: build context on every candidate docker compose run, so the 60 s image preflight and the 300 s boot probe timed out before a container was created (jobs 4186c2df, fe9cd990, 22ac4df0 on 2026-10-26). Each probe argv must keep the lane compose files first and add one temporary override with build reset and image omnibase-infra-<service>, deleted after the run. Red first: both regressions fail at the base, whose argv carries no override. Docker is faked; no live lane is needed.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONPATH=scripts/deploy-agent:src uv run --frozen python -m pytest -c scripts/deploy-agent/pyproject.toml scripts/deploy-agent/tests/unit/test_runtime_boot_gate_omn21279.py scripts/deploy-agent/tests/unit/test_dev_boot_guard_omn21279.py -q -k no_build_override
+    binds_ac:
+      - "AC8"
+  - id: dod-omn-21279-ac6-rebuild-trigger-lan-label
+    description: >-
+      The runtime-rebuild publishers' fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_rebuild_runner_lan_label_omn21279.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21279-dev-broker-memory-reservation
+    description: >-
+      AC7, dev broker memory protection. Renders the dev lane (docker-compose.infra.yml plus docker-compose.dev-lane.yml) with docker compose config and asserts the redpanda service carries mem_reservation of at least 4 GiB; renders the base file alone and asserts its broker carries none. Red first: at the base the dev broker rendered a reservation of 0 bytes. Measured on the dev host at 2026-10-26T03:24Z: omnibase-infra-redpanda memory.low 0, memory.current 1.9 GB, memory.swap.current 10.8 GB.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_dev_lane_memory_reservation_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC7"
+  - id: dod-omn21279-dev-broker-reservation-deploy-probe
+    description: >-
+      AC7, deploy-scope probe. Reads docker/docker-compose.dev-lane.yml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the dev broker reservation dial; the base file must not declare it. At the merge base the dial does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}")' | grep -qx true
+    binds_ac:
+      - "AC7"
+  - id: dod-omn21279-dev-broker-hop-proof
+    description: >-
+      AC11. On an h200 scratch broker, v24.3.18 crashed in 2 of 2 runs within 8 minutes under group expiry churn (group_offset_retention_sec 5 with per-call groups and ListGroups loops; exit 135, then exit 133 after "libc++abi: terminating" and "Aborting on shard 0"), and v25.3.18 ran the same workload for 500 s with RestartCount 0. A synthetic v24.3.18 volume (20 topics, 400 groups, SASL on) went through v25.1.12, v25.2.14 and v25.3.18 at cluster_version 14, 15, 16, 17 with its topics, groups, offsets and user intact; v25.3.18 started directly on a v24.3 volume asserted an incompatible logical version. The declaration records those logical versions and the test walks the declared chain against them. Red first: at the merge base the test file and the logical_versions key do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC11"
+  - id: dod-omn21279-dev-broker-hop-proof-deploy-probe
+    description: >-
+      AC11, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it records logical_versions with v25.3.18 starting no earlier than logical version 16. At the merge base the key does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("logical_versions:") and contains("redpandadata/redpanda:v25.3.18:\n    latest: 17\n    earliest: 16"))' | grep -qx true
+    binds_ac:
+      - "AC11"
+  - id: dod-omn21279-dev-broker-upgrade-path
+    description: >-
+      AC9. The dev broker crashed inside Kafka ListGroups on v24.3.18 (SIGSEGV at group_manager::list_groups +0x1cc on 2026-10-25T20:56:59Z and 2026-10-26T12:19:27Z, the second with the AC7 reservation in place). Upstream fixed the group erase race for v25.3.16, and v25.3.x refuses a volume older than v25.2. The test reads the declared upgrade path and the catalog pin; its fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume and a downgrade, and accept v25.1.12. Red first: at the merge base the declaration and the test file do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC9"
+  - id: dod-omn21279-dev-broker-upgrade-path-deploy-probe
+    description: >-
+      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 24.3 feature release and a path ending at v25.3.18. At the merge base the file does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"24.3\"") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
+    binds_ac:
+      - "AC9"
+  - id: dod-omn21279-dev-broker-memory-cap
+    description: >-
+      AC10. Before implementation the new real-stack test failed because the dev broker still rendered --memory 12G. Fixtures refuse 1G/12G arenas, unlimited, sub-range and oversized limits, duplicate or absent flags, and an arena larger than its limit. A subprocess replay proves the deploy preflight refuses an invalid rendered dev stack and accepts 3G/4g. Existing AC1 and AC2 evidence remains above, unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac: [AC10]
+  - id: dod-omn21279-dev-broker-cap-hosted-deploy-check
+    description: >-
+      AC10 hosted-runner deploy check. Renders Compose using synthetic required variables and no daemon, lab route or credentials, proving stale operator memory cannot undo the cap. The same module tests the gate's negative controls and its deploy-preflight wiring. This fails on the merge base, where dev remains at 12G without a hard limit. A slot proof is separate and must not be inferred from these source and render checks.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac: [AC10]
+  - id: dod-omn21279-pr-time-criterion-label-check
+    description: >-
+      AC12. The test-parallel job of ci.yml runs tests/scripts/ci/test_contract_criterion_labels_distinct_omn17427.py by name on split 1, so a pull request whose contract repeats a criterion label goes red on its own run instead of in the merge queue. Red first: at the base ci.yml names the file in no step and the wiring test fails.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_contract_criterion_labels_wired_omn21279.py -q --no-cov
+    binds_ac:
+      - "AC12"
+  - id: dod-omn21279-dev-broker-arena-exhaustion
+    description: >-
+      AC13. After #5385 set the dev broker to --memory 3G with a 4g container limit (container created 2026-10-26T18:57:22Z), the broker logged 12 seastar allocation-failure aborts in 2 h 50 min, against 5 crashes in the 17 h before. The memory diagnostic at 21:42:41Z read 3071M used of 3G; the broker held 4605 topics and 8100 client connections. The record and its consistency test do not change the arena: OPERATOR-CONSENT 2026-10-25T17:53:44Z bounds it to 2-4 GiB and the preflight refuses more, so the decision is left to the operator. Red first: at the merge base the record has no arena_exhaustion_since_cap section and the test file does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_arena_exhaustion_record_omn21279.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC13"
+  - id: dod-omn21279-arena-exhaustion-deploy-probe
+    description: >-
+      AC13, deploy-scope probe. Reads docs/incidents/OMN-21279/dev-broker-crash-cause.json through the GitHub API at the commit that carries this contract and exits nonzero unless it holds the arena_exhaustion_since_cap section. At the merge base the key does not exist. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docs/incidents/OMN-21279/dev-broker-crash-cause.json?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("\"arena_exhaustion_since_cap\"")' | grep -qx true
+    binds_ac:
+      - "AC13"
+  - id: dod-omn21279-dev-broker-first-hop
+    description: >-
+      AC14. On 2026-10-26 on h201 a 49.2G scratch copy of the dev data volume omnibase-infra-redpanda-data (v24.3.18) started healthy in turn on v25.1.12 (cluster_version 15), v25.2.14 (16) and v25.3.18 (17), each with 4635 topics, 14623 groups and 0 ERROR lines; the live broker was not touched. The dev pin moves to v25.1.12 in every place. The tests refuse a pin past the deployed 24.3 feature release that is not the next path hop or not listed in proven_on_data_copy. Red first: at the merge base every site pins v24.3.18 and proven_on_data_copy does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py tests/unit/docker/test_dev_broker_image_pin_omn17427.py -q -n 0 --no-cov -p no:randomly
+    binds_ac:
+      - "AC14"
+  - id: dod-omn21279-dev-broker-first-hop-deploy-probe
+    description: >-
+      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.1.12 and the declaration lists proven_on_data_copy. At the merge base the catalog pins v24.3.18. The hosted runner runs it; it needs no Docker and no live host.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.1.12")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("proven_on_data_copy:")' | grep -qx true
+    binds_ac:
+      - "AC14"

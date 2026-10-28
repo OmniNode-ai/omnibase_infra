@@ -1,0 +1,109 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDeveloperPrincipalPlanCompute
+#
+# Plans a developer machine's broker principal from a grants declaration: its
+# name, create or rotate, the exact grant list and the declaration digest. The
+# rules are the lab issuer's (scripts/lab_principal_issuer.py load_declaration,
+# principal_name); a parity test holds the two to the same fixtures. Pure: the
+# caller supplies the declaration and the derived grant documents it names.
+#
+# Related Tickets:
+#   - OMN-20821: this node
+#   - OMN-20150: one command takes a Mac to lab-ready with its bus identity
+name: "node_developer_principal_plan_compute"
+contract_name: "node_developer_principal_plan_compute"
+node_name: "node_developer_principal_plan_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Plan a developer machine's broker principal (name, create or rotate, exact grants, declaration digest) from a grants declaration under the lab issuer's rules, without I/O.
+
+runtime_profiles:
+  - local-dev
+input_model:
+  name: "ModelDeveloperPrincipalPlanRequest"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_plan_request"
+  description: "The declaration text, the derived grant documents it names, the login, the device and the principals the broker already holds."
+output_model:
+  name: "ModelDeveloperPrincipalPlan"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_plan"
+  description: "Create, rotate or a typed refusal, with the principal name, its sorted grants and the declaration digest."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "developer_principal.plan"
+      handler:
+        name: "HandlerDeveloperPrincipalPlan"
+        module: "omnibase_infra.handlers.handler_developer_principal_plan"
+      description: >
+        Pure compute: validate the declaration as the lab issuer does, name the principal, decide create, rotate or the device-cap refusal, and resolve its grants.
+
+      supported_operations:
+        - "developer_principal.plan"
+      input_model:
+        name: "ModelDeveloperPrincipalPlanRequest"
+        module: "omnibase_infra.models.developer_principal.model_developer_principal_plan_request"
+        description: "Typed def-B request for one principal plan."
+      output_fields:
+        - decision
+        - principal
+        - lane
+        - grants
+        - declaration_digest
+        - refusal_kind
+        - refusal
+io_operations:
+  - operation: "developer_principal.plan"
+    description: "Plan one developer principal from a grants declaration."
+    input_fields:
+      - declaration_yaml
+      - derived_documents
+      - login
+      - device
+      - existing_principals
+    output_fields:
+      - decision
+      - principal
+      - lane
+      - grants
+      - declaration_digest
+      - refusal_kind
+      - refusal
+capabilities:
+  - name: "developer_principal.plan"
+    description: "Plan a developer broker principal under the lab issuer's declaration rules."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: >
+    Pure planning of a developer machine's broker principal under the lab issuer's declaration rules. Declares the local-dev runtime profile, which no deployed runtime carries, so main and effects never attach it; it runs through onex node.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-10-27"
+  updated: "2026-10-27"
+  tags:
+    - compute
+    - broker
+    - principal
+    - developer
+  related_tickets:
+    - "OMN-20821"
+    - "OMN-20150"

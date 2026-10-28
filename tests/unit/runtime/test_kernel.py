@@ -912,6 +912,169 @@ class TestBootstrap:
 
         assert exit_code == 0
 
+    @pytest.mark.parametrize(
+        ("prefetched_value", "kernel_status"),
+        [
+            (None, "degraded_error"),
+            (None, "skipped"),
+            ("", "ok"),
+            ("   ", "ok"),
+            ("test-token", "ok"),
+        ],
+    )
+    async def test_required_secret_gate_after_infisical_prefetch(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        prefetched_value: str | None,
+        kernel_status: str,
+    ) -> None:
+        """A failed/empty prefetch cannot admit a secret-dependent contract.
+
+        A skipped kernel prefetch (no inline credentials) stays pending, so the
+        runtime retries with its handler registry's secret resolver.
+        """
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            wire_from_manifest as real_wire_from_manifest,
+        )
+        from omnibase_infra.runtime.runtime_profile import load_runtime_profile
+
+        monkeypatch.setenv("INFISICAL_ADDR", "https://infisical.example")
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("ONEX_RUNTIME_NODE_SELECTION", raising=False)
+        monkeypatch.delenv("ONEX_RUNTIME_FOLDED_PROFILES", raising=False)
+        monkeypatch.setenv("RUNTIME_PROFILE", "main")
+        profile = load_runtime_profile().model_copy(
+            update={"prefetch_policy": "best_effort"}
+        )
+        source = self._never_wiring_manifest()
+        gated_name = source.contracts[0].name
+        manifest = source.model_copy(
+            update={
+                "contracts": (
+                    source.contracts[0].model_copy(
+                        update={"required_secrets": ("GITHUB_TOKEN",)}
+                    ),
+                    source.contracts[1],
+                )
+            }
+        )
+        order: list[str] = []
+
+        async def prefetch(**kwargs: object) -> str:
+            order.append("prefetch")
+            if prefetched_value is not None:
+                monkeypatch.setenv("GITHUB_TOKEN", prefetched_value)
+            return kernel_status
+
+        async def wire(**kwargs: object) -> ModelAutoWiringReport:
+            order.append("wire")
+            return await real_wire_from_manifest(**kwargs)
+
+        with (
+            patch(
+                "omnibase_infra.runtime.service_kernel.prefetch_runtime_config",
+                new=prefetch,
+            ),
+            patch(
+                "omnibase_infra.runtime.service_kernel.load_runtime_profile",
+                return_value=profile,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.wire_from_manifest",
+                side_effect=wire,
+            ) as wiring,
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as event,
+        ):
+            event.return_value.wait = AsyncMock(return_value=None)
+            assert await bootstrap() == 0
+
+        wired_manifest = wiring.call_args.kwargs["manifest"]
+        assert (gated_name in {c.name for c in wired_manifest.contracts}) is bool(
+            prefetched_value and prefetched_value.strip()
+        )
+        served_manifest = (
+            mock_health_server.return_value.attach_manifest.call_args.args[0]
+        )
+        skips = [
+            s for s in served_manifest.skips if s.reason == "required_secret_absent"
+        ]
+        if prefetched_value and prefetched_value.strip():
+            assert not skips
+        else:
+            assert len(skips) == 1
+            assert skips[0].membership[0].contract == gated_name
+            assert skips[0].membership[0].joined is False
+            assert skips[0].membership[0].token == "absent"
+        assert order == ["prefetch", "wire"]
+        assert mock_runtime_host.call_args.kwargs["config_prefetch_status"] == (
+            "pending" if kernel_status == "skipped" else kernel_status
+        )
+
+    @pytest.mark.parametrize("selection", ["profile", "node"])
+    async def test_required_secret_gate_ignores_excluded_contracts(
+        self,
+        mock_wire_infrastructure: MagicMock,
+        mock_inmemory_runtime_config: MagicMock,
+        mock_runtime_host: MagicMock,
+        mock_event_bus: MagicMock,
+        mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        selection: str,
+    ) -> None:
+        """Only selected nodes contribute required secrets or absence records."""
+        from omnibase_infra.runtime.auto_wiring import required_secret_names
+
+        monkeypatch.delenv("INFISICAL_ADDR", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.setenv("RUNTIME_PROFILE", "main")
+        monkeypatch.delenv("ONEX_RUNTIME_NODE_SELECTION", raising=False)
+        monkeypatch.delenv("ONEX_RUNTIME_FOLDED_PROFILES", raising=False)
+        source = self._never_wiring_manifest()
+        excluded = source.contracts[0].model_copy(
+            update={
+                "required_secrets": ("GITHUB_TOKEN",),
+                "runtime_profiles": ("effects",) if selection == "profile" else (),
+            }
+        )
+        selected = source.contracts[1]
+        if selection == "node":
+            monkeypatch.setenv("ONEX_RUNTIME_NODE_SELECTION", selected.name)
+        manifest = source.model_copy(update={"contracts": (excluded, selected)})
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.required_secret_names",
+                wraps=required_secret_names,
+            ) as names,
+            patch("omnibase_infra.runtime.service_kernel.asyncio.Event") as event,
+        ):
+            event.return_value.wait = AsyncMock(return_value=None)
+            assert await bootstrap() == 0
+
+        served_manifest = (
+            mock_health_server.return_value.attach_manifest.call_args.args[0]
+        )
+        assert not any(
+            s.reason == "required_secret_absent" for s in served_manifest.skips
+        )
+        assert "token=absent" not in caplog.text
+        assert "GITHUB_TOKEN" not in caplog.text
+        names.assert_called_once()
+        assert {c.name for c in names.call_args.args[0].contracts} == {selected.name}
+
     async def test_bootstrap_defers_auto_wiring_subscriptions_until_after_freeze(
         self,
         mock_wire_infrastructure: MagicMock,

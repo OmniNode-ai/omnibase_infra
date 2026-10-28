@@ -30,6 +30,26 @@ requirements:
         statement: "AC6: the clone step resolves the newest refs/tags/dev-* of omniintelligence with git ls-remote, logs the tag and its commit, fails closed when none exists, and reads no branch tip or pinned sha -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k clone_step"
       - id: "AC7"
         statement: "AC7: secrets.HOSTILE_REVIEW_ANTHROPIC_API_KEY is exported to the review step alone as ANTHROPIC_API_KEY and REVIEW_ANTHROPIC_API_KEY, and the preflight holds neither -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
+  - id: "req-no-repost-on-unchanged-diff"
+    statement: "The Hostile Reviewer posts no new finding threads when the pull request's own diff is unchanged since a review the reviewer bot already posted."
+    acceptance:
+      - id: "AC8"
+        statement: "AC8: the thread poster digests the PR's own added and removed lines, records the digest in its review, posts nothing when a github-actions[bot] review already carries it, and ignores the marker in any other account's review -- falsifier: uv run pytest tests/ci/test_post_hostile_review_threads.py tests/ci/test_post_hostile_review_threads_merge_only_omn20910.py -q -n 0 --no-cov -k diff_digest"
+  - id: "req-review-judge-on-default-branch"
+    statement: "The hostile-review judge (a workflow_run workflow, which GitHub runs only from the default branch) and the thread script modes it calls are on dev, while dev's thread gate keeps clearing a rejection with a reason."
+    acceptance:
+      - id: "AC9"
+        statement: "AC9: hostile-review-judge.yml runs --read-request, --pending and --post-verdicts from base-branch code, skips download and judging when the triggering run uploaded no hostile-review-judge-request artifact and fails closed when the artifact listing fails, and the gate still clears a rejection with a reason and no verdict -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
+  - id: "req-rung-eval-env-example-backend-pin"
+    statement: "The rung-eval host env template names the variables the cloud-openrouter rung reads since OMN-20974 (RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID and RUNG_EVAL_DOGFOOD_TENANT_ID), commented and empty, and no longer names the retired BASE_URL, MODEL and API_KEY variables of that rung."
+    acceptance:
+      - id: "AC10"
+        statement: "AC10: the env example carries both backend-pin names commented with empty values and none of the three retired cloud rung names -- falsifier: uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly -k 'value_free_environment or retired_cloud_rung' fails at the merge base"
+  - id: "req-review-judge-head-protocol"
+    statement: "The default-branch rejection judge produces the head-bound reply protocol required by omnibase_infra#5237, retaining the head whose code it judged rather than the head at posting time."
+    acceptance:
+      - id: "AC11"
+        statement: "AC11: pending records and posted judge replies carry the same judged head, a push invalidates the prior judgement, an unbound legacy verdict is queued for judgement again, and a missing or invalid recorded head posts nothing -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov -p no:randomly -k HeadBoundJudgeProtocol (seven cases fail before the change)"
 evidence_requirements:
   - kind: "tests"
     description: "The overlay and the workflow tests pass at the head."
@@ -39,6 +59,30 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: "dod-omn20910-ac11-recorded-rejection-protocol"
+    description: "A successful dev-bus GitHub review-thread capture supplies a real finding, rejection, ids and reviewed head. Replay through the production verdict producer and parser accepts only that head and refuses legacy, other-head, wrong-identity and changed-body controls, with no API seam replacement. Verdicts are protocol controls, not claimed model judgements."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_live_contact_omn20910.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
+  - id: "dod-omn20910-ac11-judge-head-protocol"
+    description: "Seven test-first regressions drive the real pending and posting modes with a recording GitHub API, including a push during judgement and five invalid or absent head controls. All seven fail at the merge base; no provider, credential or live GitHub call is used."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_hostile_review_judge_omn17427.py -q -n 0 --no-cov -p no:randomly -k HeadBoundJudgeProtocol"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
+  - id: "dod-omn20910-ac11-judge-head-protocol-deploy"
+    description: "Hosted-runner deploy check of the judge producer, recorded-contact replay, thread gate, workflow wiring and secret boundary. It requires neither Docker nor a deployed service and does not claim live judgements or green PR gates."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run --frozen pytest tests/ci/test_check_hostile_review_threads.py tests/ci/test_hostile_review_judge_live_contact_omn20910.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py tests/ci/test_hostile_review_threads_live_contact_omn17427.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC11"]
   - id: "dod-omn20910-ac1-overlay-declares-voters"
     description: "The review and preflight read the overlay from the private CI overlay, outside the pull request checkout (amended by OMN-20923)."
     source: "manual"
@@ -87,3 +131,34 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_reviewer_dev_tag_key_omn20910.py -q -k 'claude_key or secret_expression'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC7"]
+  - id: "dod-omn20910-ac8-no-repost-unchanged-diff"
+    description: "AC8. The poster records the PR diff digest, skips unchanged diffs already reviewed by github-actions[bot], and ignores other accounts' markers."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_post_hostile_review_threads.py tests/ci/test_post_hostile_review_threads_merge_only_omn20910.py -q -n 0 --no-cov -k diff_digest"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC8"]
+  - id: "dod-omn20910-ac9-review-judge-on-default-branch"
+    description: "AC9. The judge workflow and the thread script's judge modes run from the default branch; with no request artifact the judge does nothing; dev's gate rule for a rejection is unchanged."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC9"]
+  - id: "dod-omn20910-ac10-rung-env-backend-pin"
+    description: "AC10. The rung-eval env example names the backend-pin variables of the cloud rung and none of its retired variables."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_rung_eval_timer_units.py -q -n 0 --no-cov -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC10"]
+  - id: "dod-omn20910-deploy-rung-eval-env-example"
+    description: "The change is a host env template and its test; the installed unit files are unchanged. The check reads the template the installer copies and fails when it still names a retired cloud rung variable or lacks a backend-pin name."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "grep -q '^# RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID=$' deploy/rung-eval/rung-eval.env.example && grep -q '^# RUNG_EVAL_DOGFOOD_TENANT_ID=$' deploy/rung-eval/rung-eval.env.example && ! grep -qE 'RUNG_EVAL_CLOUD_OPENROUTER_(BASE_URL|MODEL|API_KEY)' deploy/rung-eval/rung-eval.env.example"
+        cwd: "${OMNI_HOME}/omnibase_infra"

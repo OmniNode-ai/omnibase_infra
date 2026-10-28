@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# docker-compose.dev-bus-ha.yml — ONE member of the three-broker dev bus (OMN-21430).
+#
+# =============================================================================
+# WHAT THIS IS
+# =============================================================================
+# The dev bus today is one Redpanda broker (omnibase-infra-redpanda, v24.3.18,
+# --smp 1 --memory 12G) on h201. On 2026-10-25/26 it crashed three times
+# (SIGSEGV 20:56:59Z, abort 22:48:33Z, SIGSEGV 00:59:10Z) and each crash stopped
+# all bus traffic and the dev runtime. This file runs one broker of a
+# three-broker Raft cluster; each of the three hosts in
+# docker/redpanda/dev-bus-ha/hosts.tsv runs it once with its own env file
+# (docker/redpanda/dev-bus-ha/<host>.env.example). With replication factor 3 a
+# write needs 2 of 3 replicas, so one broker can stop and writes and
+# consumer-group commits still land (scratch proof:
+# docker/redpanda/dev-bus-ha/evidence/omn-21430-scratch-proof.txt).
+#
+# Design, cutover order and rollback: the internal planning note 2026-10-26-dev-bus-three-brokers.
+# NOTHING here is live. The dev lane's `redpanda` service in
+# docker-compose.infra.yml is unchanged until the cutover runs.
+#
+# Run (on each member host, from docker/):
+#   docker compose -p omnibase-infra-dev-bus-ha -f docker-compose.dev-bus-ha.yml \
+#     --env-file redpanda/dev-bus-ha/<host>.env up -d
+#
+# Own compose project, container, network and volume names, so a dev-lane
+# rebuild or `down` cannot reach a bus member (the OMN-18691 lesson).
+# =============================================================================
+name: omnibase-infra-dev-bus-ha
+services:
+  redpanda:
+    image: redpandadata/redpanda:${DEV_BUS_HA_REDPANDA_IMAGE_TAG:-v24.3.18}
+    container_name: omnibase-infra-dev-bus-ha-redpanda
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    command:
+      - redpanda
+      - start
+      # Two Kafka listeners. `external` is the one every client uses after the
+      # cutover: the three host addresses are the bootstrap list. `internal`
+      # exists only for the transition: clients still bootstrapped on the old
+      # dev broker's `internal` listener get metadata for that listener name,
+      # so every member must advertise one, at an address those clients can
+      # reach, or partitions led by the new members are invisible to them.
+      - --kafka-addr internal://0.0.0.0:9093,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://${DEV_BUS_HA_ADVERTISE_HOST:?DEV_BUS_HA_ADVERTISE_HOST is required - the member host's tailnet address from hosts.tsv}:${DEV_BUS_HA_INTERNAL_PORT:-19093},external://${DEV_BUS_HA_ADVERTISE_HOST:?DEV_BUS_HA_ADVERTISE_HOST is required}:${DEV_BUS_HA_KAFKA_PORT:-19092}
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr ${DEV_BUS_HA_ADVERTISE_HOST:?DEV_BUS_HA_ADVERTISE_HOST is required}:${DEV_BUS_HA_RPC_PORT:-33145}
+      # The h201 member's rpc address, on all three. h201 already holds the
+      # cluster (its data volume is the dev broker's), so it ignores the list;
+      # h202 and h200 join through it.
+      - --seeds ${DEV_BUS_HA_SEEDS:?DEV_BUS_HA_SEEDS is required - the h201 member's rpc address from hosts.tsv}
+      # No --mode dev-container: the settings the dev bus relies on from it
+      # (topic auto-create, partition cap) are cluster config, set in
+      # redpanda/dev-bus-ha/.bootstrap.yaml and by the cutover's rpk steps.
+      - --smp 1
+      # 12G is the floor OMN-20266 measured (6G crashed 12 times in 32 h at
+      # 2,409 partitions). With RF3 every member carries every replica, so each
+      # member holds what the single broker holds today.
+      - --memory ${DEV_BUS_HA_MEMORY:-12G}
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --default-log-level=warn
+      - --set topic_partitions_per_shard=7000
+    # The container limit is the seastar arena plus 2G for the process outside
+    # it, and swap is refused (memswap_limit == mem_limit): tonight the 12G dev
+    # broker held 9.0 GiB in swap on h201 (h201-swap-0120, 01:21Z).
+    mem_limit: ${DEV_BUS_HA_MEM_LIMIT:-14g}
+    memswap_limit: ${DEV_BUS_HA_MEM_LIMIT:-14g}
+    ports:
+      - "${DEV_BUS_HA_KAFKA_PORT:-19092}:19092"
+      - "${DEV_BUS_HA_INTERNAL_PORT:-19093}:9093"
+      - "${DEV_BUS_HA_RPC_PORT:-33145}:33145"
+      # Admin API on the host loopback only (OMN-20260: admin auth is off).
+      - "127.0.0.1:${DEV_BUS_HA_ADMIN_PORT:-9644}:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+      - ./redpanda/dev-bus-ha/.bootstrap.yaml:/etc/redpanda/.bootstrap.yaml:ro
+    networks:
+      - dev-bus-ha
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "com.omninode.service=dev-bus-ha-redpanda"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-21430"
+networks:
+  dev-bus-ha:
+    name: omnibase-infra-dev-bus-ha-network
+volumes:
+  redpanda_data:
+    # h201 points this at the existing dev broker volume so the member keeps
+    # the cluster's data and node id; h202 and h200 start empty.
+    name: ${DEV_BUS_HA_DATA_VOLUME:-omnibase-infra-dev-bus-ha-redpanda-data}

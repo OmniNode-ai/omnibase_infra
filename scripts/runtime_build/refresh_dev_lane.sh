@@ -271,6 +271,9 @@ readonly REFRESH_BUILD_SERVICES=(
     # everywhere except here, which left it declared, censused as critical
     # drift, and never running on either lab lane.
     tenant-projection-writer
+    # OMN-21279 -- build-only infra half of the composed runtime image;
+    # scale 0 in the overlay, so up starts no container for it.
+    dev-lane-infra-runtime-image
 )
 # The clones this refresh records prior HEADs for and moves to the deployed
 # ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single
@@ -587,7 +590,8 @@ run_preflight_required_env() {
         --lane "${LANE}" \
         --runtime-policy-env "${REPO_ROOT}/docker/runtime-policy.env" \
         --compose-file "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
-        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml"
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml" \
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-tenant-fold.yml"
 }
 
 # OMN-20867: the lane's env fragment from the private deployment overlay clone,

@@ -10,11 +10,14 @@ raises `ValueError: Duplicate local ingress route alias '<name>'`.
 
 This test inspects every infra contract.yaml and fails if it declares a
 `name:` that lives in the omnimarket-side nodes package — the known
-collision shape that crashes boot.
+collision shape that crashes boot. It reads the omnimarket sibling clone's
+contract files rather than importing omnimarket, because omnibase_infra never
+imports omnimarket (OMN-21279).
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -36,25 +39,23 @@ def _read_contract_name(contract_path: Path) -> str | None:
 
 
 def _omnimarket_node_dir() -> Path | None:
-    """Locate the omnimarket nodes directory if the package is importable.
+    """Locate the omnimarket nodes directory in the sibling clone under $OMNI_HOME.
 
-    Returns None if omnimarket isn't on sys.path in this test environment
-    (in which case we skip — the runtime wiring check is the source of
-    truth for the duplicate-alias error).
+    Returns None if $OMNI_HOME is unset or holds no omnimarket clone (in which
+    case we skip — the runtime wiring check is the source of truth for the
+    duplicate-alias error).
     """
-    try:
-        import omnimarket  # type: ignore[import-not-found]
-    except ImportError:
+    workspace_root = os.environ.get("OMNI_HOME", "").strip()
+    if not workspace_root:
         return None
-    pkg_root = Path(omnimarket.__file__).parent
-    nodes_dir = pkg_root / "nodes"
+    nodes_dir = Path(workspace_root) / "omnimarket" / "src" / "omnimarket" / "nodes"
     return nodes_dir if nodes_dir.is_dir() else None
 
 
 def test_no_infra_contract_name_collides_with_omnimarket() -> None:
     market_dir = _omnimarket_node_dir()
     if market_dir is None:
-        pytest.skip("omnimarket not importable in this environment")
+        pytest.skip("no omnimarket sibling clone under $OMNI_HOME in this environment")
 
     market_names: dict[str, Path] = {}
     for contract in market_dir.rglob("contract.yaml"):

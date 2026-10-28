@@ -67,6 +67,20 @@
     {
       "broker": "dev",
       "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_query_client.consume.v1.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.omnimarket.work_ledger_query_client.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
       "resource": "local.omnimemory.memory_lifecycle_probe.consume.v1.",
       "operation": "DESCRIBE",
       "pattern": "PREFIXED"
@@ -75,6 +89,20 @@
       "broker": "dev",
       "resource_type": "GROUP",
       "resource": "local.omnimemory.memory_lifecycle_probe.consume.v1.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.rr.friction-run-",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "local.rr.friction-run-",
       "operation": "READ",
       "pattern": "PREFIXED"
     },
@@ -103,6 +131,20 @@
       "broker": "dev",
       "resource_type": "GROUP",
       "resource": "pr-handoff-request.",
+      "operation": "READ",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "receipt-mode-client.",
+      "operation": "DESCRIBE",
+      "pattern": "PREFIXED"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "GROUP",
+      "resource": "receipt-mode-client.",
       "operation": "READ",
       "pattern": "PREFIXED"
     },
@@ -117,6 +159,48 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.cmd.omnibase-infra.delegation-request.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-internal.morning-friction-sweep.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnibase-internal.morning-friction-sweep.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-package.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-package.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omniintelligence.context-compaction-requested.v1",
       "operation": "WRITE",
       "pattern": "LITERAL"
     },
@@ -221,6 +305,20 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.cmd.omnimarket.work-ledger-query-requested.v1",
+      "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.cmd.omnimemory.expire-memory.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -272,6 +370,34 @@
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnibase-infra.delegation-failed.v1",
       "operation": "WRITE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-completed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnibase-internal.morning-friction-sweep-failed.v1",
+      "operation": "READ",
       "pattern": "LITERAL"
     },
     {
@@ -697,6 +823,34 @@
     {
       "broker": "dev",
       "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-fallback.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-fallback.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-prepared.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.context-compaction-prepared.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.delegate-skill-completed.v1",
       "operation": "DESCRIBE",
       "pattern": "LITERAL"
@@ -915,6 +1069,20 @@
       "broker": "dev",
       "resource_type": "TOPIC",
       "resource": "onex.evt.omnimarket.work-ledger-append-failed.v1",
+      "operation": "READ",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-query-completed.v1",
+      "operation": "DESCRIBE",
+      "pattern": "LITERAL"
+    },
+    {
+      "broker": "dev",
+      "resource_type": "TOPIC",
+      "resource": "onex.evt.omnimarket.work-ledger-query-completed.v1",
       "operation": "READ",
       "pattern": "LITERAL"
     },

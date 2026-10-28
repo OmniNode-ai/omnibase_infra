@@ -68,6 +68,15 @@ _CHATGPT_MODELS = (
     "gpt-5.5",
 )
 
+# Rows added after 2026-10-06 and checked against the provider page in their
+# own ticket's test (OMN-21431: test_pricing_manifest_opus_5_5_omn21431.py).
+_CHECKED_ELSEWHERE = (
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-fable-5-1",
+    "claude-fable-5",
+)
+
 # Rows no provider page priced on 2026-10-06: they must resolve as unpriced.
 _UNPUBLISHED = ("gemini-2.0-flash", "gemini-1.5-pro", "o1-mini")
 
@@ -137,6 +146,6 @@ def test_every_cloud_row_is_cited() -> None:
         for model_id, entry in _raw_models().items()
         if entry["source"] != _LOCAL_SOURCE
     }
-    assert set(cloud) == set(_PUBLISHED)
+    assert set(cloud) == set(_PUBLISHED) | set(_CHECKED_ELSEWHERE)
     for model_id, entry in cloud.items():
         assert entry["source"] == _PUBLISHED_SOURCE, model_id

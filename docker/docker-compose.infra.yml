@@ -660,7 +660,7 @@ services:
   #            All broker addresses are hardcoded literals in compose.
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
   redpanda:
-    image: redpandadata/redpanda:v24.2.7
+    image: redpandadata/redpanda:v25.1.12
     ulimits:
       nofile:
         soft: 65535
@@ -708,6 +708,13 @@ services:
       # broker serves 1537 partitions on 2G, and this one carries 1756, so 12G
       # is a deliberately conservative first step. 12G -> 8G is a later ticket,
       # gated on a 24h soak. Raise it back by setting DEV_REDPANDA_MEMORY.
+      #
+      # OMN-20266: operator-env DEV_REDPANDA_MEMORY=6G (set 2026-10-21,
+      # recreated 2026-10-22T00:01Z) crashed the broker 12 times in 32 hours:
+      # 2,409 partitions on one shard; 4 seastar allocation failures of ~3.2 MB
+      # with 3.7 GB free, 8 segfaults. Do not set it below 12G without a soak.
+      # The system alert's dev-broker-memory row warns below 12G and
+      # dev-broker-restart goes CRITICAL on a restart-policy restart.
       - --memory ${DEV_REDPANDA_MEMORY:-12G}
       # OMN-5176: --admin-addr removed — rpk wraps it into redpanda.yaml but
       # the actual binary rejects the flag, causing a crash-loop on recreate.
@@ -771,7 +778,7 @@ services:
   # this container to complete before starting, to avoid hitting partition limits
   # on fresh Redpanda volumes.
   redpanda-partition-cap:
-    image: redpandadata/redpanda:v24.2.7
+    image: redpandadata/redpanda:v25.1.12
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
     extends:

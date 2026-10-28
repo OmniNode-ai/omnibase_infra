@@ -175,6 +175,16 @@ class ConsumerFlowLane:
         try:
             with self.urlopen(url, timeout=self.http_timeout) as resp:
                 body = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            # OMN-19812: the projection API names its refusal in the body (a
+            # degraded exposure, a source read that failed); the status line
+            # alone left the board reading "503 Service Unavailable" with the
+            # server's own cause discarded.
+            cause = _http_error_cause(exc)
+            said = f"; server said: {cause}" if cause else ""
+            raise ConsumerFlowInputError(
+                f"GET {url}: {type(exc).__name__}: {exc}{said}"
+            ) from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise ConsumerFlowInputError(
                 f"GET {url}: {type(exc).__name__}: {exc}"
@@ -226,3 +236,36 @@ def parse_high_watermark(describe_out: str) -> int:
             f"no partition rows in rpk describe output: {describe_out[:200]!r}"
         )
     return total
+
+
+_HTTP_ERROR_BODY_BYTES = 2048
+_HTTP_ERROR_TEXT_CHARS = 200
+
+
+def _http_error_cause(exc: urllib.error.HTTPError) -> str:
+    """The refusal the server named in an error body, or "" when it named none.
+
+    A JSON object body contributes its ``status``, ``error`` and ``reason``
+    string fields, in that order; any other body contributes its first
+    characters with control characters removed.
+    """
+    try:
+        raw = exc.read(_HTTP_ERROR_BODY_BYTES) if exc.fp is not None else b""
+    except (OSError, ValueError):
+        return ""
+    text = raw.decode("utf-8", errors="replace").strip()
+    if not text:
+        return ""
+    try:
+        parsed: object = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        named = [
+            f"{key}={value}"
+            for key in ("status", "error", "reason")
+            if isinstance(value := parsed.get(key), str) and value
+        ]
+        if named:
+            return " ".join(named)
+    return "".join(ch for ch in text if ch.isprintable())[:_HTTP_ERROR_TEXT_CHARS]

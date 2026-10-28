@@ -217,19 +217,24 @@ def test_moved_job_runs_on_the_verify_label(
 
 
 def test_the_reusable_verify_job_moves_with_omnimarkets_own_route() -> None:
-    """Task B8 (OMN-19510): when omnimarket itself calls the reusable
-    workflow, ``verify-sibling-converged`` reads the SAME
-    ``verify_runs_on`` output as every other caller, but that output now
-    resolves to dev-202's own host-scoped runner rather than the dev-201
-    literal every other caller still gets."""
+    """Omnimarket's verify runner follows the routed instance's availability."""
+    from scripts.ci.deploy_lane_verify_route import load_table
+
+    table = load_table()
+    routed = next(
+        row["instance"]
+        for row in table["routes"]
+        if row["requester_repository"] == "omnimarket"
+    )
+    available = table["instances"][routed].get("available", True)
+    expected = routed if available else table["default_instance"]
     assert ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged") in (
         ROUTED_JOBS
     )
-    assert _routed_labels("gha/omnimarket/pr-1") == [
-        "self-hosted",
-        "omnibase-verify",
-        "host-202",
-    ]
+    assert (
+        _routed_labels("gha/omnimarket/pr-1")
+        == (table["instances"][expected]["verify"]["runner_labels"])
+    )
 
 
 @pytest.mark.parametrize(("workflow", "job_key"), STAYED_JOBS)

@@ -100,7 +100,6 @@ ARG UV_VERSION=0.6.14
 ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
 ARG ONEX_CHANGE_CONTROL_REF=main
-ARG OMNIMARKET_REF=main
 """
 
 
@@ -111,7 +110,6 @@ def test_parse_dockerfile_args_extracts_known_pins(tmp_path: Path) -> None:
     result = _mod._parse_dockerfile_args(df)
     assert result["OMNIBASE_COMPAT_REF"] == "c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
     assert result["ONEX_CHANGE_CONTROL_REF"] == "main"
-    assert result["OMNIMARKET_REF"] == "main"
     assert result["UV_VERSION"] == "0.6.14"
 
 
@@ -164,20 +162,23 @@ def test_parse_uv_sources_missing_section(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_check_dockerfile_args_flags_main_ref(tmp_path: Path) -> None:
     df = tmp_path / "Dockerfile.runtime"
-    df.write_text(_SAMPLE_DOCKERFILE)
+    df.write_text(_SAMPLE_DOCKERFILE + "ARG OMNIBASE_COMPAT_REF=main\n")
     df_args = _mod._parse_dockerfile_args(df)
 
     with patch.object(_mod, "_gh_latest_release", return_value="v1.2.0"):
         results = _mod._check_dockerfile_args(df_args, threshold=1)
 
     main_results = [r for r in results if r.pinned == "main"]
+    # Positive control: the floating ref is found, so the drift assertion below
+    # is not vacuous.
+    assert main_results
     assert all(r.drifted for r in main_results), "floating 'main' refs must be drifted"
     names = {r.name for r in main_results}
     # OMN-16296: ONEX_CHANGE_CONTROL_REF is no longer a Dockerfile ARG --
     # onex_change_control is not installed into the runtime image -- so the
-    # checker must not expect or flag it.
-    assert "ONEX_CHANGE_CONTROL_REF" not in names
-    assert "OMNIMARKET_REF" in names
+    # checker must not expect or flag it. OMN-21279: the same holds for
+    # OMNIMARKET_REF, which the image no longer carries.
+    assert names == {"OMNIBASE_COMPAT_REF"}
 
 
 @pytest.mark.unit
@@ -352,7 +353,6 @@ ARG UV_VERSION=0.6.14
 ARG OMNIBASE_COMPAT_REF="c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/c1a878f1339d396a7f11dee42ea9f0e30fb9c1d1.tar.gz"
 ARG ONEX_CHANGE_CONTROL_REF=abc123def456789012345678901234567890abcd
-ARG OMNIMARKET_REF=deadbeef1234567890abcdef1234567890abcdef
 """
 
 # pyproject with no floating branch refs — all pinned to tags or SHAs

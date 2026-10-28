@@ -106,6 +106,12 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
+    "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
+    "delegation_capability_cells": "omnimarket#4380",
+    "delegation_lab_jobs": "omnimarket#4277",
+    "delegation_lab_job_outbox": "omnimarket#4277",
+    "compaction_current_context": "omnimarket OMN-21090 (node_projection_compaction_current_context)",
+    "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
 }

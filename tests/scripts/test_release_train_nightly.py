@@ -98,6 +98,9 @@ def _policy(**overrides: Any) -> Any:
         "lab_evidence_note": "the compose dev lane on the lab host",
         "mode": rt.EnumTrainMode.CUT,
         "mode_note": "",
+        "dependency_refresh": rt.EnumDependencyRefresh.LOCKED,
+        "dependency_refresh_note": "",
+        "first_party_lock_prefixes": ("omni", "onex"),
     }
     fields.update(overrides)
     return rt.ModelRepoReleasePolicy(**fields)
@@ -252,9 +255,9 @@ class TestLiveState:
                 "entry is the only durable record a later reader has"
             )
         assert "deliberate minor release" in note, (
-            "the surviving blocker -- the unreleased-commit backlog that makes "
-            "a patch cut the wrong shape -- must stay stated, because it is "
-            "what still holds this repo at report_only"
+            "the backlog blocker -- the unreleased-commit backlog that made a "
+            "patch cut the wrong shape -- must stay on record with the minor "
+            "release that cleared it (OMN-21164)"
         )
 
     def test_infra_counts_docker_migrations_as_release_relevant(self) -> None:
@@ -284,7 +287,7 @@ class TestLiveState:
             "omnibase_compat is excluded by operator ruling and must not appear"
         )
 
-    def test_exactly_the_five_reviewed_repos_are_armed_to_cut(self) -> None:
+    def test_exactly_the_six_reviewed_repos_are_armed_to_cut(self) -> None:
         """Arming a repo is one field, and this test is what keeps it a
         deliberate, visible act rather than a side effect of another change.
 
@@ -306,6 +309,10 @@ class TestLiveState:
         (OMN-20715) after release-on-merge.yml was retired (omnimarket#3037,
         2026-09-28), leaving nothing releasing it. Its premise is a lab receipt,
         not green CI alone.
+
+        omniintelligence was armed (OMN-21164) once the deliberate minor
+        release its entry asked for had shipped: 0.25.0, tagged by
+        auto-tag-on-merge and published by a push-event release.yml run.
         """
         policies = rt.load_policy(_POLICY)
         armed = sorted(
@@ -315,6 +322,7 @@ class TestLiveState:
             "omnibase_core",
             "omnibase_infra",
             "omnibase_spi",
+            "omniintelligence",
             "omnimarket",
             "omnimemory",
         ]
@@ -748,10 +756,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnibase_infra:\n"
             "    package: omnibase-infra\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src, pyproject.toml]\n"
             "    lab_evidence: compose-dev\n"
             "    lab_evidence_note: the compose dev lane\n"
@@ -768,10 +778,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnimemory:\n"
             "    package: omnimemory\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src]\n"
             "    lab_evidence: none\n"
             "    lab_evidence_note: ''\n"
@@ -787,10 +799,12 @@ class TestConfigurationErrorsRefuse:
     ) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnimemory:\n"
             "    package: omnimemory\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src]\n"
             "    lab_evidence: compose-dev\n"
             "    lab_evidence_note: the compose dev lane\n"
@@ -1896,10 +1910,12 @@ class TestPathsDownstreamReposCloneByTagAreReleaseRelevant:
     def _write(tmp_path: Path, consumed: str) -> Path:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
+            "dependency_refresh_first_party_prefixes: [omni, onex]\n"
             "repos:\n"
             "  omnibase_core:\n"
             "    package: omnibase-core\n"
             "    default_branch: dev\n"
+            "    dependency_refresh: locked\n"
             "    release_relevant_paths: [src, pyproject.toml]\n"
             "    lab_evidence: none\n"
             "    lab_evidence_note: no lab lane\n"

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import logging
@@ -59,6 +60,7 @@ from deploy_agent.executor import (
     SCOPE_BUNDLES,
     DeployExecutor,
     DeployRolledBackError,
+    DevBootGuard,
     DevLaneMigrationPreflightError,
     EnumInstancePhase,
     VerificationFailedError,
@@ -76,6 +78,7 @@ from deploy_agent.executor import (
     set_lane_overlay_clone,
 )
 from deploy_agent.executor import _run as run_command
+from deploy_agent.executor import deliver_dev_boot_reports as deliver_reports
 from deploy_agent.health import create_health_app
 from deploy_agent.host_slot import (
     HostSlotHeldError,
@@ -558,8 +561,8 @@ class DeployAgent:
         self._dev_tag_behind_since: dict[str, datetime] = {}
         self._dev_tag_heartbeat: dict[str, ModelDevTagHeartbeat] = {}
         self._dev_tag_heartbeat_published_at: dict[str, datetime] = {}
-        self._idle_read_running_image: Callable[[], str] = lambda: (
-            read_running_image(_runtime_container_for_lane(EnumRuntimeLane.DEV))
+        self._idle_read_running_image: Callable[[], str] = lambda: read_running_image(
+            _runtime_container_for_lane(EnumRuntimeLane.DEV)
         )
         # OMN-19544 AC1. On a lab host this instance shares with a prover (the
         # .105 laptop's VM holds the lane or a proof stack, not both), both
@@ -1947,6 +1950,16 @@ class DeployAgent:
                 # Preflight
                 self.executor.preflight(on_phase_update=on_phase_update)
 
+                # OMN-21279: retain the previous generation's compose settings
+                # before git_pull replaces them. The guard has no non-dev path.
+                dev_guard = None
+                if cmd.runtime_lane is EnumRuntimeLane.DEV and cmd.scope in (
+                    Scope.RUNTIME,
+                    Scope.FULL,
+                ):
+                    dev_guard = DevBootGuard(self.executor, STATE_DIR)
+                    dev_guard.prepare()
+
                 # Git pull -- OMN-18124: under the lane's host lock, the same
                 # per-compose-project lock refresh_dev_lane.sh takes. The
                 # deploy-source clone is shared with that script, and this agent
@@ -1974,51 +1987,88 @@ class DeployAgent:
                 if cmd.scope in (Scope.RUNTIME, Scope.FULL):
                     self.executor.validate_llm_endpoint_env_contract()
 
-                # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
-                # cache. prod pulls the pinned digest instead of rebuilding from a ref.
-                rollback_point = (
-                    capture_rollback_point(self.executor, cmd.runtime_lane)
-                    if cmd.scope in (Scope.RUNTIME, Scope.FULL)
-                    and cmd.runtime_lane != EnumRuntimeLane.PROD
-                    else None
-                )
-                services_restarted = self.executor.rebuild_scope(
-                    cmd.scope,
-                    cmd.services,
-                    on_phase_update=on_phase_update,
-                    git_sha=self._current_git_sha,
-                    # OMN-16442/OMN-17291: the command's own pin, carried through to
-                    # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
-                    git_ref=cmd.git_ref,
-                    build_source=cmd.build_source,
-                    lane=cmd.runtime_lane,
-                    image_digest=cmd.image_digest,
-                )
-
-                # prod must serve exactly the pinned digest: verify the running
-                # container image digest equals the requested digest BEFORE any
-                # health check, failing closed on mismatch.
-                if cmd.runtime_lane == EnumRuntimeLane.PROD and cmd.image_digest:
-                    health_checks = self.executor.deploy_and_verify(
-                        lane=cmd.runtime_lane,
-                        expected_digest=cmd.image_digest,
-                        on_phase_update=on_phase_update,
-                        service=resolve_prod_target_service(cmd),
+                # A compose failure and a probe timeout are as capable of
+                # leaving dev down as VerificationFailedError. Recover all
+                # failed dev attempts while the lane lock is still held.
+                protection = (
+                    dev_guard.protect(
+                        str(cid),
+                        self._current_git_sha,
+                        lambda error: self.job_store.complete(
+                            cid,
+                            status="failed",
+                            errors=[error],
+                            settling_stage=EnumJobSettlingStage.BOOT_RECOVERY,
+                        ),
                     )
-                else:
-                    try:
-                        health_checks = self.executor.verify(
-                            on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                    if dev_guard is not None
+                    else contextlib.nullcontext()
+                )
+                with protection:
+                    # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
+                    # cache. prod pulls the pinned digest instead of rebuilding from a ref.
+                    rollback_point = (
+                        capture_rollback_point(self.executor, cmd.runtime_lane)
+                        if cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                        and cmd.runtime_lane
+                        not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
+                        else None
+                    )
+                    # Dev recovery belongs to the boot guard. Every other
+                    # non-prod runtime/full rebuild needs a retained point.
+                    if (
+                        cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                        and cmd.runtime_lane
+                        not in (EnumRuntimeLane.PROD, EnumRuntimeLane.DEV)
+                        and rollback_point is None
+                    ):
+                        raise RuntimeError(
+                            f"Refusing {cmd.runtime_lane.value} {cmd.scope.value} deploy: "
+                            "no healthy, retained rollback point"
                         )
-                    except VerificationFailedError as exc:
-                        if rollback_point is not None:
-                            outcome = restore_rollback_point(
-                                self.executor, rollback_point, on_phase_update
+                    services_restarted = self.executor.rebuild_scope(
+                        cmd.scope,
+                        cmd.services,
+                        on_phase_update=on_phase_update,
+                        git_sha=self._current_git_sha,
+                        # OMN-16442/OMN-17291: the command's own pin, carried through to
+                        # stage_workspace.sh as DEPLOY_REF for workspace-mode builds.
+                        git_ref=cmd.git_ref,
+                        build_source=cmd.build_source,
+                        lane=cmd.runtime_lane,
+                        image_digest=cmd.image_digest,
+                    )
+
+                    if dev_guard is not None:
+                        dev_guard.wait()
+
+                    # prod must serve exactly the pinned digest: verify the running
+                    # container image digest equals the requested digest BEFORE any
+                    # health check, failing closed on mismatch.
+                    if cmd.runtime_lane == EnumRuntimeLane.PROD and cmd.image_digest:
+                        health_checks = self.executor.deploy_and_verify(
+                            lane=cmd.runtime_lane,
+                            expected_digest=cmd.image_digest,
+                            on_phase_update=on_phase_update,
+                            service=resolve_prod_target_service(cmd),
+                        )
+                    else:
+                        try:
+                            health_checks = self.executor.verify(
+                                on_phase_update=on_phase_update, lane=cmd.runtime_lane
                             )
-                            raise DeployRolledBackError(
-                                exc, outcome, rollback_point
-                            ) from exc
-                        raise
+                        except (
+                            VerificationFailedError,
+                            subprocess.TimeoutExpired,
+                        ) as exc:
+                            if rollback_point is not None:
+                                outcome = restore_rollback_point(
+                                    self.executor, rollback_point, on_phase_update
+                                )
+                                raise DeployRolledBackError(
+                                    exc, outcome, rollback_point
+                                ) from exc
+                            raise
 
                 # OMN-20867: the lane's mirror forwarders, on the image the
                 # runtime phase just verified, under this lane's lock. The
@@ -2926,6 +2976,17 @@ class DeployAgent:
 
     def _retry_pending_publishes(self) -> None:
         """Replay any result still owed to the bus. BLOCKING — see ``_offload``."""
+        # Failure reports use their own durable outbox and survive a runtime
+        # bus outage. Retry only on a dev-capable instance.
+        if EnumRuntimeLane.DEV in self._allowed_lanes:
+            try:
+                deliver_reports(
+                    STATE_DIR
+                    / "dev-boot-guard"
+                    / lane_config_for(EnumRuntimeLane.DEV).compose_project
+                )
+            except (OSError, ValueError, RuntimeError):
+                logger.exception("Dev boot failure reports remain pending")
         pending = self.job_store.get_pending_publish()
         for job in pending:
             cid_str = str(job.correlation_id)

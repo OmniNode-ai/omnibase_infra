@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "GitHub Actions job log of OmniNode-ai/omnibase_infra run 40034772634, job 120691438156 (Enable Auto-Merge, check_suite on dev head 95ada339993f4423ede0ae88fdd07e3548d05ca5), step 6 'Enable auto-merge', read through onex scm job-log; the gh pr merge output GitHub returned for a draft PR",
+    "captured_utc": "2026-10-23T23:07:00+00:00",
+    "ticket": "OMN-17292",
+    "command": "gh pr merge <draft PR> --repo OmniNode-ai/omnibase_infra --auto"
+  },
+  "response": {
+    "step_output": "auto-merge failed: GraphQL: Pull request Pull request is a draft (enablePullRequestAutoMerge)",
+    "exit_code": 1
+  }
+}

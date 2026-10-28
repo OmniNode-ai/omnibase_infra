@@ -18,6 +18,11 @@ lines: `avail_gb` against `crit_free_gb`/`warn_free_gb`, and `used_pct` against
 the now-advisory `warn_pct`. `halt_reason` names which of the three fired, so a
 receipt that cites this guard says why it fired rather than only that it did.
 The 1.0.0 field `crit_pct` is gone — there is no critical percentage any more.
+
+SCHEMA 2.1.0 (OMN-17427). Adds `inode_used_pct` (null when df could not read it)
+and the warning reason `inode_used_pct_advisory`: a filesystem out of inodes
+fails every write with ENOSPC while its byte use looks healthy (a lab host's CI
+runner scratch disk on 2026-10-21: 77% of bytes, 100% of inodes).
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ _HALT_REASONS = frozenset(
         "free_space_below_crit_floor",
         "free_space_below_warn_floor",
         "used_pct_advisory",
+        "inode_used_pct_advisory",
     }
 )
 
@@ -49,6 +55,7 @@ def build_event(
     crit_free_gb: int,
     host: str,
     topic: str,
+    inode_used_pct: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, object]:
     """Construct the typed disk-watermark event payload."""
@@ -64,8 +71,15 @@ def build_event(
             "only free space below the critical floor may be critical; "
             f"got severity=critical with halt_reason={halt_reason!r}"
         )
+    if halt_reason == "inode_used_pct_advisory" and inode_used_pct is None:
+        raise ValueError(
+            "halt_reason=inode_used_pct_advisory needs the inode_used_pct reading"
+        )
+    inodes = (
+        "inodes unknown" if inode_used_pct is None else f"inodes {inode_used_pct}% used"
+    )
     return {
-        "schema_version": "2.0.0",
+        "schema_version": "2.1.0",
         "event_type": "disk-watermark",
         "topic": topic,
         "host": host,
@@ -76,6 +90,7 @@ def build_event(
         "warn_free_gb": warn_free_gb,
         "used_pct": used_pct,
         "warn_pct": warn_pct,
+        "inode_used_pct": inode_used_pct,
         "severity": severity,
         "halt_reason": halt_reason,
         "emitted_at": now.isoformat(),
@@ -86,7 +101,7 @@ def build_event(
         "message": (
             f"{host}:{mount} {avail_gb} GiB free "
             f"(crit floor {crit_free_gb} GiB, warn floor {warn_free_gb} GiB); "
-            f"{used_pct}% used (advisory warn>={warn_pct}%) "
+            f"{used_pct}% used, {inodes} (advisory warn>={warn_pct}%) "
             f"severity={severity} reason={halt_reason}"
         ),
     }
@@ -105,6 +120,9 @@ def main() -> int:
         crit_free_gb=int(os.environ["CRIT_FREE_GB"]),
         host=os.environ["HOSTNAME_TAG"],
         topic=os.environ["TOPIC"],
+        inode_used_pct=int(os.environ["INODE_USED_PCT"])
+        if os.environ.get("INODE_USED_PCT")
+        else None,
     )
     json.dump(event, sys.stdout)
     sys.stdout.write("\n")

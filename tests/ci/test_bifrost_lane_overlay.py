@@ -155,14 +155,28 @@ def test_stability_lane_mounts_the_overlay_at_the_pinned_path() -> None:
 
 
 def test_standalone_lane_files_pin_and_mount_their_own_overlay() -> None:
-    """Each standalone recipe binds its project's overlay at the shared path."""
+    """Each standalone recipe binds its project's overlay at the shared path.
+
+    Both runtimes pin the path, and every service that names a non-empty
+    BIFROST_LANE_OVERLAY_PATH mounts it. The collaborator lane's delegation
+    writer merges that lane's runtime env and renders from the path too
+    (OMN-17427); a service that blanks it, such as projection-api, mounts nothing.
+    """
     runtime_services = {"omninode-runtime", "runtime-effects"}
     for path in _STANDALONE_RENDERING_LANE_FILES.values():
-        assert lane_overlay_mounts(path) == {
-            service: [LANE_OVERLAY_MOUNT] for service in runtime_services
-        }
         services = load_compose(path)["services"]
-        for service in runtime_services:
+        carriers = {
+            name
+            for name, service in services.items()
+            if ((service or {}).get("environment") or {}).get(
+                "BIFROST_LANE_OVERLAY_PATH"
+            )
+        }
+        assert runtime_services <= carriers
+        assert lane_overlay_mounts(path) == {
+            service: [LANE_OVERLAY_MOUNT] for service in carriers
+        }
+        for service in carriers:
             assert services[service]["environment"]["BIFROST_LANE_OVERLAY_PATH"] == (
                 LANE_OVERLAY_TARGET
             )
