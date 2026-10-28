@@ -22,7 +22,9 @@ profile, while every dev-lane deploy names it and so starts it.
 from __future__ import annotations
 
 import ast
+import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -174,30 +176,32 @@ def test_ac3_the_page_sits_outside_the_runtime_profile() -> None:
     assert profiles == ["cost-estimator"]
 
 
-def _image_build_labels() -> dict[str, str]:
-    """The ``--label k=v`` pairs of the image build the compose comment spells."""
-    compose = _DEV_LANE.read_text(encoding="utf-8")
-    block = compose[
-        compose.index(f"  {_SERVICE}:") - 4000 : compose.index(f"  {_SERVICE}:")
-    ]
-    labels = dict(re.findall(r"--label ([a-z.-]+)=(\S+)", block))
-    assert labels, "the cost-estimator-web comment spells no image build labels"
-    return labels
+# What the lab build stamps (see the compose comment): a real repository name
+# and a full commit sha. The readback is exercised against exactly that.
+_STAMPED_SOURCE_REPO = "web-front-end"
+_STAMPED_REVISION = "31dc8d7f82cf40393bd070445e4347deba8b3eca"
+_SOURCE_LABEL = "ai.omninode.image.source-repo"
+_REVISION_LABEL = "org.opencontainers.image.revision"
 
 
-def _resolve_source_repo(tmp_path: Path, labels: dict[str, str]) -> str:
-    """Run onex-runtime-deploy's own resolve_service_source_repo on a stub docker.
-
-    The function is cut out of the handler verbatim, so this exercises the
-    readback's real routing decision, not a restatement of it.
-    """
+def _handler_function(name: str) -> str:
     handler = _HANDLER.read_text(encoding="utf-8")
-    match = re.search(
-        r"^resolve_service_source_repo\(\) \{\n.*?^\}\n", handler, re.S | re.M
-    )
-    assert match is not None, "resolve_service_source_repo not found in the handler"
+    match = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", handler, re.S | re.M)
+    assert match is not None, f"{name} not found in the handler"
+    return match.group(0)
+
+
+def _run_handler(
+    tmp_path: Path, labels: dict[str, str], call: str
+) -> subprocess.CompletedProcess[str]:
+    """Run onex-runtime-deploy's own readback functions on a stub docker.
+
+    The functions are cut out of the handler verbatim, so this exercises the
+    readback's real decisions, not a restatement of them. The stub answers
+    `docker inspect -f '{{index .Config.Labels "<key>"}}'` from ``labels``.
+    """
     stub_dir = tmp_path / "bin"
-    stub_dir.mkdir()
+    stub_dir.mkdir(exist_ok=True)
     docker = stub_dir / "docker"
     lines = ["#!/usr/bin/env bash", 'fmt="$3"']
     for key, value in labels.items():
@@ -205,35 +209,114 @@ def _resolve_source_repo(tmp_path: Path, labels: dict[str, str]) -> str:
     lines.append('echo "<no value>"')
     docker.write_text("\n".join(lines) + "\n", encoding="utf-8")
     docker.chmod(0o755)
-    script = (
-        match.group(0) + 'resolve_service_source_repo "omninode-cost-estimator-web"\n'
+    script = "".join(
+        _handler_function(name)
+        for name in (
+            "log_info",
+            "log_error",
+            "log_cmd",
+            "resolve_service_source_repo",
+            "resolve_expected_foreign_revision",
+            "readback_foreign_sourced_service",
+        )
     )
-    result = subprocess.run(
+    script += 'OWN_SOURCE_REPO="omnibase_infra"\n' + call + "\n"
+    return subprocess.run(
         ["bash", "-c", script],
         env={"PATH": f"{stub_dir}:/usr/bin:/bin"},
         capture_output=True,
         text=True,
+        check=False,
+    )
+
+
+def test_ac3_the_compose_build_stamps_both_labels_rt6_reads() -> None:
+    compose = _DEV_LANE.read_text(encoding="utf-8")
+    block = compose[: compose.index(f"  {_SERVICE}:")]
+    assert f"--label {_SOURCE_LABEL}=" in block
+    assert f"--label {_REVISION_LABEL}=" in block
+
+
+def test_ac3_rt6_certifies_a_page_built_that_way(tmp_path: Path) -> None:
+    """A page image carrying the stamped labels reads back as foreign sourced
+    and its readback passes, instead of being compared with this repository's
+    ref, which it could never match."""
+    labels = {_SOURCE_LABEL: _STAMPED_SOURCE_REPO, _REVISION_LABEL: _STAMPED_REVISION}
+    source = _run_handler(
+        tmp_path, labels, "resolve_service_source_repo omninode-cost-estimator-web"
+    )
+    assert source.stdout.strip() == _STAMPED_SOURCE_REPO
+    readback = _run_handler(
+        tmp_path,
+        labels,
+        f"readback_foreign_sourced_service {_SERVICE} omninode-cost-estimator-web "
+        f"{_STAMPED_SOURCE_REPO} python3 /nonexistent abc1234",
+    )
+    assert readback.returncode == 0, readback.stderr
+    assert _STAMPED_REVISION in readback.stdout
+
+
+def test_ac3_rt6_refuses_a_page_built_without_its_revision(tmp_path: Path) -> None:
+    """Control: an image missing the revision label fails the readback by name."""
+    readback = _run_handler(
+        tmp_path,
+        {_SOURCE_LABEL: _STAMPED_SOURCE_REPO},
+        f"readback_foreign_sourced_service {_SERVICE} omninode-cost-estimator-web "
+        f"{_STAMPED_SOURCE_REPO} python3 /nonexistent abc1234",
+    )
+    assert readback.returncode != 0
+    assert _REVISION_LABEL in readback.stderr
+
+
+def _service_only_compose(tmp_path: Path) -> Path:
+    """The dev lane's real cost-estimator-web block, alone, renderable by compose."""
+    svc = _services(_DEV_LANE)[_SERVICE]
+    doc = {
+        "services": {
+            _SERVICE: svc,
+            "other-runtime": {"image": "busybox", "profiles": ["runtime"]},
+        },
+        "networks": {"omnibase-infra-network": {"name": "omnibase-infra-network"}},
+    }
+    path = tmp_path / "compose.yml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return path
+
+
+def _compose_services(compose: Path, *named: str) -> set[str]:
+    """The services `docker compose --profile runtime` resolves, as an up would.
+
+    With no service named this is the bring-up set; naming a service is how
+    every dev-lane deploy path addresses it.
+    """
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(compose), "--profile", "runtime"]
+        + ["config", "--format", "json", *named],
+        capture_output=True,
+        text=True,
         check=True,
     )
-    return result.stdout.strip()
+    return set(json.loads(result.stdout)["services"])
 
 
-def test_ac3_rt6_routes_the_page_to_the_foreign_sourced_readback(
+def test_ac3_compose_runtime_bringup_skips_the_page_and_naming_it_enables_it(
     tmp_path: Path,
 ) -> None:
-    """RT-6 certifies a recreated container by the repository that built it.
+    """Compose's own profile semantics, on the real service block.
 
-    An image built the way the compose comment spells reads back as foreign
-    sourced, so the readback checks its own revision label instead of comparing
-    it with this repository's ref, which it could never match.
+    A `--profile runtime` bring-up (what every other dev instance runs) leaves
+    the page out; naming the service, as every dev-lane deploy path does,
+    brings it in under that same `--profile runtime` invocation.
     """
-    labels = _image_build_labels()
-    assert "org.opencontainers.image.revision" in labels
-    source = _resolve_source_repo(tmp_path, labels)
-    assert source
-    assert source != "omnibase_infra"
-
-
-def test_ac3_rt6_control_an_unlabelled_image_is_not_foreign(tmp_path: Path) -> None:
-    """Positive control: without the label the readback treats it as its own."""
-    assert _resolve_source_repo(tmp_path, {}) == ""
+    if (
+        shutil.which("docker") is None
+        or subprocess.run(
+            ["docker", "compose", "version"], capture_output=True, check=False
+        ).returncode
+        != 0
+    ):
+        pytest.skip("docker compose CLI not available")
+    compose = _service_only_compose(tmp_path)
+    assert _SERVICE not in _compose_services(compose)
+    assert "other-runtime" in _compose_services(compose)
+    assert _SERVICE in _compose_services(compose, _SERVICE)
