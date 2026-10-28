@@ -2117,6 +2117,93 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-17530"
       - "autoheal=true"
+  # OMN-21481 -- the public cost estimator page (/cost-estimator, OMN-20388),
+  # served from this lane so teammates open it without anyone's laptop running.
+  # Its API is onex-api above: /v1/estimator/* is answered there, and this
+  # service carries only the web front end's page and its thin /api/estimator/*
+  # proxy to onex-api over the lane network.
+  #
+  # TAG-REFERENCED, like onex-api, and for the same reason: the image is built
+  # out of a different repository, the web front end's, with that repository's
+  # own Dockerfile, on the lab host:
+  #   docker build \
+  #     --label ai.omninode.image.source-repo=<web front-end repository> \
+  #     --label org.opencontainers.image.revision="$(git -C <its clone> rev-parse HEAD)" \
+  #     -t omnibase-infra-cost-estimator-web:dev-lane <its clone>
+  # Those two labels are what the RT-6 readback certifies a recreated container
+  # by: a foreign source repository at a stated revision. An image built without
+  # them fails that readback by name, never silently.
+  #
+  # ITS OWN PROFILE, `cost-estimator`, and not `runtime`. The other dev
+  # instances layer this file and bring up `--profile runtime`; a runtime
+  # service here would start on each of them with no API image to talk to. On
+  # this lane every deploy path names the service explicitly -- it is a member
+  # of REFRESH_BUILD_SERVICES and of DEV_LANE_ONLY_RUNTIME_SERVICES in bash and
+  # in the deploy agent -- and compose enables the profile of a service named on
+  # the command line, so every dev-lane redeploy recreates it and the page comes
+  # back with no manual step.
+  #
+  # `pull_policy: never`: the image exists in no registry, and a pull attempt
+  # would only replace a clear "no such image" with a registry error.
+  #
+  # The lane has no login, so the next-auth names carry non-secret
+  # placeholders that pass the front end's own validators: AUTH_URL must not be
+  # a loopback origin (OMN-16209), so it names a reserved never-resolvable
+  # .invalid host (RFC 6761), as onex-api's placeholder origins do. The estimator
+  # routes are public and never call Keycloak.
+  #
+  # Host port 3080: unclaimed on the lab host, and distinct from 3000 and
+  # projection-api's 3002.
+  cost-estimator-web:
+    image: ${COST_ESTIMATOR_WEB_IMAGE:-omnibase-infra-cost-estimator-web:dev-lane}
+    pull_policy: never
+    container_name: omninode-cost-estimator-web
+    profiles: ["cost-estimator"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    # No depends_on onex-api, deliberately: onex-api waits on the omninode_cloud
+    # migration one-shots, and only onex-api may sit behind that gate
+    # (OMN-18496). The page needs no ordering -- with onex-api down its upload
+    # route answers 503 and every page still renders.
+    ports:
+      - "3080:3000"
+    environment:
+      FEATURE_ESTIMATOR_ENABLED: "true"
+      # A production build of the front end redirects any host it does not know
+      # to its public origin; visitors reach this lane at the lab host's own
+      # name and port, so the lane opts in to serving that host (OMN-21481).
+      OMNIWEB_SERVE_ANY_HOST: "true"
+      DELEGATION_API_BASE_URL: "http://onex-api:8000"
+      ONEX_API_BASE_URL: "http://onex-api:8000"
+      AUTH_URL: "https://cost-estimator.invalid"
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: "dev-lane-cost-estimator-no-login-placeholder"
+      KEYCLOAK_ISSUER: "https://cost-estimator.invalid/realms/placeholder"
+      KEYCLOAK_CLIENT_ID: "placeholder"
+      KEYCLOAK_CLIENT_SECRET: "placeholder"
+      NODE_ENV: "production"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/cost-estimator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=cost-estimator-web"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-21481"
+      - "autoheal=true"
 volumes:
   # Declared here and not in the base: the two one-shots that use it exist only
   # on this lane. `name:` is spelled so the volume is identifiable on a host

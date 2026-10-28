@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21481"
+title: "The cost estimator page is served from the lab dev lane, so teammates open it without Jake's machine running"
+summary: >-
+  LANE HALF. The dev lane's compose file declares cost-estimator-web, the public cost estimator page, beside its API onex-api, which already serves /v1/estimator/*. The page is tag-referenced like onex-api: its image is built on the lab host from the web front end's repository, stamped with that repository's name and revision, which the RT-6 readback certifies. It is wired to onex-api over the lane network with the estimator feature on and published on host port 3080. It sits in its own compose profile, which the other dev instances never enable, and joins the dev-lane-only runtime set of the governed refresh (REFRESH_BUILD_SERVICES), onex-runtime-deploy and the deploy agent (DEV_LANE_ONLY_RUNTIME_SERVICES, as a tag-referenced service), so every dev-lane redeploy names and recreates it. Acceptance statements name the lab host generically; the ticket's own text is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21481-lane-service"
+    statement: "The estimator page is a declared dev-lane service beside its API, and every dev-lane redeploy brings it back."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the estimator page and its API run as declared services on the lab dev lane and answer at a fixed lane URL with Jake's machine off -- falsifier: curl -sf against the lane URL for the page and the API health route from another host returns non-200, or the lane's compose declaration carries no estimator service
+      - id: "AC2"
+        statement: >-
+          AC2: a usage CSV uploaded to the lab page returns priced rows and a saving -- falsifier: npx playwright test -g estimator_lane_upload against the lab lane URL, uploading a fixture CSV and asserting a non-empty priced row count
+      - id: "AC3"
+        statement: >-
+          AC3: the estimator comes back after a dev-lane redeploy with no manual step -- falsifier: after a dev-lane redeploy, the AC2 Playwright run fails or the services are absent from docker ps on the lab host
+evidence_requirements:
+  - kind: "tests"
+    description: "The dev lane's compose declaration, the three deploy paths' restart sets, the page's own profile and the RT-6 source-repo reading."
+    command: "uv run pytest tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn21481-lane-declares-estimator"
+    description: "AC1 declaration half: the dev lane's compose file declares cost-estimator-web on port 3080 as a tag-referenced image, and onex-api keeps its /health route on 8090."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q -n 0 --no-cov -k ac1"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn21481-lane-page-reaches-onex-api"
+    description: "AC2 lane half: the page reaches the lane's own onex-api in-network with the estimator on, serves the lab host's name, and is not behind the omninode_cloud migration gate. The upload walk itself is the front end's estimator_lane_upload, bound in that repository's contract."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q -n 0 --no-cov -k ac2"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn21481-redeploy-recreates-estimator"
+    description: "AC3 mechanism: the governed refresh, onex-runtime-deploy and the deploy agent all name and recreate cost-estimator-web on a dev-lane redeploy, its own profile keeps it off the other dev instances, and RT-6 certifies it by its source-repo label."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q -n 0 --no-cov -k ac3"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
