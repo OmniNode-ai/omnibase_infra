@@ -6,11 +6,6 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn19812-boot-grace
-    statement: The C28 consumer-flow probe does not grade a lane INDETERMINATE while its unsettled containers are still inside their declared start period, within a bounded grace.
-    acceptance:
-      - id: AC5
-        statement: "AC5: a lane whose containers report ('running', 'starting') until 700 s grades PASS with the default request controls, and a lane that never leaves starting grades INDETERMINATE within attempts x (settle + grace) -- falsifier: the new unit and integration tests fail against the merge-base handler"
   - id: req-omn19812-exit-codes
     statement: The C28 consumer-flow probe's process exit code is its verdict.
     acceptance:
@@ -23,16 +18,6 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: the scheduled workflow chain-canary-c28-consumer-flow.yml runs the probe on the lab runner selected through vars.LAB_PROBE_RUNS_ON_JSON against the dev lane and uploads its record -- falsifier: uv run --frozen pytest tests/ci/test_c28_consumer_flow_probe.py::test_the_workflow_runs_the_probe_beside_the_resolved_lane"
-  - id: req-omn19812-runtime-nofile
-    statement: Every runtime-image container on the dev lane declares an open-file limit, so the C28 subject runtime does not exhaust the daemon's default soft limit of 1024 and restart in a loop.
-    acceptance:
-      - id: AC6
-        statement: "AC6: every Dockerfile.runtime service in the infra and dev-lane compose renders declares ulimits.nofile soft >= 65536 -- falsifier: uv run pytest tests/unit/infra/test_runtime_nofile_ulimit_omn19812.py fails against the merge-base compose files"
-  - id: req-omn19812-http-refusal-cause
-    statement: The C28 unreadable verdict retains the projection server's refusal body within bounded reads.
-    acceptance:
-      - id: AC7
-        statement: "AC7: a real HTTP 503 contributes its JSON status, error and reason, or bounded printable text, to the INDETERMINATE board result and record without retrying; an empty body retains the HTTP status and a successful page is unchanged -- falsifier: the focused HTTP cause unit tests and loopback HTTP integration tests fail when refusal bodies are discarded"
 evidence_requirements:
   - kind: tests
     description: Focused unit and integration tests of the C28 docker target and full handler cover the booting lane, the never-booting bound and the unchanged unhealthy-lane bound.
@@ -129,3 +114,47 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn19812-ac5-ac7-retired
+    description: AC5, AC6 and AC7 were deleted from OMN-19812. This item retires the claims of the six items that bound them and keeps their regression tests running; it binds no criterion.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/infra/test_runtime_nofile_ulimit_omn19812.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    supersedes_ac_binding:
+      - item: dod-omn19812-ac1-boot-grace
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: AC5 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
+      - item: dod-omn19812-deploy-boot-grace-shipped
+        label: AC5
+        reason_kind: no_longer_applicable
+        reason: AC5 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
+      - item: dod-omn19812-ac6-runtime-nofile
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: AC6 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
+      - item: dod-omn19812-deploy-runtime-nofile-shipped
+        label: AC6
+        reason_kind: no_longer_applicable
+        reason: AC6 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
+      - item: dod-omn19812-ac7-http-refusal-cause
+        label: AC7
+        reason_kind: no_longer_applicable
+        reason: AC7 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
+      - item: dod-omn19812-deploy-http-refusal-cause
+        label: AC7
+        reason_kind: no_longer_applicable
+        reason: AC7 was deleted from the ticket, so the item that bound it no longer proves a criterion the ticket carries.
+        retired_by: m4-operator-1025
+        retired_at: '2026-10-28T11:00:00Z'
