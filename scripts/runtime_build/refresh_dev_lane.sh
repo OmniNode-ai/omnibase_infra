@@ -274,6 +274,14 @@ readonly REFRESH_BUILD_SERVICES=(
     # OMN-21279 -- build-only infra half of the composed runtime image;
     # scale 0 in the overlay, so up starts no container for it.
     dev-lane-infra-runtime-image
+    # OMN-21481 -- the public cost estimator page. TAG-REFERENCED like onex-api,
+    # its image built from the web front end's repository, so there is nothing
+    # to build here; naming it gets it RECREATED on every governed refresh,
+    # which is what brings the page back with no manual step. Its image is
+    # built on the lab host, not here: a host without it fails this refresh
+    # at the recreate with No such image, and the recovery is the build the
+    # docker-compose.dev-lane.yml comment spells, then the refresh again.
+    cost-estimator-web
 )
 # The clones this refresh records prior HEADs for and moves to the deployed
 # ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single

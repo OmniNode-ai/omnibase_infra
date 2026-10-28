@@ -138,6 +138,14 @@ PROFILE_GATED = {
 }
 
 
+#: OMN-21481: dev services this lane does not mirror. The cost estimator page
+#: sits in its own compose profile, which this lane never enables, so its
+#: overlay declares no container for it.
+DEV_ONLY_UNMIRRORED = frozenset({"omninode-cost-estimator-web"})
+#: The same page by compose service name, for the relabel check below.
+DEV_ONLY_UNMIRRORED_SERVICES = frozenset({"cost-estimator-web"})
+
+
 def _manifest() -> dict[str, Any]:
     return yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8"))
 
@@ -176,7 +184,9 @@ def test_dev_105_lane_boundary_manifest_declares_lab_105_only() -> None:
 def test_dev_105_lane_boundary_declares_every_dev_service_under_its_name() -> None:
     """AC1. The .201 dev lane's declared set maps one to one onto dev-105."""
     manifest = _manifest()
-    dev_declared = {s["name"] for s in manifest["lanes"]["dev"]["services"]}
+    dev_declared = {
+        s["name"] for s in manifest["lanes"]["dev"]["services"]
+    } - DEV_ONLY_UNMIRRORED
     assert dev_declared == set(DEV_TO_DEV_105), (
         "the .201 dev lane's declared services changed; map the new one to its "
         f"dev-105 name here and in the overlay. dev declares {sorted(dev_declared)}"
@@ -353,7 +363,8 @@ def test_dev_105_lane_boundary_relabels_every_dev_lane_label() -> None:
             current = m.group(1)
         elif current and re.match(r"^\s+com\.omninode\.lane: dev-105\s*$", line):
             relabelled.add(current)
-    assert labelled_in_dev <= relabelled, sorted(labelled_in_dev - relabelled)
+    mirrored = labelled_in_dev - DEV_ONLY_UNMIRRORED_SERVICES
+    assert mirrored <= relabelled, sorted(mirrored - relabelled)
 
 
 # --- the census on .105 -------------------------------------------------------

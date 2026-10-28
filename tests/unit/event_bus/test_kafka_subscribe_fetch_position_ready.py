@@ -17,6 +17,42 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error", [TimeoutError("join timed out"), asyncio.CancelledError()]
+)
+async def test_failed_subscribe_does_not_retain_callback_for_retry(
+    error: BaseException,
+) -> None:
+    """A retried listener owns one callback, without removing a peer's intent."""
+    bus = EventBusKafka(config=ModelKafkaEventBusConfig())
+    topic = "test-registration-retry"
+    peer = AsyncMock()
+    await bus.subscribe(topic, group_id="peer", on_message=peer)
+    bus._started = True
+    callback = AsyncMock()
+    with patch.object(bus, "_start_consumer_for_topic_unlocked", side_effect=error):
+        with pytest.raises(type(error)):
+            await bus.subscribe(topic, group_id="listener", on_message=callback)
+    assert [(group, cb) for group, _, cb in bus._subscribers[topic]] == [("peer", peer)]
+
+
+@pytest.mark.asyncio
+async def test_failed_sole_subscribe_removes_topic_key() -> None:
+    """A failed attach by the only subscriber leaves no empty topic entry."""
+    bus = EventBusKafka(config=ModelKafkaEventBusConfig())
+    bus._started = True
+    topic = "test-registration-sole"
+    with patch.object(
+        bus,
+        "_start_consumer_for_topic_unlocked",
+        side_effect=TimeoutError("join timed out"),
+    ):
+        with pytest.raises(TimeoutError):
+            await bus.subscribe(topic, group_id="listener", on_message=AsyncMock())
+    assert topic not in bus._subscribers
+
+
+@pytest.mark.asyncio
 async def test_subscribe_waits_for_all_initial_fetch_positions() -> None:
     """A caller may publish immediately after subscribe without a late reset."""
     bus = EventBusKafka(config=ModelKafkaEventBusConfig())
