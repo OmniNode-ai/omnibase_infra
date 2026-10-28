@@ -195,7 +195,74 @@
         "v25.3.18": 16
       },
       "declared_in": "docker/redpanda/dev_broker_upgrade_path.yaml logical_versions",
-      "procedure": "per hop on one volume: docker run <image> redpanda start --mode dev-container --smp 1 --memory <M> --set topic_partitions_per_shard=7000 -v <volume>:/var/lib/redpanda/data; wait for /v1/status/ready; wait until /v1/features cluster_version equals node_latest_version; count rpk topic list and rpk group list (SASL credentials through the docker exec environment); docker stop; next image. Not committed as a script: the canonical-file-shape ratchet (OMN-20304) refuses new scripts outside canonical locations."
+      "procedure": "per hop on one volume: docker run <image> redpanda start --mode dev-container --smp 1 --memory <M> --set topic_partitions_per_shard=7000 -v <volume>:/var/lib/redpanda/data; wait for /v1/status/ready; wait until /v1/features cluster_version equals node_latest_version; count rpk topic list and rpk group list (SASL credentials through the docker exec environment); docker stop; next image. Not committed as a script: the canonical-file-shape ratchet (OMN-20304) refuses new scripts outside canonical locations.",
+      "hop2_landing_readbacks": [
+        {
+          "ticket": "OMN-20769",
+          "host": "h201",
+          "volume_kind": "fresh scratch volume",
+          "published_ports": [],
+          "records": [
+            {
+              "at": "2026-10-28T22:10:59.739809+00:00",
+              "kind": "before-hop",
+              "image": "redpandadata/redpanda:v25.1.12",
+              "features": {
+                "cluster_version": 15,
+                "node_latest_version": 15,
+                "node_earliest_version": 12
+              }
+            },
+            {
+              "at": "2026-10-28T22:11:00.388572+00:00",
+              "kind": "produced",
+              "output": "Produced to partition 0 at offset 0 with timestamp 1793225460062."
+            },
+            {
+              "at": "2026-10-28T22:11:03.772489+00:00",
+              "kind": "after-hop",
+              "image": "redpandadata/redpanda:v25.2.14",
+              "image_id": "sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2",
+              "features": {
+                "cluster_version": 16,
+                "node_latest_version": 16,
+                "node_earliest_version": 15
+              },
+              "restart_count": 0,
+              "consumed": "{\n  \"topic\": \"landing-l18183-lab-proof\",\n  \"value\": \"landing-l18183-lab-hop-record\",\n  \"timestamp\": 1793225460062,\n  \"partition\": 0,\n  \"offset\": 0\n}",
+              "health": {
+                "cluster_uuid": "f516b340-1d1b-4eaa-9495-03df97935dab",
+                "is_healthy": true,
+                "unhealthy_reasons": [],
+                "controller_id": 0,
+                "all_nodes": [
+                  0
+                ],
+                "nodes_down": [],
+                "nodes_in_recovery_mode": [],
+                "leaderless_partitions": [],
+                "leaderless_count": 0,
+                "under_replicated_count": 0,
+                "under_replicated_partitions": []
+              },
+              "project": "landing-l18183-lab",
+              "network": "none",
+              "volume": "landing-l18183-lab-data"
+            },
+            {
+              "at": "2026-10-28T22:11:04.277289+00:00",
+              "kind": "cleanup",
+              "scratch_container_removed": true,
+              "scratch_volume_removed": true
+            }
+          ],
+          "not_tested": [
+            "current live-data copy",
+            "client load",
+            "long-term crash mitigation"
+          ]
+        }
+      ]
     }
   },
   "request_census": {
