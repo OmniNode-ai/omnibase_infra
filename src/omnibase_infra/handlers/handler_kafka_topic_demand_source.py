@@ -23,6 +23,7 @@ from aiokafka import AIOKafkaConsumer
 from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import create_groupless_consumer
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -41,6 +42,16 @@ class HandlerKafkaTopicDemandSource:
 
     def __init__(self, config: ModelKafkaEventBusConfig) -> None:
         self._config = config
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """INFRA_HANDLER: reads the broker's offsets and records."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """EFFECT: talks to the Kafka broker."""
+        return EnumHandlerTypeCategory.EFFECT
 
     async def watch_idle_topics(
         self,
@@ -87,14 +98,16 @@ class HandlerKafkaTopicDemandSource:
         # A topic that cannot be read here (not yet provisioned, or not visible
         # to this principal) counts as in use: it cannot be watched, so its
         # contract joins at boot exactly as it did before.
-        with_records = {tp.topic for tp in partitions if high[tp] > low[tp]}
-        readable = {tp.topic for tp in partitions}
+        # A partition the broker returned no offset for is unreadable too.
+        measured = [tp for tp in partitions if tp in low and tp in high]
+        with_records = {tp.topic for tp in measured if high[tp] > low[tp]}
+        readable = {tp.topic for tp in measured}
         in_use = frozenset(
             logical
             for physical, logical in logical_of.items()
             if physical in with_records or physical not in readable
         )
-        watched = [tp for tp in partitions if tp.topic not in with_records]
+        watched = [tp for tp in measured if tp.topic not in with_records]
         if not watched:
             await consumer.stop()
 
@@ -114,6 +127,16 @@ class HandlerKafkaTopicDemandSource:
             self._watch(consumer, watched, on_first_physical_record),
             name="boot-subscription-demand-watch",
         )
+
+        def _log_watch_death(done: asyncio.Task[None]) -> None:
+            if not done.cancelled() and done.exception() is not None:
+                logger.error(
+                    "Boot subscription demand watch died; deferred contracts "
+                    "will not start on demand (OMN-18087)",
+                    exc_info=done.exception(),
+                )
+
+        task.add_done_callback(_log_watch_death)
 
         async def stop() -> None:
             task.cancel()
