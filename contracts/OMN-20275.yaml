@@ -143,12 +143,12 @@ dod_evidence:
         check_value: "uv run --frozen pytest tests/unit/infra/test_dev_broker_memory_cap_omn21279.py -q -n 0 --no-cov -p no:randomly -k checker"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-deploy-runtime-bus-recovery"
-    description: "Hosted-runner deploy probe: read the recovery-capable bus on the PR branch and exercise a local runtime HTTP server through outage and recovery. The same server stays live and readiness changes from 503 to 200; broker I/O is simulated. No production deployment is claimed."
+    description: "Hosted-runner deploy probe: exercise a local runtime HTTP server through bus outage and recovery, then deliver one registration event after a transient listener attach failure. The same server stays live and readiness changes from 503 to 200; the listener retry fails against the pre-repair runtime. Broker I/O is simulated. No production deployment is claimed."
     source: "manual"
     binds_ac: ["AC14"]
     checks:
       - check_type: "command"
-        check_value: "grep -q 'class EventBusRecovering' src/omnibase_infra/event_bus/event_bus_kafka.py && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_runtime_bus_recovery.py -q -p no:randomly"
+        check_value: "grep -q 'class EventBusRecovering' src/omnibase_infra/event_bus/event_bus_kafka.py && env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_runtime_bus_recovery.py tests/integration/test_runtime_host_dynamic_registration.py::test_dynamic_registration_delivers_once_after_listener_retry -q -p no:randomly -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-deploy-dynamic-listener-retry"
     description: "Hosted-runner deploy probe for the observed h201 registration-join crash: transient subscription failure retries without closing existing consumers, shutdown cancels retry, configuration errors remain fatal, and failed or cancelled attaches retain no duplicate callback. Hermetic broker seams; no credentials, Docker, host services or live deployment required."
