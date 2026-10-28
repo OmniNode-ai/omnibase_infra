@@ -48,6 +48,14 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/unit/docker/test_cost_estimator_dev_lane_omn21481.py -q -n 0 --no-cov -k ac3"
         cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn21481-lane-live-probe"
+    description: "Post-deploy: from another host, the lane page answers at the lane URL and both estimator containers run healthy on the dev lane host. It reads the lab host's running lane, which a hosted runner cannot reach, so only the local Done gate runs it and it binds no acceptance criterion; the hosted items above bind AC1 to AC3."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: 'curl -sf -o /dev/null "${ESTIMATOR_LANE_URL:?ESTIMATOR_LANE_URL names the lane origin of the cost estimator page}/cost-estimator" && ssh -o BatchMode=yes -o ConnectTimeout=6 "${DEV_LANE_HOST:?DEV_LANE_HOST names the dev lane host}" "docker ps --filter health=healthy --format {{.Names}}" | grep -qx omninode-cost-estimator-web'
+        cwd: "${OMNI_HOME}/omnibase_infra"
 emergency_bypass:
   enabled: false
   justification: ""
