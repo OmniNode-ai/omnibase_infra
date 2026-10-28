@@ -15,10 +15,10 @@ requirements:
 dod_evidence:
   - id: dod-omn-21433-ac1-slot-render
     description: >-
-      AC1, deploy scope. The slot overlay and the rendered-slot verifier are covered by the verify-lane entrypoint tests, and a pre-PR slot built from the branch passed the render check on the lab host (receipt in the pull request body).
+      AC1, deploy scope. The slot overlay and the rendered-slot verifier are covered by the verify-lane entrypoint tests, and a pre-PR slot built from the branch passed the render check on the lab host (receipt in the pull request body). The four lab_overlay cases read the private lane manifest, which a hosted runner does not have, so this command deselects them; the Lane Census Staleness job selects them.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -n 0
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -n 0 -m "not lab_overlay"
     binds_ac:
       - AC1
