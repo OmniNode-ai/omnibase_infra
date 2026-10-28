@@ -37,7 +37,11 @@ def test_vendor_is_the_exact_last_used_source() -> None:
 
 
 def test_tenant_ledger_binds_the_exact_vendor_once() -> None:
-    lines = (FORWARD / "_ledger/application-migrations.tsv").read_text().splitlines()
+    lines = (
+        (FORWARD / "_ledger/application-migrations.tsv")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     rows = [line.split("\t") for line in lines if line.split("\t", 1)[0] == ARTIFACT]
     assert rows == [
         [
@@ -52,5 +56,16 @@ def test_tenant_ledger_binds_the_exact_vendor_once() -> None:
 
 
 def test_a_nullable_column_add_is_classified_expand_only() -> None:
-    classes = yaml.safe_load((ROOT / "config/migration_classes.yaml").read_text())
+    classes = yaml.safe_load(
+        (ROOT / "config/migration_classes.yaml").read_text(encoding="utf-8")
+    )
     assert classes["migrations"].get(f"forward/{ARTIFACT}") == "expand-only"
+
+
+def test_ledger_sha_is_the_vendored_file_hash() -> None:
+    """The ledger row's sha256 is the vendored file's own hash, not just a constant."""
+    data = (FORWARD / ARTIFACT).read_bytes()
+    lines = (FORWARD / "_ledger/application-migrations.tsv").read_text(encoding="utf-8")
+    rows = [line.split("\t") for line in lines.splitlines()]
+    [row] = [row for row in rows if row[0] == ARTIFACT]
+    assert row[-1] == hashlib.sha256(data).hexdigest()
