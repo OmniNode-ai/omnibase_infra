@@ -10,6 +10,8 @@ Usage:
     python -m omnibase_infra.docker.catalog.cli up runtime --seed
     python -m omnibase_infra.docker.catalog.cli up runtime --build
     python -m omnibase_infra.docker.catalog.cli up local --env-file ~/.omnibase/local.env --build
+    python -m omnibase_infra.docker.catalog.cli up local-market --composed-image IMAGE
+    python -m omnibase_infra.docker.catalog.cli image-containers IMAGE local-market
     python -m omnibase_infra.docker.catalog.cli down [--volumes]
     python -m omnibase_infra.docker.catalog.cli status
     python -m omnibase_infra.docker.catalog.cli seed
@@ -28,7 +30,11 @@ from pathlib import Path
 
 import yaml
 
-from omnibase_infra.docker.catalog.generator import write_compose
+from omnibase_infra.docker.catalog.generator import (
+    containers_on_image,
+    generate_compose,
+    write_compose,
+)
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
 from omnibase_infra.docker.catalog.validator_healthcheck_semantic_probe import (
@@ -162,7 +168,9 @@ def _refuse_host_port_clashes(bundles: list[str]) -> int:
     return 1
 
 
-def _resolve_and_generate(bundles: list[str], output: str) -> int:
+def _resolve_and_generate(
+    bundles: list[str], output: str, *, composed_image: str | None = None
+) -> int:
     """Resolve bundles, generate compose, write to output path.
 
     The render itself is ``write_compose``, the one renderer the ``onex local``
@@ -176,6 +184,7 @@ def _resolve_and_generate(bundles: list[str], output: str) -> int:
         catalog_dir=Path(_CATALOG_DIR),
         output_path=Path(output),
         environment=os.environ,
+        composed_image=composed_image,
     )
     print(f"Generated compose with {len(resolved.manifests)} entries -> {output}")
     return 0
@@ -236,8 +245,29 @@ def _load_stack() -> list[str]:
     return list(bundles) if isinstance(bundles, list) else ["core"]
 
 
+def _pop_composed_image(args: list[str]) -> tuple[list[str], str | None, bool]:
+    """Split ``--composed-image IMAGE`` out of ``args``, refusing a missing value."""
+    rest: list[str] = []
+    composed_image: str | None = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--composed-image":
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                print("Missing value for --composed-image", file=sys.stderr)
+                return rest, None, False
+            composed_image = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    return rest, composed_image, True
+
+
 def cmd_generate(args: list[str]) -> int:
     """Generate compose from selected bundles."""
+    args, composed_image, ok = _pop_composed_image(args)
+    if not ok:
+        return 1
     args, env_file, ok = _pop_env_file(args)
     if not ok:
         return 1
@@ -259,7 +289,25 @@ def cmd_generate(args: list[str]) -> int:
             i += 1
     if not bundles:
         bundles = _load_stack()
-    return _resolve_and_generate(bundles, output)
+    return _resolve_and_generate(bundles, output, composed_image=composed_image)
+
+
+def cmd_image_containers(args: list[str]) -> int:
+    """Print container names from a bundle render using the composed image."""
+    if len(args) < 2:
+        print("Usage: image-containers IMAGE BUNDLE [BUNDLE ...]", file=sys.stderr)
+        return 2
+    image, *bundles = args
+    resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
+    resolved = resolver.resolve(bundles=bundles)
+    compose = generate_compose(resolved, composed_image=image)
+    names = containers_on_image(compose, image)
+    if not names:
+        print(f"No containers on image: {image}", file=sys.stderr)
+        return 1
+    for name in names:
+        print(name)
+    return 0
 
 
 def cmd_validate(args: list[str]) -> int:
@@ -426,6 +474,9 @@ def cmd_seed(_args: list[str]) -> int:
 
 def cmd_up(args: list[str]) -> int:
     """Validate, generate, and start compose stack."""
+    args, composed_image, ok = _pop_composed_image(args)
+    if not ok:
+        return 1
     args, env_file, ok = _pop_env_file(args)
     if not ok:
         return 1
@@ -453,7 +504,7 @@ def cmd_up(args: list[str]) -> int:
         return 1
 
     # Generate
-    rc = _resolve_and_generate(bundles, _DEFAULT_OUTPUT)
+    rc = _resolve_and_generate(bundles, _DEFAULT_OUTPUT, composed_image=composed_image)
     if rc != 0:
         return rc
 
@@ -631,7 +682,8 @@ def main() -> None:
     if not args:
         print("Usage: python -m omnibase_infra.docker.catalog.cli <command> [args]")
         print(
-            "Commands: generate, validate, validate-runtime, up, down, status, seed, read-stack"
+            "Commands: generate, image-containers, validate, validate-runtime, "
+            "up, down, status, seed, read-stack"
         )
         sys.exit(1)
 
@@ -640,6 +692,7 @@ def main() -> None:
 
     commands = {
         "generate": cmd_generate,
+        "image-containers": cmd_image_containers,
         "validate": cmd_validate,
         "validate-runtime": cmd_validate_runtime,
         "up": cmd_up,

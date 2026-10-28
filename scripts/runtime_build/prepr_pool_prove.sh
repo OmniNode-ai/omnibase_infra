@@ -336,6 +336,78 @@ fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
   echo "group-commit $repo $(git -C "$d" rev-parse HEAD) tree $tree base $(git -C "$d" rev-parse "HEAD~$count") tree-agrees=$agrees"
 }
 
+# OMN-21217: which containers run the packages under test. omnibase_infra's
+# runtime image installs no omnimarket (OMN-21279), so a proof with omnimarket in
+# it boots the composed stack: omnimarket's Dockerfile.runtime built on the infra
+# image this run just built, and the local-market bundle rendered with that image
+# on every service that runs the runtime or the market image. `build` writes the
+# container names of that render to $W/composed-containers (composed_build); no
+# name is listed here. The two kernels are always read, the composed services
+# beside them. A proof without omnimarket reads the two kernels, as before. A
+# proof with omnimarket and no list reads nothing, and the judge fails a subject
+# that has no compare: the proof never falls back to the two infra kernels.
+market_under_test() { [ -n "${MARKET_PR:-}${MARKET_GROUP:-}${MARKET_REF_SHA:-}" ]; }
+proof_subjects() { # repositories the run proves, one line
+  local s=""
+  [ -n "${INFRA_PR:-}${INFRA_GROUP:-}${INFRA_REF_SHA:-}" ] && s="omnibase_infra"
+  market_under_test && s="$s omnimarket"
+  echo $s
+}
+proof_containers() { # one line; rc 1 and no output when the composed list is absent
+  if market_under_test; then
+    [ -s "$W/composed-containers" ] || return 1
+    { echo "$M"; echo "$E"; cat "$W/composed-containers"; } | grep . | sort -u | tr '\n' ' '
+    echo
+  else
+    echo "$M $E"
+  fi
+}
+composed_build() { # build the composed omnimarket image and read its containers from the render
+  local img="$P-omnimarket-runtime:latest" brc need
+  docker build -f "$R/omnimarket/Dockerfile.runtime" \
+    --build-arg INFRA_RUNTIME_IMAGE="$P-runtime:latest" \
+    --build-arg OMNIMARKET_VCS_REF="$(git -C "$R/omnimarket" rev-parse HEAD)" \
+    -t "$img" "$R/omnimarket" > "$W/composed-build.log" 2>&1
+  brc=$?; echo "composed build rc=$brc $(date -u +%FT%TZ)"; tail -4 "$W/composed-build.log"
+  [ "$brc" = 0 ] || return 1
+  rm -f "$W/composed-containers"
+  (cd "$R/omnibase_infra" && uv run -q python -m omnibase_infra.docker.catalog.cli image-containers "$img" local-market) \
+    > "$W/composed-containers.out" 2> "$W/composed-containers.err" || { echo "composed-containers: the render names none: $(tail -2 "$W/composed-containers.err")"; return 1; }
+  for need in $M $E; do
+    grep -qx "$need" "$W/composed-containers.out" || { echo "composed-containers lacks the kernel $need: $(tr '\n' ' ' < "$W/composed-containers.out")"; return 1; }
+  done
+  mv "$W/composed-containers.out" "$W/composed-containers"
+  echo "composed-containers: $(tr '\n' ' ' < "$W/composed-containers")"
+}
+starting_count() { # containers still in their health start period: the runtimes and the composed services
+  local rows
+  rows=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}} {{.Status}}')
+  { echo "$rows" | grep -- '-runtime'
+    if [ -s "$W/composed-containers" ]; then echo "$rows" | grep -Ff "$W/composed-containers"; fi
+  } | sort -u | grep -c 'health: starting'
+}
+identity_readback() { # every repository under test, whole package, in every container that runs it
+  local repo c containers
+  containers=$(proof_containers) || { echo "composed-containers-missing: the omnimarket proof built no composed stack, so no container is known to run it"; containers=""; }
+  for repo in $(proof_subjects); do
+    echo "identity-subject $repo"
+    echo "src-diff $repo files=$(git -C "$R/$repo" diff --name-only origin/dev...HEAD -- src/ 2>/dev/null | grep -c .)"
+    for c in $containers; do
+      docker exec "$c" python -c "$IMG_LIST_PY" "$repo" > "/tmp/$TAG-img-$repo-$c.txt" 2> "/tmp/$TAG-img-$repo-$c.err" \
+        || echo "pkg-tree-list-error $repo $c $(tail -1 "/tmp/$TAG-img-$repo-$c.err")"
+      python3 -c "$PKG_TREE_PY" "$R/$repo" "$repo" "$c" "/tmp/$TAG-img-$repo-$c.txt" 2>&1 | tail -16
+    done
+  done
+  for c in $containers; do echo "$c omnimarket=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnimarket'))" 2>&1 | tail -1) infra=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnibase_infra'))" 2>&1 | tail -1)"; done
+}
+live_mentions() { # one mention count per term per container that runs the packages; terms are grep -E, passed unglobbed
+  local c n L
+  for c in $(proof_containers); do
+    L=$(docker logs $c 2>&1)
+    for n in "$@"; do echo "  $c mentions $n: $(echo "$L" | grep -cE "$n")"; done
+  done
+}
+
 case "$PHASE" in
 snap-pre|snap-post)
   out=/tmp/$TAG-$PHASE.txt
@@ -452,7 +524,11 @@ build)
     cp "$OVERLAY_FILE" "$W/local.bifrost.yaml" || { echo "build rc=1 overlay copy failed"; exit 1; }
     echo "overlay replaces local.bifrost.yaml sha256=$(shasum -a 256 "$OVERLAY_FILE" | cut -c1-12)"
   fi
-  uv run -q python -m omnibase_infra.docker.catalog.cli generate local --env-file "$W/local.env" 2>&1 | tail -2
+  # OMN-21217: a proof with omnimarket in it runs the local-market bundle on the
+  # composed image (composed_build below); the others run the infra-only local bundle
+  BUNDLE=local; COMPOSED_FLAG=""
+  if market_under_test; then BUNDLE=local-market; COMPOSED_FLAG="--composed-image $P-omnimarket-runtime:latest"; fi
+  uv run -q python -m omnibase_infra.docker.catalog.cli generate "$BUNDLE" --env-file "$W/local.env" 2>&1 | tail -2
   RV=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')
   if [ "${DOCKER_CONFIG_MODE:-host}" = isolated ]; then
     # A macOS host whose docker credsStore lives in the login keychain cannot
@@ -487,9 +563,10 @@ json.dump(cfg, open(sys.argv[1],"w"))' "$DC/config.json"
     grep -qi keychain "$W/build.log" && echo "build failed on the docker credential keychain: set docker_config: isolated for this host"
     exit 1
   fi
+  if market_under_test; then composed_build || { echo "build rc=1 the composed omnimarket image did not build"; exit 1; }; fi
   docker images --filter reference="$P*" --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}'
   echo "up start $(ts)"
-  uv run -q python -m omnibase_infra.docker.catalog.cli up local --env-file "$W/local.env" > "$W/up.log" 2>&1
+  uv run -q python -m omnibase_infra.docker.catalog.cli up "$BUNDLE" --env-file "$W/local.env" $COMPOSED_FLAG > "$W/up.log" 2>&1
   urc=$?; echo "up rc=$urc $(ts)"; tail -6 "$W/up.log"
   [ "$urc" = 0 ] || exit 1
   ;;
@@ -500,7 +577,7 @@ probe)
   # still in its health start period and both ports answer, or PROBE_WAIT_S.
   start=$(date +%s); end=$(( start + ${PROBE_WAIT_S:-1500} ))
   while :; do
-    starting=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}} {{.Status}}' | grep -- '-runtime' | grep -c 'health: starting')
+    starting=$(starting_count)
     c1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$MAIN/health")
     c2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "localhost:$EFF/health")
     if [ "$starting" = 0 ] && [ "$c1" != 000 ] && [ "$c2" != 000 ]; then break; fi
@@ -514,21 +591,10 @@ probe)
   echo "image-revision-label $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1 | tail -1)"
   echo "build GIT_SHA $(git -C "$R/omnibase_infra" rev-parse HEAD) market $(git -C "$R/omnimarket" rev-parse HEAD)"
   # every repository a PR is under test in has its whole installed package
-  # compared with its build tree, in both runtimes, so identity never depends
-  # on which files a caller listed in ID_FILES
-  SUBJECTS=""
-  [ -n "${INFRA_PR:-}${INFRA_GROUP:-}${INFRA_REF_SHA:-}" ] && SUBJECTS="omnibase_infra"
-  [ -n "${MARKET_PR:-}${MARKET_GROUP:-}${MARKET_REF_SHA:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
-  for repo in $SUBJECTS; do
-    echo "identity-subject $repo"
-    echo "src-diff $repo files=$(git -C "$R/$repo" diff --name-only origin/dev...HEAD -- src/ 2>/dev/null | grep -c .)"
-    for c in $M $E; do
-      docker exec "$c" python -c "$IMG_LIST_PY" "$repo" > "/tmp/$TAG-img-$repo-$c.txt" 2> "/tmp/$TAG-img-$repo-$c.err" \
-        || echo "pkg-tree-list-error $repo $c $(tail -1 "/tmp/$TAG-img-$repo-$c.err")"
-      python3 -c "$PKG_TREE_PY" "$R/$repo" "$repo" "$c" "/tmp/$TAG-img-$repo-$c.txt" 2>&1 | tail -16
-    done
-  done
-  for c in $M $E; do echo "$c omnimarket=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnimarket'))" 2>&1 | tail -1) infra=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnibase_infra'))" 2>&1 | tail -1)"; done
+  # compared with its build tree, in every container that runs it (proof_containers),
+  # so identity never depends on which files a caller listed in ID_FILES
+  SUBJECTS=$(proof_subjects)
+  identity_readback
   for spec in ${ID_FILES:-}; do repo=${spec%%:*}; f=${spec#*:}; pkg=${repo}
     want=$(git -C "$R/$repo" show "HEAD:src/$f" 2>/dev/null | shasum -a 256 | cut -c1-12)
     got=$(docker exec $M python -c "import $pkg, hashlib, os; b=os.path.dirname(os.path.dirname($pkg.__file__)); print(hashlib.sha256(open(b+'/$f','rb').read()).hexdigest()[:12])" 2>&1 | tail -1)
@@ -560,8 +626,9 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     echo "failed-contracts $c: $(echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' -F': ' 'NF>1{print $1}' | sort -u | tr '\n' ' ')"
     echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' 'NF{sub(/^ +/, ""); print}' \
       | sed -E "s/^([^:]+): .*failed: (.*)$/  failed-contract-reason $c \\1: \\2/" | cut -c1-260
-    # noglob: a derived term carries a bracket class, never a file pattern
-    set -f; for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -cE "$n")"; done; set +f; done
+  done
+  # noglob: a derived term carries a bracket class, never a file pattern
+  set -f; live_mentions ${LIVE_GREP:-}; set +f
   if [ "$KIND" = prepr-slot ] && { [ -n "${SQL:-}" ] || [ -n "${GROUP_GREP:-}" ]; }; then
     echo "== sql and consumer groups: not read on a prepr slot (its databases and groups live on the dev lane's shared servers)"
   elif [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)
