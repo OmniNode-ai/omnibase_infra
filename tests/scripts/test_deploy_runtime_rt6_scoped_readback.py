@@ -329,6 +329,11 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # rather than in RUNTIME_SERVICES: a prod `up -d --no-deps` naming it
         # would start it on a lane that never opted in.
         "tenant-projection-writer",
+        # OMN-19513: the tenth. The claude hook-events writer is the only owner
+        # of node_projection_claude_hook_events on the dev lane, whose main
+        # runtime excludes the node, so a deploy that left it behind would
+        # certify a lane on which that projection runs a stale image.
+        "projection-claude-hook-events-writer",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -347,6 +352,9 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
         "onex-api": "onex-api",
         "tenant-projection-writer": "omnimarket-tenant-projection-writer",
+        "projection-claude-hook-events-writer": (
+            "omnimarket-projection-claude-hook-events-writer"
+        ),
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not

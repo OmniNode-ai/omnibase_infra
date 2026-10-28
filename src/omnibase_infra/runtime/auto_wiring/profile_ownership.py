@@ -62,6 +62,7 @@ from omnibase_infra.models.runtime.model_runtime_lane_class_selection import (
     ModelRuntimeLaneClassSelection,
 )
 from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_EXCLUSION,
     ENV_RUNTIME_NODE_SELECTION,
     ModelRuntimeNodeSelection,
 )
@@ -282,8 +283,9 @@ class ModelRuntimeProfileOwnershipResult(BaseModel):
         default_factory=tuple,
         description=(
             "Contracts left unattached because the deployment's node selection "
-            "(ONEX_RUNTIME_NODE_SELECTION) does not name them (OMN-17427). "
-            "Empty when no selection is set."
+            "(ONEX_RUNTIME_NODE_SELECTION) does not name them (OMN-17427), or "
+            "its node exclusion (ONEX_RUNTIME_NODE_EXCLUSION) does (OMN-19513). "
+            "Empty when neither is set."
         ),
     )
 
@@ -368,6 +370,9 @@ def filter_manifest_for_runtime_profile(
     Before any of that, a deployment node selection (OMN-17427) drops every
     contract it does not name, listed in ``node_selection_excluded_contracts``;
     a name it carries that no discovered contract has adds a discovery error.
+    A deployment node exclusion (``ONEX_RUNTIME_NODE_EXCLUSION``, OMN-19513)
+    drops the contracts it names on the same terms, and a name it carries that
+    no discovered contract has adds a discovery error.
 
     Args:
         environ: Override for the process environment the runtime lane is read
@@ -400,6 +405,19 @@ def filter_manifest_for_runtime_profile(
                 ),
             )
             logger.error("Auto-wiring node selection: %s", record.error)
+            lane_errors.append(record)
+    for name in node_selection.excluded:
+        if name not in discovered_names:
+            record = ModelDiscoveryError(
+                entry_point_name=name,
+                error=(
+                    f"{ENV_RUNTIME_NODE_EXCLUSION} names {name!r}, which no "
+                    "discovered contract is; a node handed to another process "
+                    "must exist or the exclusion is a typo that leaves two "
+                    "owners, fail-closed (OMN-19513)."
+                ),
+            )
+            logger.error("Auto-wiring node exclusion: %s", record.error)
             lane_errors.append(record)
     selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
     if selection.refusal:
@@ -464,9 +482,10 @@ def filter_manifest_for_runtime_profile(
         )
     if node_selection_excluded:
         logger.info(
-            "Auto-wiring node selection: attached only %s; excluded %d other "
-            "contract(s) (OMN-17427)",
+            "Auto-wiring node selection: selection=%s exclusion=%s; left %d "
+            "contract(s) unattached (OMN-17427, OMN-19513)",
             list(node_selection.contracts),
+            list(node_selection.excluded),
             len(node_selection_excluded),
         )
     if lane_class_admitted:

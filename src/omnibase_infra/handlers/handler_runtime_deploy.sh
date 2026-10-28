@@ -249,8 +249,12 @@ readonly RUNTIME_SERVICES=(
 # START the carrier on a lane that never opted into it, defeating the compose
 # profile that keeps it inert there. Membership here scopes the restart to the
 # two lanes whose overlays put it in the `runtime` compose profile.
+# OMN-19513 adds projection-claude-hook-events-writer for the same reason as
+# the carrier: declared in the base compose file, started only by the dev lane
+# overlay that moves it into the `runtime` profile.
 readonly DEV_LANE_ONLY_RUNTIME_SERVICES=(
     tenant-projection-writer
+    projection-claude-hook-events-writer
     projection-tenant-registry-writer
     projection-delegation-writer
     projection-registration-writer

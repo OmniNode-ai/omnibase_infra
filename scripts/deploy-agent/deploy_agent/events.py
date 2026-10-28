@@ -275,6 +275,14 @@ DEV_LANE_ONLY_RUNTIME_SERVICES: tuple[str, ...] = (
     # moved past -- the exact defect measured above, on the one service where
     # nothing else would ever notice.
     "tenant-projection-writer",
+    # OMN-19513: the claude hook-events projection writer. Declared in the base
+    # compose file behind the same inert profile as the carrier above, so the
+    # same reasoning applies: a lane-agnostic `up -d --no-deps` of this name
+    # would start it on a lane that never opted in. It is also the only owner of
+    # node_projection_claude_hook_events on the dev lane, whose main runtime
+    # excludes the node, so an agent scope that could not reach it would leave
+    # that projection running an image the rest of the lane had moved past.
+    "projection-claude-hook-events-writer",
 )
 
 # OMN-18108: the members of the array above that carry an ``image:`` and no
