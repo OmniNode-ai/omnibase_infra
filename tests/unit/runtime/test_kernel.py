@@ -1166,6 +1166,7 @@ class TestBootstrap:
         mock_runtime_host: MagicMock,
         mock_event_bus: MagicMock,
         mock_health_server: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """OMN-18087: plugin consumers (delegation's among them) join first.
 
@@ -1174,6 +1175,11 @@ class TestBootstrap:
         consumer for 37 minutes after a recreate.
         """
         from omnibase_infra.adapters.llm.plugin_llm import PluginLlm
+
+        # PluginLlm is the one plugin this harness activates on its own, and
+        # only when an LLM endpoint is configured; configure one so the test
+        # does not depend on the host's environment.
+        monkeypatch.setenv("LLM_CODER_URL", "http://127.0.0.1:9/v1")
         from omnibase_infra.runtime.models.model_domain_plugin_config import (
             ModelDomainPluginConfig,
         )
