@@ -24,7 +24,7 @@
 # (mode 0600); nothing here creates, rotates or reads any other credential.
 name: redpanda-local-sasl
 description: One-shot that creates the laptop broker's SCRAM superuser, enables SASL and proves anonymous clients are refused
-image: redpandadata/redpanda:v25.2.14
+image: redpandadata/redpanda:v25.3.18
 layer: infrastructure
 container_name: omnibase-infra-redpanda-local-sasl
 required_env:

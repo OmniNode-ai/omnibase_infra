@@ -147,7 +147,7 @@
       "redpandadata/redpanda:v25.3.18"
     ],
     "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
-    "pending": "v25.1.12 is live on the dev broker (read back 2026-10-28: image v25.1.12, cluster_version 15) and crashed in list_groups +0x1cb; OMN-20769 pins v25.2.14 (second hop, no fix in it) and moves deployed_feature_release to 25.1; deploy it and read it back, then pin v25.3.18, the first image on the path that carries the fix",
+    "pending": "v25.1.12 was live on the dev broker and crashed in list_groups +0x1cb (2026-10-28T08:35:30Z); OMN-20769 hop 1 pins v25.2.14 (no fix in it) and hop 2 pins v25.3.18 with deployed_feature_release 25.2, the first image on the path that carries the fix; hop 2 lands only after the dev broker runs v25.2.14 and it is read back, then deploy v25.3.18 and read it back",
     "hop_proof": {
       "guard": "tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py refuses a declared hop whose image needs a newer logical version than the previous image leaves, and a chain image with no measured entry",
       "scratch_run": "2026-10-26 on h200, synthetic v24.3.18 volume with 20 topics, 400 groups, 3000 records on hop-t0, a SCRAM superuser and enable_sasl true: cluster_version 14 -> 15 -> 16 -> 17 across v25.1.12, v25.2.14, v25.3.18; topics 20, groups 400, high watermark 3000, committed offset 3000, the user and the unauthenticated refusal unchanged at every hop; a second seeded volume repeated the same four hops with topics 20 and groups 400 at each",
