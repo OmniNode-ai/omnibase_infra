@@ -10627,11 +10627,13 @@ async def _split_boot_set_by_demand(
         )
     logger.info(
         "Boot subscription split: %d contract(s) in use attach at boot, %d "
-        "start on their first request; %d of %d topic(s) hold records (OMN-18087)",
+        "start on their first request; %d of %d topic(s) hold records; "
+        "watched_topics=%s (OMN-18087)",
         len(boot),
         len(eligible) - len(boot),
         len(in_use),
         len(all_topics),
+        sorted(deferred_by_topic),
     )
     return boot
 
