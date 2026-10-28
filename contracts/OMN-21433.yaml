@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21433"
+title: "The software factory has a formal design and failure process, with every station proven against canonical shapes at its seams"
+summary: >-
+  T2.6 (omnibase_infra slice) of the validators-to-core plan. The pre-commit hooks that rewrote files during a commit are check-only: ruff format runs with --check, ruff check runs with --no-fix, the end-of-file rule is a check that rewrites nothing, a staged tmp/ file is refused instead of deleted, and an AI co-author trailer in a commit message is refused instead of stripped. The credential-in-log self-test hook, listed by the plan as a writer, only reads a fixture and is proven byte-identical rather than changed. Criteria of this task are labelled T2.6 and numbered AC26xx; the plan parent's own criteria are not bound here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-t26-check-only-hooks"
+    statement: "T2.6: the omnibase_infra pre-commit hooks refuse a defect and leave the working tree byte-identical, instead of rewriting it."
+    acceptance:
+      - id: "AC2601"
+        statement: >-
+          T2.6 AC1: a canary commit with an unformatted file is refused and the working tree is byte-identical after the hook run -- falsifier: the ruff-format and ruff-fix hooks run against a staged unformatted file exit zero, or the tree differs byte for byte after the run
+      - id: "AC2602"
+        statement: >-
+          T2.6 AC2: the canary of an unformatted file plus an AI co-author trailer is refused on both counts, and the trailer is refused instead of stripped -- falsifier: the trailer hook exits zero on a commit message carrying the trailer, or the message file differs after the run
+      - id: "AC2603"
+        statement: >-
+          T2.6 AC3: the end-of-file rule checks without fixing and a staged tmp/ file is refused instead of deleted -- falsifier: a file with no final newline or a doubled final newline passes the end-of-file hook, a staged tmp/ file passes its hook, or either run changes a byte of the tree
+evidence_requirements:
+  - kind: "tests"
+    description: "The repo's own hook definitions run through pre-commit against a throwaway git repository holding each defect, with the tree compared byte for byte before and after."
+    command: "uv run pytest tests/ci/test_check_only_hooks_omn21433.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-t26-unformatted-file-refused-tree-untouched"
+    description: "AC2601: the ruff-format and ruff-fix hooks refuse an unformatted file and a fixable lint defect, and the tree is byte-identical after each run; a formatted file passes as the positive control."
+    source: "manual"
+    binds_ac: ["AC2601"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21433.py -q -n 0 --no-cov -k 'TestRuffFormat or TestRuffCheck or ruff'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-t26-trailer-refused-not-stripped"
+    description: "AC2602: the co-author trailer hook refuses an AI trailer and leaves the message file byte-identical; a human trailer passes as the positive control."
+    source: "manual"
+    binds_ac: ["AC2602"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21433.py -q -n 0 --no-cov -k TestCoAuthorTrailer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-t26-eof-and-tmp-check-only"
+    description: "AC2603: the end-of-file hook refuses a missing or doubled final newline and the tmp hook refuses a staged tmp/ file, each leaving the tree byte-identical; clean inputs pass as the positive controls, and the credential-in-log self-test is shown to leave the checkout untouched."
+    source: "manual"
+    binds_ac: ["AC2603"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21433.py -q -n 0 --no-cov -k 'TestEndOfFile or TestStagedTmp or TestCredentialSelfTestNeverWrote or TestConfigShape'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
