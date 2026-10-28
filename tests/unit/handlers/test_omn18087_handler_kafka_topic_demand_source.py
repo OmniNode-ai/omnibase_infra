@@ -31,6 +31,7 @@ class FakeConsumer:
         self.kwargs = kwargs
         self.offsets: dict[str, tuple[int, int]] = {}
         self.assigned: list[TopicPartition] = []
+        self.assignments: list[list[TopicPartition]] = []
         self.seeks: dict[TopicPartition, int] = {}
         self.paused: set[TopicPartition] = set()
         self.arrivals: asyncio.Queue[str] = asyncio.Queue()
@@ -44,14 +45,13 @@ class FakeConsumer:
         self.stopped = True
 
     async def topics(self) -> set[str]:
-        return set(self.offsets)
-
-    def partitions_for_topic(self, topic: str) -> set[int]:
-        return {0} if topic in self.offsets else set()
+        raise AssertionError("partitions come from the admin client")
 
     async def beginning_offsets(
         self, partitions: list[TopicPartition]
     ) -> dict[TopicPartition, int]:
+        # An offset request for a partition never assigned waits on metadata.
+        assert set(partitions) <= set(self.assigned)
         return {tp: self.offsets[tp.topic][0] for tp in partitions}
 
     async def end_offsets(
@@ -61,6 +61,7 @@ class FakeConsumer:
 
     def assign(self, partitions: list[TopicPartition]) -> None:
         self.assigned = list(partitions)
+        self.assignments.append(list(partitions))
 
     def seek(self, tp: TopicPartition, offset: int) -> None:
         self.seeks[tp] = offset
@@ -76,6 +77,28 @@ class FakeConsumer:
         return {TopicPartition(topic, 0): [object()]}
 
 
+class FakeAdmin:
+    """Lists and describes the broker's topics, one partition each."""
+
+    def __init__(self, offsets: dict[str, tuple[int, int]]) -> None:
+        self._offsets = offsets
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def list_topics(self) -> list[str]:
+        return sorted(self._offsets)
+
+    async def describe_topics(self, topics: list[str]) -> list[dict[str, object]]:
+        return [
+            {"topic": topic, "error_code": 0, "partitions": [{"partition": 0}]}
+            for topic in topics
+        ]
+
+
 @pytest.fixture
 def broker(monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[int, int]]:
     FakeConsumer.instances.clear()
@@ -87,6 +110,7 @@ def broker(monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[int, int]]:
         return consumer
 
     monkeypatch.setattr(module, "AIOKafkaConsumer", build)
+    monkeypatch.setattr(module, "AIOKafkaAdminClient", lambda **_: FakeAdmin(offsets))
     return offsets
 
 

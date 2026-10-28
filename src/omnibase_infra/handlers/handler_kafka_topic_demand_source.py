@@ -20,6 +20,7 @@ import logging
 from collections.abc import Awaitable, Callable, Collection
 
 from aiokafka import AIOKafkaConsumer
+from aiokafka.admin import AIOKafkaAdminClient
 from aiokafka.structs import TopicPartition
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
@@ -29,6 +30,9 @@ from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 logger = logging.getLogger(__name__)
 
 _POLL_TIMEOUT_MS = 1000
+# Partitions per offset request; one request across a whole broker timed out on
+# the lab (measured by the topic-activity sampler, 2026-09-26).
+_OFFSET_CHUNK = 100
 
 
 class HandlerKafkaTopicDemandSource:
@@ -42,27 +46,45 @@ class HandlerKafkaTopicDemandSource:
         topics: Collection[str],
         on_first_record: Callable[[str], Awaitable[None]],
     ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
+        auth = build_aiokafka_auth_kwargs(self._config)
+        # The bus addresses a lane-namespaced physical topic for each contract
+        # topic; read the same physical topics and report contract names back.
+        logical_of = {apply_topic_namespace(topic): topic for topic in topics}
+        # A group-less consumer only knows partitions for topics it has been
+        # assigned, so the partitions come from the admin client.
+        admin = AIOKafkaAdminClient(
+            bootstrap_servers=self._config.bootstrap_servers, **auth
+        )
+        await admin.start()
+        try:
+            existing = set(await admin.list_topics())
+            wanted = sorted(set(logical_of) & existing)
+            described = await admin.describe_topics(wanted) if wanted else []
+        finally:
+            await admin.close()
+        partitions = [
+            TopicPartition(str(entry["topic"]), int(partition["partition"]))
+            for entry in described
+            if not entry.get("error_code")
+            for partition in entry["partitions"]
+        ]
         consumer = AIOKafkaConsumer(
             bootstrap_servers=self._config.bootstrap_servers,
             group_id=None,
             enable_auto_commit=False,
-            **build_aiokafka_auth_kwargs(self._config),
+            **auth,
         )
-        # The bus addresses a lane-namespaced physical topic for each contract
-        # topic; read the same physical topics and report contract names back.
-        logical_of = {apply_topic_namespace(topic): topic for topic in topics}
         await consumer.start()
+        low: dict[TopicPartition, int] = {}
+        high: dict[TopicPartition, int] = {}
         try:
-            # topics() refreshes cluster metadata for every topic the principal
-            # can describe.
-            visible = await consumer.topics()
-            partitions = [
-                TopicPartition(physical, partition)
-                for physical in sorted(set(logical_of) & visible)
-                for partition in sorted(consumer.partitions_for_topic(physical) or ())
-            ]
-            low = await consumer.beginning_offsets(partitions) if partitions else {}
-            high = await consumer.end_offsets(partitions) if partitions else {}
+            # Assigning first loads the metadata the offset requests wait on;
+            # bounded chunks keep one request from timing out on a large broker.
+            consumer.assign(partitions)
+            for start in range(0, len(partitions), _OFFSET_CHUNK):
+                chunk = partitions[start : start + _OFFSET_CHUNK]
+                low.update(await consumer.beginning_offsets(chunk))
+                high.update(await consumer.end_offsets(chunk))
         except BaseException:
             await consumer.stop()
             raise
