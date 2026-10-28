@@ -12,6 +12,10 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the rendered-slot verifier accepts dev-lane-infra-runtime-image at scale 0, refuses it at any other scale, and the slot overlay attaches it to omnibase-infra-network -- falsifier: test_prepr_verify_lane_entrypoint_omn18893.py build_only cases, red on the previous head'
+      - id: AC2
+        statement: 'AC2: INFRA_TAG and MARKET_TAG select the tagged head for the build and test trees, pull refs remain the default, mismatched heads fail the readback, and a base control removes PR tags and identity.'
+      - id: AC3
+        statement: 'AC3: every slot runtime service declares a bounded on-failure restart policy.'
 dod_evidence:
   - id: dod-omn-21433-ac1-slot-render
     description: >-
@@ -22,3 +26,21 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -n 0 -m "not lab_overlay"
     binds_ac:
       - AC1
+  - id: dod-omn-21433-ac2-tag-behavior
+    description: >-
+      AC2. Execute the shell clone phase against disposable local Git repositories with different tag and pull heads, inspect both resulting trees, and exercise the driver's base-control parameter filtering. No GitHub access or lab lane manifest is required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_tag_ref_omn21433.py -q -n 0
+    binds_ac:
+      - AC2
+  - id: dod-omn-21433-ac3-restart-policy
+    description: >-
+      AC3. Read the slot overlay's restart policy for each of its twelve runtime services and refuse an unlimited or missing policy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_restart_bound_omn21433.py -q -n 0
+    binds_ac:
+      - AC3
