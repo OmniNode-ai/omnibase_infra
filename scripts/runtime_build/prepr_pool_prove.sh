@@ -421,6 +421,9 @@ build)
       --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
       --descriptor-out "$W/descriptor.json" > "$W/build.log" 2>&1
     src=$?; echo "prepr_verify_lane rc=$src $(ts)"; grep '^\[prepr-verify-lane\]' "$W/build.log" | tail -6
+    # The rendered-slot verifier lists its mismatches on lines the grep above does not
+    # match, so an exit 12 reached the receipt with its reason dropped (OMN-21433).
+    [ "$src" = 12 ] && grep -E '^\[prepr-verify-rendered\]|^  - ' "$W/build.log" | head -12 | cut -c1-300
     case $src in
       0) echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
       8) # another holder owns the slot: never tear down what this run did not start

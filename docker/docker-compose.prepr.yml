@@ -289,8 +289,13 @@ services:
   # runtime services build omnimarket's composed image FROM. Compose refuses a
   # `service:` build context that names a service outside the active profile,
   # so it moves onto `prepr` with them. Its scale 0 is inherited: no container.
+  # `networks` is overridden onto the dev network because a service with none
+  # makes compose create a `default` network, and a slot never creates one
+  # (prepr_verify_rendered_slot.py refuses it; OMN-21433).
   dev-lane-infra-runtime-image:
     profiles: !override ["prepr"]
+    networks: !override
+      - omnibase-infra-network
   omninode-runtime:
     profiles: !override ["prepr"]
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime"

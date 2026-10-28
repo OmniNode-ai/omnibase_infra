@@ -96,6 +96,12 @@ SLOT_SERVICES: tuple[str, ...] = (
 )
 GATEWAY_SERVICE = "onex-api"
 
+#: Services the slot's profile carries only so compose can resolve a ``service:``
+#: build context (OMN-21279). Each is ``scale: 0``, so ``up`` never creates a
+#: container for it. The render may carry them, and carries them only while
+#: ``scale`` reads 0 (OMN-21433).
+BUILD_ONLY_SERVICES: tuple[str, ...] = ("dev-lane-infra-runtime-image",)
+
 #: Every environment key whose value is a PostgreSQL DSN. Each one must name a
 #: database carrying this slot's suffix and a principal carrying it too.
 DSN_KEYS: tuple[str, ...] = (
@@ -145,7 +151,17 @@ def check(
             f"A slot that starts a short set is a slot whose verdict covers less "
             f"than it claims."
         )
-    unexpected = sorted(set(services) - expected)
+    for name in BUILD_ONLY_SERVICES:
+        if name not in services:
+            continue
+        scale = (services[name] or {}).get("scale")
+        if scale != 0:
+            problems.append(
+                f"build-only service '{name}' renders with scale {scale!r}, not 0. "
+                f"It exists to be built, and a container for it would run under "
+                f"the dev lane's image name."
+            )
+    unexpected = sorted(set(services) - expected - set(BUILD_ONLY_SERVICES))
     if unexpected:
         problems.append(
             f"the render carries {len(unexpected)} service(s) that are not the "

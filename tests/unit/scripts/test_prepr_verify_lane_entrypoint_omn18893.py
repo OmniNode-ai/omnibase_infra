@@ -401,6 +401,42 @@ def test_an_unfenced_shared_dependency_is_caught() -> None:
     assert any("not the slot's" in p for p in problems)
 
 
+BUILD_ONLY_IMAGE = "dev-lane-infra-runtime-image"
+
+
+def test_the_build_only_infra_image_is_not_a_shared_dependency() -> None:
+    """OMN-21433: the render of a slot built on omnimarket's composed image.
+
+    OMN-21279 moved the dev overlay's build-only infra image onto the slot's
+    profile, because compose refuses a ``service:`` build context that names a
+    service outside the active profile. Its ``scale: 0`` means no container is
+    ever created, so the verifier must accept it. It refused it instead, and
+    every slot bring-up exited 12 on the dev head of 2026-10-28.
+    """
+    rendered = _good_render()
+    rendered["services"][BUILD_ONLY_IMAGE] = {
+        "profiles": ["prepr"],
+        "scale": 0,
+        "networks": {"omnibase-infra-network": None},
+    }
+    assert verifier.check(rendered, policy.resolve_slot(1), False) == []
+
+
+def test_a_build_only_image_that_would_start_a_container_is_still_caught() -> None:
+    rendered = _good_render()
+    rendered["services"][BUILD_ONLY_IMAGE] = {"profiles": ["prepr"], "scale": 1}
+    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    assert any(BUILD_ONLY_IMAGE in p for p in problems)
+
+
+def test_the_slot_overlay_attaches_the_build_only_image_to_the_dev_network() -> None:
+    """Without a ``networks`` entry compose invents a ``default`` network, and
+    the verifier (rightly) refuses any network a slot would create."""
+    svc = _overlay_for_slot(1)["services"][BUILD_ONLY_IMAGE]
+    assert svc["profiles"] == ["prepr"]
+    assert svc["networks"] == ["omnibase-infra-network"]
+
+
 def test_the_verifier_fails_closed_on_an_unreadable_render(tmp_path: Path) -> None:
     """A gate that cannot read its own input has not passed, it has not run."""
     missing = tmp_path / "absent.json"
