@@ -2167,11 +2167,17 @@ class EventBusKafka(
                 # only this call's intent so retry cannot duplicate its callback;
                 # other callers' subscriptions must keep their ownership.
                 async with self._lock:
-                    self._subscribers[topic] = [
-                        entry
-                        for entry in self._subscribers[topic]
-                        if entry[1] != subscription_id
+                    remaining = [
+                        (sub_group_id, sub_id, callback)
+                        for sub_group_id, sub_id, callback in self._subscribers.get(
+                            topic, []
+                        )
+                        if sub_id != subscription_id
                     ]
+                    if remaining:
+                        self._subscribers[topic] = remaining
+                    else:
+                        self._subscribers.pop(topic, None)
                 raise
 
         async with self._lock:
