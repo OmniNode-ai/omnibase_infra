@@ -299,7 +299,11 @@ def cmd_image_containers(args: list[str]) -> int:
         return 2
     image, *bundles = args
     resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
-    resolved = resolver.resolve(bundles=bundles)
+    try:
+        resolved = resolver.resolve(bundles=bundles)
+    except ValueError as exc:
+        print(f"Cannot resolve bundles {bundles}: {exc}", file=sys.stderr)
+        return 2
     compose = generate_compose(resolved, composed_image=image)
     names = containers_on_image(compose, image)
     if not names:
