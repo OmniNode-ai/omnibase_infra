@@ -1513,7 +1513,12 @@ class WorkspaceRuntimeConfigMissingError(ProtocolConfigurationError):
     """
 
 
-def workspace_runtime_config_root(workspace_root: Path) -> Path:
+def workspace_runtime_config_root(
+    workspace_root: Path,
+    *,
+    environment: Mapping[str, str] | None = None,
+    allow_developer_config: bool = True,
+) -> Path:
     """Resolve the config owner, independently of the registry's state root.
 
     ONEX_WORKSPACE_CONFIG_ROOT is a bootstrap location, never a transport
@@ -1522,16 +1527,20 @@ def workspace_runtime_config_root(workspace_root: Path) -> Path:
     if it is a directory, otherwise the sibling path for the caller to refuse.
     All results are resolved. A developer install never needs a private
     repository (OMN-20700). There is no retiring-root read.
+    Callers may inject their captured environment and disable developer config
+    when their contract permits only the explicit root and registry sibling.
     """
-    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
+    captured = os.environ if environment is None else environment
+    configured = captured.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
     if configured:
         return Path(configured).resolve()
     sibling = workspace_root / ".." / "omnibase_internal"
     if sibling.is_dir():
         return sibling.resolve()
-    developer = workspace_root / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
-    if developer.is_dir():
-        return developer.resolve()
+    if allow_developer_config:
+        developer = workspace_root / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
+        if developer.is_dir():
+            return developer.resolve()
     return sibling.resolve()
 
 

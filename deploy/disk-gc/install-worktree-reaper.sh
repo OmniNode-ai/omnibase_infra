@@ -11,7 +11,7 @@
 # This is the *orchestrator's deploy step* — it is NOT run by the worker that ships
 # the code PR. The worker ships the unit files; the operator runs this on .201.
 #
-# Usage (run on 192.168.86.201 after pulling latest):
+# Usage (run on <configured-host> after pulling latest):
 #   bash deploy/disk-gc/install-worktree-reaper.sh            # install + enable + start timer
 #   bash deploy/disk-gc/install-worktree-reaper.sh --uninstall
 #   bash deploy/disk-gc/install-worktree-reaper.sh --status

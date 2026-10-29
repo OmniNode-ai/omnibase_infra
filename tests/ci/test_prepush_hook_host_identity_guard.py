@@ -29,7 +29,7 @@ Three assertion classes:
    routinely emits `is_full_suite=False` with `selected_paths=["tests/"]`, and
    before OMN-15408 those runs bypassed the guard outright: 13,898 tests /
    506s in omnimarket and 2,429 tests / 245s in omnibase_infra, executed on
-   `omnibook` through real `git push` runs on 2026-07-29 with the guard never
+   `gate-host-d` through real `git push` runs on 2026-07-29 with the guard never
    invoked -- while the identical selected work forced via
    `PREPUSH_FULL_SUITE=1` WAS refused. Assertion classes 1 and 2 above were
    green that entire time, because both only ever drove the flag-true path.
@@ -41,6 +41,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,7 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
 from tests.ci._prepush_lab_isolation import gh_offline_env, network_free_lab_env
+from tests.ci._prepush_private_table import write_hook_repo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
@@ -64,9 +66,9 @@ def de_designating_env() -> dict[str, str]:
     Before the host table, `.200` identity was the sole definition of "a
     designated host", so overriding `PREPUSH_200_HOSTNAME` alone was enough to
     make the refusal below host-independent. It never actually was: on the
-    `.201` gate-runner (hostname `gate-runner-201`) the guard matched its second
+    container gate runner the guard matched its second
     hard-coded name and this test's premise inverted from a refusal to a pass.
-    Adding `omninode-pc` as a row would have widened that hole to the `.201`
+    Adding a host identity row would have widened that hole to the physical
     host itself -- which is exactly why the override contract is that an
     override REPLACES the row it names rather than adding a name to the set.
 
@@ -208,52 +210,17 @@ def test_guard_has_a_visible_degraded_host_override() -> None:
     )
 
 
-def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
-    """Behavioral proof: force the full-suite escalation and a
-    guaranteed-non-matching host; the hook must exit non-zero and must NEVER
-    reach the actual pytest invocation."""
-    env = dict(os.environ)
-    # Scrub ambient leaky vars before setting the ones this test deliberately
-    # forces below (OMN-16425). PREPUSH_ALLOW_LOCAL_FULL_SUITE leaking in from
-    # an outer `git push` invocation routes the hook down the degraded-host
-    # override branch instead of refusing, letting it reach a nested pytest
-    # invocation that can recurse into this same test file.
-    for leaky in (
-        "PREPUSH_FULL_SUITE",
-        "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
-        "ENABLE_SMART_TESTS",
-        "PREPUSH_ADJACENCY",
-        "PREPUSH_PYTEST_ARGS",
-        # OMN-16489: this test deliberately exercises FIRST-entry behavior, so
-        # the recursion sentinel an outer hook run exports must not leak in.
-        "ONEX_PREPUSH_HOOK_ACTIVE",
-    ):
-        env.pop(leaky, None)
-    env["PREPUSH_FULL_SUITE"] = "1"
-    env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
-    # OMN-16991: de-designate every OTHER authorizing row too, so this proof is
-    # host-independent for the first time (see de_designating_env).
-    env.update(de_designating_env())
-    # ...and keep the lab-dispatch leg off the network. De-designating a row
-    # changes its IDENTITY, not its ssh target, so without this the hook ships a
-    # real bundle to a real lab host from inside this test.
-    env.update(network_free_lab_env())
-    env.update(gh_offline_env())
-    result = subprocess.run(
-        ["bash", str(HOOK_SCRIPT)],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
+def test_guard_refuses_full_suite_escalation_on_non_200_host(tmp_path: Path) -> None:
+    """Force full escalation in a real synthetic checkout; never reach pytest."""
+    result = _run_hook_with_stubbed_selection(
+        tmp_path, is_full_suite=True, selected_paths=["tests/unit/"], force_full=True
     )
     assert result.returncode != 0, (
         "expected the host guard to refuse the full-suite escalation on a "
         f"non-.200 host; got exit {result.returncode}. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "not the designated .200 build host" in result.stderr, (
+    assert "not a designated gate host" in result.stderr, (
         f"expected the refusal message in stderr, got: {result.stderr!r}"
     )
     assert "collected" not in result.stdout, (
@@ -269,7 +236,7 @@ def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
 # it fired on the selector's `is_full_suite` FLAG. The selector routinely emits
 # `is_full_suite=False` with `selected_paths=["tests/"]` -- the whole suite
 # arriving as an "impacted subset" -- and those runs bypassed the guard
-# entirely. Measured on host `omnibook` through real `git push` runs on
+# entirely. Measured on host `gate-host-d` through real `git push` runs on
 # 2026-07-29: omnimarket ran 13,898 tests in 506s and omnibase_infra 2,429 tests
 # in 245s, locally, with the guard never invoked; the SAME selected work forced
 # via `PREPUSH_FULL_SUITE=1` was refused. Identical cost, opposite outcome,
@@ -336,6 +303,7 @@ def _run_hook_with_stubbed_selection(
     *,
     is_full_suite: bool,
     selected_paths: list[str],
+    force_full: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run the REAL hook end-to-end with a stubbed selector + stubbed pytest.
 
@@ -350,6 +318,7 @@ def _run_hook_with_stubbed_selection(
     offline: it always resolves, `merge-base HEAD HEAD` is HEAD, and the diff is
     empty -- the stub supplies the selection regardless.
     """
+    repo = write_hook_repo(tmp_path, REPO_ROOT)
     selection_file = tmp_path / "selection.json"
     selection_file.write_text(
         json.dumps(
@@ -373,7 +342,7 @@ def _run_hook_with_stubbed_selection(
         '    cat "$PREPUSH_TEST_SELECTION_JSON"\n'
         "    exit 0\n"
         "    ;;\n"
-        "  *pytest*)\n"
+        '  "run pytest"*)\n'
         '    echo "STUB-PYTEST-INVOKED $args"\n'
         "    exit 0\n"
         "    ;;\n"
@@ -388,7 +357,7 @@ def _run_hook_with_stubbed_selection(
     )
     uv_stub.chmod(0o755)
 
-    env = dict(os.environ)
+    env = dict(scrub_git_location_env())
     env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
     env["PREPUSH_TEST_SELECTION_JSON"] = str(selection_file)
     env["PREPUSH_BASE_REF"] = "HEAD"
@@ -408,9 +377,13 @@ def _run_hook_with_stubbed_selection(
     ):
         env.pop(leaky, None)
 
+    env["OMNI_HOME"] = ""
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(tmp_path / "empty_config")
+    if force_full:
+        env["PREPUSH_FULL_SUITE"] = "1"
     return subprocess.run(
-        ["bash", str(HOOK_SCRIPT)],
-        cwd=REPO_ROOT,
+        ["bash", str(repo / "scripts" / "hooks" / HOOK_SCRIPT.name)],
+        cwd=repo,
         env=env,
         capture_output=True,
         text=True,
@@ -547,7 +520,7 @@ def test_guard_refuses_whole_suite_equivalent_selection_when_flag_is_false(
         "even though is_full_suite=False; got exit "
         f"{result.returncode}. stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "not the designated .200 build host" in result.stderr, (
+    assert "not a designated gate host" in result.stderr, (
         f"expected the refusal message in stderr, got: {result.stderr!r}"
     )
     assert "STUB-PYTEST-INVOKED" not in result.stdout, (
@@ -575,7 +548,7 @@ def test_guard_allows_a_genuinely_narrow_selection_on_a_local_host(
         f"host; got exit {result.returncode}. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "not the designated .200 build host" not in result.stderr, (
+    assert "not a designated gate host" not in result.stderr, (
         f"the guard must NOT refuse a proper narrowing; stderr: {result.stderr!r}"
     )
     assert "STUB-PYTEST-INVOKED" in result.stdout, (
@@ -594,7 +567,9 @@ def test_guard_allows_a_genuinely_narrow_selection_on_a_local_host(
 
 
 @pytest.mark.unit
-def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence() -> None:
+def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence(
+    tmp_path: Path,
+) -> None:
     """OMN-20063: real CI evidence must not let a refusal harness pass."""
     env = scrub_git_location_env(os.environ)
     env.update(gh_offline_env())
@@ -611,9 +586,10 @@ def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence() -> N
     ):
         assert fragment[token] == ""
 
+    repo = write_hook_repo(tmp_path, REPO_ROOT)
     head_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=REPO_ROOT,
+        cwd=repo,
         env=scrub_git_location_env(env),
         capture_output=True,
         text=True,
@@ -622,15 +598,13 @@ def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence() -> N
     ).stdout.strip()
     result = subprocess.run(
         [
-            "uv",
-            "run",
-            "python",
-            "scripts/hooks/prepush_remote_verify.py",
+            sys.executable,
+            str(repo / "scripts" / "hooks" / "prepush_remote_verify.py"),
             "check",
             "--head-sha",
             head_sha,
         ],
-        cwd=REPO_ROOT,
+        cwd=repo,
         env=env,
         capture_output=True,
         text=True,
@@ -652,7 +626,7 @@ def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> No
     probe, so the harnesses above could only ever see `.200` and had no remote
     host to dispatch to. Fixing the scan removed that accidental containment,
     and the very next `pytest tests/ci/` shipped a real git bundle to
-    `omnibook`, took its LOCK, and started the full `tests/unit/` suite there --
+    `gate-host-d`, took its LOCK, and started the full `tests/unit/` suite there --
     the remote wrapper's ORIGIN named this test process. That is the
     OMN-16425/OMN-16489 F-01 recursion in distributed form, reached from a test
     rather than a push.

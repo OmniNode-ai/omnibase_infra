@@ -277,7 +277,7 @@ consume_override_grant() {
 # cheap (<1s, before any pytest) and names its remediation, consistent with
 # this hook's fail-loud doctrine: a gate that cannot run must be
 # indistinguishable from a failing gate.
-PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-stickybeatz-studio}"
+PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-}"
 
 # =============================================================================
 # Live-load host selection (OMN-16295)
@@ -301,7 +301,7 @@ PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-stickybeatz-studio}"
 # on that silence is exactly how the 2026-07-24 / 2026-08-20 incidents
 # happened -- assumed headroom that was not there. "Neither host reachable"
 # refuses; it does not skip the check.
-PREPUSH_201_GATE_RUNNER_HOSTNAME="${PREPUSH_201_GATE_RUNNER_HOSTNAME:-gate-runner-201}"
+PREPUSH_201_GATE_RUNNER_HOSTNAME="${PREPUSH_201_GATE_RUNNER_HOSTNAME:-}"
 # load1/cores at or under this ratio counts as "fit". 1.0 == "not
 # oversubscribed" (a standard load-average heuristic); correctly reads the
 # observed-fit `.201` snapshot (~0.4x, 2026-08-20) as fit and both observed
@@ -528,6 +528,7 @@ host_is_fit() {
 # library reuses rather than reimplementing, and BEFORE guard_full_suite_host,
 # which is its only caller. Located relative to this script so it resolves the
 # same way whether git invokes the hook through .git/hooks or core.hooksPath.
+PREPUSH_PRIVATE_TABLE_REL="config/onex/overlays/prepush_hosts/prepush_hosts.omnibase_infra.tsv"
 # shellcheck source=scripts/hooks/prepush_dispatch.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/prepush_dispatch.sh"
 
@@ -826,7 +827,7 @@ guard_full_suite_host() {
   # literal `||` -- not policy -- was the entire structural reason .101 and
   # .105 could not be used, and it is also why `.201` only ever matched from
   # INSIDE the gate-runner container: the container sets hostname
-  # gate-runner-201 while the host itself reports omninode-pc, so every push on
+  # the configured container while the host itself reports the configured host, so every push on
   # the host needed PREPUSH_201_GATE_RUNNER_HOSTNAME exported to pass. Both
   # names are now rows, so `.201` is designated intrinsically and no env var
   # has to survive a process or ssh boundary for the guard to see it.
@@ -838,6 +839,7 @@ guard_full_suite_host() {
     die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so no host can be identified as a designated gate host for ${heavy_what}" \
         "the table is read from the COMMITTED tree so an uncommitted row cannot self-designate this machine as an authorizing gate host. Commit ${PREPUSH_HOST_TABLE_REL} (or, if you have edited it, commit the edit so HEAD and the working tree agree), then re-push"
   fi
+  log "$(prepush_private_table_status)"
   label="$(prepush_identity_label "$lc_host" || true)"
   designated="$(prepush_designated_hostnames)"
 
@@ -947,7 +949,7 @@ guard_full_suite_host() {
     log "WARNING: DEGRADED-HOST OVERRIDE IN EFFECT (single-use grant consumed) -- running ${heavy_what} on '${host}', NOT a designated gate host (${designated}). This host has weaker isolation/headroom; treat any evidence from this run as WEAKER than a designated-host gate. See knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md."
     return 0
   fi
-  die "${heavy_what} triggered on host '${host}', not the designated .200 build host ('${PREPUSH_200_HOSTNAME}') nor any other designated gate host (${designated})" \
+  die "${heavy_what} triggered on host '${host}', not a designated gate host (${designated:-none configured})" \
       "probed lab hosts: ${PREPUSH_PROBE_LOG:-none}. Push from a designated host, OR let GitHub-hosted CI run the FULL suite on this exact sha and re-push -- this hook accepts a sha-pinned green full-suite run automatically (OMN-16688; check it with 'uv run python scripts/hooks/prepush_remote_verify.py check --head-sha \$(git rev-parse HEAD)'), OR see knowledge-base-internal:runbooks/omnibase-infra-lab-prepush-host-table.md to add/enable a lab host, OR mint a single-use override grant to run the full suite on this host anyway (visible, receipted, degraded-evidence override -- do not use as a routine bypass): uv run python scripts/hooks/prepush_override_grant.py mint --reason '<why>'"
 }
 
@@ -958,7 +960,7 @@ guard_full_suite_host() {
 # FLAG. That is the wrong key: the selector routinely emits
 # `is_full_suite=False` with a whole-suite path set -- the entire suite
 # arriving as an "impacted subset" -- and those runs sail straight past the
-# guard. Measured on host `omnibook` through real `git push` runs on
+# guard. Measured on host `the configured target` through real `git push` runs on
 # 2026-07-29: this repo selected `is_full_suite=False` and executed 2,429 tests
 # in 245s locally with the guard never invoked, and omnimarket (identical
 # predicate, `paths=[ tests/ ]`) executed 13,898 tests in 506s the same way.
@@ -1016,7 +1018,7 @@ cd "$REPO_ROOT"
 # =============================================================================
 # bash>=5 canary (OMN-15617)
 # =============================================================================
-# On stickybeatz-studio (.200, the rule-11a default gate host), non-interactive
+# On a configured macOS gate host, non-interactive
 # ssh sessions resolve `bash` to the system 3.2.57 shell even though a modern
 # bash 5.x sits at /opt/homebrew/bin/bash -- it just is not first on PATH for
 # that session class. runner-monitor.sh (exercised end-to-end by

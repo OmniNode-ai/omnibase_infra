@@ -6,7 +6,7 @@ A conftest.py at the repo root (next to pyproject.toml) is loaded by pytest
 for EVERY invocation in this rootdir, regardless of which testpath is
 targeted -- unlike tests/conftest.py, which only loads for collections that
 descend into tests/. That property is exactly what OMN-15977 Hole 1 needs:
-the .200-default host guard must fire for a bare `uv run pytest tests/` (or
+the deployment-table host guard must fire for a bare `uv run pytest tests/` (or
 any other direct full-suite invocation) the same way it fires for the
 git-push path, and it must not depend on which of this repo's multiple
 testpaths (see pyproject.toml testpaths) was targeted.

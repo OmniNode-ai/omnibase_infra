@@ -1,0 +1,95 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17232
+title: Pre-push host identity and placement come from the private deployment table
+summary: >-
+  This contract covers the pre-push overlay prerequisite assigned to this lane. The public repository ships only a disabled neutral row. The caller declares the full private table, the shared library verifies committed configuration, and the remote pytest guard receives the same rows. These checks do not claim the parent ticket's runtime rollout, consumer census, or reboot acceptance.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-prepush-private-table
+    statement: Deployment identity and capacity must be injected through a private workspace table.
+    acceptance:
+      - id: AC1
+        statement: The public table has schema comments and exactly one neutral disabled local row; a planted additional row is refused and named.
+      - id: AC2
+        statement: With no configuration root, a missing registry root, or a root without the table, only the neutral row remains, no host is designated or picked, and the status explains how to configure a table.
+      - id: AC3
+        statement: The synthetic default-tier h051 row places a heavy lane before a fit last-resort row, then places a second lane in slot 2 while skipping an unreachable host.
+      - id: AC4
+        statement: A private table in a git root is read from HEAD and refused when edited or never committed, in both the shell hook and Python guard.
+      - id: AC5
+        statement: The repo-agnostic library takes the private table path from its caller and transports verified rows beside the bundle for the remote guard.
+      - id: AC6
+        statement: The Python guard has no built-in host identity and explains how to supply the private table when none is configured; the existing focused pre-push tests pass with synthetic deployment data.
+evidence_requirements:
+  - kind: tests
+    description: Synthetic fixtures cover public-table leakage, missing configuration, concurrent slots, committed authority, and remote transport without live lab dependencies.
+    command: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-prepush-neutral-ac1
+    description: Run the shipped-file check and its planted extra-row positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "neutral_disabled_row or positive_control"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-prepush-unconfigured-ac2
+    description: Exercise all three missing-configuration cases; require no identity or placement and a configuration diagnostic.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k unconfigured_deployment
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-prepush-concurrent-slots-ac3
+    description: Real probe functions over stub SSH place the first lane in h051 and the second in h051.2 with an unreachable row skipped.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k synthetic_high_slot
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-prepush-committed-table-ac4
+    description: Git-root fixtures verify committed reads and both uncommitted refusal cases, including the Python identity reader.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "committed_deployment or uncommitted_edit_to_the_deployment or never_committed or python_guard_refuses_uncommitted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-prepush-remote-table-ac5
+    description: Capture the transferred full private table and remote wrapper, including the eleventh positional table path and workspace-config root.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "verified_private_table or declared_by_the_caller"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-prepush-guard-and-regression-ac6
+    description: The focused pre-push suites use invented deployment rows and prove the no-configuration Python refusal and existing policies.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-prepush-shared-resolver-deploy
+    description: >-
+      Hosted-runner artifact probe of the shared runtime resolver at the evaluated checkout commit, followed by hermetic resolver tests. The new option is absent at the merge base, so the probe fails there. The tests prove the captured environment is honored, the sibling fallback is reused, pre-push does not discover developer config implicitly, and existing runtime defaults remain. This verifies the deployed artifact API without claiming a live runtime rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          set -euo pipefail;
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'allow_developer_config'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/cli/test_omn20700_developer_workspace_config_owner.py -q -p no:randomly -k "existing_shared_sibling_resolver or ignores_developer_config or captured_environment or fresh_developer or registry_workspace or variable_still"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

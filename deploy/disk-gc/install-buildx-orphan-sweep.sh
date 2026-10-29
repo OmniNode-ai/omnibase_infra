@@ -8,7 +8,7 @@
 # These are systemd USER units (NOT lane containers). Installing/enabling them is
 # scoped to the runtime user and does not touch any docker-compose lane. No sudo.
 #
-# Usage (run on 192.168.86.201 after pulling latest):
+# Usage (run on <configured-host> after pulling latest):
 #   bash deploy/disk-gc/install-buildx-orphan-sweep.sh            # install + enable + start timer
 #   bash deploy/disk-gc/install-buildx-orphan-sweep.sh --uninstall
 #   bash deploy/disk-gc/install-buildx-orphan-sweep.sh --status
