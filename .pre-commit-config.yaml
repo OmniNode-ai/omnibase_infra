@@ -71,6 +71,13 @@ repos:
         files: ^(src/omnibase_infra/nodes/node_developer_principal_plan_compute/|src/omnibase_infra/handlers/handler_developer_principal_plan\.py$|src/omnibase_infra/models/developer_principal/|scripts/lab_principal_issuer\.py$|deploy/(lab|local)/developer-principal-|tests/unit/nodes/node_developer_principal_plan_compute/|tests/scripts/test_developer_principal_grants_parity\.py$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: broker-principal-effect
+        name: Broker principal effect applies a plan in the mint order (OMN-20822)
+        entry: uv run --frozen pytest tests/unit/nodes/node_broker_principal_effect -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/nodes/node_broker_principal_effect/|src/omnibase_infra/handlers/handler_broker_principal_[a-z]+\.py$|src/omnibase_infra/models/developer_principal/|src/omnibase_infra/protocols/protocol_broker_principal_[a-z_]+\.py$|tests/unit/nodes/node_broker_principal_effect/)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov
