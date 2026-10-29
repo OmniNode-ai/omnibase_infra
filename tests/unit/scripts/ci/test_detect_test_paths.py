@@ -11,6 +11,7 @@ from scripts.ci.detect_test_paths import (
     COLLOCATED_TEST_ROOTS,
     PRE_COMMIT_CONFIG_PATH,
     TEST_FILE_PATTERNS,
+    _is_compose_recipe,
     compute_selection,
     is_collectable_test_file_name,
     resolve_test_paths,
@@ -779,17 +780,61 @@ def test_compose_recipe_alone_still_selects_the_unit_tree() -> None:
     assert selection.selected_paths == ["tests/unit/"]
 
 
-def test_nested_compose_yml_beside_a_ci_test_keeps_the_unit_fallback() -> None:
+@pytest.mark.parametrize(
+    "compose_path",
+    [
+        "docker/domain-adapter-proof/compose.yml",
+        "docker/docker-compose.infra.override.yaml",
+    ],
+)
+def test_each_nested_or_override_compose_path_alone_keeps_the_unit_fallback(
+    compose_path: str,
+) -> None:
+    # One compose path per case beside the tests/ci/ module: a regression in
+    # nested-directory or .yaml-suffix matching fails its own case instead of
+    # hiding behind the other path.
     selection = compute_selection(
-        changed_files=[
-            "docker/domain-adapter-proof/compose.yml",
-            "docker/docker-compose.infra.override.yaml",
-            "tests/ci/test_bifrost_lane_overlay.py",
-        ],
+        changed_files=[compose_path, "tests/ci/test_bifrost_lane_overlay.py"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
     assert "tests/unit/" in selection.selected_paths
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("docker/docker-compose.infra.yml", True),
+        ("docker/docker-compose.infra.override.yaml", True),
+        ("docker/compose.yml", True),
+        ("docker/domain-adapter-proof/compose.yaml", True),
+        ("docker/foo.yml", False),
+        ("docker/compose-notes.yml", False),
+        ("compose.yml", False),
+        ("docker-compose.yml", False),
+        ("docker/docker-compose.infra.md", False),
+    ],
+)
+def test_is_compose_recipe_matches_only_compose_yaml_under_docker(
+    path: str, expected: bool
+) -> None:
+    assert _is_compose_recipe(path) is expected
+
+
+@pytest.mark.parametrize("other_path", ["docker/foo.yml", "compose.yml"])
+def test_non_compose_yaml_beside_a_ci_test_does_not_add_the_unit_tree(
+    other_path: str,
+) -> None:
+    # Over-selection guard: a YAML under docker/ that is not a compose recipe,
+    # and a compose-named file outside docker/, must not pull tests/unit/ in.
+    selection = compute_selection(
+        changed_files=[other_path, "tests/ci/test_bifrost_lane_overlay.py"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
+    assert "tests/unit/" not in selection.selected_paths
 
 
 def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
