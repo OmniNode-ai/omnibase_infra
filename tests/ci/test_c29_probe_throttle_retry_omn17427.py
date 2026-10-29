@@ -182,7 +182,8 @@ def test_repeats_are_bounded_and_the_last_throttle_still_fails(
         probe.KEYED_THROTTLE_BACKOFF_S[: probe.KEYED_THROTTLE_RETRIES]
     )
     assert obs["keyed_throttled_runs"] == probe.KEYED_THROTTLE_RETRIES
-    names = probe.grade_names_provider(obs, probe.PROVIDERS["openrouter"])
+    receipt = json.loads(obs["run_files"]["receipt.json"])
+    names = probe.grade_names_provider(obs, probe.PROVIDERS["openrouter"], receipt)
     assert not names.passed
     assert names.evidence["keyed_throttled_runs"] == probe.KEYED_THROTTLE_RETRIES
 
