@@ -187,6 +187,25 @@ class EventBusInmemory(_CoreEventBusInmemory):
             required_for_readiness=required_for_readiness,
         )
 
+    async def subscribe_ungrouped(
+        self,
+        topic: str,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+    ) -> Callable[[], Awaitable[None]]:
+        """Read ``topic`` from now on in a subscription of its own (OMN-17427).
+
+        The same operation as ``EventBusKafka.subscribe_ungrouped``: a one-shot
+        reader that sees only records published after it returns and leaves
+        nothing behind when it unsubscribes. An in-memory bus has no broker
+        groups, so the subscription is keyed by a private id that no other
+        subscriber can share, and the returned unsubscribe removes it.
+        """
+        return await self.subscribe(
+            topic,
+            on_message=on_message,
+            group_id=f"ungrouped.{uuid4().hex}",
+        )
+
     async def publish(  # type: ignore[override]
         self,
         topic: str,
