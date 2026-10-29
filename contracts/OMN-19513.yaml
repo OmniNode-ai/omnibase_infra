@@ -27,6 +27,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: "AC4: the rejoin supervisor replaces a consumer that raises on poll or whose replacement failed to start, retrying every 30 seconds, instead of polling the stopped handle -- falsifier: uv run pytest tests/unit/event_bus/test_consumer_rejoin_after_broker_restart.py -q -p no:cacheprovider fails 3 of 3 at origin/dev with ConsumerStoppedError out of next_batch"
+  - id: req-omn19513-hook-events-own-writer
+    statement: "The claude hook-events projection runs in its own dev-lane container, so a restart of omninode-runtime no longer leaves it unsubscribed while that runtime joins its other consumer groups."
+    acceptance:
+      - id: AC5
+        statement: "AC5: with ONEX_RUNTIME_NODE_EXCLUSION naming projection_claude_hook_events, filter_manifest_for_runtime_profile leaves that contract unattached on main and a runtime selecting it attaches only it; the dev lane starts projection-claude-hook-events-writer with the main runtime's KAFKA_INSTANCE_ID so the consumer group keeps its committed offsets -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py fails at origin/dev, which has neither file"
 evidence_requirements:
   - kind: tests
     description: "Render the base and dev-lane compose files and check both spool paths, their persistent mounts, and volume isolation."
@@ -52,6 +57,12 @@ evidence_requirements:
   - kind: manual
     description: "Hosted-runner deploy check: the consume loop delivers after two failed replacement starts, retries at 30 seconds, and recovers readiness after delivery."
     command: "deploy: uv run pytest tests/integration/event_bus/test_consumer_rejoin_recovery_omn19513.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The exclusion and selection partition the node between the main runtime and the writer, and the dev lane renders both halves with the shared instance id."
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "Real contract discovery plus the profile filter, fed the environment the dev-lane and base compose files render, leave the projection with exactly one owner and the writer on the main runtime's instance id."
+    command: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -119,3 +130,41 @@ dod_evidence:
         check_value: "uv run pytest tests/integration/event_bus/test_consumer_rejoin_recovery_omn19513.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC4]
+  - id: "dod-omn19513-hook-events-own-writer"
+    description: "The exclusion filter and the rendered dev-lane writer; neither test file exists at origin/dev."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]
+  - id: "dod-omn19513-handoff-refuses-unknown-exclusion"
+    description: "An unknown excluded contract refuses wiring with RuntimeHostError, including an empty discovery manifest; valid handoffs still wire real installed handlers with the kernel's wiring arguments."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/test_auto_wiring_real_manifest.py -k test_real_manifest_node_selection_wires_only_selected_contracts -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]
+  - id: "dod-omn19513-deploy-writer-catalog-policy"
+    description: "Hosted-runner deploy configuration probe: render the catalog writer and compare placement, strict wiring, broker policy, secret references and nofile limits with its dev-lane deployment."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py -k test_catalog_writer_preserves_dev_lane_placement_and_broker_policy -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]
+  - id: "dod-omn19513-writer-db-inventory-compose-handoff"
+    description: "The writer declares its internal and analytics database bindings; Docker Compose renders the base plus dev overlay before the real discovery/filter handoff assertions."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_omn19513_hook_events_writer.py tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC5]

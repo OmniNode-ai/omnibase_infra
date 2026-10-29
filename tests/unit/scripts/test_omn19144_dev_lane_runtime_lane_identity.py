@@ -252,7 +252,14 @@ def test_exactly_one_dev_lane_service_resolves_to_a_health_lane() -> None:
     declared = {
         name: env for name, env in environments.items() if ENV_RUNTIME_LANE in env
     }
-    assert set(declared) == {LANE_SPEAKING_SERVICE, "runtime-effects"}
+    # OMN-19513: the claude hook-events writer is a third main-profile runtime on
+    # this lane. It names the lane for placement, as effects does, and speaks no
+    # health for it.
+    assert set(declared) == {
+        LANE_SPEAKING_SERVICE,
+        "runtime-effects",
+        "projection-claude-hook-events-writer",
+    }
     speakers = {
         name: lane
         for name, env in declared.items()
@@ -261,9 +268,9 @@ def test_exactly_one_dev_lane_service_resolves_to_a_health_lane() -> None:
     assert speakers == {LANE_SPEAKING_SERVICE: DEV_LANE_VALUE}, (
         "exactly one service may key health while the projection stores one row per lane"
     )
-    effects = declared["runtime-effects"]
-    assert resolve_runtime_lane(effects) is None
-    assert resolve_declared_runtime_lane(effects) == DEV_LANE_VALUE
+    for silent in ("runtime-effects", "projection-claude-hook-events-writer"):
+        assert resolve_runtime_lane(declared[silent]) is None
+        assert resolve_declared_runtime_lane(declared[silent]) == DEV_LANE_VALUE
 
 
 @pytest.mark.parametrize(

@@ -45,6 +45,7 @@ LANDING = (ORCHESTRATOR, GITHUB_EFFECT)
 # A dev-lane-scoped contract the overlay does NOT select: it stays off an
 # instance (the lab lane-health fold keys rows for the lab lanes only).
 LAB_HEALTH = "node_projection_lab_lane_health"
+HOOK_EVENTS = "projection_claude_hook_events"
 
 
 def test_ticket_contract_retains_lane_class_and_mirror_source_evidence() -> None:
@@ -160,6 +161,14 @@ def _manifest(tmp_path: Path) -> ModelAutoWiringManifest:
         ),
         LAB_HEALTH: (
             "name: node_projection_lab_lane_health\n"
+            "contract_version: {major: 1, minor: 0, patch: 0}\n"
+            "node_type: reducer\n"
+            f"runtime_lanes: [{DEV_LANE}]\n"
+        ),
+        # The dev lane's runtime excludes this node (OMN-19513): the ownership
+        # filter refuses an exclusion naming a contract that was not discovered.
+        HOOK_EVENTS: (
+            "name: projection_claude_hook_events\n"
             "contract_version: {major: 1, minor: 0, patch: 0}\n"
             "node_type: reducer\n"
             f"runtime_lanes: [{DEV_LANE}]\n"

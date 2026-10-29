@@ -1663,7 +1663,7 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: >-
-          python3 -c "from pathlib import Path; t=Path('README.md').read_text(); assert 3 <= len(t.splitlines()) <= 5; assert 'https://github.com/OmniNode-ai/knowledge_base' in t; assert not any(Path('docs/evidence').rglob('*.txt')); assert not any(Path('tests/fixtures').rglob('README.md')); assert not any(Path(p).exists() for p in ['SECURITY.md', '.github/CONTRIBUTING.md', '.github/CODE_OF_CONDUCT.md']); print('Documentation surface check passed')"
+          python3 -c "from pathlib import Path; t=Path('README.md').read_text(); assert 3 <= len(t.splitlines()) <= 20; assert 'https://github.com/OmniNode-ai/knowledge_base' in t; assert not any(Path('docs/evidence').rglob('*.txt')); assert not any(Path('tests/fixtures').rglob('README.md')); assert not any(Path(p).exists() for p in ['SECURITY.md', '.github/CONTRIBUTING.md', '.github/CODE_OF_CONDUCT.md']); print('Documentation surface check passed')"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC39

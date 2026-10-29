@@ -271,6 +271,14 @@ readonly REFRESH_BUILD_SERVICES=(
     # everywhere except here, which left it declared, censused as critical
     # drift, and never running on either lab lane.
     tenant-projection-writer
+    # OMN-19513 -- the claude hook-events projection writer. Same shape as the
+    # carrier above: declared in docker/docker-compose.infra.yml behind the inert
+    # `profile-carrier-optin` compose profile and promoted into `runtime` by this
+    # lane's `profiles: !override`. Membership is mandatory for the carrier's
+    # reason, and it carries a second duty: the main runtime on this lane names
+    # the same node in ONEX_RUNTIME_NODE_EXCLUSION, so a refresh that rebuilt
+    # main and skipped this container would leave the node consumed by nothing.
+    projection-claude-hook-events-writer
     # OMN-21279 -- build-only infra half of the composed runtime image;
     # scale 0 in the overlay, so up starts no container for it.
     dev-lane-infra-runtime-image

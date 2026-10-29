@@ -84,7 +84,20 @@ def test_lane_scoped_effects_contract_uses_rendered_placement(
         (REPO_ROOT / "src/omnibase_infra/nodes").glob("*/contract.yaml")
     )
     assert repo_contracts, "positive control: the real repository manifest is present"
-    manifest = discover_contracts_from_paths([*repo_contracts, contract_path])
+    # The dev lane's runtime excludes this node (OMN-19513) and the ownership
+    # filter refuses an exclusion naming a contract that was not discovered.
+    hook_events_dir = tmp_path / "projection_claude_hook_events"
+    hook_events_dir.mkdir()
+    hook_events_path = hook_events_dir / "contract.yaml"
+    hook_events_path.write_text(
+        "name: projection_claude_hook_events\n"
+        "node_type: reducer\n"
+        "contract_version: {major: 1, minor: 0, patch: 0}\n",
+        encoding="utf-8",
+    )
+    manifest = discover_contracts_from_paths(
+        [*repo_contracts, contract_path, hook_events_path]
+    )
     assert len(manifest.contracts) > 1
     files: tuple[str, ...] = ("docker-compose.infra.yml", "docker-compose.dev-lane.yml")
     if overlay is not None:
