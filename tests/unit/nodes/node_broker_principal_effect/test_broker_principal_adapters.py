@@ -20,9 +20,9 @@ import pytest
 from confluent_kafka.admin import AclBinding
 from pydantic import SecretStr
 
-from omnibase_infra.adapters.adapter_broker_principal import (
-    AdapterKafkaPrincipalAcls,
-    AdapterRedpandaAdminApi,
+from omnibase_infra.handlers.handler_broker_principal_list import (
+    BrokerPrincipalAdminApi,
+    BrokerPrincipalKafkaAcls,
 )
 from omnibase_infra.models.developer_principal import ModelBrokerAclBinding
 
@@ -78,7 +78,7 @@ def test_grants_complete_before_password_the_acl_client_awaits_a_delayed_future(
     None
 ):
     admin = _FakeAdminClient(delays=[0.0, 0.3, 0.05])
-    client = AdapterKafkaPrincipalAcls(admin_client=admin, timeout_seconds=5.0)
+    client = BrokerPrincipalKafkaAcls(admin_client=admin, timeout_seconds=5.0)
     started = time.monotonic()
     client.create_acls(PRINCIPAL, BINDINGS)
     assert time.monotonic() - started >= 0.25, (
@@ -89,7 +89,7 @@ def test_grants_complete_before_password_the_acl_client_awaits_a_delayed_future(
 
 def test_grants_complete_before_password_the_acl_client_raises_when_one_fails() -> None:
     admin = _FakeAdminClient(delays=[0.0, 0.2, 0.0], fail_index=1)
-    client = AdapterKafkaPrincipalAcls(admin_client=admin, timeout_seconds=5.0)
+    client = BrokerPrincipalKafkaAcls(admin_client=admin, timeout_seconds=5.0)
     with pytest.raises(RuntimeError) as raised:
         client.create_acls(PRINCIPAL, BINDINGS)
     assert "1 of 3" in str(raised.value)
@@ -100,7 +100,7 @@ def test_grants_complete_before_password_a_future_past_its_timeout_is_a_failure(
     None
 ):
     admin = _FakeAdminClient(delays=[0.0, 2.0, 0.0])
-    client = AdapterKafkaPrincipalAcls(admin_client=admin, timeout_seconds=0.2)
+    client = BrokerPrincipalKafkaAcls(admin_client=admin, timeout_seconds=0.2)
     with pytest.raises(RuntimeError):
         client.create_acls(PRINCIPAL, BINDINGS)
 
@@ -114,7 +114,7 @@ def test_no_secret_the_admin_api_error_text_never_carries_the_password() -> None
         sent.append((method, url, body))
         raise OSError(f"HTTP 500 for body {body!r}")
 
-    client = AdapterRedpandaAdminApi(
+    client = BrokerPrincipalAdminApi(
         admin_url="http://redpanda:9644",
         username="superuser",
         password=SecretStr("superuser-secret"),
@@ -138,7 +138,7 @@ def test_the_admin_api_client_updates_an_existing_user_with_put() -> None:
         sent.append((method, url))
         return b""
 
-    client = AdapterRedpandaAdminApi(
+    client = BrokerPrincipalAdminApi(
         admin_url="http://redpanda:9644",
         username="superuser",
         password=SecretStr("superuser-secret"),

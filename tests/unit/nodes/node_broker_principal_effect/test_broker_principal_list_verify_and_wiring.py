@@ -20,8 +20,8 @@ import pytest
 import yaml
 from pydantic import SecretStr
 
-from omnibase_infra.errors.error_broker_principal import BrokerPrincipalError
 from omnibase_infra.handlers.handler_broker_principal_list import (
+    BrokerPrincipalError,
     HandlerBrokerPrincipalList,
 )
 from omnibase_infra.handlers.handler_broker_principal_verify import (

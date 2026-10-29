@@ -22,10 +22,10 @@ from collections.abc import Iterable, Mapping
 import pytest
 from pydantic import SecretStr
 
-from omnibase_infra.errors.error_broker_principal import BrokerPrincipalError
 from omnibase_infra.handlers.handler_broker_principal_apply import (
     HandlerBrokerPrincipalApply,
 )
+from omnibase_infra.handlers.handler_broker_principal_list import BrokerPrincipalError
 from omnibase_infra.models.developer_principal import (
     ModelBrokerAclBinding,
     ModelBrokerPrincipalApplyRequest,
