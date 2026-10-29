@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Minimal etcd v3 client over the JSON gRPC gateway (OMN-21421).
 
-Covers the calls placement needs: lease grant, single keepalive, revoke, an
-atomic create-if-absent transaction, key and prefix reads. The gateway takes
+Covers the calls placement and the generic lease (OMN-21424) need: lease
+grant, single keepalive, revoke, an atomic create-if-absent transaction, a
+general transaction, key and prefix reads. The gateway takes
 base64 keys and values and returns 64-bit integers as JSON strings.
 """
 
@@ -21,6 +22,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 _JsonObject = dict[str, object]
 
@@ -40,11 +42,27 @@ def _prefix_end(prefix: str) -> str:
 
 
 class HandlerPlacementEtcd:
-    """Async etcd v3 JSON-gateway client; every request is bounded by ``timeout_s``."""
+    """Async etcd v3 JSON-gateway client with optional HTTP client injection.
 
-    def __init__(self, endpoint: str, *, timeout_s: float = 1.0) -> None:
+    Without ``client``, ``timeout_s`` bounds every request as in the original
+    endpoint-only API. An injected client retains its own timeout, TLS and
+    authentication settings; ``timeout_s`` applies only to a constructed client.
+    In either case, ``aclose`` closes the client.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        client: httpx.AsyncClient | None = None,
+        *,
+        timeout_s: float = 1.0,
+    ) -> None:
         self._endpoint = endpoint.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=timeout_s)
+        self._client = (
+            client
+            if client is not None
+            else ProviderHttpClient.create_client(timeout_seconds=timeout_s)
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -96,7 +114,17 @@ class HandlerPlacementEtcd:
         return int(str(result.get("TTL", "0")))
 
     async def lease_revoke(self, lease_id: int) -> None:
-        await self._post("/v3/lease/revoke", {"ID": str(lease_id)})
+        """Revoke a lease; one etcd no longer holds (404, already expired) is revoked."""
+        try:
+            await self._post("/v3/lease/revoke", {"ID": str(lease_id)})
+        except InfraConnectionError as exc:
+            cause = exc.__cause__
+            if (
+                isinstance(cause, httpx.HTTPStatusError)
+                and cause.response.status_code == 404
+            ):
+                return
+            raise
 
     async def put(self, key: str, value: str, *, lease_id: int) -> int:
         payload = await self._post(
@@ -167,5 +195,59 @@ class HandlerPlacementEtcd:
             if isinstance(entry, dict)
         }
 
+    async def txn(
+        self,
+        *,
+        compare: list[_JsonObject],
+        success: list[_JsonObject],
+        failure: list[_JsonObject],
+    ) -> tuple[bool, int, list[_JsonObject]]:
+        """Run one etcd transaction; returns ``(succeeded, revision, responses)``."""
+        payload = await self._post(
+            "/v3/kv/txn",
+            {"compare": compare, "success": success, "failure": failure},
+        )
+        header = payload.get("header")
+        revision = (
+            int(str(header.get("revision", "0"))) if isinstance(header, dict) else 0
+        )
+        responses = payload.get("responses")
+        return (
+            bool(payload.get("succeeded", False)),
+            revision,
+            [r for r in responses if isinstance(r, dict)]
+            if isinstance(responses, list)
+            else [],
+        )
 
-__all__ = ["HandlerPlacementEtcd"]
+    async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
+        """Read a prefix; returns ``(key, value, create_revision, lease_id)`` per key."""
+        payload = await self._post(
+            "/v3/kv/range", {"key": _b64(prefix), "range_end": _prefix_end(prefix)}
+        )
+        kvs = payload.get("kvs")
+        if not isinstance(kvs, list):
+            return []
+        return [
+            (
+                _unb64(entry.get("key")),
+                _unb64(entry.get("value")),
+                int(str(entry.get("create_revision", "0"))),
+                int(str(entry.get("lease", "0"))),
+            )
+            for entry in kvs
+            if isinstance(entry, dict)
+        ]
+
+
+def b64(text: str) -> str:
+    """Base64 of ``text`` as the JSON gateway takes keys and values."""
+    return _b64(text)
+
+
+def unb64(text: object) -> str:
+    """Decode a base64 key or value from a JSON gateway reply."""
+    return _unb64(text)
+
+
+__all__ = ["HandlerPlacementEtcd", "b64", "unb64"]

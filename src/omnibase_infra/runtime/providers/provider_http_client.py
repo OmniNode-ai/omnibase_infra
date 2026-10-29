@@ -49,13 +49,28 @@ class ProviderHttpClient:
             },
         )
 
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self._config.timeout_seconds),
+        client = self.create_client(
+            timeout_seconds=self._config.timeout_seconds,
             follow_redirects=self._config.follow_redirects,
         )
 
         logger.info("HTTP client created successfully")
         return client
+
+    @staticmethod
+    def create_client(
+        *, timeout_seconds: float, follow_redirects: bool = False
+    ) -> httpx.AsyncClient:
+        """Materialize an owned client for synchronous transport constructors.
+
+        Client construction performs no I/O. Callers retain responsibility for
+        closing the returned client, just as for ``create``. Explicit settings
+        preserve transport-specific timeouts and redirect policies.
+        """
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout_seconds),
+            follow_redirects=follow_redirects,
+        )
 
     @staticmethod
     async def close(resource: httpx.AsyncClient | None) -> None:

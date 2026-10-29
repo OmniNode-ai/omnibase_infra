@@ -1,0 +1,126 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21424
+title: "Generic lease orchestrator, reducer and projection"
+summary: >-
+  Adds the generic lease to the OMN-21418 GenericLease model (FenceMonotonicPerResource, NoEffectWithStaleFence, ExpiredLeaseFreesResource): src/omnibase_infra/handlers/lease/ (an etcd store where a grant is one transaction creating a free slot key and the request key on a fresh etcd lease, the fence is that transaction's revision, a renewal is a keepalive at the same fence; a pure projection reducer keeping the highest fence per (kind, resource); a projection writer whose upsert never lowers a fence), src/omnibase_infra/models/lease/, the check_fence port in src/omnibase_infra/handlers/lease/handler_lease_store.py (ok, stale, expired, unknown; the ticket names runtime/placement/fence.py, where the canonical-file-shape ratchet refuses new code), the node-lineage forward migration docker/migrations/forward/nodes/node_projection_lease/0001_create_lease_projection.sql, and the node_lease_orchestrator, node_lease_reducer and node_projection_lease contracts with no topic declared. Stacked on OMN-21421 (runtime election). The eight lease topics, runtime wiring and the onex lease CLI verb are not in this change: placing the lease orchestrator as a primary reads the contract placement block, which waits on an omnibase_core release carrying omnibase_core#2098.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21424-ac1-one-grant
+    statement: "100 concurrent acquires for one resource of a capacity-1 kind give exactly one lease-granted and 99 lease-refused."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: 100 concurrent acquires for one resource of a capacity-1 kind give exactly one `lease-granted` and 99 `lease-refused` -- falsifier: the integration test counts a grant total other than 1
+  - id: req-omn21424-ac2-fence-monotonic
+    statement: "A re-grant after expiry has a fence strictly greater than every earlier fence for that resource, also across a lease-primary failover."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: a re-grant after expiry has a fence strictly greater than every earlier fence for that resource, also across a lease-primary failover -- falsifier: the test reads a fence less than or equal to an earlier one
+  - id: req-omn21424-ac3-idempotent
+    statement: "A repeated acquire with the same request_id returns the same lease_id and fence."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: a repeated acquire with the same `request_id` returns the same `lease_id` and fence -- falsifier: the second reply carries a different `lease_id`
+  - id: req-omn21424-ac4-projection
+    statement: "The projection upserts on (kind, resource) and never replaces a row with a lower fence."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: the projection upserts on `(kind, resource)` and never replaces a row with a lower fence -- falsifier: replaying events out of order leaves a lower fence in the row
+  - id: req-omn21424-ac5-host-loss
+    statement: "Stopping the runtime and the etcd member on the host holding the lease primary leaves the next acquire answered within 30 s by another host."
+    acceptance:
+      - id: AC5
+        statement: |-
+          AC5: stopping the runtime and the etcd member on the host holding the lease primary leaves the next acquire answered within 30 s by another host (replay of the h202 outage) -- falsifier: the lab receipt shows a gap above 30 s or no grant
+  - id: req-omn21424-ac6-check-fence
+    statement: "check_fence returns stale, expired and unknown for a lower fence, an absent key and an unreachable etcd, and never ok for them."
+    acceptance:
+      - id: AC6
+        statement: |-
+          AC6: `check_fence` returns `stale`, `expired` and `unknown` for a lower fence, an absent key and an unreachable etcd, and never `ok` for them -- falsifier: a pytest over the three cases reads `ok`
+evidence_requirements:
+  - kind: tests
+    description: "The generic lease suites (two lease stores on a real etcd, two runtime processes on a three-member etcd, the projection and check_fence unit tests) pass."
+    command: "uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease tests/integration/nodes/test_lease_nodes_contract_discovery_omn21424.py -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the committed lease source read at the checkout commit. It starts nothing and touches no running lane."
+    command: "deploy: gh api contents of handler_lease_store.py and handler_lease_projection.py at HEAD"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21424-ac1-one-grant
+    description: >-
+      Two lease stores, one per simulated runtime, send 100 concurrent acquires for one resource of a capacity-1 kind to a loopback etcd; the test counts exactly one lease-granted and 99 lease-refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k test_ac1
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21424-ac2-fence-monotonic
+    description: >-
+      Three grants of one resource on alternating stores, each after the previous TTL-2 lease expired, each with a fence above every earlier one and a renewal at the same fence; and, across the loss of the lease-primary host, the re-grant of the expired resource by the other host's runtime has a fence above the pre-outage grant's.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k "test_ac2 or test_ac5_ac2"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21424-ac3-idempotent
+    description: >-
+      A repeated acquire with one request_id, on the same store, on the other store and ten times concurrently, returns the first grant's lease_id and fence; ten concurrent first acquires with one fresh request_id all return one grant.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k test_ac3
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21424-ac4-projection
+    description: >-
+      Every ordering of seven lease events through the pure reducer ends at the highest fence per (kind, resource), and a lower-fence event emits no intent; every ordering of three upserts through the writer's SQL statement against the migration's table (run in SQLite) leaves the highest fence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lease_projection_omn21424.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn21424-ac5-host-loss
+    description: >-
+      Two runtime processes, each beside its own member of a three-member loopback etcd, run the lease orchestrator as a primary node; the test SIGKILLs the runtime that answered and stops its etcd member, asks for a new acquire, and asserts the other host's runtime grants it within 30 s, printing the AC5 receipt with the gap.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py -q -n 0 -k test_ac5_ac2
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-omn21424-ac6-check-fence
+    description: >-
+      check_fence over a released grant's fence (expired), the same fence after a newer grant (stale), an absent resource (expired) and a stopped etcd (unknown), and over a closed port (unknown); the live fence reads ok.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease/test_check_fence_omn21424.py -q -n 0 -k "test_ac6"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-omn21424-deploy-lease-surface
+    description: >-
+      Read the committed lease source at the checkout commit through the GitHub contents API. Fail when the grant transaction's slot compare, the projection upsert's fence guard, or check_fence's unknown on an unreachable store and stale on a lower fence is absent. Runs on hosted runners without a container daemon or access to a private runtime; the lease is not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC1, AC4, AC6]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F '_absent(slot_key),' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_projection.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'WHERE lease_projection.fence <= EXCLUDED.fence' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra

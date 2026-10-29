@@ -254,6 +254,7 @@ databases:
               - dep_health_findings
               - hook_events
               - instruction_eval_aggregate_snapshots
+              - lease_projection
               - llm_cost_aggregates
               - local_environment
               - metering_summary
