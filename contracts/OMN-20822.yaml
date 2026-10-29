@@ -1,0 +1,88 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20822"
+title: "An effect node creates, grants and verifies a developer principal on the broker it is pointed at"
+summary: >-
+  node_broker_principal_effect (EFFECT_GENERIC, an onex.nodes entry point, runtime_profiles [local-dev]) routes three operations by operation_match: broker.principal.list (HandlerBrokerPrincipalList, the Admin API reachability check), broker.principal.apply (HandlerBrokerPrincipalApply) and broker.principal.verify (HandlerBrokerPrincipalVerify). The ticket named a `cli` profile; the profile registry is canonical in omnibase_core (OMN-12957) and refuses an unregistered name, so the contract names local-dev, a registered profile no deployed runtime carries, which keeps main and effects off the node, as OMN-20821 did. Its def-B handlers live in omnibase_infra.handlers and its models in omnibase_infra.models.developer_principal, because node-local handler directories in this repository are reserved for allowlisted infra nodes. Apply runs the mint plan's fixed order: list the broker's users, read the principal's ACLs and refuse any outside the plan, create the planned ACLs (waiting for every create_acls future), read them back and compare as a set, and only then set the SCRAM password through the Redpanda Admin API. A failure reports acls_applied and password_set. The password is read from the environment variable the request names and appears in no result, log record or exception. The Kafka clients reuse build_confluent_auth_config_from_env.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20822-broker-principal-effect"
+    statement: "An effect node applies a developer principal plan to the broker in the mint order, verifies it, and never discloses the password."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: apply sets the password only after every planned ACL has been created and read back as a set equal to the plan, including when `create_acls` completes some resources late or fails on one -- falsifier: `uv run pytest tests/unit/nodes/node_broker_principal_effect -k grants_complete_before_password -q` shows a password call before the read-back, a password call after a partial failure, or a delayed future not awaited"
+      - id: "AC2"
+        statement: "AC2: a rerun for an existing principal leaves the ACL set identical, reports `rotate`, and a principal that holds an ACL outside the plan is refused with the extra named and the password untouched -- falsifier: `uv run pytest tests/integration/customer_path/test_broker_principal_effect.py -k \"rerun or drift\" -q` shows an ACL added or removed on the second run, `create` reported, or the password changed on the drift case"
+      - id: "AC3"
+        statement: "AC3: a sentinel password appears in no output model dump, no captured log record and no exception string, including on the failure paths -- falsifier: `uv run pytest tests/unit/nodes/node_broker_principal_effect -k no_secret -q` finds the sentinel in one of the three"
+      - id: "AC4"
+        statement: "AC4: against the auth-required Redpanda, with a deliberately provisioned set of three topics of which the principal is granted two, the principal lists exactly those two topics, a produce to a granted topic succeeds, and a produce to the third is refused with `TOPIC_AUTHORIZATION_FAILED` -- falsifier: `uv run pytest tests/integration/customer_path/test_broker_principal_effect.py -k enforcement -q` shows a different visible set, a failed granted produce, or a successful ungranted one"
+      - id: "AC5"
+        statement: "AC5: with the Admin API unreachable at list, the effect raises a typed error naming the URL and the operation and has created no ACL; with it failing after the ACLs exist, the error reports `acls_applied` true and `password_set` false, and for a principal that already exists its previous password still authenticates -- falsifier: `uv run pytest tests/unit/nodes/node_broker_principal_effect -k admin_down -q` shows a success result, an ACL created before the failed list, a missing flag, or an old password refused after a failed rotation"
+      - id: "AC6"
+        statement: "AC6: the manifest filters for `main` and `effects` own none of the node, and the canonical-file-shape ratchet, the contract validation and the new pre-commit entry pass with no baseline entry added -- falsifier: `pre-commit run --all-files` adds or needs a baseline line, or either profile owns the node in `-k profile_ownership`"
+evidence_requirements:
+  - kind: "tests"
+    description: "The effect node's unit tests pass."
+    command: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20822-ac1-grants-complete-before-password"
+    description: >-
+      Through a fake broker that journals every call, apply runs list_users, list_acls, create_acls, list_acls and only then set_password; a create that fails on one binding or a read-back missing one sets no password and reports acls_applied false. The ACL client waits for a future completed 0.3 s late, raises naming "1 of 3" when one binding fails while the others still complete, and treats a future past its timeout as a failure. Fails at the parent, which has no handler.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k grants_complete_before_password"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac3-no-secret"
+    description: >-
+      A sentinel password is absent from the result's model dump and repr, every captured log record, and the raised error's str, repr and attributes, on success and on the failure paths (an error text echoing the password, an Admin API 500, the Admin API down, a missing password variable); the Admin API client sends it only in the request body and keeps it out of its OSError text.
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k no_secret"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac5-admin-down"
+    description: >-
+      The Admin API down at list raises BrokerPrincipalError naming the URL and broker.principal.apply with no ACL call made; down at the password step after the ACLs exist reports acls_applied true and password_set false; on a rotation the principal's previous password is unchanged.
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k admin_down"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac6-profile-ownership"
+    description: >-
+      discover_contracts_from_paths over the node's contract, filtered by filter_manifest_for_runtime_profile, leaves nothing for main or effects and the node for local-dev (positive control). The canonical-file-shape ratchet and contract validation hooks run in CI on the same head with no baseline file changed in this change.
+    source: "manual"
+    binds_ac: ["AC6"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k profile_ownership"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac6-pre-commit-entry"
+    description: >-
+      Exactly one broker-principal-effect pre-commit entry runs the node's unit tests with pass_filenames false, on a change to the node, its handlers or its models.
+    source: "manual"
+    binds_ac: ["AC6"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k pre_commit_entry"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-deploy-probe-handler-source"
+    description: >-
+      Deploy-scope source readback for a node no deployed runtime carries (its only profile is local-dev): read the apply handler at the evaluated commit through GitHub and require the handler class the change introduces. It does not deploy a service or claim a runtime runs it. Fails at the parent, which has no such file. The AC1 tests above exercise the handler's behaviour.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "command"
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_broker_principal_apply.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "class HandlerBrokerPrincipalApply:" > /dev/null'
+        cwd: "${OMNI_HOME}/omnibase_infra"
