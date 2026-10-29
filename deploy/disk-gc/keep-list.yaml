@@ -99,6 +99,10 @@ dangling_min_age_hours: 6
 # procedure and the two flag traps are the knowledge-base-internal runbook
 # runbooks/2026-09-18-buildkit-cache-ceiling-201.md.
 #
+# OMN-19211: the dedicated lab builders (deploy/buildkit/builders.yaml) carry the
+# same ceiling in deploy/buildkit/buildkitd.toml, and that one IS applied, because
+# a builder's config needs no dockerd reload. A test fails if the three drift.
+#
 # Lowering this makes the next build colder, never less correct. The deploy
 # agent already models a cold cache (COLD_CACHE_MULTIPLIER in
 # deploy_agent/host_conditions.py) and widens its ceiling accordingly.

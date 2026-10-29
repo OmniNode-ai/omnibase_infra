@@ -32,8 +32,10 @@ from deploy_agent import recreate_supervisor
 from deploy_agent.build_budget import (
     HARD_UPPER_BOUND_SECONDS,
     EnumBuildOutcome,
+    LaneBuilderError,
     ModelBuildBudget,
     derive_image_build_budget,
+    lane_builder_env,
     parse_build_progress,
 )
 from deploy_agent.compose_budget import (
@@ -5731,8 +5733,19 @@ class DeployExecutor:
         # marker written on the way in would report the core phase failed
         # whenever a later runtime build raised.
         build_phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+        # OMN-19211: an instance that names a declared builder builds on it
+        # instead of dockerd's embedded BuildKit, whose cache index loads before
+        # dockerd's API and stopped every container on the lab host when it was damaged.
+        # Resolved before the timed command: creating a builder is not a build
+        # and must not spend the build's ceiling. Refused, never fallen back, when
+        # the builder cannot be made ready.
         try:
-            result = _run(cmd, timeout=timeout, env=_compose_env())
+            build_env = {**_compose_env(), **lane_builder_env(os.environ)}
+        except LaneBuilderError:
+            on_phase_update(build_phase, PhaseStatus.FAILED)
+            raise
+        try:
+            result = _run(cmd, timeout=timeout, env=build_env)
         except subprocess.TimeoutExpired as exc:
             on_phase_update(build_phase, PhaseStatus.FAILED)
             # OMN-18615 (AC2): say what the build had DONE, not only what it
