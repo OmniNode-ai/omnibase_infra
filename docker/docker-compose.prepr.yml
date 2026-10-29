@@ -308,6 +308,10 @@ services:
     ports: !override
       - "${PREPR_RUNTIME_MAIN_PORT:?PREPR_RUNTIME_MAIN_PORT must be set - the slot's reserved runtime port from prepr_slot_policy.py}:8085"
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       # OMN-19494 (LO4): the slot's own lane id, `prepr-1` or `prepr-2`. This
       # file layers over docker-compose.dev-lane.yml, which declares
@@ -349,6 +353,10 @@ services:
       # comment-only match still fails it.
       - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8085"
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
