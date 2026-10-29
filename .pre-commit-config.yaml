@@ -493,6 +493,7 @@ repos:
         entry: '[^\n]\Z|\n\n\Z'
         args: [--multiline]
         types: [text]
+        require_serial: true
         exclude: ^\.github/workflows/|\.captured$
       # OMN-18434. A test that shells out to git inherits GIT_DIR from the hook
       # running it and rewrites THIS repository instead of its fixture -- which
