@@ -1,54 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Direct-invocation .200-default host guard for pytest (OMN-15977 Hole 1).
+"""Guard unnarrowed local pytest runs using committed deployment host tables.
 
-The OMN-15059 guard (``scripts/hooks/prepush_smart_tests.sh``) refuses/redirects
-the heavy full-suite path when it runs -- but ONLY when pytest is launched via
-that hook, i.e. via ``git push``. It hooks the push path, not pytest itself.
-
-Build agents routinely run the full suite DIRECTLY as a "prove nothing else
-broke" verification step:
-
-    uv run pytest tests/ -q > .gate_logs/full_suite3.log
-
-No pre-push hook fires for that invocation, so the ``.200``-default host-check
-is never consulted. Observed 3x in one lane (full_suite1/2/3) on 2026-08-12,
-and confirmed as a live coverage hole in OMN-15977.
-
-This module is the SAME host-identity check the bash hook performs
-(``guard_full_suite_host`` in ``prepush_smart_tests.sh``), reimplemented so it
-can also fire for a bare/direct ``pytest`` invocation via
-``pytest_configure`` -- registered from the repo-root ``conftest.py`` so it
-is loaded for every collection, regardless of which testpath is targeted.
-
-Design mirrors the bash guard's documented posture exactly (see
-``prepush_smart_tests.sh`` OMN-15059 section):
-
-  * ROUTING OPTIMIZATION, NOT a security control. If host identity cannot be
-    determined, FAIL OPEN -- proceed locally rather than lock a developer out
-    of their own repo on an ambiguous read.
-  * CI runners are never gated -- this guard exists to keep a contended local
-    Mac from being driven to a load spike by a runaway full suite; a
-    short-lived, isolated CI runner is not that failure mode.
-  * The escape hatch is the same one the bash hook uses -- one mechanism for
-    both entry points, not two. As of OMN-16480 that mechanism is a single-use,
-    repo+HEAD-scoped, TTL-bounded, receipted grant token
-    (``scripts/hooks/prepush_override_grant.py``), NOT an environment variable.
-    Any ``PREPUSH_ALLOW_*`` variable present in the environment is now a HARD
-    REFUSAL here, exactly as it is in the bash hook: an env var is inherited by
-    every descendant process, so honoring one let a single leak disarm the gate
-    for a whole process tree and recursively spawn a second 44,064-test suite
-    (~9h03m lost, friction report F-01/F-04). See that module's docstring.
-  * Only fires on an UNNARROWED collection targeting the full-suite root (or
-    an ancestor of it) -- a targeted/narrow run (a single test file, a
-    ``-k``/``-m`` filter) always stays runnable locally. Gating every
-    invocation would get this guard disabled within a week, which is worse
-    than no guard (verbatim rationale carried over from the bash hook).
-
-Kept import-light and dependency-free (only ``os``/``socket``/``pytest``) so it
-is trivial to unit test the pure decision function directly, and so the guard
-itself can never be the thing that breaks pytest startup.
+CI and narrowed runs stay exempt. Missing private configuration designates no
+host and requires configuration or a scoped grant. Present untrusted tables
+refuse with their specific reason before a grant can be consumed.
 """
 
 from __future__ import annotations
@@ -57,9 +14,11 @@ import argparse
 import os
 import socket
 import subprocess
+import sys
 from pathlib import Path
 
 from scripts.hooks.prepush_override_grant import (
+    GrantError,
     consume,
     env_rejection_message,
     has_active_override,
@@ -97,138 +56,88 @@ def _override_var(label: str) -> str:
     return f"PREPUSH_HOST_OVERRIDE_{sanitized}"
 
 
-def designated_hostnames(
-    env: dict[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Every hostname that may run a full suite, from the COMMITTED host tables.
+class HostTableError(ValueError):
+    """A present host table cannot be trusted."""
 
-    OMN-16991. This guard used to read a container-hosted gate runner's identity
-    straight off ``PREPUSH_201_GATE_RUNNER_HOSTNAME`` -- and the bash hook's
-    ``scrub_prepush_override_env`` deliberately unsets every ``PREPUSH_*`` name
-    before ``exec uv run pytest``, so on a host whose real ``hostname -s``
-    differs from its container's, the sanctioned override never reached THIS
-    guard. The push passed the bash guard and was then refused by its own pytest
-    child.
 
-    The scrub is NOT the bug and is not weakened here -- an inheritable
-    ``PREPUSH_*`` override crossing into the pytest tree is exactly what turned
-    one sanctioned grant into a recursive 44,064-test launcher (OMN-16425 F-01,
-    ~9h03m). The bug was sourcing host IDENTITY from an environment variable
-    that must not cross a process boundary. Identity now comes from a committed
-    file that needs no inheritance at all.
+def _workspace_config_root(env: dict[str, str] | os._Environ[str]) -> Path | None:
+    """Pre-push permits explicit config or the registry sibling only."""
+    if configured := env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip():
+        return Path(configured).resolve()
+    if registry := env.get("OMNI_HOME", "").strip():
+        from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
 
-    Read from ``git show HEAD:`` rather than the working tree, and ignored
-    outright if the working copy diverges, so an uncommitted row cannot
-    self-designate this machine. The shipped table carries a neutral disabled
-    row; the deployment's hosts come from its private table (see
-    ``_private_table_text``). With no private table, or with an unreadable or
-    untrusted one, NO host is designated: the caller then requires a grant, and
-    no built-in host name stands in (OMN-20939).
-    """
-    active_env: dict[str, str] | os._Environ[str] = os.environ if env is None else env
-    try:
-        repo_root = resolve_repo_root()
-        committed = subprocess.run(
-            ["git", "-C", str(repo_root), "show", f"HEAD:{HOST_TABLE_REL}"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
+        return workspace_runtime_config_root(
+            Path(registry), environment=env, allow_developer_config=False
         )
-        if committed.returncode != 0 or not committed.stdout.strip():
-            return ()
-        working = repo_root / HOST_TABLE_REL
-        if working.is_file() and working.read_text() != committed.stdout:
-            return ()
-        table_text = committed.stdout
-        private_text = _private_table_text(active_env)
-        if private_text:
-            table_text = f"{table_text}\n{private_text}"
-        names: list[str] = []
-        for line in table_text.splitlines():
-            line = line.split("#", 1)[0]
-            if not line.strip():
-                continue
-            fields = line.split("\t")
-            if len(fields) < 12 or fields[11] != "authorizing":
-                continue
-            label, hostname = fields[0], fields[2]
-            legacy = _LEGACY_OVERRIDE_BY_LABEL.get(label)
-            if legacy and active_env.get(legacy):
-                hostname = active_env[legacy]
-            override = active_env.get(_override_var(label))
-            if override:
-                hostname = override
-            names.append(hostname)
-        return tuple(names)
-    except Exception:  # noqa: BLE001 - deliberately total; see below
-        # Deliberately broad. This runs in `pytest_configure`, where ANY escaping
-        # exception becomes an INTERNALERROR that kills the whole session before a
-        # single test is collected -- a far worse failure than refusing. An
-        # unreadable or untrusted table designates NO host, which is the strict
-        # direction: the full-suite guard then requires a grant. There is no
-        # built-in host name to fall back to (OMN-20939).
-        # `resolve_repo_root()` raising outside a git checkout is the concrete
-        # case: it raises GrantError, not OSError.
-        return ()
+    return None
 
 
-def _workspace_config_root(
-    env: dict[str, str] | os._Environ[str],
-) -> Path | None:
-    """The private config root: ONEX_WORKSPACE_CONFIG_ROOT, else the sibling of OMNI_HOME."""
-    configured = env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
-    if configured:
-        return Path(configured)
-    registry_root = env.get("OMNI_HOME", "").strip()
-    if not registry_root:
-        return None
-    # Keep the sibling dependency in its existing owner. Pre-push's contract
-    # permits two sources and must not opt into developer config implicitly.
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
-    return workspace_runtime_config_root(
-        Path(registry_root), environment=env, allow_developer_config=False
-    )
-
-
-def _private_table_text(env: dict[str, str] | os._Environ[str]) -> str | None:
-    """The deployment's host table text, or None when none is configured.
-
-    Mirrors ``prepush_private_table_text`` in prepush_dispatch.sh. A root that is
-    itself the top of a git checkout is read from its COMMITTED copy and refused
-    (raises) when the working tree differs; any other root is read as a file.
-    """
-    root = _workspace_config_root(env)
-    if root is None:
-        return None
-    path = root / PRIVATE_TABLE_REL
-    if not path.is_file():
-        return None
+def _table_text(root: Path, relative: str, *, private: bool) -> str | None:
+    """Read a table, requiring HEAD parity when its root is a git checkout."""
+    path = root / relative
+    kind = "private host table" if private else "host table"
     git_env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_ENV}
-    top = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-        env=git_env,
-    )
-    if top.returncode == 0 and Path(top.stdout.strip()).resolve() == root.resolve():
-        committed = subprocess.run(
-            ["git", "-C", str(root), "show", f"HEAD:{PRIVATE_TABLE_REL}"],
+    try:
+        if private and not path.exists() and not path.is_symlink():
+            return None
+        working = path.read_text(encoding="utf-8")
+        top = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             timeout=15,
             check=False,
             env=git_env,
         )
-        if committed.returncode != 0:
-            raise ValueError("private host table has no committed copy at HEAD")
-        if path.read_text() != committed.stdout:
-            raise ValueError("private host table differs between working tree and HEAD")
+        if private and (
+            top.returncode or Path(top.stdout.strip()).resolve() != root.resolve()
+        ):
+            return working
+        committed = subprocess.run(
+            ["git", "-C", str(root), "show", f"HEAD:{relative}"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env=git_env,
+        )
+        if committed.returncode:
+            raise HostTableError(f"{kind} has no committed copy at HEAD ({path})")
+        if working != committed.stdout:
+            raise HostTableError(
+                f"{kind} differs between the working tree and HEAD ({path})"
+            )
         return committed.stdout
-    return path.read_text()
+    except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        raise HostTableError(f"{kind} unreadable ({path}): {exc}") from exc
+
+
+def _private_table_text(
+    env: dict[str, str] | os._Environ[str],
+    relative: str = PRIVATE_TABLE_REL,
+) -> str | None:
+    """None means absent; present untrusted data raises HostTableError."""
+    root = _workspace_config_root(env)
+    return _table_text(root, relative, private=True) if root and relative else None
+
+
+def designated_hostnames(env: dict[str, str] | None = None) -> tuple[str, ...]:
+    """Committed identities; untrusted tables are refusals, never empty defaults."""
+    active_env = os.environ if env is None else env
+    table = _table_text(resolve_repo_root(), HOST_TABLE_REL, private=False) or ""
+    table += "\n" + (_private_table_text(active_env) or "")
+    names = []
+    for line in table.splitlines():
+        fields = line.split("#", 1)[0].split("\t")
+        if len(fields) < 12 or fields[11] != "authorizing":
+            continue
+        label, hostname = fields[0], fields[2]
+        legacy = _LEGACY_OVERRIDE_BY_LABEL.get(label, "")
+        names.append(
+            active_env.get(_override_var(label)) or active_env.get(legacy) or hostname
+        )
+    return tuple(names)
 
 
 def is_ci_environment(env: dict[str, str] | None = None) -> bool:
@@ -238,12 +147,7 @@ def is_ci_environment(env: dict[str, str] | None = None) -> bool:
 
 
 def resolve_local_hostname() -> str:
-    """Short hostname of the current machine, or "" if undetermined.
-
-    Mirrors the bash guard's ``hostname -s`` call and its fail-open posture:
-    an exception or empty result here is NOT distinguished from a legitimate
-    "could not verify" read by any caller of this function.
-    """
+    """Short hostname of the current machine, or "" if undetermined."""
     try:
         return socket.gethostname().split(".", 1)[0]
     except OSError:
@@ -258,17 +162,7 @@ def is_full_suite_target(
     markexpr: str,
     full_suite_target: str,
 ) -> bool:
-    """Whether this invocation is an unnarrowed collection of the full suite.
-
-    Mirrors ``selection_is_whole_suite`` in ``prepush_smart_tests.sh``: true
-    when some target path IS the full-suite root or a directory ANCESTOR of
-    it (so a bare ``pytest`` with no args, which falls back to ``testpaths``,
-    is caught too), AND neither ``-k`` nor ``-m`` narrowed the run.
-
-    A genuinely narrow target (a single test file, ``tests/unit/scripts/``)
-    is strictly BELOW the full-suite root and never trips this -- only a
-    target that covers the whole thing does.
-    """
+    """Whether this invocation is an unnarrowed collection of the full suite."""
     if keyword or markexpr:
         return False
     targets = list(args) if args else list(testpaths)
@@ -289,19 +183,7 @@ def full_suite_host_violation_message(
     additional_target_hostnames: tuple[str, ...] = (),
     override_authorized: bool,
 ) -> str | None:
-    """Return a refusal message, or None if this run may proceed.
-
-    Pure decision function -- no I/O, no env reads -- so it is directly unit
-    testable without subprocess/monkeypatch machinery. ``host`` "" means
-    "could not be determined" and fails OPEN (returns None), matching the
-    bash guard's documented routing-optimization posture verbatim.
-
-    ``override_authorized`` is resolved by the caller from a consumed grant
-    token, never from the environment (OMN-16480). It used to be
-    ``allow_override``, read straight off ``PREPUSH_ALLOW_LOCAL_FULL_SUITE``;
-    the rename is the point, not cosmetic -- the input is now a spent,
-    scope-checked authorization rather than an ambient, inheritable flag.
-    """
+    """Return a refusal message, or None if this run may proceed."""
     if not host:
         return None
     allowed_hostnames = tuple(
@@ -344,23 +226,7 @@ def full_suite_host_violation_message(
 
 
 def override_authorization(*, context: str) -> bool:
-    """Whether a scoped override authorizes THIS full-suite run.
-
-    Two ways in, in priority order:
-
-    1. An **activation record** already covering this process -- the bash hook
-       consumed a grant and then spawned this pytest as its child. Without this
-       leg the hook would consume the one grant for itself and its own child
-       pytest would then refuse, so the authorized run could never actually
-       execute. It is checked first precisely so the hand-off does not burn a
-       second grant.
-    2. A **grant** minted for this repo and this HEAD, claimed here and spent.
-       That is the direct-``pytest``-invocation path, where no hook ran at all.
-
-    Fails CLOSED on anything indeterminate (not a git worktree, git
-    unavailable, unreadable state): a guard that cannot prove authorization
-    must behave exactly like one that was denied it.
-    """
+    """Whether a scoped override authorizes THIS full-suite run."""
     try:
         repo_root = resolve_repo_root()
         head_sha = resolve_head_sha(repo_root)
@@ -380,18 +246,7 @@ def override_authorization(*, context: str) -> bool:
 
 
 def enforce(config: object, full_suite_target: str) -> None:
-    """pytest_configure entry point -- call from conftest.py.
-
-    Deliberately hooked at ``pytest_configure`` (before collection starts),
-    not ``pytest_collection_modifyitems`` (after collection completes): the
-    whole point is to refuse BEFORE paying collection cost on a full-suite
-    target, which for a several-thousand-test tree is itself non-trivial
-    wall-clock, not just before the CPU-bound test *execution* that follows.
-
-    ``config`` is a ``pytest.Config``; typed as ``object`` here to keep this
-    module importable (and unit-testable) without a hard ``pytest`` import
-    dependency at module load time.
-    """
+    """pytest_configure entry point -- call from conftest.py."""
     if is_ci_environment():
         return
     option = config.option  # type: ignore[attr-defined]
@@ -434,7 +289,10 @@ def enforce(config: object, full_suite_target: str) -> None:
     # OMN-16991: identity comes from the committed host table, not from
     # PREPUSH_* env vars the bash hook's scrub deliberately strips before it
     # spawns this pytest. See designated_hostnames().
-    all_designated = designated_hostnames()
+    try:
+        all_designated = designated_hostnames()
+    except (HostTableError, GrantError) as exc:
+        pytest.exit(f"direct full-suite pytest invocation refused: {exc}", returncode=1)
     target_hostname = all_designated[0] if all_designated else ""
     additional_hostnames = tuple(all_designated[1:])
     if (
@@ -466,14 +324,36 @@ def enforce(config: object, full_suite_target: str) -> None:
 
 
 def main() -> None:
-    """Expose the same config-root resolver to the repository-neutral shell hook."""
+    """Expose the private reader to the repository-neutral shell library."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace-config-root", action="store_true", required=True)
-    parser.parse_args()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--workspace-config-root", action="store_true")
+    mode.add_argument("--private-table", metavar="RELATIVE_PATH")
+    parser.add_argument("--status", action="store_true")
+    args = parser.parse_args()
     root = _workspace_config_root(os.environ)
-    if root is None:
-        raise SystemExit(1)
-    print(root)
+    if args.workspace_config_root:
+        if root is None:
+            raise SystemExit(1)
+        print(root)
+        return
+    try:
+        table = _private_table_text(os.environ, args.private_table)
+    except HostTableError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+    if args.status:
+        if table is None:
+            print(
+                f"deployment host table NOT CONFIGURED: {root}/{args.private_table} is absent -- "
+                "set ONEX_WORKSPACE_CONFIG_ROOT to a root holding the declared table"
+            )
+        else:
+            print(f"deployment host table: {root}/{args.private_table}")
+    elif table is None:
+        raise SystemExit(2)
+    else:
+        print(table, end="")
 
 
 if __name__ == "__main__":
