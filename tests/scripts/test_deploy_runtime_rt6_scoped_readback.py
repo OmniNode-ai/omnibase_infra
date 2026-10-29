@@ -329,6 +329,10 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         # rather than in RUNTIME_SERVICES: a prod `up -d --no-deps` naming it
         # would start it on a lane that never opted in.
         "tenant-projection-writer",
+        # OMN-21481: the tenth. The cost estimator page is recreated by every
+        # dev-lane deploy so it comes back after one, which puts it in the
+        # readback's scope too.
+        "cost-estimator-web",
     ]
     ps_map = {
         "runtime-effects": "omninode-runtime-effects",
@@ -347,6 +351,7 @@ def test_unscoped_run_verifies_full_default_service_set(tmp_path: Path) -> None:
         "infra-routing-decisions-consumer": "omninode-infra-routing-decisions-consumer",
         "onex-api": "onex-api",
         "tenant-projection-writer": "omnimarket-tenant-projection-writer",
+        "cost-estimator-web": "omninode-cost-estimator-web",
     }
     revision_map = dict.fromkeys(ps_map.values(), GIT_SHA)
     # omninode-runtime is resolved via resolve_lane_runtime_container_name, not
