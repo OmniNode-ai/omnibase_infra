@@ -35,6 +35,7 @@ OPERATOR_OVERRIDE = "DEV_LANE_TENANT_ID"
 HOUSE_TENANT_UUID = "820272f9-4aaf-5add-a2df-0af942852ab2"
 EXPECTED_ENTRY = f"${{{OPERATOR_OVERRIDE}:-{HOUSE_TENANT_UUID}}}"
 RUNTIMES = ("omninode-runtime", "runtime-effects")
+OPERATOR_TENANT_UUID = "00000000-0000-4000-8000-000000000001"
 
 
 @pytest.mark.parametrize("service", RUNTIMES)
@@ -50,14 +51,15 @@ def test_the_dev_lane_renders_the_house_tenant_by_default(service: str) -> None:
 
 
 def test_the_operator_env_overrides_the_lane_tenant() -> None:
-    services = render_stack(DEV_LANE_STACK, {OPERATOR_OVERRIDE: "operator-tenant"})
+    services = render_stack(DEV_LANE_STACK, {OPERATOR_OVERRIDE: OPERATOR_TENANT_UUID})
     assert {
         name: services[name]["environment"].get(TENANT) for name in RUNTIMES
-    } == dict.fromkeys(RUNTIMES, "operator-tenant")
+    } == dict.fromkeys(RUNTIMES, OPERATOR_TENANT_UUID)
 
 
-def test_the_context_source_tenant_stays_separate() -> None:
-    env = render_stack(DEV_LANE_STACK)["runtime-effects"]["environment"]
+@pytest.mark.parametrize("overrides", [{}, {OPERATOR_OVERRIDE: OPERATOR_TENANT_UUID}])
+def test_the_context_source_tenant_stays_separate(overrides: dict[str, str]) -> None:
+    env = render_stack(DEV_LANE_STACK, overrides)["runtime-effects"]["environment"]
     assert env["ONEX_CONTEXT_SOURCE_TENANT_ID"] == "lab"
 
 

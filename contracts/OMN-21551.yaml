@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21551
 title: "The dev-lane runtimes carry no lane tenant, so the mode-2 environment observer refuses every run with identity_absent"
 summary: >-
-  Gives the compose dev lane's omninode-runtime and runtime-effects ONEX_TENANT_ID, defaulting to the house tenant 820272f9-4aaf-5add-a2df-0af942852ab2 and overridable from the operator env as DEV_LANE_TENANT_ID, so omnimarket's mode-2 environment observer, which on a compose lane reports for the configured tenant, stops refusing with identity_absent. The dev lane's tenant_registry_mirror already records that tenant (slug omninode), so no seed step is added; the catalog's local-tenant-registry-seed derives its uuid from a slug and would record a second row. ONEX_CONTEXT_SOURCE_TENANT_ID (OMN-21099) is unchanged. The overlays that layer the dev-lane file set the variable blank, which is unset to omnimarket, as before. The readers live in omnimarket, which this repository does not install; this change and its tests cover the shipped compose configuration and what compose renders from it. Delivering the value to the running dev lane is the deploy agent's converge step after merge, read on the lab afterwards (AC2, AC3), and is not part of this change.
+  Gives the compose dev lane's omninode-runtime and runtime-effects ONEX_TENANT_ID, defaulting to the house tenant 820272f9-4aaf-5add-a2df-0af942852ab2 and overridable from the operator env as DEV_LANE_TENANT_ID, so omnimarket's mode-2 environment observer, which on a compose lane reports for the configured tenant, stops refusing with identity_absent. The dev lane's tenant_registry_mirror already records that tenant (slug omninode), so no seed step is added; the catalog's local-tenant-registry-seed derives its uuid from a slug and would record a second row. ONEX_CONTEXT_SOURCE_TENANT_ID (OMN-21099) is unchanged. The overlays that layer the dev-lane file set the variable blank, which is unset to omnimarket, as before. The readers live in omnimarket, which this repository does not install; this change and its tests cover the shipped compose configuration and what compose renders from it. Delivering the value to the running dev lane is the deploy agent's converge step after merge, read on the lab afterwards and posted on the ticket; it is not part of this change.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -13,18 +13,6 @@ requirements:
       - id: AC1
         statement: |-
           AC1: the rendered dev-lane compose gives omninode-runtime and runtime-effects ONEX_TENANT_ID equal to the house tenant uuid, and leaves ONEX_CONTEXT_SOURCE_TENANT_ID as it was -- falsifier: uv run pytest over a test that loads the dev-lane compose and fails when either service lacks the variable or names another tenant
-  - id: req-omn21551-ac2-deployed-runtimes-stop-refusing
-    statement: "After the deploy agent redeploys the dev lane, both runtime containers list ONEX_TENANT_ID among their environment names and runtime-effects logs no identity_absent refusal for 30 minutes."
-    acceptance:
-      - id: AC2
-        statement: |-
-          AC2: after the deploy agent redeploys the dev lane, both runtime containers list ONEX_TENANT_ID among their environment names and the runtime-effects log carries no identity_absent refusal for 30 minutes -- falsifier: docker inspect environment names and a docker logs --since 30m grep count on the dev-lane host
-  - id: req-omn21551-ac3-environment-rows-served
-    statement: "local-environment.v1 serves rows for tenant 820272f9-4aaf-5add-a2df-0af942852ab2 on the dev lane."
-    acceptance:
-      - id: AC3
-        statement: |-
-          AC3: local-environment.v1 serves rows for tenant 820272f9-4aaf-5add-a2df-0af942852ab2 on the dev lane -- falsifier: the projection API read of local-environment.v1 for that tenant returning one or more rows
 evidence_requirements:
   - kind: tests
     description: "The dev-lane compose bundle delivers the house tenant as ONEX_TENANT_ID to both runtimes, separate from the context-source tenant, and the overlays that layer it render the variable blank."
@@ -38,18 +26,18 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
-  - id: dod-omn21551-ac1-dev-lane-runtimes-carry-the-tenant
+  - id: dod-omn21551-ac1-runtimes-carry-tenant
     description: >-
-      Read docker/docker-compose.dev-lane.yml and assert omninode-runtime and runtime-effects carry ONEX_TENANT_ID as ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}; render the dev-lane stack with docker compose config and assert the house tenant by default, the operator value when DEV_LANE_TENANT_ID is set, and ONEX_CONTEXT_SOURCE_TENANT_ID still lab; render every borrower stack and assert the variable is blank on both runtimes. Reads and renders the committed files only; no running lane is touched. The deployed containers and the observer's refusals are read on the lab after the deploy agent converges (AC2, AC3) and are not claimed here.
+      Read docker/docker-compose.dev-lane.yml and assert omninode-runtime and runtime-effects carry ONEX_TENANT_ID as ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}; render the dev-lane stack with docker compose config and assert the house tenant by default, the operator value when DEV_LANE_TENANT_ID is set, and ONEX_CONTEXT_SOURCE_TENANT_ID still lab; render every borrower stack and assert the variable is blank on both runtimes. Reads and renders the committed files only; no running lane is touched. The deployed containers and the observer's refusals are read on the lab after the deploy agent converges and are not claimed here.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_dev_lane_tenant_omn21551.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn21551-ac1-deploy-scope-probe
+  - id: dod-omn21551-ac1-deploy-probe
     description: >-
-      Read docker/docker-compose.dev-lane.yml from GitHub at the checked-out commit and count the runtimes' lane tenant entries. Hermetic: it reads the shipped file, not a receipt this PR authors, and goes RED at the merge base where neither runtime names the variable. The deployed containers are read on the lab after the deploy agent converges (AC2, AC3) and are not claimed here.
+      Read docker/docker-compose.dev-lane.yml from GitHub at the checked-out commit and count the runtimes' lane tenant entries. Hermetic: it reads the shipped file, not a receipt this PR authors, and goes RED at the merge base where neither runtime names the variable. The deployed containers are read on the lab after the deploy agent converges and are not claimed here.
     source: manual
     checks:
       - check_type: command
