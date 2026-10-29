@@ -21,7 +21,7 @@ from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
     HandlerKafkaTopicDemandSource,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [pytest.mark.integration, pytest.mark.kafka, pytest.mark.asyncio]
 
 
 async def test_split_and_first_record_against_real_broker(
