@@ -3633,10 +3633,9 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 129,
-        "onex-change-control": 4
+        "omnibase_infra": 137
       },
-      "contracts_discovered": 154,
+      "contracts_discovered": 158,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 96,
       "probe_count": 1096,
@@ -3673,24 +3672,30 @@
         "installed": false,
         "package": "omnimemory",
         "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+      },
+      {
+        "installed": false,
+        "package": "onex-change-control",
+        "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
       }
     ],
     "expected_excluded_onex_nodes_packages": [
       "omnimarket",
       "omniclaude",
       "omniintelligence",
-      "omnimemory"
+      "omnimemory",
+      "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-13T15:23:59.279690+00:00",
+    "generated_at_utc": "2026-10-29T07:20:42.310533+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.39",
-      "omnibase-infra": "0.38.72",
+      "omnibase-core": "0.47.57",
+      "omnibase-infra": "0.38.77",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
       "omnimemory": null,
-      "onex-change-control": "0.5.1"
+      "onex-change-control": null
     },
     "p0_outcomes": {
       "P0-1_guard_tripped_orchestrators": {
@@ -3730,8 +3735,7 @@
     "required_missing_packages": [],
     "required_onex_nodes_packages": [
       "omnibase-core",
-      "omnibase-infra",
-      "onex-change-control"
+      "omnibase-infra"
     ],
     "ticket": "OMN-12548"
   },

@@ -50,7 +50,19 @@ dod_evidence:
     binds_ac: ["AC2"]
     checks:
       - check_type: "test_passes"
-        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"rerun or drift\""
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"rerun\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"drift and outside_topic\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"drift and deny\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"drift and host_scoped_allow\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"drift and unsupported_operation\""
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac4-enforcement"
     description: >-

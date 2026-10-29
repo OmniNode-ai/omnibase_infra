@@ -17,6 +17,7 @@ password, reaches curl on stdin rather than in its argv.
 
 from __future__ import annotations
 
+import base64
 import subprocess
 import time
 import uuid
@@ -86,7 +87,7 @@ def _docker_transport(
             "-K",
             "-",
         ]
-        assert broker.password not in " ".join(args)
+        _assert_no_credential_in(args, broker, headers, body)
         proc = subprocess.run(
             args,
             input="\n".join(config).encode() + b"\n",
@@ -101,6 +102,27 @@ def _docker_transport(
         return proc.stdout
 
     return _send
+
+
+def _assert_no_credential_in(
+    args: list[str],
+    broker: RedpandaSasl,
+    headers: dict[str, str],
+    body: bytes | None,
+) -> None:
+    """Nothing that carries a credential reaches the process's argv.
+
+    The superuser's password, its Basic token (base64, so reversible), every
+    header value and the request body (which carries the minted password) are
+    each looked for in the argv the transport is about to run.
+    """
+    argv = " ".join(args)
+    token = base64.b64encode(f"{broker.username}:{broker.password}".encode()).decode()
+    secrets = [broker.password, token, *headers.values()]
+    if body is not None:
+        secrets.append(body.decode())
+    for secret in secrets:
+        assert secret not in argv, "a credential reached curl's argv"
 
 
 def _quoted(value: str) -> str:
@@ -193,6 +215,17 @@ def _can_login(broker: RedpandaSasl, principal: str, password: str) -> bool:
     except PermissionError:
         return False
     return True
+
+
+def _refused_login(broker: RedpandaSasl, principal: str, password: str) -> bool:
+    """The broker refuses this password for the principal, as an authentication failure.
+
+    Read with ``rpk`` inside the broker, which answers a wrong SCRAM password at
+    once; the confluent client would instead wait out its metadata timeout.
+    """
+    proc = broker.rpk_as(RuntimePrincipal(principal, password), "cluster", "info")
+    said = f"{proc.stdout}\n{proc.stderr}".lower()
+    return proc.returncode != 0 and ("sasl" in said or "authenticat" in said)
 
 
 def _logs_in_within(
@@ -311,7 +344,7 @@ def test_drift_an_acl_outside_the_plan_is_refused_and_the_password_untouched(
     assert (result.acls_applied, result.password_set) == (False, False)
     assert _acls(broker).list_acls(principal) == held_before
     assert _can_login(broker, principal, "old-password-omn20822")
-    assert not _can_login(broker, principal, "new-password-omn20822")
+    assert _refused_login(broker, principal, "new-password-omn20822")
 
 
 # --- AC5: the Admin API failing after the ACLs exist ----------------------------
@@ -346,7 +379,7 @@ def test_admin_down_after_the_acls_keeps_the_previous_password(
     assert ADMIN_URL in str(raised.value)
     assert _acls(broker).list_acls(principal) == planned_bindings(plan)
     assert _can_login(broker, principal, "old-password-omn20822")
-    assert not _can_login(broker, principal, "new-password-omn20822")
+    assert _refused_login(broker, principal, "new-password-omn20822")
 
 
 # --- AC4: the broker enforces exactly the planned grants -------------------------

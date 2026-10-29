@@ -40,15 +40,17 @@ from enum import Enum
 from typing import Final, cast
 
 from confluent_kafka import KafkaException
-from confluent_kafka.admin import (
+from confluent_kafka.admin import AdminClient
+
+# The package re-exports these without ``__all__``, which ``mypy --strict`` does
+# not count as an export; import them from the modules that define them.
+from confluent_kafka.admin._acl import (
     AclBinding,
     AclBindingFilter,
     AclOperation,
     AclPermissionType,
-    AdminClient,
-    ResourcePatternType,
-    ResourceType,
 )
+from confluent_kafka.admin._resource import ResourcePatternType, ResourceType
 from pydantic import SecretStr
 
 from omnibase_core.enums import EnumCoreErrorCode

@@ -10,7 +10,7 @@ from __future__ import annotations
 from concurrent.futures import Future
 from typing import Protocol
 
-from confluent_kafka.admin import AclBinding, AclBindingFilter
+from confluent_kafka.admin._acl import AclBinding, AclBindingFilter
 
 
 class ProtocolBrokerPrincipalKafkaAdmin(Protocol):
