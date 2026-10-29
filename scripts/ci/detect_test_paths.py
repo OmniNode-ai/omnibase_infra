@@ -149,6 +149,32 @@ def is_collectable_test_file_name(name: str) -> bool:
 # part the new branch understands) is structural, not specific to migrations.
 MIGRATION_TREE_PREFIX = "docker/migrations/forward/"
 
+# OMN-19513 / omnibase_infra#5437: a compose recipe's tests are spread across
+# tests/unit/docker/, tests/unit/infra/ and tests/ci/, and none of them is named
+# by a path mapping. A compose file changed ALONE selected tests/unit/ through
+# `compute_selection`'s fallback, but the same file changed beside a tests/ci/
+# module gave `_resolve` a non-empty selection (tests/ci/ only) and suppressed
+# that fallback -- the trap documented at MIGRATION_TREE_PREFIX. #5437 edited
+# docker-compose.infra.yml and tests/ci/test_bifrost_lane_overlay.py, ran
+# Tests (Split 1..3/3) green on tests/ci/ alone, and was ejected five times by
+# the merge-group full suite, where tests/unit/docker/test_lane_overlay_dir_resolution.py
+# failed on the hand-kept list of overlay mounts. ADDITIVE: a compose recipe
+# keeps the tests/unit/ coverage it had when it was the only changed file.
+# A recipe is any YAML under docker/ (any depth) named docker-compose*.y[a]ml or
+# compose.y[a]ml, so per-proof compose.yml files and override variants route too.
+COMPOSE_RECIPE_TREE = "docker/"
+COMPOSE_RECIPE_SUFFIXES = (".yml", ".yaml")
+
+
+def _is_compose_recipe(path: str) -> bool:
+    if not path.startswith(COMPOSE_RECIPE_TREE) or not path.endswith(
+        COMPOSE_RECIPE_SUFFIXES
+    ):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith(("docker-compose", "compose."))
+
+
 # OMN-15410: pytest roots that live NEXT TO the code they cover instead of
 # under tests/. They are collected by the full suite (pyproject.toml
 # `testpaths`), but the full suite is only one of two pytest steps — a
@@ -569,6 +595,11 @@ def _resolve(
             # omnibase_infra#2493). Note this is an `if`, not an `elif`:
             # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
             selected.update(SCRIPTS_TEST_PREFIXES)
+
+        if _is_compose_recipe(path):
+            # See COMPOSE_RECIPE_TREE: keep the blanket tests/unit/ coverage
+            # a sibling mapping (tests/ci/) would otherwise suppress.
+            selected.add(TEST_UNIT_PREFIX)
 
         if path.startswith(MIGRATION_TREE_PREFIX):
             # OMN-15336 item 4 repair follow-up: see MIGRATION_TREE_PREFIX's

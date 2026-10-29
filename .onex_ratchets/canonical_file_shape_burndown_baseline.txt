@@ -1,0 +1,52 @@
+# Burn-down ticket: OMN-21523
+# canonical-file-shape burn-down baseline. Shrink-only once installed.
+# Every line is a file a file-shape rule refuses that the ticket above burns
+# down. Delete a line when its file is removed, moved into a canonical
+# location or rewritten as contract + node + handler. A new line is refused
+# and the file is never deleted, even when empty.
+src/omnibase_infra/handlers/handler_boot_failure_ledger.py
+src/omnibase_infra/handlers/handler_db.py
+src/omnibase_infra/handlers/handler_declared_state_lease_local.py
+src/omnibase_infra/handlers/handler_dev_lane_branch_install.py
+src/omnibase_infra/handlers/handler_dev_lane_pin.py
+src/omnibase_infra/handlers/handler_filesystem.py
+src/omnibase_infra/handlers/handler_gmail_api.py
+src/omnibase_infra/handlers/handler_graph.py
+src/omnibase_infra/handlers/handler_http.py
+src/omnibase_infra/handlers/handler_infisical.py
+src/omnibase_infra/handlers/handler_intent.py
+src/omnibase_infra/handlers/handler_kafka_topic_demand_source.py
+src/omnibase_infra/handlers/handler_ledger_write_guard.py
+src/omnibase_infra/handlers/handler_manifest_persistence.py
+src/omnibase_infra/handlers/handler_mcp.py
+src/omnibase_infra/handlers/handler_projection_derived_write.py
+src/omnibase_infra/handlers/handler_projection_write_cursor.py
+src/omnibase_infra/handlers/handler_qdrant.py
+src/omnibase_infra/handlers/handler_receipt_mode_publish_await.py
+src/omnibase_infra/handlers/handler_runtime_deploy.sh
+src/omnibase_infra/handlers/handler_topic_catalog_postgres.py
+src/omnibase_infra/handlers/handler_work_ledger_query.py
+src/omnibase_infra/handlers/handler_workspace_runtime_config_materializer.py
+src/omnibase_infra/handlers/placement/handler_placement_election.py
+src/omnibase_infra/handlers/placement/handler_placement_epoch_guard.py
+src/omnibase_infra/handlers/placement/handler_placement_etcd.py
+src/omnibase_infra/handlers/placement/handler_placement_rebuild.py
+src/omnibase_infra/handlers/placement/handler_placement_runtime.py
+src/omnibase_infra/handlers/placement/handler_placement_serving.py
+src/omnibase_infra/handlers/placement/handler_placement_session.py
+src/omnibase_infra/handlers/service_discovery/handler_service_discovery_mock.py
+src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_imperative_orchestrator_ratchet.py
+src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_orchestration_monolith_ratchet.py
+src/omnibase_infra/nodes/node_architecture_validator/validators/scanner_orchestrator_reducer_state_invariant.py
+src/omnibase_infra/nodes/node_artifact_change_detector_effect/services/contract_file_watcher.py
+src/omnibase_infra/nodes/node_board_probe_effect/coverage_validator.py
+src/omnibase_infra/nodes/node_contract_loader_effect/handlers/handler_contract_scan.py
+src/omnibase_infra/nodes/node_event_bus_wiring_effect/handlers/handler_event_bus_wiring.py
+src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py
+src/omnibase_infra/nodes/node_merge_provenance_observe_effect/handlers/handler_merge_group_run_read_github.py
+src/omnibase_infra/nodes/node_runtime_orchestrator/handlers/handler_runtime_lifecycle.py
+src/omnibase_infra/nodes/node_scope_workflow_orchestrator/bin/scope_check.sh
+tests/lab/dev_bus_ha/scratch_three_broker_proof.sh
+tests/redeploy/test_pipeline_smoke.sh
+tests/redeploy/test_preflight.sh
+tests/test_precommit_additional_dependencies_omn19666.sh

@@ -36,6 +36,7 @@ import email.message
 import http.client
 import io
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -226,7 +227,7 @@ jobs:
           EXPRESSION: git+https://github.com/OmniNode-ai/omnimarket@${{{{ github.sha }}}}
         run: |
           uv run --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@{INCIDENT_B_GOOD_SHA}' \
-            python -m omnibase_core.validators.canonical_file_shape
+            python -m omnibase_core.nodes.node_canonical_file_shape_check_compute.runtime_canonical_file_shape_check
         with:
           dependencies:
             - 'git+https://github.com/OmniNode-ai/omnibase_spi.git@dev git+https://github.com/OmniNode-ai/omniclaude@main'
@@ -497,41 +498,51 @@ def test_real_tree_extracts_precommit_revs_and_workflow_git_pins() -> None:
 
 @pytest.mark.unit
 def test_real_tree_core_ratchet_pins_stay_equal() -> None:
-    """Canonical-file-shape and node-boundary hooks share their CI core SHA."""
+    """Each core ratchet shares one ref between its hook and its CI job.
+
+    canonical-file-shape pins a dev-merge tag of omnibase_core (OMN-21523);
+    node-boundary-imports still pins a full commit SHA.
+    """
     precommit = REPO_ROOT / ".pre-commit-config.yaml"
     pins = extract_pins([WORKFLOWS_DIR, precommit])
-    workflow_pins = [
-        p
-        for p in pins
-        if p.source == str(WORKFLOWS_DIR / "ci.yml")
-        and p.kind == "workflow-git-pin"
-        and p.repo == "omnibase_core"
-        and p.locus.endswith(
-            (".env.CANONICAL_FILE_SHAPE_CORE", ".env.NODE_BOUNDARY_CORE")
-        )
-    ]
-    assert len(workflow_pins) == 2
     config = yaml.safe_load(precommit.read_text(encoding="utf-8"))
-    hook_ids = {"canonical-file-shape", "check-node-boundary-imports"}
-    hook_loci = {
-        hook["id"]: f"repos[{index}].rev"
-        for index, entry in enumerate(config["repos"])
-        for hook in entry.get("hooks", [])
-        if hook["id"] in hook_ids
+    ci_loci = {
+        "canonical-file-shape": ".env.CANONICAL_FILE_SHAPE_CORE",
+        "check-node-boundary-imports": ".env.NODE_BOUNDARY_CORE",
     }
-    assert hook_loci.keys() == hook_ids
-    precommit_pins = [
-        p
-        for p in pins
-        if p.source == str(precommit)
-        and p.kind == "precommit-rev"
-        and p.repo == "omnibase_core"
-        and p.locus in hook_loci.values()
-    ]
-    assert len(precommit_pins) == 2
-    refs = {p.ref for p in workflow_pins + precommit_pins}
-    assert len(refs) == 1
-    assert all(len(ref) == 40 and set(ref) <= set("0123456789abcdef") for ref in refs)
+    refs: dict[str, set[str]] = {}
+    for hook_id, ci_suffix in ci_loci.items():
+        workflow_pins = [
+            p
+            for p in pins
+            if p.source == str(WORKFLOWS_DIR / "ci.yml")
+            and p.kind == "workflow-git-pin"
+            and p.repo == "omnibase_core"
+            and p.locus.endswith(ci_suffix)
+        ]
+        assert len(workflow_pins) == 1
+        hook_loci = [
+            f"repos[{index}].rev"
+            for index, entry in enumerate(config["repos"])
+            for hook in entry.get("hooks", [])
+            if hook["id"] == hook_id
+        ]
+        assert len(hook_loci) == 1
+        precommit_pins = [
+            p
+            for p in pins
+            if p.source == str(precommit)
+            and p.kind == "precommit-rev"
+            and p.repo == "omnibase_core"
+            and p.locus == hook_loci[0]
+        ]
+        assert len(precommit_pins) == 1
+        refs[hook_id] = {p.ref for p in workflow_pins + precommit_pins}
+        assert len(refs[hook_id]) == 1
+    (shape_ref,) = refs["canonical-file-shape"]
+    (boundary_ref,) = refs["check-node-boundary-imports"]
+    assert re.fullmatch(r"dev-\d{14}-[0-9a-f]{12}", shape_ref)
+    assert len(boundary_ref) == 40 and set(boundary_ref) <= set("0123456789abcdef")
 
 
 @pytest.mark.unit

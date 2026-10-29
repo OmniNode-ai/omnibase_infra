@@ -51,7 +51,10 @@ def _lane_mount_services(lane: str, services: Collection[str]) -> set[str]:
     the bind on the claude hook-events writer, which pins the same overlay path
     through x-runtime-env (OMN-21433). A two-runtime recipe that defines
     the delegation writer lists the bind on it too: the writer merges the lane
-    runtime env, which names BIFROST_LANE_OVERLAY_PATH (OMN-21371).
+    runtime env, which names BIFROST_LANE_OVERLAY_PATH (OMN-21371). The base
+    file's claude hook-events writer is the same case: it merges the runtime env,
+    so its entrypoint preflight needs the bind (OMN-21433); only the base file
+    lists it.
     """
     if lane == "infra":
         return _RUNTIME_SERVICES | _WORKER_SERVICES | {_HOOK_EVENTS_WRITER}
