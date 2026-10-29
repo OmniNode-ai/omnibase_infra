@@ -3911,7 +3911,10 @@ def test_synthetic_high_slot_host_places_two_lanes_and_skips_unreachable_host(
 def test_python_guard_refuses_uncommitted_private_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed: bool
 ) -> None:
-    from scripts.hooks.pytest_full_suite_host_guard import designated_hostnames
+    from scripts.hooks.pytest_full_suite_host_guard import (
+        HostTableError,
+        designated_hostnames,
+    )
 
     repo = _repo_with_table(tmp_path, TABLE.read_text(encoding="utf-8"))
     root = _git_root_with_table(tmp_path, commit=committed)
@@ -3921,7 +3924,13 @@ def test_python_guard_refuses_uncommitted_private_identity(
     for var in _GIT_SCOPING_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(repo)
-    assert designated_hostnames(env={"ONEX_WORKSPACE_CONFIG_ROOT": str(root)}) == ()
+    reason = (
+        "differs between the working tree and HEAD"
+        if committed
+        else "no committed copy at HEAD"
+    )
+    with pytest.raises(HostTableError, match=reason):
+        designated_hostnames(env={"ONEX_WORKSPACE_CONFIG_ROOT": str(root)})
 
 
 def test_python_guard_without_private_table_has_no_builtin_identity(
@@ -3942,6 +3951,7 @@ def test_python_guard_without_private_table_has_no_builtin_identity(
     assert "no gate host is configured" in message
     assert "ONEX_WORKSPACE_CONFIG_ROOT" in message
     assert PRIVATE_TABLE_REL in message
+    assert "prepush_override_grant.py mint" in message
 
 
 def test_remote_wrapper_reads_transferred_table_through_workspace_config_root(
@@ -4034,6 +4044,9 @@ def test_prepush_ignores_developer_config_while_runtime_keeps_its_default(
     from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
     registry = tmp_path / "registry"
+    sibling = workspace_runtime_config_root(
+        registry, environment={"OMNI_HOME": str(registry)}, allow_developer_config=False
+    )
     developer = registry / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
     table = developer / PRIVATE_TABLE_REL
     table.parent.mkdir(parents=True)
@@ -4041,9 +4054,6 @@ def test_prepush_ignores_developer_config_while_runtime_keeps_its_default(
     env = {"OMNI_HOME": str(registry)}
     assert (
         workspace_runtime_config_root(registry, environment=env) == developer.resolve()
-    )
-    sibling = workspace_runtime_config_root(
-        registry, environment=env, allow_developer_config=False
     )
     assert sibling != developer.resolve()
     assert _workspace_config_root(env) == sibling
@@ -4065,14 +4075,59 @@ def test_shared_resolver_uses_captured_environment_instead_of_process_settings(
 
     registry = tmp_path / "registry"
     explicit = tmp_path / "explicit-config"
-    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "ambient-config"))
-    assert (
-        workspace_runtime_config_root(
-            registry, environment={"ONEX_WORKSPACE_CONFIG_ROOT": str(explicit)}
-        )
-        == explicit.resolve()
-    )
     expected = workspace_runtime_config_root(
         registry, environment={}, allow_developer_config=False
     )
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "ambient-config"))
+    assert (
+        _workspace_config_root({"ONEX_WORKSPACE_CONFIG_ROOT": str(explicit)})
+        == explicit.resolve()
+    )
     assert _workspace_config_root({"OMNI_HOME": str(registry)}) == expected
+
+
+@pytest.mark.parametrize(
+    "state", ["absent", "committed", "divergent", "uncommitted", "unreadable"]
+)
+def test_private_table_cli_preserves_trust_refusals(tmp_path: Path, state: str) -> None:
+    """The deployed CLI owns the same trust decision used by both guards."""
+    import sys
+
+    root = _git_root_with_table(tmp_path, commit=state != "uncommitted")
+    table = root / PRIVATE_TABLE_REL
+    if state == "absent":
+        table.unlink()
+    elif state == "divergent":
+        table.write_text(table.read_text() + "# divergent\n")
+    elif state == "unreadable":
+        table.unlink()
+        table.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.hooks.pytest_full_suite_host_guard",
+            "--private-table",
+            PRIVATE_TABLE_REL,
+        ],
+        cwd=REPO_ROOT,
+        env={**scrub_git_location_env(), "ONEX_WORKSPACE_CONFIG_ROOT": str(root)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if state == "committed":
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == SYNTHETIC_TABLE
+    elif state == "absent":
+        assert result.returncode == 2, result.stderr
+        assert result.stdout == ""
+    else:
+        reason = {
+            "divergent": "differs between the working tree and HEAD",
+            "uncommitted": "no committed copy at HEAD",
+            "unreadable": "unreadable",
+        }[state]
+        assert result.returncode == 1
+        assert reason in result.stderr
+        assert result.stdout == ""

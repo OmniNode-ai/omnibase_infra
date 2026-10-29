@@ -277,7 +277,6 @@ consume_override_grant() {
 # cheap (<1s, before any pytest) and names its remediation, consistent with
 # this hook's fail-loud doctrine: a gate that cannot run must be
 # indistinguishable from a failing gate.
-PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-}"
 
 # =============================================================================
 # Live-load host selection (OMN-16295)
@@ -301,7 +300,6 @@ PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-}"
 # on that silence is exactly how the 2026-07-24 / 2026-08-20 incidents
 # happened -- assumed headroom that was not there. "Neither host reachable"
 # refuses; it does not skip the check.
-PREPUSH_201_GATE_RUNNER_HOSTNAME="${PREPUSH_201_GATE_RUNNER_HOSTNAME:-}"
 # load1/cores at or under this ratio counts as "fit". 1.0 == "not
 # oversubscribed" (a standard load-average heuristic); correctly reads the
 # observed-fit `.201` snapshot (~0.4x, 2026-08-20) as fit and both observed
@@ -1057,9 +1055,9 @@ BASE_SHA="$(git merge-base "${BASE_REF}" HEAD 2>/dev/null)" \
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
 
-CHANGED_FILE="$(mktemp)"
-SELECTION_FILE="$(mktemp)"
-SELECTION_ERR="$(mktemp)"
+CHANGED_FILE="$(mktemp "${TMPDIR:-/tmp}/prepush.XXXXXX")"
+SELECTION_FILE="$(mktemp "${TMPDIR:-/tmp}/prepush.XXXXXX")"
+SELECTION_ERR="$(mktemp "${TMPDIR:-/tmp}/prepush.XXXXXX")"
 
 # ONE exit trap for the whole hook. bash keeps exactly one EXIT trap per shell,
 # so the later `trap prepush_lock_release EXIT` that guard_full_suite_host used

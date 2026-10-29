@@ -72,23 +72,29 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC5]
   - id: dod-prepush-guard-and-regression-ac6
-    description: The focused pre-push suites use invented deployment rows and prove the no-configuration Python refusal and existing policies.
+    description: Synthetic guard fixtures pin the unconfigured-host refusal, table setup instructions, grant path, and divergent-table diagnostic within the hosted verifier budget. Full regression validation remains in evidence_requirements.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "python_guard_without_private_table or python_guard_refuses_uncommitted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly -k "direct_invocation_refused_on_non_200_host or direct_invocation_refuses_divergent_private_table"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
-  - id: dod-prepush-shared-resolver-deploy
+  - id: dod-prepush-private-table-cli-deploy
     description: >-
-      Hosted-runner artifact probe of the shared runtime resolver at the evaluated checkout commit, followed by hermetic resolver tests. The new option is absent at the merge base, so the probe fails there. The tests prove the captured environment is honored, the sibling fallback is reused, pre-push does not discover developer config implicitly, and existing runtime defaults remain. This verifies the deployed artifact API without claiming a live runtime rollout.
+      Hosted-runner artifact probe executes the shipped private-table CLI with synthetic committed, absent, divergent, uncommitted and unreadable tables. It asserts the transported contents, exit codes and specific diagnostics without private deployment configuration or network reads. The CLI option is absent at the merge base, making the control falsifiable. This verifies the deployment hook artifact without claiming a live runtime rollout.
     source: manual
     checks:
-      - check_type: command
-        check_value: |-
-          set -euo pipefail;
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'allow_developer_config'
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k private_table_cli_preserves_trust_refusals
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-prepush-shared-root-policy-deploy
+    description: Synthetic artifact regression verifies captured environments and the pre-push developer-config opt-out while preserving default runtime config precedence. No private deployment table or network is needed.
+    source: manual
+    checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/cli/test_omn20700_developer_workspace_config_owner.py -q -p no:randomly -k "existing_shared_sibling_resolver or ignores_developer_config or captured_environment or fresh_developer or registry_workspace or variable_still"
         cwd: ${OMNI_HOME}/omnibase_infra

@@ -249,6 +249,7 @@ def _write_synthetic_project(tmp_path: Path) -> Path:
         "    enforce(config, 'tests')\n",
         encoding="utf-8",
     )
+    _write_host_table(project, "localhost", "disabled")
     tests_dir = project / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_x.py").write_text(
@@ -360,6 +361,7 @@ def test_direct_invocation_refused_on_non_200_host(tmp_path: Path) -> None:
     (no `git push` in sight) on a non-.200 host is refused BEFORE
     collection."""
     project = _write_synthetic_project(tmp_path)
+    _git_init(project)
     result = _run_pytest(
         project,
         env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
@@ -631,3 +633,26 @@ def test_an_uncommitted_table_row_cannot_self_designate_this_host(
     assert result.returncode != 0, (
         f"an uncommitted row must be ignored, not honored; got exit {result.returncode}"
     )
+
+
+def test_direct_invocation_refuses_divergent_private_table_before_grant(
+    tmp_path: Path,
+) -> None:
+    project = _write_synthetic_project(tmp_path)
+    _git_init(project)
+    root = tmp_path / "private"
+    table = root / PRIVATE_TABLE_REL
+    table.parent.mkdir(parents=True)
+    table.write_text("# committed private table\n", encoding="utf-8")
+    _git_init(root)
+    table.write_text("# divergent private table\n", encoding="utf-8")
+    result = _run_pytest(
+        project, env_overrides={"ONEX_WORKSPACE_CONFIG_ROOT": str(root)}
+    )
+    assert result.returncode == 1
+    assert (
+        "private host table differs between the working tree and HEAD" in result.stderr
+    )
+    assert "no gate host is configured" not in result.stderr
+    assert "INTERNALERROR" not in result.stderr
+    assert "1 passed" not in result.stdout

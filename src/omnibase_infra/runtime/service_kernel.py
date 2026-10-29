@@ -1519,17 +1519,7 @@ def workspace_runtime_config_root(
     environment: Mapping[str, str] | None = None,
     allow_developer_config: bool = True,
 ) -> Path:
-    """Resolve the config owner, independently of the registry's state root.
-
-    ONEX_WORKSPACE_CONFIG_ROOT is a bootstrap location, never a transport
-    selector. Resolution order is a non-blank environment override, the sibling
-    ``../omnibase_internal`` if it is a directory, then ``.onex/workspace-config``
-    if it is a directory, otherwise the sibling path for the caller to refuse.
-    All results are resolved. A developer install never needs a private
-    repository (OMN-20700). There is no retiring-root read.
-    Callers may inject their captured environment and disable developer config
-    when their contract permits only the explicit root and registry sibling.
-    """
+    """Resolve config by caller policy without changing runtime defaults."""
     captured = os.environ if environment is None else environment
     configured = captured.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
     if configured:
