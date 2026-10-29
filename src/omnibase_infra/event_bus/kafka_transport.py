@@ -89,9 +89,24 @@ from omnibase_infra.topics.topic_namespace import (
     strip_topic_namespace,
 )
 
-__all__ = ["KafkaTransport"]
+__all__ = ["KafkaTransport", "create_groupless_consumer"]
 
 logger = logging.getLogger(__name__)
+
+
+def create_groupless_consumer(config: ModelKafkaEventBusConfig) -> AIOKafkaConsumer:
+    """Build an unstarted consumer that joins no group and commits no offset.
+
+    The one sanctioned construction site for a group-less reader (OMN-18087):
+    callers that only measure or watch offsets use it instead of building a raw
+    client of their own.
+    """
+    return AIOKafkaConsumer(
+        bootstrap_servers=config.bootstrap_servers,
+        group_id=None,
+        enable_auto_commit=False,
+        **build_aiokafka_auth_kwargs(config),
+    )
 
 
 class KafkaTransport:
