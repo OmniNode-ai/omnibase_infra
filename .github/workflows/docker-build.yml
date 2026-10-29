@@ -182,6 +182,18 @@ jobs:
         with:
           driver: docker-container
           name: onex-shared-buildkit
+          # OMN-19211: image, driver options and the cache ceiling come from the
+          # declaration (deploy/buildkit/builders.yaml, key `ci`; the config file
+          # is buildkitd.toml). dockerd's embedded BuildKit stays out of CI image
+          # builds, because its cache index loads before dockerd's API and a
+          # damaged one stopped every container on the runner host three times
+          # in 33 days.
+          # tests/unit/test_lab_builder_declaration_omn19211.py fails when these
+          # lines and the declaration disagree.
+          driver-opts: |
+            image=moby/buildkit:v0.34.1
+            network=host
+          buildkitd-config: deploy/buildkit/buildkitd.toml
 
       - name: Verify Buildx driver
         run: |
