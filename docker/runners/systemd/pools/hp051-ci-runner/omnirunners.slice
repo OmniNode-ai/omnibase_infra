@@ -1,0 +1,11 @@
+[Unit]
+Description=OmniNode CI runner pool on h051, the HP DL560 Gen8 (OMN-17232)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=96G
+MemoryMax=112G
+MemorySwapMax=2G
+CPUAccounting=yes
+CPUWeight=25

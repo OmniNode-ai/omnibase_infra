@@ -1,0 +1,185 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17232 -- the canary CI pool on the HP ProLiant DL560 Gen8 (h051).
+#
+# WHY IT EXISTS. The offload plan (task T2a) moves CI capacity off the primary host one measured step at a time. Operator RULING 2026-10-29T14:00:26Z: make before
+# break, so nothing on the primary host is stopped until its copy on the HP runs and validates. This is the first step: four
+# runners that no existing workflow can select, so a real job reaches them only when a branch workflow names the
+# label on purpose. the primary host keeps every one of its runners.
+#
+# SAME RUNNER, OTHER HOST. The anchors below are docker-compose.runners-omnipc2-ci-runner.yml's, with these changes,
+# each deliberate:
+#   - RUNNER_LABELS carry `hp-canary` and NOT `omnibase-ci` or `omnibase-ci-multiarch`, so no `runs-on: [self-hosted,
+#     omnibase-ci, ...]` job in any repository can land here. T2b adds the production labels in its own change.
+#   - ONEX_LANE_HOST is h051 (the host's row of the lab host table), the docker GID is 988 (read on the host), and
+#     the per-runner caches, job workspaces and TMPDIR sit under /data/scratch on the data logical volume (ext4
+#     on the Smart Array RAID 5, mounted /data), so job IO stays off the boot volume.
+#   - its own container, runner and volume names (hp051-ci-runner-N) and its own compose project
+#     (`-p hp051-ci-runner`), so nothing collides with another host's runner and the fleet probe can tell the hosts
+#     apart by prefix.
+#   - the pool sits in omnirunners.slice, installed from docker/runners/systemd/pools/hp051-ci-runner/, sized from
+#     the T0 reads (80 threads, 377 GiB, no AVX2) so CI yields to the OS and to the lanes that follow.
+#
+# DEPLOYING. From a machine with ssh to the host (ssh alias h051) and org-admin gh:
+#   scripts/deploy-runners.sh --host=h051 [--limit=N]
+# The slice unit is not installed by that script for a host row (only for a `pools:` entry), so install it once
+# by hand and read it back: sudo install -m 0644 docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice
+# /etc/systemd/system/omnirunners.slice && sudo systemctl daemon-reload && sudo systemctl start omnirunners.slice
+# Before the first recreate, on the host: create /data/scratch/runners/<N>/{work,tmp} and
+# /data/scratch/cache/runners/<N>/{pip,pre-commit,pnpm,ms-playwright,ci-envs,npm}, owned by uid 1001 (tmp mode 1777),
+# and put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST and RUNNER_LAB_HOST_TABLE in ~/.omnibase/runners/docker/.env (mode 600).
+# OMN-18829: the same host-owned declaration is read by native jobs and CI.
+# Refuse container creation when it is absent; never create an empty directory.
+x-lab-host-table: &lab-host-table
+  type: bind
+  source: ${RUNNER_LAB_HOST_TABLE:?RUNNER_LAB_HOST_TABLE must name the host's lab host table file (runner host docker/.env)}
+  target: /etc/onex/lab_run_hosts.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+x-runner-base: &runner-base
+  image: omninode-runner:latest
+  restart: unless-stopped
+  mem_limit: 6g
+  memswap_limit: 12g
+  cpus: "2.0"
+  pids_limit: 4096
+  cgroup_parent: omnirunners.slice
+  environment: &runner-env
+    # OMN-18829: the host row, not the container install identity, owns lab delegations.
+    ONEX_LANE_HOST: h051
+    ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
+    RUNNER_LABELS: self-hosted,hp-canary,linux,x64,arch-amd64
+    GITHUB_ORG_URL: https://github.com/OmniNode-ai
+    KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
+    RUNNER_TOKEN: ${RUNNER_TOKEN}
+    RUNNER_GROUP: omnibase-ci
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /opt/onex-runner-hooks/runner-job-started.sh
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: "600"
+    # OMN-19998: the uv cache lives INSIDE the job-workspace mount (/data/scratch/runners/<N>/work),
+    # so uv hardlinks wheel contents into a venv instead of copying them. See the header.
+    UV_CACHE_DIR: /home/runner/actions-runner/_work/.uv-cache
+    TMPDIR: /home/runner/tmp
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./runners:/opt/onex-runner-hooks:ro
+    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+    - *lab-host-table
+  group_add:
+    - "988" # h051 docker group GID (getent group docker on the host, read 2026-10-29)
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/onex-runner-hooks/healthcheck.sh"]
+    interval: 30s
+    timeout: 12s
+    retries: 3
+    start_period: 120s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  hp051-ci-runner-1:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-runner-1
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-runner-1
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
+      - /data/scratch/cache/runners/1/pip:/home/runner/.cache/pip
+      - /data/scratch/cache/runners/1/pre-commit:/home/runner/.cache/pre-commit
+      - /data/scratch/cache/runners/1/pnpm:/home/runner/.cache/pnpm
+      - /data/scratch/cache/runners/1/ms-playwright:/home/runner/.cache/ms-playwright
+      - /data/scratch/cache/runners/1/ci-envs:/home/runner/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/1/npm:/home/runner/.npm
+      - /data/scratch/runners/1/work:/home/runner/actions-runner/_work
+      - /data/scratch/runners/1/tmp:/home/runner/tmp
+      - hp051-ci-runner-1-creds:/home/runner/.runner-creds
+  hp051-ci-runner-2:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-runner-2
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-runner-2
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
+      - /data/scratch/cache/runners/2/pip:/home/runner/.cache/pip
+      - /data/scratch/cache/runners/2/pre-commit:/home/runner/.cache/pre-commit
+      - /data/scratch/cache/runners/2/pnpm:/home/runner/.cache/pnpm
+      - /data/scratch/cache/runners/2/ms-playwright:/home/runner/.cache/ms-playwright
+      - /data/scratch/cache/runners/2/ci-envs:/home/runner/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/2/npm:/home/runner/.npm
+      - /data/scratch/runners/2/work:/home/runner/actions-runner/_work
+      - /data/scratch/runners/2/tmp:/home/runner/tmp
+      - hp051-ci-runner-2-creds:/home/runner/.runner-creds
+  hp051-ci-runner-3:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-runner-3
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-runner-3
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
+      - /data/scratch/cache/runners/3/pip:/home/runner/.cache/pip
+      - /data/scratch/cache/runners/3/pre-commit:/home/runner/.cache/pre-commit
+      - /data/scratch/cache/runners/3/pnpm:/home/runner/.cache/pnpm
+      - /data/scratch/cache/runners/3/ms-playwright:/home/runner/.cache/ms-playwright
+      - /data/scratch/cache/runners/3/ci-envs:/home/runner/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/3/npm:/home/runner/.npm
+      - /data/scratch/runners/3/work:/home/runner/actions-runner/_work
+      - /data/scratch/runners/3/tmp:/home/runner/tmp
+      - hp051-ci-runner-3-creds:/home/runner/.runner-creds
+  hp051-ci-runner-4:
+    !!merge <<: *runner-base
+    container_name: hp051-ci-runner-4
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: hp051-ci-runner-4
+    entrypoint: ["/opt/onex-runner-hooks/entrypoint.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners:/opt/onex-runner-hooks:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
+      - /data/scratch/cache/runners/4/pip:/home/runner/.cache/pip
+      - /data/scratch/cache/runners/4/pre-commit:/home/runner/.cache/pre-commit
+      - /data/scratch/cache/runners/4/pnpm:/home/runner/.cache/pnpm
+      - /data/scratch/cache/runners/4/ms-playwright:/home/runner/.cache/ms-playwright
+      - /data/scratch/cache/runners/4/ci-envs:/home/runner/.cache/omni/ci-envs
+      - /data/scratch/cache/runners/4/npm:/home/runner/.npm
+      - /data/scratch/runners/4/work:/home/runner/actions-runner/_work
+      - /data/scratch/runners/4/tmp:/home/runner/tmp
+      - hp051-ci-runner-4-creds:/home/runner/.runner-creds
+volumes:
+  hp051-ci-runner-1-creds:
+    name: hp051-ci-runner-1-creds
+  hp051-ci-runner-2-creds:
+    name: hp051-ci-runner-2-creds
+  hp051-ci-runner-3-creds:
+    name: hp051-ci-runner-3-creds
+  hp051-ci-runner-4-creds:
+    name: hp051-ci-runner-4-creds

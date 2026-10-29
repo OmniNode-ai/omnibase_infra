@@ -158,6 +158,22 @@ hosts:
       - runner_name_prefix: omnipc2-customer-plane-runner
         expected_count: 1
         classes: [customer-plane]
+  # h051 -- HP ProLiant DL560 Gen8 (hp-gen8), amd64, no AVX2 (OMN-17232). The canary
+  # CI pool of the offload plan (T2a): four runners labelled `hp-canary` and
+  # never `omnibase-ci`, so no existing workflow can select them and a job lands
+  # here only when a branch workflow names the label. Its class is `canary`, which
+  # no required-label spread or capacity probe counts, so the pool adds no
+  # availability claim until T2b gives it production labels in its own change.
+  # The primary host keeps every runner (operator RULING 2026-10-29T14:00:26Z, make before
+  # break). Slice: docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice
+  # (installed by hand, see the compose header). The host is an ssh alias, h051,
+  # that each operator's ssh config resolves; the address is not kept in this
+  # public file. Deployed with `deploy-runners.sh --host=h051`.
+  - host: h051
+    arch: amd64
+    runner_name_prefix: hp051-ci-runner
+    expected_count: 4
+    classes: [canary]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the
