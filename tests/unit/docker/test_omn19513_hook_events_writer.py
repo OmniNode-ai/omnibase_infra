@@ -17,6 +17,7 @@ These tests render YAML and start no container.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -197,17 +198,58 @@ def test_other_lanes_neither_start_the_writer_nor_exclude_the_node(
             assert "ONEX_RUNTIME_NODE_EXCLUSION" not in env
 
 
-def test_the_writer_is_in_the_dev_lane_restart_scope() -> None:
-    refresh = (REPO_ROOT / "scripts/runtime_build/refresh_dev_lane.sh").read_text(
-        encoding="utf-8"
+def _bash_array_members(path: Path, name: str) -> list[str]:
+    """Members of ``name=( ... )`` with comments stripped, so a name in prose is not one."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next(
+        index
+        for index, line in enumerate(lines)
+        if line.removeprefix("readonly ").startswith(f"{name}=(")
     )
-    deploy = (
-        REPO_ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
-    ).read_text(encoding="utf-8")
-    agent = (REPO_ROOT / "scripts/deploy-agent/deploy_agent/events.py").read_text(
-        encoding="utf-8"
+    members: list[str] = []
+    for line in lines[start + 1 :]:
+        code = line.split("#", 1)[0].strip()
+        if code == ")":
+            return members
+        members.extend(code.split())
+    raise AssertionError(f"{name} in {path} is not closed")
+
+
+def _python_tuple_members(path: Path, name: str) -> list[str]:
+    """String members of the module-level tuple ``name``, read from the AST."""
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and isinstance(node.value, ast.Tuple)
+        ):
+            return [
+                element.value
+                for element in node.value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            ]
+    raise AssertionError(f"{name} is not a module-level tuple in {path}")
+
+
+def test_the_writer_is_in_the_dev_lane_restart_scope() -> None:
+    refresh = _bash_array_members(
+        REPO_ROOT / "scripts/runtime_build/refresh_dev_lane.sh",
+        "REFRESH_BUILD_SERVICES",
+    )
+    deploy = _bash_array_members(
+        REPO_ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
+        "DEV_LANE_ONLY_RUNTIME_SERVICES",
+    )
+    events = _python_tuple_members(
+        REPO_ROOT / "scripts/deploy-agent/deploy_agent/events.py",
+        "DEV_LANE_ONLY_RUNTIME_SERVICES",
     )
 
+    # Positive control: the parser finds the members the arrays already carry.
+    assert "tenant-projection-writer" in refresh
+    assert "tenant-projection-writer" in deploy
     assert WRITER in refresh
     assert WRITER in deploy
-    assert f'"{WRITER}"' in agent
+    assert "tenant-projection-writer" in events
+    assert refresh.count(WRITER) == deploy.count(WRITER) == events.count(WRITER) == 1
