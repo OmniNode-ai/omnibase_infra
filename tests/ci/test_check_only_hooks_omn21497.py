@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""T2.6 canary: the pre-commit hooks that rewrote files are check-only (OMN-21433).
+"""T2.6 canary: the pre-commit hooks that rewrote files are check-only (OMN-21497).
 
 A hook that edits the working tree during a commit races the stash/restore step
 and hides the defect it fixed. Each hook below now refuses and leaves every byte
@@ -240,7 +240,7 @@ class TestStagedTmp:
 class TestCoAuthorTrailer:
     def test_ai_trailer_is_refused_and_message_untouched(self, tmp_path: Path) -> None:
         message = (
-            "feat(OMN-21433): subject\n\nbody\n\n"
+            "feat(OMN-21497): subject\n\nbody\n\n"
             "Co-Authored-By: Claude <noreply@anthropic.com>\n"
         )
         rc, out, before, after = _run_hook(
@@ -251,7 +251,7 @@ class TestCoAuthorTrailer:
 
     def test_human_trailer_passes(self, tmp_path: Path) -> None:
         message = (
-            "feat(OMN-21433): subject\n\nCo-authored-by: A Person <a@example.com>\n"
+            "feat(OMN-21497): subject\n\nCo-authored-by: A Person <a@example.com>\n"
         )
         rc, out, before, after = _run_hook(
             tmp_path, TRAILER_ID, {"keep.txt": "x\n"}, commit_msg=message

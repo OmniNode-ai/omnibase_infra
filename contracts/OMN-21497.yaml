@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21497"
+title: "T2.6: check-only pre-commit hooks in omnibase_infra"
+summary: >-
+  T2.6 of the validators-to-core plan, omnibase_infra slice. The pre-commit hooks that rewrote files during a commit are check-only: ruff format runs with --check, ruff check runs with --no-fix, the end-of-file rule is a check that rewrites nothing, a staged tmp/ file is refused instead of deleted, and an AI co-author trailer in a commit message is refused instead of stripped. The credential-in-log self-test hook, listed by the plan as a writer, only reads a fixture and is proven byte-identical rather than changed.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-t26-no-hook-rewrites"
+    statement: "No pre-commit hook of omnibase_infra rewrites a file or a commit message; each rewriting hook refuses a defect and leaves the working tree byte-identical."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: No hook of omnibase_infra rewrites a file or a commit message: each Appendix 1 REWRITES FILES row of this repository is a check that refuses -- falsifier: pytest cases over the converted hook config and a git grep of the config for hooks whose entry writes
+      - id: "AC2"
+        statement: >-
+          AC2: A canary commit with an unformatted file and an AI co-author trailer is refused and the working tree is byte-identical after the hook run -- falsifier: pytest case that hashes the tree before and after the hook run, plus pre-commit run --files on the canary commit
+evidence_requirements:
+  - kind: "tests"
+    description: "The repo's own hook definitions run through pre-commit against a throwaway git repository holding each defect, with the tree compared byte for byte before and after."
+    command: "uv run pytest tests/ci/test_check_only_hooks_omn21497.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-t26-config-has-no-writing-hook"
+    description: "AC1: the converted hook config carries none of the retired writing ids and no hook entry that writes; ruff-format runs in check mode and ruff-fix in no-fix mode."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21497.py -q -n 0 --no-cov -k TestConfigShape"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-t26-eof-and-tmp-check-only"
+    description: "AC1: the end-of-file hook refuses a missing or doubled final newline and the tmp hook refuses a staged tmp/ file, each leaving the tree byte-identical; clean inputs pass as the positive controls, and the credential-in-log self-test is shown to leave the checkout untouched."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21497.py -q -n 0 --no-cov -k 'TestEndOfFile or TestStagedTmp or TestCredentialSelfTestNeverWrote'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-t26-unformatted-file-refused-tree-untouched"
+    description: "AC2: the ruff-format and ruff-fix hooks refuse an unformatted file and a fixable lint defect, and the tree is byte-identical after each run; a formatted file passes as the positive control."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21497.py -q -n 0 --no-cov -k 'TestRuffFormat or TestRuffCheck'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-t26-trailer-refused-not-stripped"
+    description: "AC2: the co-author trailer hook refuses an AI trailer and leaves the message file byte-identical; a human trailer passes as the positive control."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_check_only_hooks_omn21497.py -q -n 0 --no-cov -k TestCoAuthorTrailer"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
