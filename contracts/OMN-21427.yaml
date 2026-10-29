@@ -1,0 +1,112 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21427
+title: "Lab slot placement on the generic service"
+summary: >-
+  The omnibase_infra half of slice 4 of the OMN-21279 runtime cluster and generic lease plan, stacked on OMN-21424 (the generic lease store). Adds HandlerLeaseSlotPlacement (src/omnibase_infra/handlers/lease/handler_lease_slot_placement.py), which places a unit on the first candidate host with a free `slot` lease on resource `slot:<host>` and keeps no lock file and no pid marker; a per-resource capacity on ModelLeaseKindPolicy so each host has its own slot count; a `granted` read-back on HandlerLeaseStore so a retried placement replays its grant on whichever host it got; and lab_lease_kinds.yaml, which declares the slot kind (B2) and the C1-C5 and C7-C9 lock rows as lease kinds, each with a TTL. Not in this change: deleting the placement lock, slot markers and placing receipts (B1, B2, B6), which live outside this repository; moving the C1-C5 and C7-C9 scripts off their own lock files onto these kinds, which needs the lab etcd cluster of plan task T1; and wiring the OMN-20604 slot FSM in omnimarket's node_lab_job_reducer, which carries no slot code on omnimarket dev today.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21427-ac1-slot-leases
+    statement: "Placement takes slot leases and keeps no placement lock or slot marker of its own."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: placement takes `slot` leases and the placement lock and slot markers (B1, B2, B6) are deleted -- falsifier: a grep finds `.lock` flock or `<host>.<lease>.<pid>` marker code in placement
+  - id: req-omn21427-ac2-lease-kinds
+    statement: "The pre-PR, compose-lane, deploy-host, host-reconcile, lab-stack and heavy-suite locks are lease kinds with an expiry."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: the pre-PR, compose-lane, deploy-host, host-reconcile, lab-stack and heavy-suite locks (C1-C5, C7-C9) are lease kinds with an expiry -- falsifier: any of them still writes its own lock file or directory
+  - id: req-omn21427-ac3-host-loss
+    statement: "Losing the host holding slot leases frees those slots at lease expiry and another host's placement proceeds."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: stopping the runtime and etcd member on a host holding slot leases frees those slots at lease expiry and another host's placement proceeds -- falsifier: the lab receipt shows the slots held past expiry
+  - id: req-omn21427-ac4-slot-fsm
+    statement: "The lab slot FSM reserves through a slot lease and keeps no slot ownership of its own."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: the lab slot FSM of OMN-20604 reserves through a `slot` lease and keeps no slot ownership of its own -- falsifier: a grep of `node_lab_job_reducer` and the slot table code finds a slot claim written outside the lease orchestrator
+evidence_requirements:
+  - kind: tests
+    description: "The slot placement and lab lease kind suites pass against a real etcd (single member and three members)."
+    command: "uv run pytest tests/integration/runtime/placement/test_lab_slot_placement_omn21427.py tests/unit/handlers/lease/test_lab_lease_kinds_omn21427.py tests/unit/handlers/lease/test_slot_placement_no_lock_omn21427.py -q -n 0"
+  - kind: manual
+    description: "Deploy validation command for the caller-contract deploy gate: the committed slot placement source read at the checkout commit. It starts nothing and touches no running lane."
+    command: "deploy: gh api contents of handler_lease_slot_placement.py and lab_lease_kinds.yaml at HEAD"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21427-static-node-migration
+    description: >-
+      The node lease projection migration has statically provable schema-qualified targets. Real PostgreSQL applies it twice, converges nullable columns without changing valid rows, and refuses each of the seven required columns when it contains NULL without replacing or deleting data.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_lease_projection_node_omn21427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21427-expiry-projection
+    description: >-
+      Reconcile a TTL-expired slot grant from its held projection row through the lease.reconcile handler, without a successful renewal. The expiry event retains the original identity, holder and fence, marks the reducer row expired, and cannot overwrite a newer grant. An unreachable etcd raises instead of emitting an expiry event. This is an explicit reconciliation port; periodic scheduling and deployed runtime wiring remain outside this change.
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/runtime/placement/test_lease_expiry_reconciliation_omn21427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21427-ac1-slot-leases
+    description: >-
+      Two placers on one loopback etcd race 30 placements over two hosts of capacity 2 and 3: exactly 5 grants, each host at its capacity, 25 refusals, 5 distinct fences; a retried request_id replays its grant on the other placer; a release frees a slot for the other placer at a higher fence. The placement handler's source has no fcntl, flock, .lock, getpid, kill(, open( or mkdir. Covers the omnibase_infra placement only; the placement lock, slot markers and placing receipts outside this repository are not deleted by this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lab_slot_placement_omn21427.py tests/unit/handlers/lease/test_slot_placement_no_lock_omn21427.py -q -n 0 -k "test_ac1 or no_lock"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21427-ac2-lease-kinds
+    description: >-
+      lab_lease_kinds.yaml declares exactly the kinds slot, prepr-project, prepr-slot, prepr-host, compose-lane, deploy-host, host-reconcile, lab-stack and heavy-suite, one per inventory row B2, C1-C5, C7-C9, each with a TTL of at least 2 s and the mechanism it replaces; a kind declared twice is refused. The scripts of C1-C5 and C7-C9 still write their own lock files in this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/lease/test_lab_lease_kinds_omn21427.py -q -n 0
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21427-ac3-host-loss
+    description: >-
+      A placer process beside member 0 of a three-member loopback etcd holds both slots of a host at TTL 3 s and renews them; another host's placement through member 1 is refused while they are held. The test SIGKILLs the placer, stops member 0, and asserts the other host places both slots within 11 s (two TTLs plus 5 s for etcd's lease TTL reset at a leader change) at fences above the held ones, printing the AC3 receipt.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lab_slot_placement_omn21427.py -q -n 0 -k test_ac3
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21427-ac4-slot-port
+    description: >-
+      The reserve and release port the OMN-20604 slot FSM is to call: a placement is a slot lease grant and a release frees the slot for another placer, with no slot record outside the lease store. Wiring the FSM in omnimarket's node_lab_job_reducer is not in this change.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/placement/test_lab_slot_placement_omn21427.py -q -n 0 -k test_ac1_release_frees_the_slot_for_another_placer
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn21427-deploy-slot-surface
+    description: >-
+      Read the committed slot placement source and the lab lease kinds at the checkout commit through the GitHub contents API. Fail when placement does not acquire through HandlerLeaseStore or the heavy-suite kind is undeclared. Runs on hosted runners without a container daemon or access to a private runtime; slot placement is not wired into the deployed runtime by this change.
+    source: manual
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_slot_placement.py?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'await self._store.acquire(' > /dev/null &&
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/lab_lease_kinds.yaml?ref=$(git rev-parse HEAD)" --jq .content |
+            base64 -d | grep -F 'kind: heavy-suite' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
