@@ -2030,11 +2030,13 @@ def run_proof(
                 not in (
                     "INFRA_PR",
                     "INFRA_HEAD",
+                    "INFRA_TAG",
                     "INFRA_GROUP",
                     "INFRA_GROUP_BASE",
                     "INFRA_GROUP_TREE",
                     "MARKET_PR",
                     "MARKET_HEAD",
+                    "MARKET_TAG",
                     "MARKET_GROUP",
                     "MARKET_GROUP_BASE",
                     "MARKET_GROUP_TREE",
