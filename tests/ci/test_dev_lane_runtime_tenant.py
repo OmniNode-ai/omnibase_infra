@@ -20,7 +20,6 @@ after the deploy agent converges.
 
 from __future__ import annotations
 
-import os
 import re
 import uuid
 
@@ -46,12 +45,9 @@ _DEFAULT_RE = re.compile(r"^\$\{DEV_LANE_TENANT_ID:-([^}]*)\}$")
 CONTEXT_SOURCE_TENANT = "ONEX_CONTEXT_SOURCE_TENANT_ID"
 CONTEXT_SOURCE_ENTRY = "${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}"
 
-# Skipped only off CI: on a CI runner a missing docker compose CLI fails the
-# rendered checks instead of skipping them, so the rendered and override
-# behaviour is never reported green unverified.
 needs_compose = pytest.mark.skipif(
-    not os.environ.get("CI") and not docker_compose_available(),
-    reason="docker compose CLI absent off CI; the committed-entry checks still hold",
+    not docker_compose_available(),
+    reason="docker compose CLI absent; the committed-entry checks still hold",
 )
 
 

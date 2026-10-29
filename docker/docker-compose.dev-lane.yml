@@ -932,14 +932,17 @@ services:
       # such container, keeps the node in its main runtime.
       ONEX_RUNTIME_NODE_EXCLUSION: projection_claude_hook_events
       #
-      # -- Lane tenant (OMN-21554) ------------------------------------------------
-      # node_local_environment_observe_effect reports for the install identity,
-      # else this runtime's ONEX_TENANT_ID; with neither, every tick refused with
-      # identity_absent (both dev-lane runtimes, 2026-10-29). The default is the house
-      # tenant UUID (omnimarket HOUSE_TENANT_UUID); the local_environment writer
-      # confirms it against tenant_registry_mirror, which on the dev lane already holds
-      # omninode -> this UUID from a real tenant event, so no seed is wired.
-      # Non-secret; the operator env may override it with DEV_LANE_TENANT_ID.
+      # -- Lane tenant (OMN-21551) ---------------------------------------------
+      # omnimarket's mode-2 environment observer reports for the install
+      # identity, and on a compose lane, which never runs `onex local init`, for
+      # this configured tenant instead. Unset, it refused every run with
+      # identity_absent (113 in 30 minutes on 2026-10-29) and
+      # local-environment.v1 served no rows. The house tenant is the one this
+      # lane's tenant_registry_mirror already records (slug omninode, from
+      # onex.tenant.events), so no seed step runs here: the catalog's
+      # local-tenant-registry-seed derives its uuid from a slug and would record
+      # a second row. runtime-effects carries the same value. Every overlay that
+      # layers this file blanks it.
       ONEX_TENANT_ID: ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}
     healthcheck:
       test:
@@ -1050,14 +1053,13 @@ services:
       # this one overlay value; all of them run in this container. Unset, every
       # compaction command falls back pack_builder_unavailable and every source
       # read is denied. It is the context-source access tenant only, a separate
-      # variable from the lane identity ONEX_TENANT_ID set just below (OMN-21554),
-      # and it does not follow that identity. Non-secret; the operator env may
-      # override the dev-lane default.
+      # variable from the lane tenant ONEX_TENANT_ID below, and neither follows
+      # the other. Non-secret; the operator env may override the dev-lane default.
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
       #
-      # -- Lane tenant (OMN-21554) ------------------------------------------------
-      # The same lane identity as omninode-runtime above, for the same reason;
-      # see that block.
+      # -- Lane tenant (OMN-21551) ---------------------------------------------
+      # The same house tenant as omninode-runtime above, and for the same
+      # reason: the mode-2 environment observer runs in this container.
       ONEX_TENANT_ID: ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.

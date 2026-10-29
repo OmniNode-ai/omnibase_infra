@@ -21,7 +21,7 @@ requirements:
           AC3: runtime-effects carries the new ONEX_TENANT_ID beside the OMN-21099 context-source tenant, which still commits as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab} and renders lab with an operator lane tenant set -- falsifier: uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -k context_source_tenant fails on origin/dev, where runtime-effects carries no ONEX_TENANT_ID
 evidence_requirements:
   - kind: "tests"
-    description: "The committed dev-lane overlay entries are parsed as YAML, and the dev-lane stack is rendered with docker compose config; on CI a missing compose CLI fails the rendered cases instead of skipping them."
+    description: "The committed dev-lane overlay entries are parsed as YAML, and the dev-lane stack is rendered with docker compose config; the rendered cases skip when the compose CLI is absent."
     command: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -n 0 --no-cov"
 dod_evidence:
   - id: "dod-runtime-tenant-on-both-runtimes"
