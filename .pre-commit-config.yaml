@@ -169,9 +169,10 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 031148215620031436cba30619bbae67c0bb38ad
+    rev: dev-20261029151319-6e0a5eee541a
     hooks:
       - id: canonical-file-shape
+        args: [--rules, file-shape]
         require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
