@@ -39,6 +39,7 @@ _COMPOSE_PROJECT = f"omnibase-infra-{_JUDGE_COMPOSE.stem.partition('.')[2]}"
 _RUNTIME_SERVICES = {"omninode-runtime", "runtime-effects"}
 _WORKER_SERVICES = {"runtime-worker", "tenant-projection-writer"}
 _DELEGATION_WRITER = "projection-delegation-writer"
+_HOOK_EVENTS_WRITER = "projection-claude-hook-events-writer"
 
 
 def _lane_mount_services(lane: str, services: Collection[str]) -> set[str]:
@@ -46,11 +47,18 @@ def _lane_mount_services(lane: str, services: Collection[str]) -> set[str]:
 
     Layered worker lanes carry four runtimes. The prod recipe restates the
     volumes of main, effects and worker only; its tenant projection writer
-    inherits the base file's bind (OMN-17101). A two-runtime recipe that defines
+    inherits the base file's bind (OMN-17101). The base infra file also lists
+    the bind on the claude hook-events writer, which pins the same overlay path
+    through x-runtime-env (OMN-21433). A two-runtime recipe that defines
     the delegation writer lists the bind on it too: the writer merges the lane
-    runtime env, which names BIFROST_LANE_OVERLAY_PATH (OMN-21371).
+    runtime env, which names BIFROST_LANE_OVERLAY_PATH (OMN-21371). The base
+    file's claude hook-events writer is the same case: it merges the runtime env,
+    so its entrypoint preflight needs the bind (OMN-21433); only the base file
+    lists it.
     """
-    if lane in {"infra", "prepr"} or lane.startswith(("dev-", "stability")):
+    if lane == "infra":
+        return _RUNTIME_SERVICES | _WORKER_SERVICES | {_HOOK_EVENTS_WRITER}
+    if lane == "prepr" or lane.startswith(("dev-", "stability")):
         return _RUNTIME_SERVICES | _WORKER_SERVICES
     if lane == "prod":
         return _RUNTIME_SERVICES | {"runtime-worker"}
@@ -93,7 +101,7 @@ def test_the_shipped_overlay_directory_holds_only_the_neutral_template() -> None
 
 def test_all_lane_compose_recipes_are_covered() -> None:
     assert sorted(len(services) for services in _LANE_COMPOSE_MOUNTS.values()) == (
-        [2] * 3 + [3] * 2 + [4] * 6
+        [2] * 3 + [3] * 2 + [4] * 5 + [5]
     )
     assert "docker-compose.prod.yml" in _LANE_COMPOSE_MOUNTS
 
