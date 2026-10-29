@@ -47,3 +47,12 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_dev_lane_tenant_omn21551.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21551-ac1-deploy-scope-probe
+    description: >-
+      Read docker/docker-compose.dev-lane.yml from GitHub at the checked-out commit and count the runtimes' lane tenant entries. Hermetic: it reads the shipped file, not a receipt this PR authors, and goes RED at the merge base where neither runtime names the variable. The deployed containers are read on the lab after the deploy agent converges (AC2, AC3) and are not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.dev-lane.yml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'ONEX_TENANT_ID: .{DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
