@@ -58,6 +58,24 @@ class HandlerKafkaTopicDemandSource:
         topics: Collection[str],
         on_first_record: Callable[[str], Awaitable[None]],
     ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
+        try:
+            return await self._measure_and_watch(topics, on_first_record)
+        except Exception:  # boundary: an unmeasurable broker keeps the boot path
+            logger.exception(
+                "Boot subscription demand measure failed; every contract joins "
+                "at boot (OMN-18087)"
+            )
+
+            async def _nothing_to_stop() -> None:
+                return None
+
+            return frozenset(topics), _nothing_to_stop
+
+    async def _measure_and_watch(
+        self,
+        topics: Collection[str],
+        on_first_record: Callable[[str], Awaitable[None]],
+    ) -> tuple[frozenset[str], Callable[[], Awaitable[None]]]:
         auth = build_aiokafka_auth_kwargs(self._config)
         # The bus addresses a lane-namespaced physical topic for each contract
         # topic; read the same physical topics and report contract names back.
@@ -157,7 +175,21 @@ class HandlerKafkaTopicDemandSource:
     ) -> None:
         remaining = list(watched)
         while remaining:
-            batches = await consumer.getmany(timeout_ms=_POLL_TIMEOUT_MS)
+            try:
+                batches = await consumer.getmany(timeout_ms=_POLL_TIMEOUT_MS)
+            except Exception:  # boundary: a dead watch must not strand contracts
+                logger.exception(
+                    "Boot subscription demand watch failed; starting every "
+                    "deferred contract now (OMN-18087)"
+                )
+                for topic in sorted({tp.topic for tp in remaining}):
+                    try:
+                        await on_first_record(topic)
+                    except Exception:  # boundary: one topic's start never ends it
+                        logger.exception(
+                            "Demand start failed for topic %s (OMN-18087)", topic
+                        )
+                return
             waiting = {tp.topic for tp in remaining}
             arrived = sorted(
                 {tp.topic for tp, records in batches.items() if records} & waiting

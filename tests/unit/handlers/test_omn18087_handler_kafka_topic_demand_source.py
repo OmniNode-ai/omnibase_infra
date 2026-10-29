@@ -190,3 +190,46 @@ async def test_nothing_idle_starts_no_watch(
     assert in_use == {BUSY}
     assert FakeConsumer.instances[0].stopped
     await stop()
+
+
+async def test_unmeasurable_broker_keeps_every_topic_on_the_boot_path(
+    broker: dict[str, tuple[int, int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(**_: object) -> FakeAdmin:
+        raise RuntimeError("broker unreachable")
+
+    monkeypatch.setattr(module, "AIOKafkaAdminClient", refuse)
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError("nothing is watched")
+
+    in_use, stop = await _source().watch_idle_topics({BUSY, IDLE}, on_first)
+    assert in_use == {BUSY, IDLE}
+    await stop()
+
+
+async def test_dead_watch_starts_every_deferred_topic(
+    broker: dict[str, tuple[int, int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker.update({IDLE: (3, 3)})
+    started: list[str] = []
+
+    async def on_first(topic: str) -> None:
+        started.append(topic)
+
+    _, stop = await _source().watch_idle_topics({IDLE}, on_first)
+    consumer = FakeConsumer.instances[0]
+
+    async def broken(timeout_ms: int = 0) -> dict[TopicPartition, list[object]]:
+        raise RuntimeError("broker disconnected")
+
+    monkeypatch.setattr(consumer, "getmany", broken)
+    try:
+        async with asyncio.timeout(2):
+            while not started:
+                await asyncio.sleep(0.01)
+        assert started == [IDLE]
+    finally:
+        await stop()
