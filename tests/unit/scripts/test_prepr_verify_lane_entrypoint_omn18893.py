@@ -429,6 +429,54 @@ def test_a_build_only_image_that_would_start_a_container_is_still_caught() -> No
     assert any(BUILD_ONLY_IMAGE in p for p in problems)
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"ports": ["8085:8085"]},
+        {"privileged": True},
+        {"volumes": ["/:/host"]},
+        {"deploy": {"replicas": 1}},
+    ],
+)
+def test_a_build_only_image_with_extra_attributes_is_caught(
+    extra: dict[str, object],
+) -> None:
+    rendered = _good_render()
+    rendered["services"][BUILD_ONLY_IMAGE] = {
+        "profiles": ["prepr"],
+        "scale": 0,
+        "networks": {"omnibase-infra-network": None},
+        **extra,
+    }
+    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    assert any(BUILD_ONLY_IMAGE in p for p in problems)
+
+
+@pytest.mark.parametrize(
+    "svc",
+    [
+        {"profiles": ["prepr"], "networks": {"omnibase-infra-network": None}},
+        {
+            "profiles": ["prepr"],
+            "scale": 0,
+            "networks": {"omnibase-infra-network": None, "other": None},
+        },
+        {
+            "profiles": ["prepr", "extra"],
+            "scale": 0,
+            "networks": ["omnibase-infra-network"],
+        },
+    ],
+)
+def test_a_build_only_image_without_scale_or_on_wrong_network_is_caught(
+    svc: dict[str, object],
+) -> None:
+    rendered = _good_render()
+    rendered["services"][BUILD_ONLY_IMAGE] = svc
+    problems = verifier.check(rendered, policy.resolve_slot(1), False)
+    assert any(BUILD_ONLY_IMAGE in p for p in problems)
+
+
 def test_the_slot_overlay_attaches_the_build_only_image_to_the_dev_network() -> None:
     """Without a ``networks`` entry compose invents a ``default`` network, and
     the verifier (rightly) refuses any network a slot would create."""
