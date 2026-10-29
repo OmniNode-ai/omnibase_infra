@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-21523
+title: omnibase_infra switches to the canonical-file-shape node entry with a ticketed first-install baseline
+summary: The canonical-file-shape pre-commit hook and CI job run omnibase_core's node entry (rule group file-shape) at the dev-merge tag dev-20261029151319-6e0a5eee541a. The 45 refused paths the existing baseline does not list sit in .onex_ratchets/canonical_file_shape_burndown_baseline.txt, whose header names OMN-21523; the 11 baseline-stale lines are deleted from the existing baseline. AC3 (zero entries on 2026-11-26) is not bound here and stays unproven.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-canonical-file-shape-switch
+    statement: The hook is wired at the omnibase_core tag, passes on the whole tree, and refuses a new unbound handler and a grown burn-down baseline.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the hook is wired at the omnibase_core tag and passes on the whole tree with a baseline of exactly the measured findings, this ticket named in its header -- falsifier: `uv run pre-commit run canonical-file-shape --all-files` exits 0 and `grep -c -v ''^#'' .onex_ratchets/canonical_file_shape_baseline.txt` prints the count measured at the switch commit'
+      - id: AC2
+        statement: 'AC2: a canary commit adding one new unbound handler is refused with handler_outside_node and a canary adding one baseline line for an existing refused file is refused with baseline-growth -- falsifier: `uv run pytest` of the repository''s canary test passes on both cases'
+evidence_requirements:
+  - kind: tests
+    description: Tag wiring, whole-tree pass at HEAD, the burn-down header and the two canary refusals.
+    command: uv run pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py tests/ci/test_pin_reachability_omn15538.py tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21523-ac1-hook-wired-whole-tree
+    description: The hook and CI job pin the tag, the whole tree passes at HEAD, and the burn-down file names this ticket and lists no path the existing baseline lists.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py tests/ci/test_pin_reachability_omn15538.py tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0 -k 'whole_tree or committed_burndown or core_ratchet_pins or node_entry_tag'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21523-ac2-canary-refusals
+    description: A new unbound handler is refused as handler_outside_node and one more burn-down line is refused as baseline-growth against the committed base; a docs-only change is accepted.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_canonical_file_shape_ratchet_omn21523.py -q -n 0 -k 'handler_outside_node or baseline_growth'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

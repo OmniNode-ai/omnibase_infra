@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeBrokerPrincipalEffect
+#
+# Creates, grants and verifies a developer principal on the broker it is pointed
+# at: the broker call of the developer bus mint. The order is fixed by the mint
+# plan (D9): list users through the Admin API, refuse drift, create the planned
+# ACLs and read them back, and only then set the password, which comes from an
+# environment variable the request names and appears in no output.
+#
+# Related Tickets:
+#   - OMN-20822: this node
+#   - OMN-20821: the plan compute node whose output this node applies
+#   - OMN-20150: one command takes a Mac to lab-ready with its bus identity
+name: "node_broker_principal_effect"
+contract_name: "node_broker_principal_effect"
+node_name: "node_broker_principal_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Create, grant and verify a developer principal on a broker: list its users, refuse ACL drift, create and read back the planned ACLs, then set the password from a named environment variable.
+
+runtime_profiles:
+  - local-dev
+input_model:
+  name: "ModelBrokerPrincipalApplyRequest"
+  module: "omnibase_infra.models.developer_principal.model_broker_principal_apply_request"
+  description: "The plan, the Admin API URL and the name of the password variable."
+output_model:
+  name: "ModelBrokerPrincipalApplyResult"
+  module: "omnibase_infra.models.developer_principal.model_broker_principal_apply_result"
+  description: "Create, rotate or a drift refusal, with the ACLs created and no password."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "broker.principal.list"
+      handler:
+        name: "HandlerBrokerPrincipalList"
+        module: "omnibase_infra.handlers.handler_broker_principal_list"
+      description: >
+        List the broker's users through the Admin API (the reachability check) and keep the principals with the declaration's prefix.
+
+      supported_operations:
+        - "broker.principal.list"
+      input_model:
+        name: "ModelBrokerPrincipalListRequest"
+        module: "omnibase_infra.models.developer_principal.model_broker_principal_list_request"
+        description: "The Admin API URL and the declaration's prefix."
+      output_fields:
+        - principals
+    - operation: "broker.principal.apply"
+      handler:
+        name: "HandlerBrokerPrincipalApply"
+        module: "omnibase_infra.handlers.handler_broker_principal_apply"
+      description: >
+        Refuse drift, create and read back the planned ACLs, then set the password, reporting acls_applied and password_set on failure.
+
+      supported_operations:
+        - "broker.principal.apply"
+      input_model:
+        name: "ModelBrokerPrincipalApplyRequest"
+        module: "omnibase_infra.models.developer_principal.model_broker_principal_apply_request"
+        description: "The plan, the Admin API URL and the name of the password variable."
+      output_fields:
+        - principal
+        - action
+        - acls_created
+        - acls_applied
+        - password_set
+        - extra_acls
+        - refusal
+    - operation: "broker.principal.verify"
+      handler:
+        name: "HandlerBrokerPrincipalVerify"
+        module: "omnibase_infra.handlers.handler_broker_principal_verify"
+      description: >
+        Compare the principal's ACLs with the plan, then log in as the principal and list the topics it can see.
+
+      supported_operations:
+        - "broker.principal.verify"
+      input_model:
+        name: "ModelBrokerPrincipalVerifyRequest"
+        module: "omnibase_infra.models.developer_principal.model_broker_principal_verify_request"
+        description: "The plan, the Admin API URL and the name of the password variable."
+      output_fields:
+        - principal
+        - verified
+        - visible_topics
+        - reason
+io_operations:
+  - operation: "broker.principal.list"
+    description: "List the developer principals under a prefix."
+    input_fields:
+      - admin_url
+      - prefix
+    output_fields:
+      - principals
+  - operation: "broker.principal.apply"
+    description: "Apply one planned developer principal."
+    input_fields:
+      - plan
+      - admin_url
+      - password_env
+    output_fields:
+      - principal
+      - action
+      - acls_created
+      - acls_applied
+      - password_set
+      - extra_acls
+      - refusal
+  - operation: "broker.principal.verify"
+    description: "Verify one developer principal's grants and login."
+    input_fields:
+      - plan
+      - admin_url
+      - password_env
+    output_fields:
+      - principal
+      - verified
+      - visible_topics
+      - reason
+capabilities:
+  - name: "broker.principal.apply"
+    description: "Create, grant and verify a developer principal on a broker in the mint plan's fixed order."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - "BrokerPrincipalError"
+metadata:
+  description: >
+    The broker call of the developer bus mint. Declares the local-dev runtime profile, which no deployed runtime carries, so main and effects never attach it; it runs through onex node.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-10-29"
+  updated: "2026-10-29"
+  tags:
+    - effect
+    - broker
+    - principal
+    - developer
+  related_tickets:
+    - "OMN-20822"
+    - "OMN-20821"
+    - "OMN-20150"
