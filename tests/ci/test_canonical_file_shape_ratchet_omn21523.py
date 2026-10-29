@@ -145,6 +145,11 @@ def test_one_more_burndown_line_is_refused_as_baseline_growth(repo: Path) -> Non
     _write(repo, BURNDOWN, _burndown(listed))
     base = _commit(repo, f"{TICKET}: base with a burn-down baseline")
 
+    _write(repo, "docs/readme.md", "unrelated\n")
+    _commit(repo, f"{TICKET}: unrelated change")
+    control = _ratchet(repo, base)
+    assert "[baseline-growth]" not in control.stderr, control.stderr
+
     _write(repo, BURNDOWN, _burndown(listed, unlisted))
     _commit(repo, f"{TICKET}: grow the burn-down baseline")
     refused = _ratchet(repo, base)
@@ -164,6 +169,8 @@ def test_committed_burndown_baseline_names_the_ticket_and_no_existing_entry() ->
     }
     assert entries
     assert not entries & baseline
+    missing = sorted(path for path in entries if not (ROOT / path).is_file())
+    assert not missing, f"burn-down entries naming no file: {missing}"
 
 
 def test_whole_tree_passes_at_head_with_the_committed_baselines() -> None:
