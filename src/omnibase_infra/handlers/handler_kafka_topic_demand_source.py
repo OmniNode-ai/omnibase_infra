@@ -37,6 +37,10 @@ _POLL_TIMEOUT_MS = 1000
 _OFFSET_CHUNK = 100
 
 
+async def _nothing_to_stop() -> None:
+    return None
+
+
 class HandlerKafkaTopicDemandSource:
     """Measure and watch topics with one group-less, commit-free consumer."""
 
@@ -65,10 +69,6 @@ class HandlerKafkaTopicDemandSource:
                 "Boot subscription demand measure failed; every contract joins "
                 "at boot (OMN-18087)"
             )
-
-            async def _nothing_to_stop() -> None:
-                return None
-
             return frozenset(topics), _nothing_to_stop
 
     async def _measure_and_watch(
@@ -98,6 +98,16 @@ class HandlerKafkaTopicDemandSource:
             if not entry.get("error_code")
             for partition in entry["partitions"]
         ]
+        if not partitions:
+            # Nothing to measure or watch: the boot set is empty (a runtime
+            # profile that owns no auto-wired contract) or none of its topics
+            # exists yet, so every topic is unreadable and in use. Starting a
+            # reader here would stop it before aiokafka's group-less
+            # coordinator task had run once, and that stop raises
+            # CancelledError out of this call, past the boundary above, and ends
+            # the kernel (tenant-projection-writer restart loop on the laptop
+            # profile, run 40881579955).
+            return frozenset(logical_of.values()), _nothing_to_stop
         consumer = create_groupless_consumer(self._config)
         await consumer.start()
         low: dict[TopicPartition, int] = {}
@@ -128,10 +138,6 @@ class HandlerKafkaTopicDemandSource:
         watched = [tp for tp in measured if tp.topic not in with_records]
         if not watched:
             await consumer.stop()
-
-            async def _nothing_to_stop() -> None:
-                return None
-
             return in_use, _nothing_to_stop
 
         consumer.assign(watched)

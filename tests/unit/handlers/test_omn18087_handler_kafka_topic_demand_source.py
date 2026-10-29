@@ -233,3 +233,38 @@ async def test_dead_watch_starts_every_deferred_topic(
         assert started == [IDLE]
     finally:
         await stop()
+
+
+async def test_empty_boot_set_starts_no_reader(
+    broker: dict[str, tuple[int, int]],
+) -> None:
+    # A runtime profile that owns no auto-wired contract (the laptop profile's
+    # tenant-projection-writer, whose contracts live in omnimarket) hands over
+    # an empty boot set. Starting a group-less reader and stopping it with no
+    # partition assigned raises CancelledError out of aiokafka's coordinator
+    # close, which ended the kernel in a restart loop (OMN-18087, run
+    # 40881579955). No reader may be started when there is nothing to read.
+    async def on_first(topic: str) -> None:
+        raise AssertionError(f"nothing is watched, got {topic}")
+
+    in_use, stop = await _source().watch_idle_topics(set(), on_first)
+
+    assert in_use == frozenset()
+    assert FakeConsumer.instances == []
+    await stop()
+
+
+async def test_boot_set_of_unprovisioned_topics_starts_no_reader(
+    broker: dict[str, tuple[int, int]],
+) -> None:
+    broker.update({BUSY: (0, 5)})
+
+    async def on_first(topic: str) -> None:
+        raise AssertionError(f"nothing is watched, got {topic}")
+
+    in_use, stop = await _source().watch_idle_topics({ABSENT}, on_first)
+
+    # Unreadable topics stay on the boot path, as before.
+    assert in_use == {ABSENT}
+    assert FakeConsumer.instances == []
+    await stop()
