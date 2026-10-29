@@ -19,7 +19,11 @@ import pytest
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
-from omnibase_infra.errors import InfraTimeoutError, InfraUnavailableError
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
+)
 from omnibase_infra.event_bus import event_bus_kafka as kafka_module
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
@@ -183,3 +187,74 @@ async def test_kafka_close_stops_a_reader_nobody_unsubscribed() -> None:
     await bus.close()
     consumer.stop.assert_awaited_once()
     assert not bus._ungrouped_readers
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_kafka_ungrouped_consumer_start_failure_maps_to_connection_error() -> (
+    None
+):
+    bus = EventBusKafka(config=ModelKafkaEventBusConfig())
+    bus._started = True
+    consumer = _consumer({TopicPartition(TOPIC, 0)})
+    consumer.start = AsyncMock(side_effect=OSError("broker unreachable"))
+    with patch.object(kafka_module, "AIOKafkaConsumer", return_value=consumer):
+        with pytest.raises(InfraConnectionError):
+            await bus.subscribe_ungrouped(TOPIC, AsyncMock())
+    consumer.stop.assert_awaited_once()
+    assert not bus._ungrouped_readers
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_kafka_ungrouped_empty_assignment_starts_without_position_waits() -> None:
+    bus = EventBusKafka(config=ModelKafkaEventBusConfig())
+    bus._started = True
+    consumer = _consumer(set())
+    with patch.object(kafka_module, "AIOKafkaConsumer", return_value=consumer):
+        unsubscribe = await bus.subscribe_ungrouped(TOPIC, AsyncMock())
+    consumer.position.assert_not_awaited()
+    assert len(bus._ungrouped_readers) == 1
+    await unsubscribe()
+    assert not bus._ungrouped_readers
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_kafka_ungrouped_callback_exception_does_not_end_the_read() -> None:
+    bus = EventBusKafka(config=ModelKafkaEventBusConfig())
+    bus._started = True
+    consumer = _consumer({TopicPartition(TOPIC, 0)})
+    records = []
+    for offset in (1, 2):
+        record = MagicMock()
+        record.key = None
+        record.value = b"reply"
+        record.offset = offset
+        record.partition = 0
+        record.headers = []
+        records.append(record)
+    waits = iter(records)
+
+    async def getone() -> object:
+        try:
+            return next(waits)
+        except StopIteration:
+            await asyncio.Event().wait()
+            raise
+
+    consumer.getone = getone
+    second_delivered = asyncio.Event()
+    calls: list[str] = []
+
+    async def on_message(message: ModelEventMessage) -> None:
+        calls.append(message.offset)
+        if message.offset == "1":
+            raise ValueError("callback failed")
+        second_delivered.set()
+
+    with patch.object(kafka_module, "AIOKafkaConsumer", return_value=consumer):
+        unsubscribe = await bus.subscribe_ungrouped(TOPIC, on_message)
+    await asyncio.wait_for(second_delivered.wait(), timeout=1)
+    assert calls == ["1", "2"]
+    await unsubscribe()
