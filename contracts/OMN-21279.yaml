@@ -300,6 +300,14 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("logical_versions:") and contains("redpandadata/redpanda:v25.3.18:\n    latest: 17\n    earliest: 16"))' | grep -qx true
     binds_ac:
       - "AC11"
+  - id: dod-omn-21279-rebase-layering
+    description: >-
+      Rebase onto the current dev landing base retains the Dockerfile, workflow and test-fixture layering controls. This hosted-runner regression checks the real runtime Dockerfile and the negative fixture controls; the existing runtime-boot-smoke job remains the boot half of AC2.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_no_omnimarket_dependency_omn19998.py -q -n 0 --no-cov -p no:randomly
+    binds_ac: [AC1, AC2]
   - id: dod-omn21279-dev-broker-upgrade-path
     description: >-
       AC9. The dev broker crashed inside Kafka ListGroups on v24.3.18 (SIGSEGV at group_manager::list_groups +0x1cc on 2026-10-25T20:56:59Z and 2026-10-26T12:19:27Z, the second with the AC7 reservation in place). Upstream fixed the group erase race for v25.3.16, and v25.3.x refuses a volume older than v25.2. The test reads the declared upgrade path and the catalog pin; its fixtures refuse v25.3.18 and v25.2.14 over a 24.3 volume and a downgrade, and accept v25.1.12. Red first: at the merge base the declaration and the test file do not exist.
