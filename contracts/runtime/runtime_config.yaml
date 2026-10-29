@@ -133,6 +133,11 @@ pattern_b_broker:
     - omnimarket
   enabled_profiles:
     - main
+# OMN-18087: join at boot only the auto-wired contracts whose subscribe topics
+# hold a record on the broker; every other contract joins its consumer groups
+# when its first request arrives. "all" joins every contract at boot.
+boot_subscriptions:
+  policy: "in_use"
 # Handler configuration [RESERVED - not currently used]
 # Future: Will be used for dynamic protocol loading and configuration
 handlers:

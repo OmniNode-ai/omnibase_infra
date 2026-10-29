@@ -24,7 +24,7 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
+# Params (sourced): TAG W [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
@@ -275,10 +275,13 @@ test_merge_head() { # dir repo -> merges FETCH_HEAD into dev (no-ff), falls back
     echo "$repo test-merge CONFLICTS with dev; building the raw head $(git -C "$d" rev-parse HEAD)"
   fi
 }
-fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
-  local d=$1 repo=$2 pr=$3 exp=$4
+fetch_pr() { # dir repo pr expected [tag] -> merges PR head into dev (no-ff), falls back to raw head on conflict
+  # A tag pushed at the head (lab/pr-<repo>-<n>-<sha12>, OMN-21433) is fetched in place of the
+  # pull ref; the head it resolves to is still compared with the expected one below.
+  local d=$1 repo=$2 pr=$3 exp=$4 tag=${5:-} ref
+  ref=pull/$pr/head; [ -z "$tag" ] || ref=refs/tags/$tag
   git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
-  git -C "$d" fetch -q origin "pull/$pr/head"
+  git -C "$d" fetch -q origin "$ref"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo#$pr fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
   pr_subject "$d" "$repo" "$pr" "$h" "$(git -C "$d" rev-parse origin/dev)"
@@ -449,8 +452,8 @@ clone)
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_REF_SHA:-}" ]; then fetch_ref "$R/omnibase_infra" omnibase_infra "$INFRA_REF_SHA"
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
-  elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
-    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "pull/$INFRA_PR/head"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD" "${INFRA_TAG:-}"
+    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
   if [ -n "${MARKET_GROUP:-}" ]; then
     fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" "${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
@@ -458,8 +461,8 @@ clone)
     git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   elif [ -n "${MARKET_REF_SHA:-}" ]; then fetch_ref "$R/omnimarket" omnimarket "$MARKET_REF_SHA"
     git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "$MARKET_REF_SHA"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
-  elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD"
-    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "pull/$MARKET_PR/head"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+  elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD" "${MARKET_TAG:-}"
+    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnimarket.git "$R/omnimarket"; fi
   git clone -q --branch main https://github.com/OmniNode-ai/omnibase_compat.git "$R/omnibase_compat"
   git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_core.git "$R/omnibase_core"
@@ -493,6 +496,9 @@ build)
       --worktree "$R/omnibase_infra" --reason "${REASON:?REASON is required on a prepr slot}" \
       --descriptor-out "$W/descriptor.json" > "$W/build.log" 2>&1
     src=$?; echo "prepr_verify_lane rc=$src $(ts)"; grep '^\[prepr-verify-lane\]' "$W/build.log" | tail -6
+    # The rendered-slot verifier lists its mismatches on lines the grep above does not
+    # match, so an exit 12 reached the receipt with its reason dropped (OMN-21433).
+    [ "$src" = 12 ] && grep -E '^\[prepr-verify-rendered\]|^  - ' "$W/build.log" | head -12 | cut -c1-300
     case $src in
       0) echo "build rc=0"; echo "up rc=0"; : > "$W/migrated" ;;
       8) # another holder owns the slot: never tear down what this run did not start
