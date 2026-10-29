@@ -473,6 +473,96 @@ def _consume_failure_extra(
     }
 
 
+#: Where a group-less read begins: the log end at start. A reply read must not
+#: see replies to earlier commands.
+UNGROUPED_AUTO_OFFSET_RESET: Final[str] = "latest"
+
+
+class KafkaUngroupedReader:
+    """One group-less consumer of one topic, feeding one callback (OMN-17427).
+
+    A one-shot request/reply caller reads one reply and leaves. Joining a
+    consumer group for that read leaves the group behind: the consumer
+    unsubscribes, the group goes Empty, and its auto-committed offsets keep it on
+    the broker until offset retention expires it. Measured on the dev broker on
+    2026-10-29: 8835 groups, 8191 of them Empty, about 6978 of those minted one
+    per call by the SCM and work-ledger callers. On a one-shard broker with
+    several hundred live consumers that starved group coordination and detached
+    the GitHub write consumer.
+
+    This reader takes the topic's partitions directly (no group, so no join, no
+    rebalance, no coordinator round trip) and commits nothing, so nothing is left
+    on the broker when it stops. It begins at the log end and ``start`` does not
+    return until every assigned partition has a resolved position, so a record
+    published as soon as ``start`` returns is read.
+    """
+
+    def __init__(
+        self,
+        *,
+        consumer: AIOKafkaConsumer,
+        topic: str,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+        to_message: Callable[[object, str], ModelEventMessage],
+    ) -> None:
+        self._consumer = consumer
+        self._topic = topic
+        self._on_message = on_message
+        self._to_message = to_message
+        self._task: asyncio.Task[None] | None = None
+        self._stopped = False
+
+    async def start(self, *, timeout_seconds: float) -> None:
+        """Assign the partitions, resolve their positions, then begin reading.
+
+        Raises ``TimeoutError`` when the assignment or a position does not
+        resolve in ``timeout_seconds``; the consumer is stopped first.
+        """
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                await self._consumer.start()
+                for partition in self._consumer.assignment():
+                    await self._consumer.position(partition)
+        except BaseException:
+            await self._stop_consumer()
+            raise
+        self._task = asyncio.create_task(self._read())
+
+    async def stop(self) -> None:
+        """Stop reading and release the consumer. Safe to call twice."""
+        if self._stopped:
+            return
+        self._stopped = True
+        task, self._task = self._task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await self._stop_consumer()
+
+    async def _stop_consumer(self) -> None:
+        try:
+            await self._consumer.stop()
+        except (KafkaError, OSError, RuntimeError, TimeoutError):
+            logger.warning(
+                "Error stopping group-less consumer for topic %s",
+                self._topic,
+                exc_info=True,
+            )
+
+    async def _read(self) -> None:
+        while True:
+            record = await self._consumer.getone()
+            try:
+                await self._on_message(self._to_message(record, self._topic))
+            except Exception:
+                logger.exception(
+                    "Group-less read of topic %s: callback failed", self._topic
+                )
+
+
 class EventBusKafka(
     MixinKafkaBroadcast,
     MixinKafkaDlq,
@@ -631,6 +721,9 @@ class EventBusKafka(
         self._producer: AIOKafkaProducer | None = None
         self._consumers: dict[str, AIOKafkaConsumer] = {}
         self._group_consumers: dict[tuple[str, str], AIOKafkaConsumer] = {}
+        # OMN-17427: group-less reads (subscribe_ungrouped) hold no group, so
+        # nothing on the broker names them; close() must find them here.
+        self._ungrouped_readers: set[KafkaUngroupedReader] = set()
         # OMN-18640: one rejoin supervisor per (topic, group). Holds the
         # per-consumer stall state and the typed rejoin history a readiness
         # probe reads.
@@ -1235,6 +1328,10 @@ class EventBusKafka(
                 await consumer.stop()
             except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                 logger.warning(f"Error stopping consumer: {e}")
+
+        for reader in list(self._ungrouped_readers):
+            await reader.stop()
+        self._ungrouped_readers.clear()
 
         # Close producer with proper locking
         async with self._producer_lock:
@@ -2221,6 +2318,97 @@ class EventBusKafka(
 
                 except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(f"Error during unsubscribe: {e}")
+
+        return unsubscribe
+
+    async def subscribe_ungrouped(
+        self,
+        topic: str,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]],
+    ) -> Callable[[], Awaitable[None]]:
+        """Read ``topic`` from its log end with no consumer group (OMN-17427).
+
+        For a one-shot request/reply caller: it reads one reply and leaves, so a
+        consumer group would only be left behind on the broker (Empty, with
+        committed offsets) until offset retention expired it. This takes the
+        topic's partitions directly, commits nothing, and returns only after
+        every assigned partition has a resolved position, so a record published
+        as soon as this returns is delivered to ``on_message``. The returned
+        unsubscribe stops the consumer; nothing remains on the broker.
+
+        Raises:
+            InfraUnavailableError: When the bus has not been started.
+            InfraTimeoutError: When the assignment or a position does not
+                resolve within the bus's startup budget.
+            InfraConnectionError: When the consumer cannot start.
+        """
+        correlation_id = uuid4()
+        self._validate_topic_name(topic, correlation_id)
+        if not self._started:
+            raise InfraUnavailableError(
+                "Event bus not started. Call start() first.",
+                context=ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="subscribe_ungrouped",
+                    target_name=f"kafka.{self._environment}",
+                ),
+                topic=topic,
+            )
+        consumer = AIOKafkaConsumer(
+            apply_topic_namespace(topic),
+            bootstrap_servers=self._bootstrap_servers,
+            group_id=None,
+            auto_offset_reset=UNGROUPED_AUTO_OFFSET_RESET,
+            enable_auto_commit=False,
+            retry_backoff_ms=self._config.reconnect_backoff_ms,
+            max_partition_fetch_bytes=self._config.max_partition_fetch_bytes,
+            **self._build_client_version_kwargs(AIOKafkaConsumer),
+            **self._build_auth_kwargs(),
+        )
+        reader = KafkaUngroupedReader(
+            consumer=consumer,
+            topic=topic,
+            on_message=on_message,
+            to_message=self._kafka_msg_to_model,
+        )
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=correlation_id,
+            transport_type=EnumInfraTransportType.KAFKA,
+            operation="subscribe_ungrouped",
+            target_name=f"kafka.{topic}",
+        )
+        servers = self._sanitize_bootstrap_servers(self._bootstrap_servers)
+        try:
+            await reader.start(timeout_seconds=self._timeout_seconds)
+        except TimeoutError as exc:
+            raise InfraTimeoutError(
+                f"Timeout starting group-less read of topic {topic} after "
+                f"{self._timeout_seconds}s",
+                context=ModelTimeoutErrorContext(
+                    transport_type=EnumInfraTransportType.KAFKA,
+                    operation="subscribe_ungrouped",
+                    target_name=f"kafka.{topic}",
+                    correlation_id=correlation_id,
+                    timeout_seconds=self._timeout_seconds,
+                ),
+                topic=topic,
+                servers=servers,
+            ) from exc
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise InfraConnectionError(
+                f"Failed to start group-less read of topic {topic}: {exc}",
+                context=context,
+                topic=topic,
+                servers=servers,
+            ) from exc
+        self._ungrouped_readers.add(reader)
+
+        async def unsubscribe() -> None:
+            self._ungrouped_readers.discard(reader)
+            await reader.stop()
 
         return unsubscribe
 

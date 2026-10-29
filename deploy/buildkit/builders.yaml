@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# builders.yaml -- the dedicated BuildKit builders of the lab (OMN-19211).
+#
+# This file is the single declaration. The deploy agent reads it
+# (deploy_agent.lane_builder) to create and verify the builder its lane image
+# builds run on; the CI workflow that builds on the shared runners names the
+# same builder in `.github/workflows/docker-build.yml`, and
+# tests/unit/test_lab_builder_declaration_omn19211.py fails when the two
+# disagree. Nothing here is a default: a key a reader needs is present.
+#
+# WHY THESE EXIST. See the header of buildkitd.toml: dockerd's embedded BuildKit
+# loads its cache index before its API, so a damaged index stopped every
+# container on the lab host three times in 33 days. Each builder below has its own
+# container and its own state volume, so a damaged cache stops that builder
+# only. A builder per workload (lane image builds, CI image builds) keeps one
+# workload's damage from stopping the other.
+schema_version: "1.0.0"
+builders:
+  # Lane image builds: the deploy agent's `docker compose build`. Selected per
+  # agent instance by the unit's DEPLOY_AGENT_LANE_BUILDER=lane.
+  lane:
+    name: onex-lane-buildkit
+    driver: docker-container
+    # Pinned. v0.34.0 is the first release that recovers from a database that
+    # fails to open (moby/buildkit#7137), writes a BoltDB freelist at graceful
+    # shutdown (#7249) and carries bbolt v1.5.0; v0.34.1 is current at the
+    # time of writing. the Engine release the lab host ran embeds v0.27.1.
+    image: moby/buildkit:v0.34.1
+    buildkitd_config: deploy/buildkit/buildkitd.toml
+    # network=host so the host's docker.io mirror on localhost:5000 answers.
+    driver_opts:
+      network: host
+    bootstrap_timeout_seconds: 600
+  # CI image builds on the shared runners. The name is the one
+  # docker-build.yml has pinned since OMN-16406, so no orphan is created.
+  ci:
+    name: onex-shared-buildkit
+    driver: docker-container
+    image: moby/buildkit:v0.34.1
+    buildkitd_config: deploy/buildkit/buildkitd.toml
+    driver_opts:
+      network: host
+    bootstrap_timeout_seconds: 600
+# The Docker Engine floor for every lab host. Engine 29.9.0 is the first release
+# that embeds BuildKit v0.34.0, so the daemon's own BuildKit gains the same
+# database-open recovery. Applying it restarts dockerd (live-restore keeps the
+# containers), which is a host-wide window, so it is declared here and applied
+# by the host owner; the builders above do not depend on it.
+engine:
+  min_docker_ce: "29.9.0"
