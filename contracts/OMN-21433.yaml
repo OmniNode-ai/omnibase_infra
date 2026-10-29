@@ -37,7 +37,7 @@ dod_evidence:
       - AC2
   - id: dod-omn-21433-ac3-restart-policy
     description: >-
-      AC3. Read the slot overlay's restart policy for each of its twelve runtime services and refuse an unlimited or missing policy.
+      AC3, deploy scope. Run Docker Compose config with the infra, dev-lane and prepr files and both slot profiles, using synthetic credentials and the checked-in runtime policy. Assert that each of the twelve rendered runtime services has exactly on-failure:3. No daemon, private lane manifest or running containers are required.
     source: manual
     checks:
       - check_type: test_passes

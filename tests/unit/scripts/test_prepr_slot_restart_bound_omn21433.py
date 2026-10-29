@@ -19,12 +19,14 @@ stays exited, ``docker ps`` shows it, and the slot's health probe fails on it.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -47,59 +49,87 @@ SLOT_SERVICES = (
 )
 
 
-# The slot is rendered by prepr_verify_lane.sh from these three files, in this
-# order; a later file's ``restart`` replaces an earlier one's, and ``!reset``
-# drops it back to the default (no restart).
+# Use the same chain and profiles as prepr_verify_lane.sh. Compose itself must
+# apply interpolation, !override, !reset, inheritance and normalization.
 COMPOSE_CHAIN = (
     REPO_ROOT / "docker" / "docker-compose.infra.yml",
     REPO_ROOT / "docker" / "docker-compose.dev-lane.yml",
     OVERLAY,
 )
 
-_RESET = object()
 
-
-class _TagTolerantLoader(yaml.SafeLoader):
-    """Load a compose file, marking ``!reset`` and passing other tags through."""
-
-
-def _tag(loader: Any, suffix: str, node: Any) -> Any:
-    if suffix == "reset":
-        return _RESET
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node, deep=True)
-    if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node, deep=True)
-    return loader.construct_scalar(node)
-
-
-_TagTolerantLoader.add_multi_constructor("!", _tag)
-
-
-def _services(path: Path) -> dict[str, Any]:
-    text = re.sub(r"\$\{[A-Z_]+[^}]*\}", "1", path.read_text(encoding="utf-8"))
-    loader = _TagTolerantLoader(text)
-    try:
-        return loader.get_single_data().get("services") or {}
-    finally:
-        loader.dispose()
-
-
-def _rendered_restart(name: str) -> object:
-    """The ``restart`` value the chain renders for ``name``, last file wins."""
-    policy: object = None
+@pytest.fixture(scope="module")
+def rendered_services(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    scratch = tmp_path_factory.mktemp("prepr-restart-render")
+    runtime_policy = REPO_ROOT / "docker" / "runtime-policy.env"
+    policy_keys = set(
+        re.findall(r"^([A-Z_][A-Z_0-9]*)=", runtime_policy.read_text(), re.M)
+    )
+    # Render only: no daemon, credentials, private lane manifest or running
+    # containers are needed. Supply synthetic values for required inputs outside
+    # the checked-in runtime policy; leave the actual Compose YAML untouched.
+    required = {
+        match.group(1)
+        for path in (
+            *COMPOSE_CHAIN,
+            REPO_ROOT / "docker" / "docker-compose.broker-profile.yml",
+        )
+        for match in re.finditer(r"\$\{([A-Z_][A-Z_0-9]*):?\?", path.read_text())
+    }
+    project = os.environ.get("COMPOSE_PROJECT_NAME", "prepr-restart-render")
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(scratch),
+        "COMPOSE_PROJECT_NAME": project,
+        **dict.fromkeys(required - policy_keys, "render-only"),
+        **{key: "48080" for key in required - policy_keys if key.endswith("_PORT")},
+        "ONEX_PREPR_SLOT": "1",
+        "ONEX_DB_SLOT": "prepr1",
+        "PREPR_VALKEY_DB_INDEX": "11",
+        "ONEX_LANE_OVERLAY_DIR": str(scratch),
+        "ONEX_PREPR_TENANT_STATE_DIR": str(scratch),
+        "ONEX_LAB_TENANT_STATE_DIR": str(scratch),
+    }
+    command = [
+        "docker",
+        "compose",
+        "--env-file",
+        str(runtime_policy),
+        "-p",
+        project,
+    ]
     for path in COMPOSE_CHAIN:
-        service = _services(path).get(name)
-        if not isinstance(service, dict) or "restart" not in service:
-            continue
-        value = service["restart"]
-        policy = None if value is _RESET else value
-    return policy
+        command.extend(("-f", str(path)))
+    command.extend(
+        (
+            "--profile",
+            "prepr",
+            "--profile",
+            "prepr-gateway",
+            "config",
+            "--format",
+            "json",
+        )
+    )
+    done = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    services: dict[str, Any] = json.loads(done.stdout)["services"]
+    return services
 
 
 @pytest.mark.parametrize("name", SLOT_SERVICES)
-def test_every_slot_service_has_a_bounded_restart_policy(name: str) -> None:
-    policy = _rendered_restart(name)
+def test_every_slot_service_has_a_bounded_restart_policy(
+    name: str, rendered_services: dict[str, Any]
+) -> None:
+    policy = rendered_services[name].get("restart")
     assert policy == "on-failure:3", (
         f"{name} renders restart policy {policy!r} from the infra, dev-lane and "
         f"prepr chain. The slot must stop after three failed restarts instead of "
