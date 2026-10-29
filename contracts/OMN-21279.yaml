@@ -311,12 +311,12 @@ dod_evidence:
       - "AC9"
   - id: dod-omn21279-dev-broker-upgrade-path-deploy-probe
     description: >-
-      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 25.1 feature release and a path ending at v25.3.18. At the original merge base the deployed release read 24.3; dev now declares 25.1. The hosted runner runs it; it needs no Docker and no live host.
+      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 25.1 feature release and a path ending at v25.3.18. Dev already declares 25.1, so the probe also requires the deployed_readback record this pull request adds, which the base file lacks. The hosted runner runs it; it needs no Docker and no live host.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"25.1\"") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"25.1\"") and contains("deployed_readback:") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
     binds_ac:
       - "AC9"
   - id: dod-omn21279-dev-broker-memory-cap
@@ -374,11 +374,11 @@ dod_evidence:
       - "AC14"
   - id: dod-omn21279-dev-broker-first-hop-deploy-probe
     description: >-
-      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration lists proven_on_data_copy and deployed_feature_release 25.1. At the original base the catalog pinned v25.1.12. The hosted runner runs it; it needs no Docker and no live host.
+      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration lists proven_on_data_copy, deployed_feature_release 25.1 and the deployed_readback record. Dev already pins v25.2.14; the base declaration lacks deployed_readback, so the probe fails there. The hosted runner runs it; it needs no Docker and no live host.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("proven_on_data_copy:") and contains("deployed_feature_release: \"25.1\""))' | grep -qx true
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("proven_on_data_copy:") and contains("deployed_readback:") and contains("deployed_feature_release: \"25.1\""))' | grep -qx true
     binds_ac:
       - "AC14"
