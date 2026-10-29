@@ -6,6 +6,13 @@
 # backported to v25.3.x in #31229 for v25.3.16; there is no v24.3.x backport
 # and no v25.2.x release after the backport merged.
 #
+# OMN-20769, 2026-10-28: the first hop is live. The dev broker runs
+# redpandadata/redpanda:v25.1.12 (docker inspect on h201, /v1/features
+# cluster_version 15, node_latest_version 15), so deployed_feature_release is
+# 25.1 and that hop left path. v25.1.12 does not carry the CORE-16883 fix: it
+# crashed at kafka::group_manager::list_groups +0x1cb on 2026-10-28T08:35:30Z,
+# the frame of the v24.3.18 crashes. The fix first ships in v25.3.16, two hops on.
+#
 # Redpanda upgrades one feature release at a time: v25.3.x declares
 # earliest_version = v25_2_1 ("The earliest version we can upgrade from"), so a
 # v25.3 broker does not start on the v24.3 data volume. The dev pin may move at
@@ -16,11 +23,10 @@
 #
 # tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py and
 # test_dev_broker_hop_logical_versions_omn21279.py read this file.
-deployed_feature_release: "24.3"
+deployed_feature_release: "25.1"
 first_fixed_release: "25.3.16"
 feature_releases: ["24.2", "24.3", "25.1", "25.2", "25.3", "26.1"]
 path:
-  - redpandadata/redpanda:v25.1.12
   - redpandadata/redpanda:v25.2.14
   - redpandadata/redpanda:v25.3.18
 # Logical versions read from /v1/features on scratch brokers on 2026-10-26

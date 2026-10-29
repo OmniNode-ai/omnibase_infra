@@ -15,6 +15,12 @@ v25.2.14 and v25.3.18 started healthy in turn on a copy of the dev data volume,
 under the same ruling's rule that the dev broker moves to a version proven on
 a data copy.
 
+On 2026-10-28 the live v25.1.12 broker (cluster_version 15, read back on h201)
+crashed at ``kafka::group_manager::list_groups`` +0x1cb, the same frame as the
+v24.3.18 crashes: v25.1.12 is a hop, not the fix, which first ships in v25.3.16.
+The pin moved to v25.2.14, the second hop, and v25.3.18 follows once v25.2.14 is
+live and read back (OMN-20769).
+
 The image is spelled in several files: the catalog services, the base compose
 file (``docker-compose.infra.yml``: the broker and its partition-cap one-shot)
 and the dev-lane overlay (``docker-compose.dev-lane.yml``: the SCRAM and SASL
@@ -42,7 +48,7 @@ from tests.unit.docker.conftest import DOCKER_DIR
 
 pytestmark = [pytest.mark.unit]
 
-DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.1.12"
+DEV_BROKER_IMAGE = "redpandadata/redpanda:v25.2.14"
 
 CATALOG_DIR = DOCKER_DIR / "catalog" / "services"
 DEV_COMPOSE_FILES = ("docker-compose.infra.yml", "docker-compose.dev-lane.yml")
