@@ -20,6 +20,7 @@ after the deploy agent converges.
 
 from __future__ import annotations
 
+import os
 import re
 import uuid
 
@@ -42,9 +43,15 @@ HOUSE_TENANT_UUID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "house-tenant.omninode.ai
 EXPECTED_ENTRY = f"${{{OPERATOR_OVERRIDE}:-{HOUSE_TENANT_UUID}}}"
 _DEFAULT_RE = re.compile(r"^\$\{DEV_LANE_TENANT_ID:-([^}]*)\}$")
 
+CONTEXT_SOURCE_TENANT = "ONEX_CONTEXT_SOURCE_TENANT_ID"
+CONTEXT_SOURCE_ENTRY = "${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}"
+
+# Skipped only off CI: on a CI runner a missing docker compose CLI fails the
+# rendered checks instead of skipping them, so the rendered and override
+# behaviour is never reported green unverified.
 needs_compose = pytest.mark.skipif(
-    not docker_compose_available(),
-    reason="docker compose CLI absent; the committed-entry checks still hold",
+    not os.environ.get("CI") and not docker_compose_available(),
+    reason="docker compose CLI absent off CI; the committed-entry checks still hold",
 )
 
 
@@ -82,3 +89,18 @@ def test_the_operator_env_overrides_the_lane_tenant() -> None:
     services = render_stack(DEV_LANE_STACK, {OPERATOR_OVERRIDE: "operator-tenant"})
     for service in RUNTIMES:
         assert services[service]["environment"][TENANT] == "operator-tenant"
+
+
+def test_the_context_source_tenant_stays_beside_the_lane_tenant() -> None:
+    env = load_compose(DEV_LANE_OVERLAY)["services"]["runtime-effects"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get(TENANT) == EXPECTED_ENTRY
+    assert env.get(CONTEXT_SOURCE_TENANT) == CONTEXT_SOURCE_ENTRY
+
+
+@needs_compose
+def test_the_context_source_tenant_renders_lab_beside_the_lane_tenant() -> None:
+    services = render_stack(DEV_LANE_STACK, {OPERATOR_OVERRIDE: "operator-tenant"})
+    env = services["runtime-effects"]["environment"]
+    assert env[TENANT] == "operator-tenant"
+    assert env[CONTEXT_SOURCE_TENANT] == "lab"

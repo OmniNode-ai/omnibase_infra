@@ -18,13 +18,10 @@ requirements:
           AC2: the default UUID equals the house tenant UUID omnimarket uses -- falsifier: uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -k house fails when the default differs
       - id: "AC3"
         statement: >-
-          AC3: the OMN-21099 context-source tenant still renders lab with ONEX_TENANT_ID set -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py fails any case
-      - id: "AC4"
-        statement: >-
-          AC4: after the deploy agent converges, both dev-lane runtime containers carry ONEX_TENANT_ID and the observer emits no identity_absent refusal -- falsifier: a read-only docker inspect env-name read of both containers and a grep of omninode-runtime logs for identity_absent after the next observe interval
+          AC3: runtime-effects carries the new ONEX_TENANT_ID beside the OMN-21099 context-source tenant, which still commits as ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab} and renders lab with an operator lane tenant set -- falsifier: uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -k context_source_tenant fails on origin/dev, where runtime-effects carries no ONEX_TENANT_ID
 evidence_requirements:
   - kind: "tests"
-    description: "The committed dev-lane overlay entries are parsed as YAML, and the dev-lane stack is rendered with docker compose config when the CLI is present."
+    description: "The committed dev-lane overlay entries are parsed as YAML, and the dev-lane stack is rendered with docker compose config; on CI a missing compose CLI fails the rendered cases instead of skipping them."
     command: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -n 0 --no-cov"
 dod_evidence:
   - id: "dod-runtime-tenant-on-both-runtimes"
@@ -43,22 +40,21 @@ dod_evidence:
       - check_type: "test_passes"
         check_value: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -q -n 0 --no-cov -k house"
         cwd: "${OMNI_HOME}/omnibase_infra"
-  - id: "dod-context-source-tenant-unmoved"
-    description: "AC3: runtime-effects still renders ONEX_CONTEXT_SOURCE_TENANT_ID as lab, including with ONEX_TENANT_ID set."
+  - id: "dod-context-source-tenant-beside-lane-tenant"
+    description: "AC3: runtime-effects commits ONEX_TENANT_ID beside the unchanged ONEX_CONTEXT_SOURCE_TENANT_ID entry, and renders the context-source tenant as lab with an operator lane tenant set."
     source: "manual"
     binds_ac: ["AC3"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -n 0 --no-cov"
+        check_value: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -q -n 0 --no-cov -k context_source_tenant"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-lab-runtimes-carry-tenant"
-    description: "AC4: on the dev-lane host after the deploy agent converges, both runtime containers carry ONEX_TENANT_ID (name only, value not printed)."
+    description: "Post-deploy: on the dev-lane host after the deploy agent converges, both runtime containers carry ONEX_TENANT_ID (name only, value not printed), and neither runtime's log carries an identity_absent refusal since the container started. It reads the running dev lane, which a hosted runner cannot reach, so only the local Done gate runs it and it binds no acceptance criterion; the hosted items above bind AC1 to AC3."
     source: "manual"
-    binds_ac: ["AC4"]
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: sh -c 'for c in omninode-runtime omninode-runtime-effects; do docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $c | cut -d= -f1 | grep -qx ONEX_TENANT_ID || exit 1; done; ! docker logs --since 15m omninode-runtime 2>&1 | grep -q identity_absent'
+        check_value: sh -c 'for c in omninode-runtime omninode-runtime-effects; do docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $c | cut -d= -f1 | grep -qx ONEX_TENANT_ID || exit 1; started=$(docker inspect -f "{{.State.StartedAt}}" $c) || exit 1; ! docker logs --since "$started" $c 2>&1 | grep -q identity_absent || exit 1; done'
 emergency_bypass:
   enabled: false
   justification: ""
