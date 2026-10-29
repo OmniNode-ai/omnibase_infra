@@ -1,6 +1,6 @@
 name: redpanda-partition-cap
 description: One-shot Redpanda init service that persists partition capacity settings before runtime startup
-image: redpandadata/redpanda:v25.1.12
+image: redpandadata/redpanda:v25.2.14
 layer: infrastructure
 container_name: omnibase-infra-redpanda-partition-cap
 required_env: []
