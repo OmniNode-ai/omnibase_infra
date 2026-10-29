@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21554"
+title: "The dev-lane runtimes carry the house lane tenant, so the mode-2 environment observer reports"
+summary: >-
+  omninode-runtime and runtime-effects on the dev lane set ONEX_TENANT_ID from ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}, the house tenant UUID omnimarket uses, so node_local_environment_observe_effect stops refusing with identity_absent and OMN-19988 AC2 can run. No seed service is wired: the dev lane's tenant_registry_mirror already holds omninode -> that UUID from a real tenant event, and the local_environment writer confirms a UUID tenant by its tenant_uuid column. ONEX_CONTEXT_SOURCE_TENANT_ID (OMN-21099) is unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-dev-lane-runtime-tenant"
+    statement: "Both dev-lane kernel runtimes carry the house lane tenant as ONEX_TENANT_ID, overridable by the operator env, without moving the context-source tenant."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          AC1: the rendered dev-lane compose sets ONEX_TENANT_ID on omninode-runtime and runtime-effects from ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}, and an operator DEV_LANE_TENANT_ID overrides it -- falsifier: uv run pytest tests/ci/test_dev_lane_runtime_tenant.py fails on origin/dev and passes on the branch
+      - id: "AC2"
+        statement: >-
+          AC2: the default UUID equals the house tenant UUID omnimarket uses -- falsifier: uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -k house fails when the default differs
+      - id: "AC3"
+        statement: >-
+          AC3: the OMN-21099 context-source tenant still renders lab with ONEX_TENANT_ID set -- falsifier: uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py fails any case
+      - id: "AC4"
+        statement: >-
+          AC4: after the deploy agent converges, both dev-lane runtime containers carry ONEX_TENANT_ID and the observer emits no identity_absent refusal -- falsifier: a read-only docker inspect env-name read of both containers and a grep of omninode-runtime logs for identity_absent after the next observe interval
+evidence_requirements:
+  - kind: "tests"
+    description: "The committed dev-lane overlay entries are parsed as YAML, and the dev-lane stack is rendered with docker compose config when the CLI is present."
+    command: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-runtime-tenant-on-both-runtimes"
+    description: "AC1: both runtimes carry ONEX_TENANT_ID with the DEV_LANE_TENANT_ID override and the house default, committed and rendered."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -q -n 0 --no-cov -k 'carries or rendered or overrides'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-runtime-tenant-default-is-house-uuid"
+    description: "AC2: the committed default parses as a canonical UUID equal to uuid5(NAMESPACE_DNS, 'house-tenant.omninode.ai'), omnimarket's HOUSE_TENANT_UUID derivation."
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_dev_lane_runtime_tenant.py -q -n 0 --no-cov -k house"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-context-source-tenant-unmoved"
+    description: "AC3: runtime-effects still renders ONEX_CONTEXT_SOURCE_TENANT_ID as lab, including with ONEX_TENANT_ID set."
+    source: "manual"
+    binds_ac: ["AC3"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_dev_lane_context_source_tenant_omn21099.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-lab-runtimes-carry-tenant"
+    description: "AC4: on the dev-lane host after the deploy agent converges, both runtime containers carry ONEX_TENANT_ID (name only, value not printed)."
+    source: "manual"
+    binds_ac: ["AC4"]
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: sh -c 'for c in omninode-runtime omninode-runtime-effects; do docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $c | cut -d= -f1 | grep -qx ONEX_TENANT_ID || exit 1; done; ! docker logs --since 15m omninode-runtime 2>&1 | grep -q identity_absent'
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
