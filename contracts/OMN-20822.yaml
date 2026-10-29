@@ -41,7 +41,7 @@ dod_evidence:
     binds_ac: ["AC1"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k grants_complete_before_password"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_apply.py tests/unit/nodes/node_broker_principal_effect/test_broker_principal_adapters.py -k grants_complete_before_password"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac2-rerun-and-drift"
     description: >-
@@ -80,7 +80,7 @@ dod_evidence:
     binds_ac: ["AC3"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k no_secret"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_apply.py tests/unit/nodes/node_broker_principal_effect/test_broker_principal_adapters.py -k no_secret"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac5-admin-down"
     description: >-
@@ -89,7 +89,7 @@ dod_evidence:
     binds_ac: ["AC5"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k admin_down"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_apply.py tests/unit/nodes/node_broker_principal_effect/test_broker_principal_list_verify_and_wiring.py -k admin_down"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac5-admin-down-real-broker"
     description: >-
@@ -107,7 +107,7 @@ dod_evidence:
     binds_ac: ["AC6"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k profile_ownership"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_list_verify_and_wiring.py -k profile_ownership"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac6-pre-commit-entry"
     description: >-
@@ -116,7 +116,7 @@ dod_evidence:
     binds_ac: ["AC6"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k pre_commit_entry"
+        check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect/test_broker_principal_list_verify_and_wiring.py -k pre_commit_entry"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-deploy-probe-handler-source"
     description: >-

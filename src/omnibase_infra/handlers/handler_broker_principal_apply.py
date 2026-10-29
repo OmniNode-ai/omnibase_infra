@@ -25,7 +25,6 @@ Ticket: OMN-20822
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 
 from pydantic import SecretStr
@@ -36,6 +35,7 @@ from omnibase_infra.handlers.handler_broker_principal_list import (
     BrokerPrincipalError,
     admin_api_from_env,
     attempt,
+    environment_value,
     kafka_acls_from_env,
     scrub,
 )
@@ -94,7 +94,7 @@ class HandlerBrokerPrincipalApply:
         # request's Admin API URL and the runtime's Kafka environment.
         self._admin = admin
         self._acls = acls
-        self._environ = os.environ if environ is None else environ
+        self._environ = environ
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -129,7 +129,7 @@ class HandlerBrokerPrincipalApply:
             raise self._fail(
                 request, f"the plan was refused ({plan.refusal_kind}): {plan.refusal}"
             )
-        raw = self._environ.get(request.password_env, "")
+        raw = environment_value(request.password_env, self._environ)
         if not raw:
             raise self._fail(
                 request,

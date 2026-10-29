@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -76,6 +75,7 @@ from omnibase_infra.protocols.protocol_broker_principal_kafka_admin import (
 from omnibase_infra.protocols.protocol_broker_principal_topic_lister import (
     ProtocolBrokerPrincipalTopicLister,
 )
+from omnibase_infra.runtime.overlay.contract_env_ref import expand_contract_env_refs
 
 OPERATION = "broker.principal.list"
 SCRAM_ALGORITHM: Final[str] = "SCRAM-SHA-256"
@@ -370,13 +370,25 @@ class BrokerPrincipalKafkaSession:
         return tuple(sorted(str(name) for name in topics))
 
 
+def environment_value(name: str, environ: Mapping[str, str] | None = None) -> str:
+    """One variable, from ``environ`` when injected, else the operator environment.
+
+    The operator environment is read through ``expand_contract_env_refs``, the
+    overlay seam that is the one module family allowed to read the process
+    environment;
+    handlers do not read it themselves. ``name`` is a validated variable name.
+    """
+    if environ is not None:
+        return environ.get(name, "")
+    return expand_contract_env_refs(f"${{env.{name}}}")
+
+
 def admin_api_from_env(
     admin_url: str, environ: Mapping[str, str] | None = None
 ) -> ProtocolBrokerPrincipalAdmin:
     """The Admin API client as the stack superuser the runtime's Kafka env names."""
-    env = os.environ if environ is None else environ
-    username = env.get("KAFKA_SASL_USERNAME", "")
-    password = env.get("KAFKA_SASL_PASSWORD", "")
+    username = environment_value("KAFKA_SASL_USERNAME", environ)
+    password = environment_value("KAFKA_SASL_PASSWORD", environ)
     if not username or not password:
         raise ValueError(
             "KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must name the stack superuser"

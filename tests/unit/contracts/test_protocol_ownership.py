@@ -261,6 +261,15 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolForwarderStateReader": "nodes/node_board_probe_effect/protocols/protocol_forwarder_state_reader.py",  # [NODE] OMN-19930 one-method read seam (observe) the board_probe forwarder_refused_topic check grades through; the Docker CLI reader implements it and tests inject a fake. Infra-local, not spi: a node-internal test seam bound to this probe, not a cross-repo contract.
     "ProtocolLinearGraphQLTransport": "protocols/protocol_linear_graphql_transport.py",  # [DI] OMN-17678 one-attempt Linear GraphQL POST seam returning the raw httpx.Response so existing sweeps keep their own Retry-After, retry and fail-closed policies; tests inject a fake instead of opening a socket. Infra-local, not spi: it is bound to this repo's Linear credential and httpx adapter and is not a cross-repo contract.
     "ProtocolModelsTransport": "doctor/protocol_models_transport.py",  # [DI] OMN-19453 the single OpenAI-compatible models GET the delegation doctor local-model probe issues; tests inject a fake instead of opening a socket. Infra-local, not spi: it narrows the omnibase_core HTTP client surface to one method for this CLI probe and is not a cross-repo contract.
+    # [DI] OMN-20822 broker principal effect: the seams its three handlers call, so the
+    # unit tests inject fakes instead of a broker. Infra-local, not spi: they describe
+    # the Redpanda Admin API's SCRAM user calls and a confluent admin client's ACL and
+    # metadata calls as this effect uses them, and no other repository implements them.
+    "ProtocolBrokerPrincipalAdmin": "protocols/protocol_broker_principal_admin.py",
+    "ProtocolBrokerPrincipalAcls": "protocols/protocol_broker_principal_acls.py",
+    "ProtocolBrokerPrincipalSession": "protocols/protocol_broker_principal_session.py",
+    "ProtocolBrokerPrincipalKafkaAdmin": "protocols/protocol_broker_principal_kafka_admin.py",
+    "ProtocolBrokerPrincipalTopicLister": "protocols/protocol_broker_principal_topic_lister.py",
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

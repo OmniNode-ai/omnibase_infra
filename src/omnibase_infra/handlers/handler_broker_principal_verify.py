@@ -13,7 +13,6 @@ Ticket: OMN-20822
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 
 from pydantic import SecretStr
@@ -24,6 +23,7 @@ from omnibase_infra.handlers.handler_broker_principal_apply import planned_bindi
 from omnibase_infra.handlers.handler_broker_principal_list import (
     BrokerPrincipalError,
     attempt,
+    environment_value,
     kafka_acls_from_env,
     kafka_session_from_env,
     scrub,
@@ -56,7 +56,7 @@ class HandlerBrokerPrincipalVerify:
         # None under ``onex node``: built per request from the runtime's Kafka env.
         self._acls = acls
         self._session = session
-        self._environ = os.environ if environ is None else environ
+        self._environ = environ
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -108,7 +108,7 @@ class HandlerBrokerPrincipalVerify:
                 verified=False,
                 reason=f"ACLs differ from the plan; missing: {missing}; extra: {extra}",
             )
-        raw = self._environ.get(request.password_env, "")
+        raw = environment_value(request.password_env, self._environ)
         if not raw:
             raise self._fail(
                 request, f"the password variable {request.password_env} is not set"
