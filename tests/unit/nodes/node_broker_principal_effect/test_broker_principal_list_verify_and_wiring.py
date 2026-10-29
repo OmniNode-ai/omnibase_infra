@@ -244,6 +244,24 @@ def test_verify_refuses_a_refused_plan_before_any_broker_call() -> None:
     assert "refused" in str(raised.value)
 
 
+def test_verify_refuses_a_plan_with_no_principal_before_any_broker_call() -> None:
+    """A plan that is not refused but names no principal: the other half of the guard."""
+    untouched = _Untouched()
+    request = ModelBrokerPrincipalVerifyRequest(
+        plan=ModelDeveloperPrincipalPlan(
+            decision="create", principal="", grants=GRANTS
+        ),
+        admin_url=ADMIN_URL,
+        password_env=PASSWORD_ENV,
+    )
+    handler = HandlerBrokerPrincipalVerify(
+        acls=untouched, session=untouched, environ={PASSWORD_ENV: SENTINEL}
+    )
+    with pytest.raises(BrokerPrincipalError) as raised:
+        handler.handle(request)
+    assert raised.value.operation == "broker.principal.verify"
+
+
 def test_verify_without_the_password_variable_is_an_error_before_any_broker_call() -> (
     None
 ):
