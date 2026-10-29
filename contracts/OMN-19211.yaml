@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19211"
+title: "The lab host's image builds run on dedicated BuildKit builders with bounded history and a capped cache, so a damaged BuildKit database cannot stop dockerd"
+summary: "dockerd's embedded BuildKit panicked in ListenBuildHistory on 2026-09-22 (OMN-19211) and its bbolt solver-cache index was damaged on 2026-09-26, 2026-10-03 and 2026-10-29, stopping every container on the lab host. Lane and CI image builds move onto two declared docker-container builders (deploy/buildkit/builders.yaml) whose daemon configuration bounds build history and caps the cache; the dev deploy agent builds on the lane builder, recreates one that does not boot, and refuses the build rather than falling back to dockerd's BuildKit. The deploy agent's classification of a lost BuildKit connection (the ticket's second fix) is not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn19211-builders-declared-with-bounded-history"
+    statement: |-
+      The two declared builders run a pinned BuildKit with bounded build history and a cache ceiling equal to the host GC's, and the CI workflow and the dev deploy unit name them.
+    acceptance:
+      - id: "AC1"
+        statement: |-
+          AC1: deploy/buildkit/builders.yaml declares a lane and a ci docker-container builder on a pinned BuildKit, deploy/buildkit/buildkitd.toml bounds history (maxAge, maxEntries) and sets a maxUsedSpace ceiling equal to builder_cache_max_size in deploy/disk-gc/keep-list.yaml, and the CI workflow and deploy-agent-dev.service use the declared names -- falsifier: uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q fails at origin/dev, which has no declaration
+  - id: "req-omn19211-lane-build-uses-lane-builder"
+    statement: |-
+      A dev-lane image build runs on the declared lane builder, a builder that does not boot is recreated with its state, and an unready builder refuses the build.
+    acceptance:
+      - id: "AC2"
+        statement: |-
+          AC2: with DEPLOY_AGENT_LANE_BUILDER set the compose build runs on that builder, a builder that does not boot or runs another BuildKit version is removed with its state and created again, a creation failure refuses the build and never falls back to the default builder, and an instance naming no builder is unchanged -- falsifier: uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q fails at origin/dev, which has no lane builder module
+evidence_requirements:
+  - kind: "tests"
+    description: "The declaration tests check the builders, the config file, the ceiling equality with the host GC and the workflow and unit wiring."
+    command: "uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q"
+  - kind: "tests"
+    description: "The deploy-agent tests cover ensure, recreate and refuse, and the executor wiring."
+    command: "uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q"
+  - kind: "manual"
+    description: "Deploy check: the declaration and the dev unit at this head name the same lane builder and the config file the builders share; this reads committed configuration and touches no live host."
+    command: "deploy: uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q -k 'dev_unit or ceiling or declared_config'"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19211-ac1-builders-declared"
+    description: "The declaration tests read builders.yaml, buildkitd.toml, keep-list.yaml, the CI workflow and the dev unit and check them against each other."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn19211-ac2-lane-builder-wiring"
+    description: "The deploy-agent tests drive ensure, recreate and refuse with a fake docker runner and check the executor never falls back to the default builder."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn19211-deploy-declaration-at-head"
+    description: "Deploy probe: the declaration tests that read the dev unit, the shared config file and the cache ceiling pass at this head."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q -k 'dev_unit or ceiling or declared_config'"
+        cwd: "${OMNI_HOME}/omnibase_infra"

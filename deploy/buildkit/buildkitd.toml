@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# buildkitd.toml -- the BuildKit daemon configuration for the dedicated lab
+# builders declared in deploy/buildkit/builders.yaml (OMN-19211).
+#
+# WHY A DEDICATED BUILDER. dockerd embeds a BuildKit whose solver cache index,
+# /data/docker/buildkit/cache.db (a bbolt file), is opened by dockerd BEFORE its
+# API socket, so a damaged index stops every container on the host. It was
+# damaged three times in 33 days on the lab host (2026-09-26, 2026-10-03, 2026-10-29;
+# bbolt "page N already freed", then "invalid page type" on every restart), with
+# no disk, kernel, OOM or reboot cause. A builder run with the docker-container
+# driver keeps that index, its history database and its layers in its own state
+# volume, so the same damage can only stop that builder, which the deploy agent
+# rebuilds from nothing (deploy_agent.lane_builder).
+#
+# WHAT THIS FILE OWNS. The cache ceiling and the registry mirror. The builder
+# image, name and driver options are in builders.yaml; nothing is repeated here.
+
+# Build history is bounded the way dockerd's own was after OMN-19211. The
+# history database is a second bbolt file; keeping it small keeps a bad write
+# cheap.
+[history]
+  maxAge = 172800
+  maxEntries = 50
+
+[worker.oci]
+  gc = true
+
+  # Rule 1: anything not touched for a week goes, down to a disk-relative floor.
+  [[worker.oci.gcpolicy]]
+    keepDuration = "168h"
+    reservedSpace = "5%"
+
+  # Rule 2: the standing ceiling. `reservedSpace` alone is a FLOOR and prunes
+  # toward nothing (measured 0B on the lab host, deploy/disk-gc/keep-list.yaml), so the
+  # catch-all carries `maxUsedSpace`. The number is the same one the hourly
+  # host GC enforces on dockerd's own cache (keep-list.yaml
+  # `builder_cache_max_size`); a test fails when the two drift. This rule's
+  # floor is zero so a percentage floor on a large disk cannot override 100GB.
+  [[worker.oci.gcpolicy]]
+    all = true
+    reservedSpace = "0GB"
+    maxUsedSpace = "100GB"
+
+  # Rule 3: also cap each builder at 30% of its actual volume, so the two
+  # builders together target at most 60% on a shared disk. The 100GB rule
+  # above still limits large hosts. Keep 20% free instead of assuming every
+  # CI runner has 200GB available; the 5% cache floor scales with the disk too.
+  [[worker.oci.gcpolicy]]
+    all = true
+    reservedSpace = "5%"
+    maxUsedSpace = "30%"
+    minFreeSpace = "20%"
+
+# The host's docker.io pull-through mirror, the one dockerd declares in
+# /etc/docker/daemon.json `registry-mirrors`. A docker-container builder does
+# not inherit it. BuildKit falls back to the origin when a mirror does not
+# answer, so a host without the mirror builds exactly as before.
+[registry."docker.io"]
+  mirrors = ["localhost:5000"]
+
+[registry."localhost:5000"]
+  http = true
