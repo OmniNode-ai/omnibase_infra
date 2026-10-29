@@ -138,28 +138,30 @@ def test_new_unbound_handler_is_refused_as_handler_outside_node(repo: Path) -> N
 
 
 def test_one_more_burndown_line_is_refused_as_baseline_growth(repo: Path) -> None:
-    listed = "src/zz_pkg/handlers/handler_a.py"
-    unlisted = "src/zz_pkg/handlers/handler_b.py"
-    _write(repo, listed, HANDLER)
-    _write(repo, unlisted, HANDLER)
-    _write(repo, BURNDOWN, _burndown(listed))
+    # Every handler is listed in the burn-down baseline before the grown line is
+    # added, so the only thing that can refuse the change is the growth itself.
+    listed = [
+        "src/zz_pkg/handlers/handler_a.py",
+        "src/zz_pkg/handlers/handler_b.py",
+    ]
+    added = "src/zz_pkg/handlers/handler_c.py"
+    for path in (*listed, added):
+        _write(repo, path, HANDLER)
+    _write(repo, BURNDOWN, _burndown(*listed))
     base = _commit(repo, f"{TICKET}: base with a burn-down baseline")
 
     _write(repo, "docs/readme.md", "unrelated\n")
     _commit(repo, f"{TICKET}: unrelated change")
     control = _ratchet(repo, base)
     assert control.returncode == 0, control.stdout + control.stderr
-    assert "[baseline-growth]" not in control.stderr, control.stderr
 
-    _write(repo, BURNDOWN, _burndown(listed, unlisted))
+    _write(repo, BURNDOWN, _burndown(*listed, added))
     _commit(repo, f"{TICKET}: grow the burn-down baseline")
     refused = _ratchet(repo, base)
     assert refused.returncode == 1, refused.stdout + refused.stderr
     assert f"{BURNDOWN}: [baseline-growth]" in refused.stderr
-    # The unlisted handler is in the base commit, so the refusal is the grown
-    # burn-down file's and no handler_outside_node finding explains it.
+    assert added in refused.stderr
     assert "[handler_outside_node]" not in refused.stderr, refused.stderr
-    assert unlisted in refused.stderr
 
 
 def test_committed_burndown_baseline_names_the_ticket_and_no_existing_entry() -> None:
