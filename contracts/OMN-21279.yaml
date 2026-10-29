@@ -2,7 +2,7 @@ schema_version: 1.0.0
 ticket_id: OMN-21279
 title: omnibase_infra's runtime image, CI and tests never install or import omnimarket
 summary: >-
-  Advances the dev broker pin to the proven v25.2.14 hop after h201 read back v25.1.12 healthy at logical version 15; the final v25.3.18 crash fix still requires its own subsequent hop. Records kernel confirmation and bracketing host-memory samples for the original crashes. The dev deploy agent now checks the candidate image's Bifrost boot-contract path and readability before any container replacement, refusing the candidate and recording a failed job while preserving the running containers. The post-swap health gate and rollback remain intact. Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
+  Retains the proven v25.2.14 dev broker pin, now read back live on h201 at logical version 16; the final v25.3.18 crash fix still requires its own subsequent hop. The declaration is bound to retained Docker inspect and in-container features output, with host, identity, version and time refusal controls. Records kernel confirmation and bracketing host-memory samples for the original crashes. The dev deploy agent now checks the candidate image's Bifrost boot-contract path and readability before any container replacement, refusing the candidate and recording a failed job while preserving the running containers. The post-swap health gate and rollback remain intact. Extends the omnibase_infra layering check (tests/ci/test_no_omnimarket_dependency_omn19998.py, run by the Lint job of ci.yml and by the no-omnimarket-dependency pre-commit hook) from pyproject, uv.lock and import-time imports to docker/Dockerfile.runtime, CI install steps and test modules, and removes the omnimarket install from docker/Dockerfile.runtime. The delegation routing ladder the image used to copy out of the omnimarket wheel is now COPYed from the repo-tracked workspace/routing_tiers.yaml, a committed empty-ladder placeholder that stage_workspace.sh overwrites from the omnimarket sibling. The runtime boot half of AC2 is the runtime-boot-smoke job on the pull request head, which a hosted runner runs and this contract does not restate; the live CI scan covers ci.yml and composite actions, and three other workflows that still install omnimarket are named in the pull request body as left.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -79,7 +79,7 @@ requirements:
     statement: Next proven hop of the dev broker upgrade path, advanced by lane cx-dev-broker-crash-1835 after live first-hop readback on h201; separate from the ticket author's unchanged AC1 and AC2.
     acceptance:
       - id: AC14
-        statement: 'AC14: every dev broker image site (the catalog redpanda, redpanda-partition-cap and redpanda-local-sasl services, and the four dev redpanda services of docker-compose.infra.yml and docker-compose.dev-lane.yml) pins redpandadata/redpanda:v25.2.14, the next hop of dev_broker_upgrade_path.yaml after a healthy, finalized v25.1.12 readback on h201, and a dev pin past the deployed feature release is refused unless it is the next path hop and is listed in proven_on_data_copy -- falsifier: test_dev_broker_upgrade_path_omn21279.py and test_dev_broker_image_pin_omn17427.py, whose fixtures refuse an unproven v25.1.12 as unproven, an off-path v25.1.11 as off path even when it is listed as proven, a later hop taken before the next one, and, after deployed_feature_release advances and the hop leaves path, any pin but the new next hop'
+        statement: 'AC14: every dev broker image site (the catalog redpanda, redpanda-partition-cap and redpanda-local-sasl services, and the four dev redpanda services of docker-compose.infra.yml and docker-compose.dev-lane.yml) pins redpandadata/redpanda:v25.2.14, the next hop of dev_broker_upgrade_path.yaml after a healthy, finalized v25.1.12 readback on h201, and a dev pin past the deployed feature release is refused unless it is the next path hop and is listed in proven_on_data_copy -- falsifier: test_dev_broker_upgrade_path_omn21279.py and test_dev_broker_image_pin_omn17427.py, whose fixtures refuse an unproven v25.1.12 as unproven, an off-path v25.1.11 as off path even when it is listed as proven, a later hop taken before the next one, and, after deployed_feature_release advances and the hop leaves path, any new pin but the new next hop; retaining the exact image already read back live is a redeploy'
 evidence_requirements:
   - kind: tests
     description: Exhausted-boot recovery, lane-lock release and signed tag rollback priority regressions.
@@ -311,12 +311,12 @@ dod_evidence:
       - "AC9"
   - id: dod-omn21279-dev-broker-upgrade-path-deploy-probe
     description: >-
-      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 25.1 feature release and a path ending at v25.3.18. Dev already declares 25.1, so the probe also requires the deployed_readback record this pull request adds, which the base file lacks. The hosted runner runs it; it needs no Docker and no live host.
+      AC9, deploy-scope probe. Reads docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless it declares the deployed 25.2 feature release and a path ending at v25.3.18. The probe also requires the deployed_readback record this pull request adds, which the base file lacks. The hosted runner runs it; it needs no Docker and no live host.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"25.1\"") and contains("deployed_readback:") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("deployed_feature_release: \"25.2\"") and contains("deployed_readback:") and contains("redpandadata/redpanda:v25.3.18"))' | grep -qx true
     binds_ac:
       - "AC9"
   - id: dod-omn21279-dev-broker-memory-cap
@@ -365,7 +365,7 @@ dod_evidence:
       - "AC13"
   - id: dod-omn21279-dev-broker-first-hop
     description: >-
-      AC14. On 2026-10-26 on h201 a 49.2G scratch copy of the dev data volume omnibase-infra-redpanda-data (v24.3.18) started healthy in turn on v25.1.12 (cluster_version 15), v25.2.14 (16) and v25.3.18 (17), each with 4635 topics, 14623 groups and 0 ERROR lines; the live broker was not touched. h201 live readback on 2026-10-27 confirms v25.1.12 healthy, cluster_version and node_latest_version 15, RestartCount 0. The dev pin now moves to v25.2.14 in all seven sites. Tests refuse a non-finalized, unhealthy or wrong-broker readback, a pin that skips the next feature release and a hop without data-copy proof. Red first in this lane: the image tests failed twice against the unchanged seven v25.1.12 sites (3 passed).
+      AC14. On 2026-10-26 on h201 a 49.2G scratch copy of the dev data volume omnibase-infra-redpanda-data (v24.3.18) started healthy in turn on v25.1.12 (cluster_version 15), v25.2.14 (16) and v25.3.18 (17), each with 4635 topics, 14623 groups and 0 ERROR lines; the live broker was not touched. h201 live readback on 2026-10-27 confirms v25.1.12 healthy, cluster_version and node_latest_version 15, RestartCount 0. The dev pin moved to v25.2.14 in all seven sites via merged PR 5422. A fresh capture on 2026-10-29 from h201 records v25.2.14 healthy at cluster_version and node_latest_version 16, node_earliest_version 15, restart count 0. This change updates the deployed declaration to that capture and retains the already deployed pin. Tests refuse a non-finalized, unhealthy or wrong-broker readback, a pin that skips the next feature release and a hop without data-copy proof. Red first in this lane: the image tests failed twice against the unchanged seven v25.1.12 sites (3 passed).
     source: manual
     checks:
       - check_type: test_passes
@@ -374,11 +374,29 @@ dod_evidence:
       - "AC14"
   - id: dod-omn21279-dev-broker-first-hop-deploy-probe
     description: >-
-      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration lists proven_on_data_copy, deployed_feature_release 25.1 and the deployed_readback record. Dev already pins v25.2.14; the base declaration lacks deployed_readback, so the probe fails there. The hosted runner runs it; it needs no Docker and no live host.
+      AC14, deploy-scope probe. Reads docker/catalog/services/redpanda.yaml and docker/redpanda/dev_broker_upgrade_path.yaml through the GitHub API at the commit that carries this contract and exits nonzero unless the catalog broker pins redpandadata/redpanda:v25.2.14 and the declaration lists proven_on_data_copy, deployed_feature_release 25.2 and the deployed_readback record. Dev already pins v25.2.14; the base declaration lacks deployed_readback, so the probe fails there. The hosted runner runs it; it needs no Docker and no live host.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("proven_on_data_copy:") and contains("deployed_readback:") and contains("deployed_feature_release: \"25.1\""))' | grep -qx true
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/redpanda.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("image: redpandadata/redpanda:v25.2.14")' | grep -qx true && gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/redpanda/dev_broker_upgrade_path.yaml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | (contains("proven_on_data_copy:") and contains("deployed_readback:") and contains("deployed_feature_release: \"25.2\""))' | grep -qx true
     binds_ac:
       - "AC14"
+  - id: dod-omn21279-retained-broker-readback
+    description: >-
+      AC11 and AC14 readback hardening. The declaration must agree with retained Docker inspect output bracketing an in-container features GET on the same container ID. The capture names the dev compose project, service and data volume. Field-specific controls refuse a different host, earliest logical version or observation timestamp; coordinated edits to the readback and logical-version table cannot validate each other. Freshness is measured against the recorded plan time so a hosted runner needs no live host. The chain includes each image once and refuses repeated or reversed hops. The exact deployed pin remains a valid redeploy; a distinct pin must take the first remaining path hop and advance exactly one feature release. These named controls do not exist at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py::test_deployed_release_has_a_finalized_live_readback tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py::test_readback_and_version_table_cannot_validate_each_others_edits tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py::test_a_new_plan_cannot_reuse_a_stale_readback tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py::test_declared_chain_starts_every_hop tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py::test_repeating_the_readback_in_the_path_is_refused -q -n 0 --no-cov -p no:randomly
+    binds_ac: [AC11, AC14]
+  - id: dod-omn21279-captured-readback-hosted-deploy-check
+    description: >-
+      AC14 hosted deploy probe. Checks the declaration against retained command output and the catalog target without Docker or a live lab route. It also refuses a stale observation relative to the plan and a duplicate upgrade hop. The named negative controls are absent from the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --frozen pytest tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py::test_deployed_release_has_a_finalized_live_readback tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py::test_a_new_plan_cannot_reuse_a_stale_readback tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py::test_declared_chain_starts_every_hop tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py::test_repeating_the_readback_in_the_path_is_refused -q -n 0 --no-cov -p no:randomly
+    binds_ac: [AC14]

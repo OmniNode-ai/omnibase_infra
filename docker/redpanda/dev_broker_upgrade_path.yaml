@@ -6,9 +6,9 @@
 # backported to v25.3.x in #31229 for v25.3.16; there is no v24.3.x backport
 # and no v25.2.x release after the backport merged.
 #
-# OMN-20769, 2026-10-28: the first hop is live. The dev broker runs
+# OMN-20769, 2026-10-28: the first hop was read back live. The dev broker ran
 # redpandadata/redpanda:v25.1.12 (docker inspect on h201, /v1/features
-# cluster_version 15, node_latest_version 15), so deployed_feature_release is
+# cluster_version 15, node_latest_version 15), so deployed_feature_release became
 # 25.1 and that hop left path. v25.1.12 does not carry the CORE-16883 fix: it
 # crashed at kafka::group_manager::list_groups +0x1cb on 2026-10-28T08:35:30Z,
 # the frame of the v24.3.18 crashes. The fix first ships in v25.3.16, two hops on.
@@ -23,11 +23,10 @@
 #
 # tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py and
 # test_dev_broker_hop_logical_versions_omn21279.py read this file.
-deployed_feature_release: "25.1"
+deployed_feature_release: "25.2"
 first_fixed_release: "25.3.16"
 feature_releases: ["24.2", "24.3", "25.1", "25.2", "25.3", "26.1"]
 path:
-  - redpandadata/redpanda:v25.2.14
   - redpandadata/redpanda:v25.3.18
 # Logical versions read from /v1/features on scratch brokers on 2026-10-26
 # (docs/incidents/OMN-21279/dev-broker-crash-cause.json, fix_path.hop_proof):
@@ -63,16 +62,21 @@ proven_on_data_copy:
   - image: redpandadata/redpanda:v25.3.18
     started_healthy_at: "2026-10-26T16:10Z"
     cluster_version: 17
-# First hop read back live on h201; this is not proof that the crash is fixed.
-# Commands: docker inspect omnibase-infra-redpanda; in-container GET /v1/features.
+# The second hop is now live on h201. Retain the already deployed v25.2.14
+# pin; v25.3.18 remains a separate future upgrade. This snapshot records the
+# plan's observation, not future health. Raw inspect output brackets the
+# features GET in that container ID. Host identity is the SHA-256 of hostname
+# output so this public evidence does not expose a private DNS name.
+planned_at: "2026-10-29T02:40:13.932301+00:00"
+readback_sha256: "48250fd78d910ef74cee5ddd07c3479df60fe17521ed94c3f72c688fcdf6cea3"
 deployed_readback:
-  observed_at: "2026-10-27T16:31:45Z"
-  host: "h201"
+  observed_at: "2026-10-29T02:40:13.931740+00:00"
+  host: "sha256:b055060ffc8f40853195fb97c9bfb54cb64b3013634e19894b08ffefa4c8c315"
   container: "omnibase-infra-redpanda"
-  image: "redpandadata/redpanda:v25.1.12"
-  cluster_version: 15
-  node_latest_version: 15
-  node_earliest_version: 12
-  started_at: "2026-10-27T11:44:44.219360767Z"
+  image: "redpandadata/redpanda:v25.2.14"
+  cluster_version: 16
+  node_latest_version: 16
+  node_earliest_version: 15
+  started_at: "2026-10-29T01:23:05.066033066Z"
   restart_count: 0
   health: "healthy"
