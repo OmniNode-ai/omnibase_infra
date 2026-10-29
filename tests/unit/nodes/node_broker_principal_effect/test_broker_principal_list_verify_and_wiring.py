@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from omnibase_infra.handlers.handler_broker_principal_list import (
     BrokerPrincipalError,
@@ -27,6 +27,7 @@ from omnibase_infra.handlers.handler_broker_principal_list import (
 from omnibase_infra.handlers.handler_broker_principal_verify import (
     HandlerBrokerPrincipalVerify,
 )
+from omnibase_infra.handlers.handler_developer_principal_plan import principal_name
 from omnibase_infra.models.developer_principal import (
     ModelBrokerAclBinding,
     ModelBrokerPrincipalListRequest,
@@ -121,13 +122,36 @@ class _Session:
 
 
 def test_list_returns_only_principals_with_the_prefix() -> None:
+    """The declarations' own prefix, ``dev-``, already ends in the separator."""
     handler = HandlerBrokerPrincipalList(
-        admin=_Admin(users=("superuser", "dev-a-mac", "dev-b-air", "devx"))
+        admin=_Admin(
+            users=("superuser", "dev-a-mac", "dev-b-air", "devx", "prod-a-mac")
+        )
     )
     result = handler.handle(
-        ModelBrokerPrincipalListRequest(admin_url=ADMIN_URL, prefix="dev")
+        ModelBrokerPrincipalListRequest(admin_url=ADMIN_URL, prefix="dev-")
     )
     assert result.principals == ("dev-a-mac", "dev-b-air")
+
+
+@pytest.mark.parametrize("prefix", ["dev-", "dev", "lab-dev-"])
+def test_list_finds_every_name_the_plan_node_gives_under_that_prefix(
+    prefix: str,
+) -> None:
+    """Names come from the plan node's ``principal_name``: ``<prefix><login>-<device>``."""
+    named = principal_name(prefix, "person@example.com", "mac")
+    other = principal_name("ops-", "person@example.com", "mac")
+    handler = HandlerBrokerPrincipalList(admin=_Admin(users=(named, other)))
+    result = handler.handle(
+        ModelBrokerPrincipalListRequest(admin_url=ADMIN_URL, prefix=prefix)
+    )
+    assert result.principals == (named,)
+
+
+@pytest.mark.parametrize("prefix", ["", "Dev-", "1dev", "dev_", "d" * 17])
+def test_list_refuses_a_prefix_the_declaration_rule_refuses(prefix: str) -> None:
+    with pytest.raises(ValidationError):
+        ModelBrokerPrincipalListRequest(admin_url=ADMIN_URL, prefix=prefix)
 
 
 def test_list_admin_down_is_a_typed_error_naming_the_url_and_operation() -> None:

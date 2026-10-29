@@ -428,7 +428,7 @@ class HandlerBrokerPrincipalList:
     def handle(
         self, request: ModelBrokerPrincipalListRequest
     ) -> ModelBrokerPrincipalListResult:
-        """List the broker's users and keep those named ``<prefix>-...``."""
+        """List the broker's users and keep those whose name starts with the prefix."""
         users = attempt(
             lambda: (self._admin or admin_api_from_env(request.admin_url)).list_users(),
             lambda exc: BrokerPrincipalError(
@@ -439,7 +439,6 @@ class HandlerBrokerPrincipalList:
                 password_set=False,
             ),
         )
-        prefix = f"{request.prefix}-"
         return ModelBrokerPrincipalListResult(
-            principals=tuple(sorted(u for u in users if u.startswith(prefix)))
+            principals=tuple(sorted(u for u in users if u.startswith(request.prefix)))
         )
