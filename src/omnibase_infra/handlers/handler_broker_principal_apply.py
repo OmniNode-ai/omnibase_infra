@@ -16,7 +16,8 @@ The order is the mint plan's D9 and it is the whole point of this handler:
 A failure raises ``BrokerPrincipalError`` stating which mutations completed
 (``acls_applied``, ``password_set``). The password is held in a ``SecretStr``,
 scrubbed from any client error text, and appears in no result, log record or
-exception; errors are raised ``from None`` so no chained cause carries it.
+exception; errors are raised through ``attempt``, so none keeps the original
+exception as its cause or context.
 
 Canonical def-B dispatch entrypoint: ``handle(request) -> ModelBrokerPrincipalApplyResult``.
 Ticket: OMN-20822
@@ -32,9 +33,9 @@ from pydantic import SecretStr
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.handlers.handler_broker_principal_list import (
-    CLIENT_ERRORS,
     BrokerPrincipalError,
     admin_api_from_env,
+    attempt,
     kafka_acls_from_env,
     scrub,
 )
@@ -139,29 +140,31 @@ class HandlerBrokerPrincipalApply:
         principal = plan.principal
         planned = planned_bindings(plan)
 
-        try:
-            admin = self._admin or admin_api_from_env(request.admin_url, self._environ)
-            acls = self._acls or kafka_acls_from_env()
-        except (ValueError, RuntimeHostError) as exc:
-            raise self._fail(
+        admin, acls = attempt(
+            lambda: (
+                self._admin or admin_api_from_env(request.admin_url, self._environ),
+                self._acls or kafka_acls_from_env(),
+            ),
+            lambda exc: self._fail(
                 request, f"the broker clients could not be built ({type(exc).__name__})"
-            ) from None
-
-        try:
-            users = admin.list_users()
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+            ),
+            (ValueError, RuntimeHostError),
+        )
+        users = attempt(
+            admin.list_users,
+            lambda exc: self._fail(
                 request, f"the Admin API is unreachable ({type(exc).__name__})"
-            ) from None
+            ),
+        )
         exists = principal in users
 
-        try:
-            held = acls.list_acls(principal)
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+        held = attempt(
+            lambda: acls.list_acls(principal),
+            lambda exc: self._fail(
                 request,
                 f"the principal's ACLs could not be read ({type(exc).__name__})",
-            ) from None
+            ),
+        )
         extras = held - planned
         if extras:
             return ModelBrokerPrincipalApplyResult(
@@ -173,21 +176,21 @@ class HandlerBrokerPrincipalApply:
 
         missing = planned - held
         if missing:
-            try:
-                acls.create_acls(principal, missing)
-            except CLIENT_ERRORS as exc:
-                raise self._fail(
+            attempt(
+                lambda: acls.create_acls(principal, missing),
+                lambda exc: self._fail(
                     request,
                     "the broker did not create every planned ACL: "
                     + scrub(str(exc), password),
-                ) from None
+                ),
+            )
 
-        try:
-            readback = acls.list_acls(principal)
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+        readback = attempt(
+            lambda: acls.list_acls(principal),
+            lambda exc: self._fail(
                 request, f"the ACLs could not be read back ({type(exc).__name__})"
-            ) from None
+            ),
+        )
         if readback != planned:
             raise self._fail(
                 request,
@@ -196,14 +199,14 @@ class HandlerBrokerPrincipalApply:
                 f"{_labels(readback - planned) or 'none'}",
             )
 
-        try:
-            admin.set_password(principal, password, exists=exists)
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+        attempt(
+            lambda: admin.set_password(principal, password, exists=exists),
+            lambda exc: self._fail(
                 request,
                 "the Admin API did not set the password: " + scrub(str(exc), password),
                 acls_applied=True,
-            ) from None
+            ),
+        )
 
         return ModelBrokerPrincipalApplyResult(
             principal=principal,

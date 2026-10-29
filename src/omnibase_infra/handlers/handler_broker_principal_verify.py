@@ -22,8 +22,8 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors.error_infra import RuntimeHostError
 from omnibase_infra.handlers.handler_broker_principal_apply import planned_bindings
 from omnibase_infra.handlers.handler_broker_principal_list import (
-    CLIENT_ERRORS,
     BrokerPrincipalError,
+    attempt,
     kafka_acls_from_env,
     kafka_session_from_env,
     scrub,
@@ -83,20 +83,23 @@ class HandlerBrokerPrincipalVerify:
         """Compare the ACLs with the plan, then log in as the principal."""
         principal = request.plan.principal
         planned = planned_bindings(request.plan)
-        try:
-            acls = self._acls or kafka_acls_from_env()
-            session = self._session or kafka_session_from_env()
-        except (ValueError, RuntimeHostError) as exc:
-            raise self._fail(
+        acls, session = attempt(
+            lambda: (
+                self._acls or kafka_acls_from_env(),
+                self._session or kafka_session_from_env(),
+            ),
+            lambda exc: self._fail(
                 request, f"the broker clients could not be built ({type(exc).__name__})"
-            ) from None
-        try:
-            held = acls.list_acls(principal)
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+            ),
+            (ValueError, RuntimeHostError),
+        )
+        held = attempt(
+            lambda: acls.list_acls(principal),
+            lambda exc: self._fail(
                 request,
                 f"the principal's ACLs could not be read ({type(exc).__name__})",
-            ) from None
+            ),
+        )
         if held != planned:
             missing = sorted(b.label() for b in planned - held)
             extra = sorted(b.label() for b in held - planned)
@@ -111,12 +114,12 @@ class HandlerBrokerPrincipalVerify:
                 request, f"the password variable {request.password_env} is not set"
             )
         password = SecretStr(raw)
-        try:
-            topics = session.list_topics_as(principal, password)
-        except CLIENT_ERRORS as exc:
-            raise self._fail(
+        topics = attempt(
+            lambda: session.list_topics_as(principal, password),
+            lambda exc: self._fail(
                 request, "the principal could not log in: " + scrub(str(exc), password)
-            ) from None
+            ),
+        )
         return ModelBrokerPrincipalVerifyResult(
             principal=principal,
             verified=True,

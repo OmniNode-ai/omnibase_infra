@@ -17,7 +17,7 @@ record every call in one ordered journal, so the order itself is what is asserte
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 
 import pytest
 from pydantic import SecretStr
@@ -93,6 +93,7 @@ class _Broker:
         list_users_error: Exception | None = None,
         set_password_error: Exception | None = None,
         create_fails_on: ModelBrokerAclBinding | None = None,
+        create_error: Exception | None = None,
         readback_drops: ModelBrokerAclBinding | None = None,
     ) -> None:
         self.journal: list[str] = []
@@ -102,6 +103,7 @@ class _Broker:
         self._list_users_error = list_users_error
         self._set_password_error = set_password_error
         self._create_fails_on = create_fails_on
+        self._create_error = create_error
         self._readback_drops = readback_drops
         self._acl_reads = 0
 
@@ -133,6 +135,8 @@ class _Broker:
     ) -> None:
         wanted = sorted(bindings, key=lambda b: (b.resource, b.name, b.operation))
         self.journal.append(f"create_acls:{len(wanted)}")
+        if self._create_error is not None:
+            raise self._create_error
         for binding in wanted:
             if binding == self._create_fails_on:
                 raise RuntimeError(f"broker refused {binding.name}")
@@ -243,6 +247,19 @@ def _assert_no_sentinel(text: str) -> None:
     assert SENTINEL not in text
 
 
+def _chain(exc: BaseException | None) -> Iterator[BaseException]:
+    """The exception and every exception reachable through its cause or context."""
+    seen: set[int] = set()
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        stack += [current.__cause__, current.__context__]
+
+
 def test_no_secret_in_the_result_or_logs_on_success(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -260,8 +277,14 @@ def test_no_secret_in_the_result_or_logs_on_success(
         {"set_password_error": RuntimeError(f"admin said no to {SENTINEL}")},
         {"set_password_error": RuntimeError("admin 500")},
         {"list_users_error": ConnectionError("refused")},
+        {"create_error": RuntimeError(f"broker echoed {SENTINEL}")},
     ],
-    ids=["error_text_echoes_the_password", "admin_500", "admin_down"],
+    ids=[
+        "error_text_echoes_the_password",
+        "admin_500",
+        "admin_down",
+        "create_error_echoes_the_password",
+    ],
 )
 def test_no_secret_in_the_exception_on_failure_paths(
     caplog: pytest.LogCaptureFixture, broker_kwargs: dict[str, Exception]
@@ -269,9 +292,11 @@ def test_no_secret_in_the_exception_on_failure_paths(
     caplog.set_level(logging.DEBUG)
     with pytest.raises(BrokerPrincipalError) as raised:
         _handler(_Broker(**broker_kwargs)).handle(_request())
-    _assert_no_sentinel(str(raised.value))
-    _assert_no_sentinel(repr(raised.value))
-    _assert_no_sentinel(repr(raised.value.__dict__))
+    for link in _chain(raised.value):
+        _assert_no_sentinel(str(link))
+        _assert_no_sentinel(repr(link))
+        _assert_no_sentinel(repr(link.args))
+        _assert_no_sentinel(repr(vars(link)))
     for record in caplog.records:
         _assert_no_sentinel(record.getMessage())
 

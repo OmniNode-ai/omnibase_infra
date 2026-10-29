@@ -33,6 +33,7 @@ from omnibase_infra.handlers.handler_broker_principal_apply import (
 )
 from omnibase_infra.handlers.handler_broker_principal_list import (
     BrokerPrincipalAdminApi,
+    BrokerPrincipalError,
     BrokerPrincipalKafkaAcls,
     BrokerPrincipalKafkaSession,
 )
@@ -68,15 +69,30 @@ def _docker_transport(
     def _send(
         method: str, url: str, body: bytes | None, headers: dict[str, str]
     ) -> bytes:
-        args = ["docker", "exec", "-i", broker.container, "curl", "-sS", "-f"]
-        args += ["-X", method]
-        for name, value in headers.items():
-            args += ["-H", f"{name}: {value}"]
+        # Everything that carries a credential (the superuser's Basic header and
+        # the body with the minted password) goes to curl as a config on stdin.
+        config = [f"url = {_quoted(url)}", f"request = {_quoted(method)}"]
+        config += [f"header = {_quoted(f'{k}: {v}')}" for k, v in headers.items()]
         if body is not None:
-            args += ["--data-binary", "@-"]
-        args.append(url)
+            config.append(f"data-binary = {_quoted(body.decode())}")
+        args = [
+            "docker",
+            "exec",
+            "-i",
+            broker.container,
+            "curl",
+            "-sS",
+            "-f",
+            "-K",
+            "-",
+        ]
+        assert broker.password not in " ".join(args)
         proc = subprocess.run(
-            args, input=body or b"", capture_output=True, timeout=60, check=False
+            args,
+            input="\n".join(config).encode() + b"\n",
+            capture_output=True,
+            timeout=60,
+            check=False,
         )
         if proc.returncode != 0:
             raise OSError(
@@ -85,6 +101,12 @@ def _docker_transport(
         return proc.stdout
 
     return _send
+
+
+def _quoted(value: str) -> str:
+    """A curl config string: double-quoted, with backslash and quote escaped."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _client_config(
@@ -114,13 +136,16 @@ def _session(broker: RedpandaSasl) -> BrokerPrincipalKafkaSession:
 
 
 def _apply(
-    broker: RedpandaSasl, plan: ModelDeveloperPrincipalPlan, password: str
+    broker: RedpandaSasl,
+    plan: ModelDeveloperPrincipalPlan,
+    password: str,
+    transport: Callable[[str, str, bytes | None, dict[str, str]], bytes] | None = None,
 ) -> ModelBrokerPrincipalApplyResult:
     admin = BrokerPrincipalAdminApi(
         admin_url=ADMIN_URL,
         username=broker.username,
         password=SecretStr(broker.password),
-        transport=_docker_transport(broker),
+        transport=transport or _docker_transport(broker),
     )
     handler = HandlerBrokerPrincipalApply(
         admin=admin, acls=_acls(broker), environ={PASSWORD_ENV: password}
@@ -225,8 +250,17 @@ def test_rerun_rotates_and_leaves_the_acl_set_identical(
     assert _logs_in_within(broker, principal, "second-password-omn20822")
 
 
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("outside_topic", {"operation": "read"}),
+        ("deny", {"permission": "deny"}),
+        ("host_scoped_allow", {"host": "192.0.2.10"}),
+        ("unsupported_operation", {"operation": "alter"}),
+    ],
+)
 def test_drift_an_acl_outside_the_plan_is_refused_and_the_password_untouched(
-    redpanda_sasl: RedpandaSasl,
+    redpanda_sasl: RedpandaSasl, kind: str, expected: dict[str, str]
 ) -> None:
     broker = redpanda_sasl
     principal = _principal()
@@ -235,19 +269,82 @@ def test_drift_an_acl_outside_the_plan_is_refused_and_the_password_untouched(
 
     assert _apply(broker, plan, "old-password-omn20822").action == "create"
     assert _logs_in_within(broker, principal, "old-password-omn20822")
-    broker.grant(
-        RuntimePrincipal(principal, "old-password-omn20822"),
-        operations=("read",),
-        topics=(outside,),
-    )
+    who = f"User:{principal}"
+    extra = {
+        "outside_topic": (
+            "--allow-principal",
+            who,
+            "--operation",
+            "read",
+            "--topic",
+            outside,
+        ),
+        "deny": ("--deny-principal", who, "--operation", "write", "--topic", granted_a),
+        "host_scoped_allow": (
+            "--allow-principal",
+            who,
+            "--allow-host",
+            "192.0.2.10",
+            "--operation",
+            "write",
+            "--topic",
+            granted_a,
+        ),
+        "unsupported_operation": (
+            "--allow-principal",
+            who,
+            "--operation",
+            "alter",
+            "--topic",
+            granted_a,
+        ),
+    }[kind]
+    broker.rpk("security", "acl", "create", *extra)
     held_before = _acls(broker).list_acls(principal)
+    assert len(held_before) == len(planned_bindings(plan)) + 1, broker.acl_listing()
 
     result = _apply(broker, plan, "new-password-omn20822")
     assert result.action == "refused"
-    assert [b.name for b in result.extra_acls] == [outside]
-    assert outside in result.refusal
+    (named,) = result.extra_acls
+    assert {field: getattr(named, field) for field in expected} == expected
+    assert named.label() in result.refusal
     assert (result.acls_applied, result.password_set) == (False, False)
     assert _acls(broker).list_acls(principal) == held_before
+    assert _can_login(broker, principal, "old-password-omn20822")
+    assert not _can_login(broker, principal, "new-password-omn20822")
+
+
+# --- AC5: the Admin API failing after the ACLs exist ----------------------------
+
+
+def test_admin_down_after_the_acls_keeps_the_previous_password(
+    redpanda_sasl: RedpandaSasl,
+) -> None:
+    """The Admin API goes away at the password call, after the ACLs were applied.
+
+    The failure is injected at the transport, on the one call that sets the
+    password; the user list and every ACL call before it reach the real broker.
+    """
+    broker = redpanda_sasl
+    principal = _principal()
+    plan = _plan(principal, _topics(broker, 1))
+    assert _apply(broker, plan, "old-password-omn20822").action == "create"
+    assert _logs_in_within(broker, principal, "old-password-omn20822")
+
+    real = _docker_transport(broker)
+
+    def _down_at_password(
+        method: str, url: str, body: bytes | None, headers: dict[str, str]
+    ) -> bytes:
+        if method == "PUT":
+            raise OSError("connection refused: the Admin API went away")
+        return real(method, url, body, headers)
+
+    with pytest.raises(BrokerPrincipalError) as raised:
+        _apply(broker, plan, "new-password-omn20822", transport=_down_at_password)
+    assert (raised.value.acls_applied, raised.value.password_set) == (True, False)
+    assert ADMIN_URL in str(raised.value)
+    assert _acls(broker).list_acls(principal) == planned_bindings(plan)
     assert _can_login(broker, principal, "old-password-omn20822")
     assert not _can_login(broker, principal, "new-password-omn20822")
 

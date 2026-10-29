@@ -45,7 +45,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac2-rerun-and-drift"
     description: >-
-      Against the auth-required Redpanda, with the real Admin API and Kafka ACL clients: a second apply of the same plan reports rotate with no ACL created and reads back the identical ACL set, and the rotated password authenticates; after an ACL outside the plan is granted, apply reports refused naming the extra topic, the ACL set is unchanged, the previous password still authenticates and the new one does not. Fails at the parent, which has no handler.
+      Against the auth-required Redpanda, with the real Admin API and Kafka ACL clients: a second apply of the same plan reports rotate with no ACL created and reads back the identical ACL set, and the rotated password authenticates; after an ACL outside the plan is granted (an ALLOW on another topic, a DENY, a host-scoped ALLOW or an operation the plan cannot express, on a granted topic), apply reports refused naming that binding, the ACL set is unchanged, the previous password still authenticates and the new one does not. Fails at the parent, which has no handler.
     source: "manual"
     binds_ac: ["AC2"]
     checks:
@@ -63,7 +63,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac3-no-secret"
     description: >-
-      A sentinel password is absent from the result's model dump and repr, every captured log record, and the raised error's str, repr and attributes, on success and on the failure paths (an error text echoing the password, an Admin API 500, the Admin API down, a missing password variable); the Admin API client sends it only in the request body and keeps it out of its OSError text.
+      A sentinel password is absent from the result's model dump and repr, every captured log record, and the str, repr, args and attributes of the raised error and of every exception reachable through its cause and context, on success and on the failure paths (an error text echoing the password from the password step or from ACL creation, an Admin API 500, the Admin API down, a missing password variable, a refused login); the Admin API client sends it only in the request body and keeps it out of its error chain.
     source: "manual"
     binds_ac: ["AC3"]
     checks:
@@ -78,6 +78,15 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k admin_down"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac5-admin-down-real-broker"
+    description: >-
+      Against the auth-required Redpanda, a principal is created with one password; a second apply with a new password has the Admin API fail at the password call (injected at the transport on that one call; the user list and every ACL call reach the real broker). The error reports acls_applied true and password_set false and names the Admin API URL, the ACL set equals the plan, the previous password still authenticates and the new one does not. Fails at the parent, which has no handler.
+    source: "manual"
+    binds_ac: ["AC5"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k admin_down"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac6-profile-ownership"
     description: >-

@@ -20,7 +20,8 @@ share: the typed failure ``BrokerPrincipalError`` and the broker clients.
 * ``BrokerPrincipalKafkaSession`` logs in as the principal and lists its topics.
 
 No client and no error carries a password: a failure is re-raised with the
-password values scrubbed from its text, ``from None``.
+password values scrubbed from its text, through ``attempt``, which leaves the new
+error with no cause and no context, so the original is not reachable from it.
 
 Canonical def-B dispatch entrypoint: ``handle(request) -> ModelBrokerPrincipalListResult``.
 Ticket: OMN-20822
@@ -35,6 +36,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import CancelledError
+from enum import Enum
 from typing import Final, cast
 
 from confluent_kafka import KafkaException
@@ -101,9 +103,6 @@ _OPERATION = {
     "read": AclOperation.READ,
     "write": AclOperation.WRITE,
 }
-_RESOURCE_BACK = {v: k for k, v in _RESOURCE.items()}
-_PATTERN_BACK = {v: k for k, v in _PATTERN.items()}
-_OPERATION_BACK = {v: k for k, v in _OPERATION.items()}
 
 # confluent_kafka treats a None name or host in an AclBindingFilter as "match
 # any"; its type stubs declare str, so the wildcard is cast rather than ignored.
@@ -117,6 +116,25 @@ _URLOPEN: Final = urllib.request.urlopen
 Transport = Callable[[str, str, bytes | None, dict[str, str]], bytes]
 
 
+def attempt[T](
+    call: Callable[[], T],
+    failure: Callable[[Exception], Exception],
+    errors: tuple[type[Exception], ...] = CLIENT_ERRORS,
+) -> T:
+    """Run ``call``; on one of ``errors`` raise ``failure(exc)`` with no chain.
+
+    ``raise ... from None`` only hides a chain from the traceback: the new error's
+    ``__context__`` still holds the original, whose text or arguments can carry a
+    password. The failure is therefore built inside the handler and raised after
+    it, where no exception is being handled, so its cause and context are None.
+    """
+    try:
+        return call()
+    except errors as exc:
+        error = failure(exc)
+    raise error
+
+
 class BrokerPrincipalError(RuntimeHostError):
     """Listing, applying or verifying a developer principal failed.
 
@@ -124,7 +142,7 @@ class BrokerPrincipalError(RuntimeHostError):
     states which mutations had completed: ``acls_applied`` (every planned ACL
     created and read back) and ``password_set``. It names the operation and the
     Admin API URL. Its text never carries the password: callers pass scrubbed
-    text and raise it ``from None``.
+    text and raise it through ``attempt``.
     """
 
     def __init__(
@@ -201,13 +219,14 @@ class BrokerPrincipalAdminApi:
         headers = {"Authorization": self._authorization}
         if data is not None:
             headers["Content-Type"] = "application/json"
-        try:
-            payload = self._transport(method, f"{self._base}{path}", data, headers)
-        except OSError as exc:
-            raise OSError(
+        payload = attempt(
+            lambda: self._transport(method, f"{self._base}{path}", data, headers),
+            lambda exc: OSError(
                 f"Admin API {method} {path} failed: "
                 + scrub(str(exc), self._password, hidden)
-            ) from None
+            ),
+            (OSError,),
+        )
         return json.loads(payload) if payload else None
 
     def list_users(self) -> tuple[str, ...]:
@@ -229,6 +248,11 @@ class BrokerPrincipalAdminApi:
             self._call("PUT", f"/v1/security/users/{quoted}", body, password)
         else:
             self._call("POST", "/v1/security/users", body, password)
+
+
+def _enum_name(value: object) -> str:
+    """A confluent enum member as the binding names it: ``AclOperation.ALTER`` -> ``alter``."""
+    return value.name.lower() if isinstance(value, Enum) else str(value).lower()
 
 
 def _to_binding(principal: str, binding: ModelBrokerAclBinding) -> AclBinding:
@@ -256,6 +280,7 @@ class BrokerPrincipalKafkaAcls:
         self._timeout = timeout_seconds
 
     def list_acls(self, principal: str) -> frozenset[ModelBrokerAclBinding]:
+        """Every ACL naming the principal, of any resource, operation, permission or host."""
         acl_filter = AclBindingFilter(
             ResourceType.ANY,
             _ANY,
@@ -263,42 +288,26 @@ class BrokerPrincipalKafkaAcls:
             f"User:{principal}",
             _ANY,
             AclOperation.ANY,
-            AclPermissionType.ALLOW,
+            AclPermissionType.ANY,
         )
-        try:
-            found = self._admin.describe_acls(acl_filter).result(timeout=self._timeout)
-        except KafkaException as exc:
-            raise RuntimeError(f"describe_acls failed: {exc}") from None
+        found = attempt(
+            lambda: self._admin.describe_acls(acl_filter).result(timeout=self._timeout),
+            lambda exc: RuntimeError(f"describe_acls failed: {exc}"),
+            (KafkaException,),
+        )
         if not isinstance(found, list):
             raise RuntimeError("describe_acls did not return a list of bindings")
-        held: set[ModelBrokerAclBinding] = set()
-        for acl in found:
-            restype, pattern, operation = (
-                acl.restype,
-                acl.resource_pattern_type,
-                acl.operation,
+        return frozenset(
+            ModelBrokerAclBinding(
+                resource=_enum_name(acl.restype),
+                name=acl.name,
+                pattern=_enum_name(acl.resource_pattern_type),
+                operation=_enum_name(acl.operation),
+                permission=_enum_name(acl.permission_type),
+                host=acl.host or "*",
             )
-            if not (
-                isinstance(restype, ResourceType)
-                and isinstance(pattern, ResourcePatternType)
-                and isinstance(operation, AclOperation)
-                and restype in _RESOURCE_BACK
-                and pattern in _PATTERN_BACK
-                and operation in _OPERATION_BACK
-            ):
-                # An ACL this effect cannot express still counts as drift.
-                raise RuntimeError(
-                    f"{principal} holds an ACL outside the declaration's shapes: {acl}"
-                )
-            held.add(
-                ModelBrokerAclBinding(
-                    resource=_RESOURCE_BACK[restype],
-                    name=acl.name,
-                    pattern=_PATTERN_BACK[pattern],
-                    operation=_OPERATION_BACK[operation],
-                )
-            )
-        return frozenset(held)
+            for acl in found
+        )
 
     def create_acls(
         self, principal: str, bindings: Iterable[ModelBrokerAclBinding]
@@ -346,12 +355,13 @@ class BrokerPrincipalKafkaSession:
             "sasl.username": principal,
             "sasl.password": password.get_secret_value(),
         }
-        try:
-            metadata = self._factory(config).list_topics(timeout=self._timeout)
-        except KafkaException as exc:
-            raise PermissionError(
+        metadata = attempt(
+            lambda: self._factory(config).list_topics(timeout=self._timeout),
+            lambda exc: PermissionError(
                 "login as the principal failed: " + scrub(str(exc), password)
-            ) from None
+            ),
+            (KafkaException,),
+        )
         topics = getattr(metadata, "topics", None)
         if not isinstance(topics, Mapping):
             raise ValueError("the broker's metadata reply carried no topic map")
@@ -417,17 +427,16 @@ class HandlerBrokerPrincipalList:
         self, request: ModelBrokerPrincipalListRequest
     ) -> ModelBrokerPrincipalListResult:
         """List the broker's users and keep those named ``<prefix>-...``."""
-        try:
-            admin = self._admin or admin_api_from_env(request.admin_url)
-            users = admin.list_users()
-        except CLIENT_ERRORS as exc:
-            raise BrokerPrincipalError(
+        users = attempt(
+            lambda: (self._admin or admin_api_from_env(request.admin_url)).list_users(),
+            lambda exc: BrokerPrincipalError(
                 f"the Admin API is unreachable ({type(exc).__name__})",
                 operation=OPERATION,
                 url=request.admin_url,
                 acls_applied=False,
                 password_set=False,
-            ) from None
+            ),
+        )
         prefix = f"{request.prefix}-"
         return ModelBrokerPrincipalListResult(
             principals=tuple(sorted(u for u in users if u.startswith(prefix)))

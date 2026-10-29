@@ -177,8 +177,14 @@ def test_verify_a_refused_login_is_a_typed_error_without_the_secret() -> None:
     with pytest.raises(BrokerPrincipalError) as raised:
         _verify(_Acls(PLANNED), session).handle(_verify_request())
     assert raised.value.operation == "broker.principal.verify"
-    assert SENTINEL not in str(raised.value)
-    assert SENTINEL not in repr(raised.value.__dict__)
+    chain: list[BaseException] = []
+    link: BaseException | None = raised.value
+    while link is not None and link not in chain:
+        chain.append(link)
+        link = link.__context__ or link.__cause__
+    for exc in chain:
+        assert SENTINEL not in str(exc), type(exc).__name__
+        assert SENTINEL not in repr(vars(exc)), type(exc).__name__
 
 
 # --- AC6: no main or effects runtime owns the node; one pre-commit entry ----------
