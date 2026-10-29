@@ -19,7 +19,11 @@ hop, and every path hop to have been proven on a copy of the dev data volume.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from copy import deepcopy
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -31,6 +35,9 @@ pytestmark = [pytest.mark.unit]
 
 UPGRADE_PATH = DOCKER_DIR / "redpanda" / "dev_broker_upgrade_path.yaml"
 CATALOG_BROKER = DOCKER_DIR / "catalog" / "services" / "redpanda.yaml"
+READBACK = (
+    DOCKER_DIR.parent / "docs/incidents/OMN-21279/dev-broker-deployed-readback.json"
+)
 _VERSION = re.compile(r":v(\d+)\.(\d+)\.(\d+)$")
 
 
@@ -49,6 +56,107 @@ def _version(image: str) -> tuple[int, int, int]:
 def _feature(image: str) -> str:
     major, minor, _ = _version(image)
     return f"{major}.{minor}"
+
+
+def _assert_deployed_readback(declared: dict[str, Any]) -> None:
+    """Validate the plan against retained command output, without contacting a lane."""
+    assert (
+        declared["readback_sha256"] == hashlib.sha256(READBACK.read_bytes()).hexdigest()
+    )
+    capture = json.loads(READBACK.read_text())
+    for command in ("inspect", "features", "inspect_after"):
+        assert capture[command]["exit_code"] == 0
+    inspected = json.loads(capture["inspect"]["stdout"])
+    assert inspected == json.loads(capture["inspect_after"]["stdout"])
+    assert capture["features"]["argv"] == [
+        "docker",
+        "exec",
+        inspected["id"],
+        "curl",
+        "-fsS",
+        "http://127.0.0.1:9644/v1/features",
+    ]
+    assert inspected["project"] == "omnibase-infra"
+    assert inspected["service"] == "redpanda"
+    assert inspected["data_volume"] == "omnibase-infra-redpanda-data"
+    features = json.loads(capture["features"]["stdout"])
+    observed = declared["deployed_readback"]
+    for field in ("image", "started_at", "health", "restart_count"):
+        assert observed[field] == inspected[field], f"{field}: differs from capture"
+    assert capture["host"]["argv"] == ["hostname"]
+    assert capture["host"]["exit_code"] == 0
+    assert observed["host"] == "sha256:" + capture["host"]["stdout_sha256"], (
+        "host: differs from capture"
+    )
+    assert observed["container"] == inspected["name"].removeprefix("/"), (
+        "container: differs from capture"
+    )
+    for field in ("cluster_version", "node_latest_version", "node_earliest_version"):
+        assert observed[field] == features[field], f"{field}: differs from capture"
+    began = datetime.fromisoformat(capture["capture_started_at"])
+    finished = datetime.fromisoformat(capture["capture_finished_at"])
+    observed_at = datetime.fromisoformat(observed["observed_at"])
+    planned_at = datetime.fromisoformat(declared["planned_at"])
+    assert began <= observed_at <= finished, "observed_at: outside capture window"
+    assert finished - began <= timedelta(minutes=1), "capture took too long"
+    assert finished <= planned_at <= finished + timedelta(hours=1), "stale capture"
+    assert datetime.fromisoformat(observed["started_at"]) < began
+    image = observed["image"]
+    assert _feature(image) == declared["deployed_feature_release"]
+    assert observed["cluster_version"] == declared["logical_versions"][image]["latest"]
+    assert (
+        observed["node_earliest_version"]
+        == declared["logical_versions"][image]["earliest"]
+    )
+    assert observed["node_latest_version"] == observed["cluster_version"]
+    assert observed["health"] == "healthy"
+    assert observed["restart_count"] == 0
+
+
+def test_deployed_release_has_a_finalized_live_readback() -> None:
+    _assert_deployed_readback(_declaration())
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        ({"image": "redpandadata/redpanda:v24.3.18"}, "image"),
+        ({"cluster_version": 15}, "cluster_version"),
+        ({"node_latest_version": 17}, "node_latest_version"),
+        ({"node_earliest_version": 12}, "node_earliest_version"),
+        ({"health": "starting"}, "health"),
+        ({"restart_count": 1}, "restart_count"),
+        ({"host": "h200"}, "host"),
+        ({"container": "scratch-redpanda"}, "container"),
+        ({"observed_at": "2026-10-27T16:31:45Z"}, "observed_at"),
+        ({"started_at": "2026-10-27T11:44:44Z"}, "started_at"),
+    ],
+)
+def test_incomplete_or_wrong_broker_readback_is_refused(
+    change: dict[str, Any], field: str
+) -> None:
+    declared = deepcopy(_declaration())
+    declared["deployed_readback"].update(change)
+    with pytest.raises(AssertionError, match=field):
+        _assert_deployed_readback(declared)
+
+
+def test_readback_and_version_table_cannot_validate_each_others_edits() -> None:
+    declared = deepcopy(_declaration())
+    image = declared["deployed_readback"]["image"]
+    declared["logical_versions"][image]["latest"] = 17
+    declared["deployed_readback"].update(cluster_version=17, node_latest_version=17)
+    with pytest.raises(AssertionError, match="cluster_version: differs from capture"):
+        _assert_deployed_readback(declared)
+
+
+def test_a_new_plan_cannot_reuse_a_stale_readback() -> None:
+    declared = deepcopy(_declaration())
+    declared["planned_at"] = (
+        datetime.fromisoformat(declared["planned_at"]) + timedelta(days=1)
+    ).isoformat()
+    with pytest.raises(AssertionError, match="stale capture"):
+        _assert_deployed_readback(declared)
 
 
 def pin_refusal(
@@ -164,6 +272,9 @@ def test_every_path_hop_was_proven_on_a_data_copy() -> None:
         ("redpandadata/redpanda:v25.2.14", "24.3", True),
         ("redpandadata/redpanda:v25.3.18", "24.3", True),
         ("redpandadata/redpanda:v24.2.7", "24.3", True),
+        ("redpandadata/redpanda:v25.2.14", "25.1", False),
+        ("redpandadata/redpanda:v25.3.18", "25.1", True),
+        ("redpandadata/redpanda:v24.3.18", "25.1", True),
         ("redpandadata/redpanda:v25.3.18", "25.2", False),
     ],
 )

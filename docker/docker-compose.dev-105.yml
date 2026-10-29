@@ -331,6 +331,13 @@ services:
     container_name: omnimarket-dev-105-projection-live-events-writer
     labels:
       com.omninode.lane: dev-105
+  # OMN-19513: the claude hook-events projection writer belongs to the primary
+  # dev lane. This lane's runtime names a lane outside the node's own
+  # `runtime_lanes` scope, so its main runtime never attaches the node and a
+  # writer here would wire zero contracts, which strict wiring turns into a boot
+  # failure. Back to the inert profile the base file declares.
+  projection-claude-hook-events-writer:
+    profiles: !override ["profile-carrier-optin"]
 networks:
   omnibase-infra-network:
     name: omnibase-infra-dev-105-network

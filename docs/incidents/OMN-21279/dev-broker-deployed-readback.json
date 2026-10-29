@@ -1,0 +1,45 @@
+{
+  "capture_started_at": "2026-10-29T02:40:13.763039+00:00",
+  "host": {
+    "argv": [
+      "hostname"
+    ],
+    "exit_code": 0,
+    "stdout_sha256": "b055060ffc8f40853195fb97c9bfb54cb64b3013634e19894b08ffefa4c8c315"
+  },
+  "inspect": {
+    "argv": [
+      "docker",
+      "inspect",
+      "--format",
+      "{\"id\":{{json .Id}},\"name\":{{json .Name}},\"image\":{{json .Config.Image}},\"image_id\":{{json .Image}},\"started_at\":{{json .State.StartedAt}},\"health\":{{json .State.Health.Status}},\"restart_count\":{{json .RestartCount}},\"project\":{{json (index .Config.Labels \"com.docker.compose.project\")}},\"service\":{{json (index .Config.Labels \"com.docker.compose.service\")}},\"data_volume\":{{range .Mounts}}{{if eq .Destination \"/var/lib/redpanda/data\"}}{{json .Name}}{{end}}{{end}}}",
+      "omnibase-infra-redpanda"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"id\":\"f2ec6e40de4f8833f016bc6a2b2aa316c32a05e8044b8d2e96e72392672ad416\",\"name\":\"/omnibase-infra-redpanda\",\"image\":\"redpandadata/redpanda:v25.2.14\",\"image_id\":\"sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2\",\"started_at\":\"2026-10-29T01:23:05.066033066Z\",\"health\":\"healthy\",\"restart_count\":0,\"project\":\"omnibase-infra\",\"service\":\"redpanda\",\"data_volume\":\"omnibase-infra-redpanda-data\"}\n"
+  },
+  "features": {
+    "argv": [
+      "docker",
+      "exec",
+      "f2ec6e40de4f8833f016bc6a2b2aa316c32a05e8044b8d2e96e72392672ad416",
+      "curl",
+      "-fsS",
+      "http://127.0.0.1:9644/v1/features"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"cluster_version\": 16, \"original_cluster_version\": 13, \"node_earliest_version\": 15, \"node_latest_version\": 16, \"features\": [{\"name\": \"cloud_retention\", \"state\": \"active\", \"was_active\": true},{\"name\": \"node_isolation\", \"state\": \"active\", \"was_active\": true},{\"name\": \"group_offset_retention\", \"state\": \"active\", \"was_active\": true},{\"name\": \"membership_change_controller_cmds\", \"state\": \"active\", \"was_active\": true},{\"name\": \"controller_snapshots\", \"state\": \"active\", \"was_active\": true},{\"name\": \"cloud_storage_manifest_format_v2\", \"state\": \"active\", \"was_active\": true},{\"name\": \"force_partition_reconfiguration\", \"state\": \"active\", \"was_active\": true},{\"name\": \"delete_records\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raft_coordinated_recovery\", \"state\": \"active\", \"was_active\": true},{\"name\": \"cloud_storage_scrubbing\", \"state\": \"active\", \"was_active\": true},{\"name\": \"enhanced_force_reconfiguration\", \"state\": \"active\", \"was_active\": true},{\"name\": \"broker_time_based_retention\", \"state\": \"active\", \"was_active\": true},{\"name\": \"wasm_transforms\", \"state\": \"active\", \"was_active\": true},{\"name\": \"fast_partition_reconfiguration\", \"state\": \"active\", \"was_active\": true},{\"name\": \"disabling_partitions\", \"state\": \"active\", \"was_active\": true},{\"name\": \"cloud_metadata_cluster_recovery\", \"state\": \"active\", \"was_active\": true},{\"name\": \"audit_logging\", \"state\": \"active\", \"was_active\": true},{\"name\": \"compaction_placeholder_batch\", \"state\": \"active\", \"was_active\": true},{\"name\": \"partition_shard_in_health_report\", \"state\": \"active\", \"was_active\": true},{\"name\": \"role_based_access_control\", \"state\": \"active\", \"was_active\": true},{\"name\": \"cluster_topic_manifest_format_v2\", \"state\": \"active\", \"was_active\": true},{\"name\": \"node_local_core_assignment\", \"state\": \"active\", \"was_active\": true},{\"name\": \"unified_tx_state\", \"state\": \"active\", \"was_active\": true},{\"name\": \"data_migrations\", \"state\": \"active\", \"was_active\": true},{\"name\": \"group_tx_fence_dedicated_batch_type\", \"state\": \"active\", \"was_active\": true},{\"name\": \"transforms_specify_offset\", \"state\": \"active\", \"was_active\": true},{\"name\": \"remote_labels\", \"state\": \"active\", \"was_active\": true},{\"name\": \"partition_properties_stm\", \"state\": \"active\", \"was_active\": true},{\"name\": \"shadow_indexing_split_topic_property_update\", \"state\": \"active\", \"was_active\": true},{\"name\": \"datalake_iceberg\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raft_symmetric_reconfiguration_cancel\", \"state\": \"active\", \"was_active\": true},{\"name\": \"datalake_iceberg_ga\", \"state\": \"active\", \"was_active\": true},{\"name\": \"cloud_storage_read_write_fence\", \"state\": \"active\", \"was_active\": true},{\"name\": \"node_restart_risk_assessment\", \"state\": \"active\", \"was_active\": true},{\"name\": \"topic_ids\", \"state\": \"active\", \"was_active\": true},{\"name\": \"kafka_data_rpc\", \"state\": \"active\", \"was_active\": true},{\"name\": \"topic_locations_in_outbound_migrations\", \"state\": \"active\", \"was_active\": true},{\"name\": \"schema_registry_authz\", \"state\": \"active\", \"was_active\": true},{\"name\": \"consumer_groups_migrations\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raft_config_serde\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raft_append_entries_serde\", \"state\": \"active\", \"was_active\": true},{\"name\": \"rpc_transport_unknown_errc\", \"state\": \"active\", \"was_active\": true},{\"name\": \"partition_move_revert_cancel\", \"state\": \"active\", \"was_active\": true},{\"name\": \"seeds_driven_bootstrap_capable\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raft_improved_configuration\", \"state\": \"active\", \"was_active\": true},{\"name\": \"raftless_node_status\", \"state\": \"active\", \"was_active\": true},{\"name\": \"central_config\", \"state\": \"active\", \"was_active\": true},{\"name\": \"serde_raft_0\", \"state\": \"active\", \"was_active\": true},{\"name\": \"lightweight_heartbeats\", \"state\": \"active\", \"was_active\": true},{\"name\": \"mtls_authentication\", \"state\": \"active\", \"was_active\": true},{\"name\": \"ephemeral_secrets\", \"state\": \"active\", \"was_active\": true},{\"name\": \"rpc_v2_by_default\", \"state\": \"active\", \"was_active\": true},{\"name\": \"transaction_partitioning\", \"state\": \"active\", \"was_active\": true},{\"name\": \"consumer_offsets\", \"state\": \"active\", \"was_active\": true},{\"name\": \"tm_stm_cache\", \"state\": \"active\", \"was_active\": true},{\"name\": \"replication_factor_change\", \"state\": \"active\", \"was_active\": true},{\"name\": \"rm_stm_kafka_cache\", \"state\": \"active\", \"was_active\": true},{\"name\": \"maintenance_mode\", \"state\": \"active\", \"was_active\": true},{\"name\": \"transaction_ga\", \"state\": \"active\", \"was_active\": true},{\"name\": \"node_id_assignment\", \"state\": \"active\", \"was_active\": true},{\"name\": \"license\", \"state\": \"active\", \"was_active\": true},{\"name\": \"idempotency_v2\", \"state\": \"active\", \"was_active\": true},{\"name\": \"kafka_gssapi\", \"state\": \"active\", \"was_active\": true}]}"
+  },
+  "inspect_after": {
+    "argv": [
+      "docker",
+      "inspect",
+      "--format",
+      "{\"id\":{{json .Id}},\"name\":{{json .Name}},\"image\":{{json .Config.Image}},\"image_id\":{{json .Image}},\"started_at\":{{json .State.StartedAt}},\"health\":{{json .State.Health.Status}},\"restart_count\":{{json .RestartCount}},\"project\":{{json (index .Config.Labels \"com.docker.compose.project\")}},\"service\":{{json (index .Config.Labels \"com.docker.compose.service\")}},\"data_volume\":{{range .Mounts}}{{if eq .Destination \"/var/lib/redpanda/data\"}}{{json .Name}}{{end}}{{end}}}",
+      "f2ec6e40de4f8833f016bc6a2b2aa316c32a05e8044b8d2e96e72392672ad416"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"id\":\"f2ec6e40de4f8833f016bc6a2b2aa316c32a05e8044b8d2e96e72392672ad416\",\"name\":\"/omnibase-infra-redpanda\",\"image\":\"redpandadata/redpanda:v25.2.14\",\"image_id\":\"sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2\",\"started_at\":\"2026-10-29T01:23:05.066033066Z\",\"health\":\"healthy\",\"restart_count\":0,\"project\":\"omnibase-infra\",\"service\":\"redpanda\",\"data_volume\":\"omnibase-infra-redpanda-data\"}\n"
+  },
+  "capture_finished_at": "2026-10-29T02:40:13.931740+00:00"
+}
