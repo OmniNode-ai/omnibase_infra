@@ -119,6 +119,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -188,6 +189,18 @@ ALLOWED_CUSTOMER_ENV_KEYS: Final[frozenset[str]] = frozenset(
 
 #: The customer session's steps, every one traced, in order.
 SESSION_STEPS: Final[tuple[str, ...]] = ("init", "keyless", "secret_set", "keyed")
+
+# OMN-17427: the provider's own limit is not the criterion. OpenRouter answers
+# 429 for a shared-pool model ("temporarily rate-limited upstream. Please retry
+# shortly") on a few percent of hourly runs, and each answer cleared by the next
+# run. A keyed delegation whose every attempt was a provider 429 is repeated
+# after a pause, up to this many more times. The run that is graded is the last
+# one, and every clause still needs a real accepted answer from the provider.
+# Earlier throttled runs stay in the record under this prefix and their network
+# traces are graded by no_omninode like any other step.
+KEYED_THROTTLE_RETRIES: Final[int] = 2
+KEYED_THROTTLE_BACKOFF_S: Final[tuple[int, ...]] = (45, 90)
+KEYED_THROTTLED_PREFIX: Final[str] = "keyed_throttled_"
 
 #: The five distributions a delegation imports.
 ONEX_DISTRIBUTIONS: Final[tuple[str, ...]] = (
@@ -522,6 +535,24 @@ def _ref_names_provider(ref: str, slug: str) -> bool:
     return len(parts) == 3 and parts[0] == "llm" and parts[1] == slug
 
 
+def _receipt_attempts(receipt: Any) -> list[dict[str, Any]]:
+    if not isinstance(receipt, dict):
+        return []
+    result = _receipt_result(receipt)
+    attempts = result.get("attempts") or receipt.get("attempts") or []
+    return [a for a in attempts if isinstance(a, dict)]
+
+
+def receipt_provider_throttled(receipt: Any) -> bool:
+    """True when the run failed and every routing attempt was a provider 429."""
+    if not isinstance(receipt, dict) or receipt.get("status") == "success":
+        return False
+    attempts = _receipt_attempts(receipt)
+    return bool(attempts) and all(
+        a.get("failure_class") == "rate_limited" for a in attempts
+    )
+
+
 def grade_clean_machine(obs: Mapping[str, Any], receipt: Any) -> Clause:
     clause = Clause("clean_machine")
     identity = (
@@ -650,6 +681,7 @@ def grade_names_provider(
     keyed = steps.get("keyed") or {}
     files = obs.get("run_files") or {}
     clause.evidence["keyed_returncode"] = keyed.get("returncode")
+    clause.evidence["keyed_throttled_runs"] = obs.get("keyed_throttled_runs", 0)
     clause.evidence["provider_throttled"] = False
     if keyed.get("returncode") != 0:
         clause.reasons.append(
@@ -664,14 +696,10 @@ def grade_names_provider(
             clause.reasons.append(f"the keyed delegation was refused: {refusal}")
         return clause
     result = _receipt_result(receipt)
-    attempts = result.get("attempts") or receipt.get("attempts") or []
+    attempts = _receipt_attempts(receipt)
     # A provider 429 on every attempt is the provider's limit: say so first, so
     # the record does not read as a key or routing regression. It still fails.
-    if (
-        receipt.get("status") != "success"
-        and attempts
-        and all(a.get("failure_class") == "rate_limited" for a in attempts)
-    ):
+    if receipt_provider_throttled(receipt):
         backends = ", ".join(sorted({str(a.get("backend_id")) for a in attempts}))
         clause.reasons.insert(
             0,
@@ -790,7 +818,8 @@ def grade_no_omninode(obs: Mapping[str, Any], spec: ProviderSpec | None) -> Clau
     provider_host = spec.host if spec else ""
     clause.evidence["nameservers"] = nameservers
     per_step: dict[str, Any] = {}
-    for step in SESSION_STEPS:
+    throttled_steps = sorted(s for s in steps if s.startswith(KEYED_THROTTLED_PREFIX))
+    for step in (*SESSION_STEPS, *throttled_steps):
         if step not in steps:
             clause.reasons.append(f"customer step {step!r} was not traced")
             continue
@@ -1053,6 +1082,19 @@ def delegate_runs_root(env: Mapping[str, str]) -> Path:
     return Path(env["HOME"]) / ".onex_state" / "runs"
 
 
+def _keyed_receipt(step: Mapping[str, Any], runs_root: Path) -> dict[str, Any]:
+    """The receipt of one keyed delegation run, read from its run directory."""
+    doc = _load_json(step.get("stdout")) or {}
+    run_id = doc.get("run_id") if isinstance(doc, dict) else None
+    if not run_id:
+        return {}
+    path = runs_root / str(run_id) / "receipt.json"
+    if not path.is_file():
+        return {}
+    receipt = _load_json(path.read_text(errors="replace"))
+    return receipt if isinstance(receipt, dict) else {}
+
+
 def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     # Popped before anything is spawned, so no child ever inherits it.
     key = os.environ.pop(args.key_env, "")
@@ -1121,6 +1163,14 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         stdin_text=key,
     )
     steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
+    throttled_runs = 0
+    while throttled_runs < KEYED_THROTTLE_RETRIES and receipt_provider_throttled(
+        _keyed_receipt(steps["keyed"], runs_root)
+    ):
+        throttled_runs += 1
+        steps[f"{KEYED_THROTTLED_PREFIX}{throttled_runs}"] = steps.pop("keyed")
+        time.sleep(KEYED_THROTTLE_BACKOFF_S[throttled_runs - 1])
+        steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
     listing = subprocess.run(
         [str(onex), "secret", "list"],
         env=customer_env,
@@ -1183,6 +1233,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "customer_env_keys": sorted(customer_env),
         "nameservers": read_nameservers(),
         "steps": steps,
+        "keyed_throttled_runs": throttled_runs,
         "registered_refs": registered_refs,
         "secret_list": listing.stdout,
         "run_dir": str(run_dir) if run_dir else None,
