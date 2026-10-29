@@ -13,6 +13,7 @@ expire the lease and grant the key to another runtime.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from collections.abc import Callable, Sequence
@@ -83,24 +84,29 @@ class HandlerPlacementSession:
         """Grant the lease and register membership; raises when etcd is unreachable."""
         sent = self._clock()
         lease_id, granted = await self._adapter.lease_grant(self._ttl_s)
-        if granted <= self._margin_s:
-            context = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.HTTP,
-                operation="placement_session_open",
+        try:
+            if granted <= self._margin_s:
+                context = ModelInfraErrorContext.with_correlation(
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="placement_session_open",
+                )
+                raise InfraConnectionError(
+                    f"etcd granted TTL {granted}s, not above the {self._margin_s}s margin",
+                    context=context,
+                )
+            await self._adapter.put(
+                f"{MEMBERS_PREFIX}{self._runtime_id}",
+                json.dumps(
+                    {"runtime_id": self._runtime_id, "nodes": list(self._node_names)}
+                ),
+                lease_id=lease_id,
             )
-            raise InfraConnectionError(
-                f"etcd granted TTL {granted}s, not above the {self._margin_s}s margin",
-                context=context,
-            )
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self._adapter.lease_revoke(lease_id)
+            raise
         self._lease_id = lease_id
         self._extend(sent, granted)
-        await self._adapter.put(
-            f"{MEMBERS_PREFIX}{self._runtime_id}",
-            json.dumps(
-                {"runtime_id": self._runtime_id, "nodes": list(self._node_names)}
-            ),
-            lease_id=lease_id,
-        )
 
     async def keepalive(self) -> bool:
         """Renew once. False when the lease is gone; the session is then closed."""
