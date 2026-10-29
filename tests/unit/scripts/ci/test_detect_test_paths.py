@@ -751,6 +751,34 @@ def test_ordinary_migration_change_selects_both_ratchet_and_unit_fallback() -> N
     assert "tests/unit/" in selection.selected_paths
 
 
+def test_compose_recipe_change_beside_a_ci_test_keeps_the_unit_fallback() -> None:
+    # omnibase_infra#5437 changed docker/docker-compose.infra.yml and
+    # tests/ci/test_bifrost_lane_overlay.py. The tests/ci/ mapping made the
+    # selection non-empty, which suppressed the tests/unit/ fallback the compose
+    # file had when changed alone, so tests/unit/docker/
+    # test_lane_overlay_dir_resolution.py -- which failed on that tree in the
+    # merge-group full suite -- never ran on the pull request.
+    changed = [
+        "docker/docker-compose.infra.yml",
+        "tests/ci/test_bifrost_lane_overlay.py",
+    ]
+    selection = compute_selection(
+        changed_files=changed, adjacency_path=ADJ, ref_name="pr-branch"
+    )
+    assert selection.is_full_suite is False
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
+    assert "tests/unit/" in selection.selected_paths
+
+
+def test_compose_recipe_alone_still_selects_the_unit_tree() -> None:
+    selection = compute_selection(
+        changed_files=["docker/docker-compose.dev-lane.yml"],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert selection.selected_paths == ["tests/unit/"]
+
+
 def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
     # No regression on the existing CI-process mapping: scripts/ci/ keeps
     # selecting tests/ci/, and now also picks up the scripts test families.

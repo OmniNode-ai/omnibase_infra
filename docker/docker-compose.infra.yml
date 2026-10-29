@@ -1696,8 +1696,14 @@ services:
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: "false"
       POSTGRES_HOST: postgres
     stop_grace_period: 90s
+    # OMN-21433: the kernel renders the Bifrost delegation contract in its
+    # entrypoint preflight (x-runtime-env pins BIFROST_LANE_OVERLAY_PATH), so it
+    # needs the lane overlay at the pinned path like every other kernel service.
+    # Without this mount the preflight raised "Bifrost lane overlay not found"
+    # and the container stopped after its declared 5 boot failures.
     volumes:
       - ../contracts:/app/contracts:ro
+      - *lane-overlay-mount
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
