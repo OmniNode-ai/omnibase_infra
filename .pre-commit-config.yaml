@@ -71,6 +71,13 @@ repos:
         files: ^(src/omnibase_infra/nodes/node_developer_principal_plan_compute/|src/omnibase_infra/handlers/handler_developer_principal_plan\.py$|src/omnibase_infra/models/developer_principal/|scripts/lab_principal_issuer\.py$|deploy/(lab|local)/developer-principal-|tests/unit/nodes/node_developer_principal_plan_compute/|tests/scripts/test_developer_principal_grants_parity\.py$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: broker-principal-effect
+        name: Broker principal effect applies a plan in the mint order (OMN-20822)
+        entry: uv run --frozen pytest tests/unit/nodes/node_broker_principal_effect -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(src/omnibase_infra/nodes/node_broker_principal_effect/|src/omnibase_infra/handlers/handler_broker_principal_[a-z]+\.py$|src/omnibase_infra/models/developer_principal/|src/omnibase_infra/protocols/protocol_broker_principal_[a-z_]+\.py$|tests/unit/nodes/node_broker_principal_effect/)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov
@@ -169,9 +176,10 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 031148215620031436cba30619bbae67c0bb38ad
+    rev: dev-20261029151319-6e0a5eee541a
     hooks:
       - id: canonical-file-shape
+        args: [--rules, file-shape]
         require_serial: true
   # OMN-19998: public-repository runner placement (RULING 2026-10-16T07:07:09Z,
   # "Ci runners should be for private repos only"). Refuses a staged workflow job
