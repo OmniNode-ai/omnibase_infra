@@ -665,6 +665,15 @@ requirements:
     acceptance:
       - id: AC17427620001
         statement: 'AC17427620001: subscribe_ungrouped on the in-memory bus delivers only records published after it, shares nothing between readers and leaves no subscriber after unsubscribe, and on the Kafka bus builds a group-less consumer that commits nothing, starts only once every assigned position is resolved and is stopped by unsubscribe or close -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_subscribe_ungrouped_omn17427.py tests/integration/event_bus/test_subscribe_ungrouped_integration_omn17427.py -q fails at the merge base'
+  - id: req-omn17427-c29-throttle-retry
+    statement: The C29 probe retries a keyed delegation only when every routing attempt was provider rate-limited, and grades the final run with the original key and network safeguards.
+    acceptance:
+      - id: AC17427544201
+        statement: A failed receipt with nonempty all-rate_limited attempts, including attempts in the terminal payload, is retryable; success, mixed failures, auth failures, empty attempts and malformed receipts are not.
+      - id: AC17427544202
+        statement: A throttled keyed run is retried after 45 seconds and then 90 seconds at most; the final run is graded, non-throttle failures are not retried, and three throttled runs still fail.
+      - id: AC17427544203
+        statement: Earlier throttled runs remain in the observation record and their traces are graded by no_omninode; the key value never appears in the record after a retry, and a captured throttled receipt is recognized as retryable.
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3065,3 +3074,41 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427620001
+  - id: dod-omn17427-c29-throttle-predicate
+    description: Synthetic receipts exercise the actual retry predicate, including terminal-payload attempts and negative controls. Fails at the merge base, where receipt_provider_throttled does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q -k receipt_provider_throttled
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427544201
+  - id: dod-omn17427-c29-throttle-retry-bound
+    description: Fake customer receipts and a recorded sleep seam exercise observe_live through success after a throttle, a non-throttle failure and retry exhaustion. Fails at the merge base, which runs the keyed delegation only once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q -k 'throttled_keyed_run or not_throttled or repeats_are_bounded'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427544202
+  - id: dod-omn17427-c29-throttle-retry-safeguards
+    description: Tests retain throttled run traces for no_omninode grading, check the record for the test key and replay the captured throttled receipt. No provider request or live lane is used.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q -k 'key_is_never or no_omninode or recorded_throttled'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427544203
+  - id: dod-omn17427-c29-throttle-retry-deploy
+    description: Hosted-runner deploy check runs the C29 retry tests with fake customer commands, a fake clock, synthetic network traces and a recorded receipt. It requires no container, provider credential, provider call or live lane and does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_c29_probe_throttle_retry_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427544201
+      - AC17427544202
+      - AC17427544203
