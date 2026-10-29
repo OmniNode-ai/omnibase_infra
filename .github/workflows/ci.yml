@@ -1784,7 +1784,10 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
-      - name: A git-pinned override must build the released tree of its declared version
+      - name: Dev-merge tag lineage regressions (OMN-17427)
+        run: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_omn17427.py tests/ci/test_dep_provenance_dev_tag_live_contact_omn17427.py -n 0 -q --no-cov
+
+      - name: A git-pinned override must verify its dev-merge tag or released tree
         env:
           # Read-only, public repos: the commits/trees endpoints work
           # unauthenticated (60 req/hr). The ambient token is attached purely

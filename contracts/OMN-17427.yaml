@@ -665,6 +665,11 @@ requirements:
     acceptance:
       - id: AC17427620001
         statement: 'AC17427620001: subscribe_ungrouped on the in-memory bus delivers only records published after it, shares nothing between readers and leaves no subscriber after unsubscribe, and on the Kafka bus builds a group-less consumer that commits nothing, starts only once every assigned position is resolved and is stopped by unsubscribe or close -- falsifier: uv run --frozen pytest tests/unit/event_bus/test_subscribe_ungrouped_omn17427.py tests/integration/event_bus/test_subscribe_ungrouped_integration_omn17427.py -q fails at the merge base'
+  - id: req-omn17427-dev-tag-lineage
+    statement: Dev-merge tag pins are verified against resolved tag identity, dev ancestry, declared version and adjacent lock identity, with unresolved facts refused.
+    acceptance:
+      - id: AC17427630001
+        statement: 'A real file-served git repository and paired pure fixtures admit the valid dev-merge tag and refuse fabricated, off-dev, suffix, version and lock mismatches; other pin shapes retain the release-tree path -- falsifier: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_omn17427.py tests/ci/test_dep_provenance_dev_tag_live_contact_omn17427.py -n 0 -q'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3065,3 +3070,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC17427620001
+  - id: dod-omn17427-dev-tag-lineage
+    description: Hermetic real-git and paired fact tests for dev-merge tag lineage; the new test path fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_omn17427.py tests/ci/test_dep_provenance_dev_tag_live_contact_omn17427.py -n 0 -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630001]

@@ -1099,6 +1099,13 @@ repos:
         files: ^pyproject\.toml$
         pass_filenames: false
         stages: [pre-commit]
+      - id: check-dep-provenance-dev-tags
+        name: Dev-merge tag lineage regressions (OMN-17427)
+        entry: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_omn17427.py tests/ci/test_dep_provenance_dev_tag_live_contact_omn17427.py -n 0 -q --no-cov
+        language: system
+        files: ^(scripts/check_dep_provenance\.py|tests/scripts/test_check_dep_provenance_dev_tag_omn17427\.py|tests/ci/test_dep_provenance_dev_tag_live_contact_omn17427\.py|tests/fixtures/dep_provenance_dev_tag(_live)?_omn17427\.json|pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
       - id: check-env-reads
         name: Block new os.environ reads (use overlay-resolved config)

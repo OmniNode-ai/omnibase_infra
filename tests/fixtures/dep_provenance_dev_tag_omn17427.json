@@ -1,0 +1,13 @@
+[
+  {"name": "fabricated-tag", "facts": {"tag_exists": false}, "condition": "tag exists"},
+  {"name": "off-dev", "facts": {"on_dev": false}, "condition": "reachable from dev"},
+  {"name": "suffix-mismatch", "facts": {"commit": "ffffffffffffffffffffffffffffffffffffffff"}, "condition": "suffix"},
+  {"name": "declared-version", "declared_version": "0.47.57", "condition": "declared version"},
+  {"name": "lock-version", "lock": {"version": "0.47.57"}, "condition": "lock version"},
+  {"name": "lock-commit", "lock": {"git": "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261029143607-123456789abc#ffffffffffffffffffffffffffffffffffffffff"}, "condition": "lock commit"},
+  {"name": "lock-tag", "lock": {"git": "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261029143607-ffffffffffff#123456789abc0000000000000000000000000000"}, "condition": "lock tag"},
+  {"name": "missing-lock-entry", "missing_lock": true, "condition": "lock entry"},
+  {"name": "unresolved-tag", "facts": {"tag_exists": null}, "condition": "UNDETERMINED lineage"},
+  {"name": "unresolved-dev", "facts": {"on_dev": null}, "condition": "UNDETERMINED lineage"},
+  {"name": "unresolved-version", "facts": {"version": null}, "condition": "UNDETERMINED lineage"}
+]

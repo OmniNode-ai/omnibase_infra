@@ -386,6 +386,13 @@ The runtime uses plugin-based handler loading from YAML contracts
 
 **Dependency bump checklist:**
 
+The dependency provenance lineage gate (`scripts/check_dep_provenance.py
+--check-lineage`) enforces RULING 2026-10-29T01:50:26Z: iterate with a dev-merge
+`tag = "dev-YYYYMMDDHHMMSS-<sha12>"`. It verifies the tag exists, peels to the
+commit named by its suffix, is reachable from `dev`, and agrees with the exact
+declared version and any adjacent `uv.lock` version, tag and commit. Unresolved
+facts fail closed; other pin shapes retain the release-tree lineage check.
+
 1. Update `pyproject.toml` bounds, then `uv sync`. `omnibase-core` is published as
    `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` and pinned exactly only in
    `[tool.uv] override-dependencies` (OMN-19655); the range must admit the override

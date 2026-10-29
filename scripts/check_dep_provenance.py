@@ -17,7 +17,8 @@ Forbidden first-party deps (both hyphen and underscore spellings):
     omnibase-core   omnibase-spi   omnibase-compat
 
 A ``[tool.uv.sources]`` entry for any of the above with a ``git`` / ``rev`` /
-``branch`` / ``tag`` key is a forbidden override and fails the gate.
+``branch`` / ``tag`` key is a forbidden override, except a dev-merge tag
+with no ``rev`` or ``branch`` key. That sanctioned shape needs no escape token.
 
 Escape hatch (Rule-10 style): a forbidden source line may carry an inline
 comment ``# raw-override-ok: <ticket>`` with a NON-EMPTY token. This exempts the
@@ -31,12 +32,13 @@ Exit codes:
 
 The override-forbid check above (``find_violations`` / the default CLI
 invocation with no flags) is deterministic and offline — it makes no network
-calls. It is unchanged and remains what pre-commit and
-``dep-provenance-gate.yml`` invoke by default.
+calls. It admits the sanctioned dev-merge tag shape without resolving its
+identity; ``--check-lineage`` is the required verifier. It remains what
+pre-commit and ``dep-provenance-gate.yml`` invoke by default.
 
 Content-lineage check (OMN-15604, opt-in via ``--check-lineage``)
 -------------------------------------------------------------------
-The gate above is SHAPE-only: it forbids a git source unconditionally, but a
+The gate above is SHAPE-only: outside the sanctioned dev-merge tag shape, a
 line carrying a well-formed ``# raw-override-ok: <ticket>`` token is exempt
 from it *unconditionally and forever* — the token is validated only for
 non-emptiness, never against whether the pinned rev's content actually matches
@@ -56,6 +58,15 @@ it resolves the ``src/`` git tree object of the pinned ref and of released tag
 differ. This runs **regardless of a ``# raw-override-ok:`` token** — the token
 exempts a line from the "forbid git source" rule only; it was never designed to
 (and must not) exempt a pin from matching the content it claims to build.
+
+Dev-merge tags (OMN-17427, RULING 2026-10-29T01:50:26Z) use a stricter
+identity check instead of comparing with an unrelated release: only a ``tag``
+key fully matching ``dev-YYYYMMDDHHMMSS-<sha12>`` takes this path. The tag
+must exist, peel to a commit matching its suffix, and be reachable from dev.
+Its project.version must equal the exact declared pin and, when uv.lock is
+present, its package version, tag and commit must also agree. Facts are
+resolved mirror-first then REST; unresolved facts still fail closed. Every
+other pin shape retains the release-tree comparison above.
 
 Because tree resolution requires network access, this is opt-in
 (``--check-lineage``) and never runs from pre-commit (offline hook) or the
@@ -170,9 +181,8 @@ Usage::
     uv run python scripts/check_dep_provenance.py --check-movable omnibase-core --target-version 0.47.0
 """
 
-from __future__ import annotations
-
 import argparse
+import base64
 import json
 import os
 import re
@@ -184,6 +194,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -327,7 +338,9 @@ def find_violations(text: str) -> list[str]:
 
     An empty list means the file is clean (exit 0). A non-empty list means the
     gate fails (exit 1). Lines carrying a valid `# raw-override-ok: <token>`
-    escape are excluded.
+    escape are excluded. A git source with only a dev-merge ``tag`` ref is
+    sanctioned without a token. This offline check cannot establish that the
+    tag exists or is on dev; required ``--check-lineage`` verifies its identity.
     """
     block = _uv_sources_block(text) or text
 
@@ -343,6 +356,16 @@ def find_violations(text: str) -> list[str]:
         git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
         if not git_keys:
             # A non-git source (unusual, but not a provenance violation).
+            continue
+
+        tag = attrs.get("tag")
+        if (
+            isinstance(attrs.get("git"), str)
+            and isinstance(tag, str)
+            and "rev" not in attrs
+            and "branch" not in attrs
+            and _DEV_MERGE_TAG_RE.fullmatch(tag)
+        ):
             continue
 
         raw_line = _line_for_package(block, pkg)
@@ -540,6 +563,10 @@ def resolve_src_tree_sha_via_mirror(
     all yield ``(None, detail)`` rather than raising, so a caller can always
     fall back to another resolver.
     """
+    from omnibase_core.validators.no_unguarded_git_subprocess import (
+        scrub_git_location_env,
+    )
+
     mirror_url = f"git://{_MIRROR_HOST}:{_MIRROR_PORT}/{repo}.git"
     try:
         with tempfile.TemporaryDirectory(prefix="dep-provenance-mirror-") as tmp:
@@ -548,7 +575,7 @@ def resolve_src_tree_sha_via_mirror(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=_MIRROR_GIT_ENV,
+                env=scrub_git_location_env(_MIRROR_GIT_ENV),
                 check=False,
             )
             if init.returncode != 0:
@@ -562,7 +589,7 @@ def resolve_src_tree_sha_via_mirror(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=_MIRROR_GIT_ENV,
+                env=scrub_git_location_env(_MIRROR_GIT_ENV),
                 check=False,
             )
             if fetch.returncode != 0:
@@ -585,7 +612,7 @@ def resolve_src_tree_sha_via_mirror(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=_MIRROR_GIT_ENV,
+                env=scrub_git_location_env(_MIRROR_GIT_ENV),
                 check=False,
             )
             tree_sha = rev.stdout.strip()
@@ -623,10 +650,306 @@ def resolve_src_tree_sha_hermetic(repo: str, ref: str) -> tuple[str | None, str]
     return None, f"mirror: {mirror_detail}; live API: {live_detail}"
 
 
+# Dev-merge tags are verified identities, not release-tree comparisons.
+_DEV_MERGE_TAG_RE = re.compile(r"^dev-\d{14}-[0-9a-f]{12}$")
+
+
+@dataclass(frozen=True)
+class DevMergeTagFacts:
+    """Resolved tag identity; None means the resolver could not establish a fact."""
+
+    tag_exists: bool | None
+    commit: str | None
+    version: str | None
+    on_dev: bool | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class DevMergeLockEntry:
+    """The version and source identity recorded by uv, without interpretation."""
+
+    version: str
+    git: str
+
+
+def dev_merge_tag_violations(
+    package: str,
+    tag: str,
+    declared_version: str,
+    facts: DevMergeTagFacts,
+    lock_entry: DevMergeLockEntry | None,
+    *,
+    lock_required: bool = False,
+) -> list[str]:
+    """Pure decision over resolved facts, the declared version and lock identity."""
+    violations: list[str] = []
+
+    def fail(condition: str, *, unresolved: bool = False) -> None:
+        prefix = "UNDETERMINED lineage: " if unresolved else ""
+        violations.append(
+            f"{package}: {prefix}tag={tag!r}: {condition} ({facts.detail})"
+        )
+
+    if _DEV_MERGE_TAG_RE.fullmatch(tag) is None:
+        fail("dev-merge tag shape does not match dev-YYYYMMDDHHMMSS-<sha12>")
+        return violations
+    if facts.tag_exists is not True:
+        fail("tag exists on repository", unresolved=facts.tag_exists is None)
+    if facts.tag_exists is not False:
+        if facts.commit is None:
+            fail("tag commit could not be resolved", unresolved=True)
+        elif not re.fullmatch(
+            r"[0-9a-f]{40}", facts.commit
+        ) or not facts.commit.startswith(tag.rsplit("-", 1)[1]):
+            fail(f"tag suffix does not match resolved commit {facts.commit!r}")
+        if facts.on_dev is not True:
+            fail("tag commit is reachable from dev", unresolved=facts.on_dev is None)
+        if facts.version is None:
+            fail("tag project.version could not be resolved", unresolved=True)
+        elif facts.version != declared_version:
+            fail(
+                f"declared version {declared_version!r} differs from tag project.version {facts.version!r}"
+            )
+    if lock_required and lock_entry is None:
+        fail("lock entry is absent or ambiguous")
+    elif lock_entry is not None:
+        source = urllib.parse.urlsplit(lock_entry.git)
+        query = urllib.parse.parse_qs(source.query)
+        if query.get("tag") != [tag]:
+            fail(f"lock tag {query.get('tag')!r} differs from tag")
+        if facts.version is not None and lock_entry.version != facts.version:
+            fail(
+                f"lock version {lock_entry.version!r} differs from tag project.version {facts.version!r}"
+            )
+        if facts.commit is not None and source.fragment != facts.commit:
+            fail(
+                f"lock commit {source.fragment!r} differs from tag commit {facts.commit!r}"
+            )
+    return violations
+
+
+def resolve_dev_merge_tag_via_mirror(
+    repo: str,
+    tag: str,
+    *,
+    mirror_url: str | None = None,
+    timeout: float = _MIRROR_TIMEOUT_SECONDS,
+) -> DevMergeTagFacts:
+    """Peel the exact tag, read its version, and fetch dev history for ancestry.
+
+    A shallow negative is never an ancestry verdict. Fetching dev with
+    --unshallow removes the depth-1 boundary before merge-base is consulted.
+    file:// is an injectable transport for the real-git fixture suite.
+    """
+    from omnibase_core.validators.no_unguarded_git_subprocess import (
+        scrub_git_location_env,
+    )
+
+    url = mirror_url or f"git://{_MIRROR_HOST}:{_MIRROR_PORT}/{repo}.git"
+    # A caller may be a linked worktree. Git fixtures/probes must never inherit
+    # its repository identity (the existing git-env isolation invariant).
+    env = scrub_git_location_env(_MIRROR_GIT_ENV)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    exists: bool | None = None
+    commit: str | None = None
+    version: str | None = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="dep-provenance-dev-tag-") as tmp:
+
+            def git(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["git", "-C", tmp, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=scrub_git_location_env(env),
+                    check=False,
+                )
+
+            init = git("init", "--quiet", "--bare")
+            if init.returncode:
+                return DevMergeTagFacts(
+                    None, None, None, None, f"mirror init: {init.stderr.strip()}"
+                )
+            fetch = git(
+                "fetch", "--quiet", "--depth=1", url, f"refs/tags/{tag}:refs/tags/{tag}"
+            )
+            if fetch.returncode:
+                # A missing ref from a successfully contacted mirror is a known
+                # mirror miss, but not proof of absence on GitHub. The hermetic
+                # wrapper falls through to REST before deciding absence.
+                missing = "couldn't find remote ref" in fetch.stderr
+                exists = False if missing else None
+                return DevMergeTagFacts(
+                    exists, None, None, None, f"mirror fetch: {fetch.stderr.strip()}"
+                )
+            rev = git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
+            if rev.returncode:
+                return DevMergeTagFacts(
+                    True, None, None, None, f"mirror peel: {rev.stderr.strip()}"
+                )
+            exists, commit = True, rev.stdout.strip()
+            document = git("show", f"{commit}:pyproject.toml")
+            if document.returncode == 0:
+                try:
+                    project = tomllib.loads(document.stdout).get("project", {})
+                    value = (
+                        project.get("version", "") if isinstance(project, dict) else ""
+                    )
+                    version = value if isinstance(value, str) else ""
+                except tomllib.TOMLDecodeError:
+                    version = ""
+            else:
+                # A fetched commit with no pyproject cannot describe a package.
+                version = ""
+            history = git(
+                "fetch", "--quiet", "--unshallow", url, "refs/heads/dev:refs/heads/dev"
+            )
+            if history.returncode:
+                return DevMergeTagFacts(
+                    True,
+                    commit,
+                    version,
+                    None,
+                    f"mirror dev history: {history.stderr.strip()}",
+                )
+            shallow = git("rev-parse", "--is-shallow-repository")
+            if shallow.returncode or shallow.stdout.strip() != "false":
+                return DevMergeTagFacts(
+                    True, commit, version, None, "mirror dev history remains shallow"
+                )
+            ancestor = git("merge-base", "--is-ancestor", commit, "refs/heads/dev")
+            on_dev = {0: True, 1: False}.get(ancestor.returncode)
+            return DevMergeTagFacts(
+                True,
+                commit,
+                version,
+                on_dev,
+                "ok (mirror)"
+                if on_dev is not None
+                else f"mirror ancestry: {ancestor.stderr.strip()}",
+            )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return DevMergeTagFacts(exists, commit, version, None, f"mirror: {exc}")
+
+
+def resolve_dev_merge_tag(repo: str, tag: str) -> DevMergeTagFacts:
+    """Resolve an exact tag ref (including annotated tags), version and dev ancestry."""
+    root = f"{_GITHUB_API}/repos/{_ORG}/{repo}"
+    status, body, detail = _api_get(
+        f"{root}/git/ref/tags/{urllib.parse.quote(tag, safe='')}"
+    )
+    if status != 200 or body is None:
+        return DevMergeTagFacts(
+            False if status == 404 else None, None, None, None, f"tag ref: {detail}"
+        )
+    obj = body.get("object")
+    for _ in range(8):
+        if not isinstance(obj, dict):
+            break
+        sha = obj.get("sha")
+        if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+            break
+        if obj.get("type") == "commit":
+            commit = sha
+            break
+        if obj.get("type") != "tag":
+            break
+        status, body, detail = _api_get(f"{root}/git/tags/{sha}")
+        if status != 200 or body is None:
+            break
+        obj = body.get("object")
+    else:
+        obj = None
+    if (
+        not isinstance(obj, dict)
+        or obj.get("type") != "commit"
+        or not isinstance(obj.get("sha"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", obj["sha"]) is None
+    ):
+        return DevMergeTagFacts(
+            True, None, None, None, f"cannot peel tag to commit: {detail}"
+        )
+    commit = obj["sha"]
+    version: str | None = None
+    errors: list[str] = []
+    status, body, detail = _api_get(f"{root}/contents/pyproject.toml?ref={commit}")
+    if status == 200 and body is not None:
+        try:
+            content = body.get("content")
+            if body.get("encoding") != "base64" or not isinstance(content, str):
+                raise ValueError("missing base64 content")
+            project = tomllib.loads(base64.b64decode(content).decode("utf-8")).get(
+                "project", {}
+            )
+            value = project.get("version", "") if isinstance(project, dict) else ""
+            version = value if isinstance(value, str) else ""
+        except (ValueError, UnicodeError) as exc:
+            errors.append(f"tag pyproject: {exc}")
+    elif status == 404:
+        version = ""
+    else:
+        errors.append(f"tag pyproject: {detail}")
+    status, body, detail = _api_get(f"{root}/compare/{commit}...dev")
+    compare_status = body.get("status") if status == 200 and body is not None else None
+    on_dev = (
+        {"ahead": True, "identical": True, "behind": False, "diverged": False}.get(
+            compare_status
+        )
+        if isinstance(compare_status, str)
+        else None
+    )
+    if on_dev is None:
+        errors.append(f"dev compare: {detail}; status={compare_status!r}")
+    return DevMergeTagFacts(
+        True, commit, version, on_dev, "; ".join(errors) or "ok (GitHub)"
+    )
+
+
+def resolve_dev_merge_tag_hermetic(repo: str, tag: str) -> DevMergeTagFacts:
+    """OMN-16096 order: complete mirror facts first, GitHub REST second."""
+    mirror = resolve_dev_merge_tag_via_mirror(repo, tag)
+    if (
+        mirror.tag_exists is True
+        and mirror.commit is not None
+        and mirror.version is not None
+        and mirror.on_dev is not None
+    ):
+        return mirror
+    live = resolve_dev_merge_tag(repo, tag)
+    return DevMergeTagFacts(
+        live.tag_exists,
+        live.commit,
+        live.version,
+        live.on_dev,
+        f"mirror: {mirror.detail}; live API: {live.detail}",
+    )
+
+
+def _dev_merge_lock_entry(text: str, package: str) -> DevMergeLockEntry | None:
+    parsed = tomllib.loads(text)
+    entries = [
+        entry
+        for entry in parsed.get("package", [])
+        if isinstance(entry, dict) and _normalize(str(entry.get("name", ""))) == package
+    ]
+    if len(entries) != 1:
+        return None
+    entry = entries[0]
+    source = entry.get("source", {})
+    git = source.get("git", "") if isinstance(source, dict) else ""
+    return DevMergeLockEntry(str(entry.get("version", "")), str(git))
+
+
 def find_lineage_violations(
     text: str,
     *,
     resolve: _ResolveFn = resolve_src_tree_sha,
+    resolve_dev_tag: Callable[
+        [str, str], DevMergeTagFacts
+    ] = resolve_dev_merge_tag_hermetic,
+    lock_text: str | None = None,
 ) -> list[str]:
     """RED when a git-pinned override's `src/` tree differs from the released
     tree of the version declared alongside it (OMN-15604).
@@ -695,6 +1018,30 @@ def find_lineage_violations(
                 f"{pkg}: cannot resolve a repo name from git url {git_url!r} to "
                 "verify lineage against declared version "
                 f"{version!r}"
+            )
+            continue
+
+        if (
+            attrs.get("tag") == ref
+            and "rev" not in attrs
+            and "branch" not in attrs
+            and _DEV_MERGE_TAG_RE.fullmatch(ref)
+        ):
+            lock_entry = None
+            if lock_text is not None:
+                try:
+                    lock_entry = _dev_merge_lock_entry(lock_text, pkg)
+                except (tomllib.TOMLDecodeError, TypeError) as exc:
+                    violations.append(f"{pkg}: tag={ref!r}: invalid uv.lock: {exc}")
+            violations.extend(
+                dev_merge_tag_violations(
+                    pkg,
+                    ref,
+                    version,
+                    resolve_dev_tag(repo, ref),
+                    lock_entry,
+                    lock_required=lock_text is not None,
+                )
             )
             continue
 
@@ -1211,7 +1558,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check_lineage:
         lineage_violations = find_lineage_violations(
-            text, resolve=resolve_src_tree_sha_hermetic
+            text,
+            resolve=resolve_src_tree_sha_hermetic,
+            lock_text=(
+                pyproject_path.with_name("uv.lock").read_text()
+                if pyproject_path.with_name("uv.lock").exists()
+                else None
+            ),
         )
         undetermined = [v for v in lineage_violations if "UNDETERMINED lineage" in v]
         diverged = [v for v in lineage_violations if v not in undetermined]

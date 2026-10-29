@@ -1,0 +1,17 @@
+{
+  "_provenance": {
+    "source": "scripts/check_dep_provenance.py::resolve_dev_merge_tag_hermetic(omnibase_core, dev-20261029143607-342000ec5702)",
+    "captured_utc": "2026-10-29T21:17:28.327067+00:00",
+    "source_sha256": "b16c12e7549440cd308286efcfeda224bb7aa91210eaee41054c708986a4cf5c",
+    "projection": "Exact typed resolver response from the mirror-first production path and its GitHub REST fallback; no seam substitution. Only the random mirror temporary path in detail is normalized."
+  },
+  "package": "omnibase-core",
+  "tag": "dev-20261029143607-342000ec5702",
+  "response": {
+    "tag_exists": true,
+    "commit": "342000ec57020e5258dde41d571420e7c09ed05b",
+    "version": "0.47.58",
+    "on_dev": true,
+    "detail": "ok (GitHub); mirror timed out after 15 seconds"
+  }
+}
