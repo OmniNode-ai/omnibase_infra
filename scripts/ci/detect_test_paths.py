@@ -160,8 +160,20 @@ MIGRATION_TREE_PREFIX = "docker/migrations/forward/"
 # the merge-group full suite, where tests/unit/docker/test_lane_overlay_dir_resolution.py
 # failed on the hand-kept list of overlay mounts. ADDITIVE: a compose recipe
 # keeps the tests/unit/ coverage it had when it was the only changed file.
-COMPOSE_RECIPE_PREFIX = "docker/docker-compose"
+# A recipe is any YAML under docker/ (any depth) named docker-compose*.y[a]ml or
+# compose.y[a]ml, so per-proof compose.yml files and override variants route too.
+COMPOSE_RECIPE_TREE = "docker/"
 COMPOSE_RECIPE_SUFFIXES = (".yml", ".yaml")
+
+
+def _is_compose_recipe(path: str) -> bool:
+    if not path.startswith(COMPOSE_RECIPE_TREE) or not path.endswith(
+        COMPOSE_RECIPE_SUFFIXES
+    ):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith(("docker-compose", "compose."))
+
 
 # OMN-15410: pytest roots that live NEXT TO the code they cover instead of
 # under tests/. They are collected by the full suite (pyproject.toml
@@ -584,10 +596,8 @@ def _resolve(
             # scripts/ci/ keeps its tests/ci/ CI-process mapping AND gains these.
             selected.update(SCRIPTS_TEST_PREFIXES)
 
-        if path.startswith(COMPOSE_RECIPE_PREFIX) and path.endswith(
-            COMPOSE_RECIPE_SUFFIXES
-        ):
-            # See COMPOSE_RECIPE_PREFIX: keep the blanket tests/unit/ coverage
+        if _is_compose_recipe(path):
+            # See COMPOSE_RECIPE_TREE: keep the blanket tests/unit/ coverage
             # a sibling mapping (tests/ci/) would otherwise suppress.
             selected.add(TEST_UNIT_PREFIX)
 

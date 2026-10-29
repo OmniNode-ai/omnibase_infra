@@ -779,6 +779,19 @@ def test_compose_recipe_alone_still_selects_the_unit_tree() -> None:
     assert selection.selected_paths == ["tests/unit/"]
 
 
+def test_nested_compose_yml_beside_a_ci_test_keeps_the_unit_fallback() -> None:
+    selection = compute_selection(
+        changed_files=[
+            "docker/domain-adapter-proof/compose.yml",
+            "docker/docker-compose.infra.override.yaml",
+            "tests/ci/test_bifrost_lane_overlay.py",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+    )
+    assert "tests/unit/" in selection.selected_paths
+
+
 def test_scripts_ci_change_still_selects_ci_process_tests() -> None:
     # No regression on the existing CI-process mapping: scripts/ci/ keeps
     # selecting tests/ci/, and now also picks up the scripts test families.
