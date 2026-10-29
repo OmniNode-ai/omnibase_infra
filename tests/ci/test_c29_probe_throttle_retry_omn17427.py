@@ -235,3 +235,18 @@ def test_recorded_throttled_run_is_the_one_the_probe_repeats(
     receipt = recorded_response["response"]["run_files"]["receipt.json"]
     assert isinstance(receipt, dict)
     assert probe.receipt_provider_throttled(receipt) is True
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/c29_throttled_receipt_omn17427.json"
+)
+def test_recorded_throttled_receipt_reads_through_every_layer(
+    recorded_response: dict[str, Any],
+) -> None:
+    """The recorded failed receipt's nested layers stay readable to the grader."""
+    receipt = recorded_response["response"]["run_files"]["receipt.json"]
+    assert probe._receipt_result(receipt)["secret_source"] == "store"
+    clean = probe.grade_clean_machine(recorded_response["response"], receipt)
+    assert set(clean.evidence["packages"]) == set(probe.ONEX_DISTRIBUTIONS)
+    refusal = probe._find_refusal(receipt)
+    assert refusal is not None and "429 Too Many Requests" in refusal
