@@ -202,7 +202,10 @@ def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
 
 
 def generate_compose(
-    resolved: ResolvedStack, *, environment: Mapping[str, str] | None = None
+    resolved: ResolvedStack,
+    *,
+    environment: Mapping[str, str] | None = None,
+    composed_image: str | None = None,
 ) -> dict[str, object]:
     """Generate a docker-compose dict from a resolved stack."""
     configured_environment = environment or {}
@@ -217,10 +220,18 @@ def generate_compose(
         # Image. The locally built runtime image is project-scoped so a second
         # project's build never retags the image another project runs.
         if manifest.image in {_RUNTIME_IMAGE, _MARKET_RUNTIME_IMAGE}:
-            svc["image"] = _scoped(project, manifest.image)
+            svc["image"] = (
+                composed_image
+                if composed_image is not None
+                else _scoped(project, manifest.image)
+            )
         else:
             svc["image"] = manifest.image
-        if name == _RUNTIME_IMAGE_BUILD_SERVICE and manifest.image == _RUNTIME_IMAGE:
+        if (
+            composed_image is None
+            and name == _RUNTIME_IMAGE_BUILD_SERVICE
+            and manifest.image == _RUNTIME_IMAGE
+        ):
             svc["build"] = _runtime_image_build(project)
 
         # Container name. A non-default project names every container after
@@ -418,6 +429,23 @@ def generate_compose(
     return compose
 
 
+def containers_on_image(compose: dict[str, object], image: str) -> list[str]:
+    """Return sorted container names for services rendered on ``image``."""
+    raw_services = compose.get("services")
+    if not isinstance(raw_services, Mapping):
+        return []
+    services: Mapping[object, object] = raw_services
+    names: list[str] = []
+    for raw_service in services.values():
+        if not isinstance(raw_service, Mapping):
+            continue
+        service: Mapping[object, object] = raw_service
+        container_name = service.get("container_name")
+        if service.get("image") == image and isinstance(container_name, str):
+            names.append(container_name)
+    return sorted(names)
+
+
 # ---------------------------------------------------------------------------
 # Public bundle renderer (OMN-19972)
 #
@@ -462,6 +490,7 @@ def write_compose(
     catalog_dir: Path,
     output_path: Path,
     environment: Mapping[str, str],
+    composed_image: str | None = None,
 ) -> ResolvedStack:
     """Resolve ``bundles``, refuse a host-port clash, and write the compose file.
 
@@ -478,7 +507,9 @@ def write_compose(
             "Cannot render: duplicate host ports in the resolved stack: "
             + "; ".join(clash.messages())
         )
-    compose = generate_compose(resolved, environment=environment)
+    compose = generate_compose(
+        resolved, environment=environment, composed_image=composed_image
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
