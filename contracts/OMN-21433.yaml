@@ -1,11 +1,21 @@
-schema_version: "1.0.0"
-ticket_id: "OMN-21433"
-title: "The documentation-surface item of contracts/OMN-17427.yaml is true on dev and its control can fail"
-summary: "dod-omn17427-documentation-surface asserted a README of at most 5 lines while the dev README is 14 lines (the work-ledger reads section of OMN-20740), so the item was false on dev, and a pull request that cites OMN-17427 and corrects it cannot show a failing control because the receipt gate lays the cited contract over the merge base. The item's line bound is corrected to 20, and a test that runs the item's own command from the repository root is bound here, by a pull request that does not cite OMN-17427, so the merge base keeps the stale contract and fails the test while the head passes."
+schema_version: 1.0.0
+ticket_id: OMN-21433
+title: A pull request is proven on a lab slot from a tag at its head, before it merges
+summary: >-
+  Lane premerge-lab-1105. The pre-PR slot pool could not bring any slot up on the dev head of 2026-10-28: OMN-21279 put the build-only dev-lane-infra-runtime-image on the slot profile and the rendered-slot verifier refused it (exit 12) with its reason dropped from the receipt. The verifier now accepts that service only at scale 0 and the overlay attaches it to the dev network, so compose creates no default network; the pool driver prints the verifier's mismatch lines on exit 12.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-slot-render-accepts-build-only-image
+    statement: Declared by this pull request under the factory minting ticket; not transcribed from a ticket body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the rendered-slot verifier accepts dev-lane-infra-runtime-image at scale 0, refuses it at any other scale, and the slot overlay attaches it to omnibase-infra-network -- falsifier: test_prepr_verify_lane_entrypoint_omn18893.py build_only cases, red on the previous head'
+      - id: AC2
+        statement: 'AC2: INFRA_TAG and MARKET_TAG select the tagged head for the build and test trees, pull refs remain the default, mismatched heads fail the readback, and a base control removes PR tags and identity.'
+      - id: AC3
+        statement: 'AC3: every slot runtime service declares a bounded on-failure restart policy.'
   - id: "req-omn21433-documentation-surface-item-holds"
     statement: |-
       The documentation-surface item of contracts/OMN-17427.yaml is true on dev and still asserts the knowledge-base link, a short README and the absence of the unused documentation paths.
@@ -22,6 +32,33 @@ emergency_bypass:
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: dod-omn-21433-ac1-slot-render
+    description: >-
+      AC1, deploy scope. The slot overlay and the rendered-slot verifier are covered by the verify-lane entrypoint tests, and a pre-PR slot built from the branch passed the render check on the lab host (receipt in the pull request body). The four lab_overlay cases read the private lane manifest, which a hosted runner does not have, so this command deselects them; the Lane Census Staleness job selects them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -n 0 -m "not lab_overlay"
+    binds_ac:
+      - AC1
+  - id: dod-omn-21433-ac2-tag-behavior
+    description: >-
+      AC2. Execute the shell clone phase against disposable local Git repositories with different tag and pull heads, inspect both resulting trees, and exercise the driver's base-control parameter filtering. No GitHub access or lab lane manifest is required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_tag_ref_omn21433.py -q -n 0
+    binds_ac:
+      - AC2
+  - id: dod-omn-21433-ac3-restart-policy
+    description: >-
+      AC3, deploy scope. Run Docker Compose config with the infra, dev-lane and prepr files and both slot profiles, using synthetic credentials and the checked-in runtime policy. Assert that each of the twelve rendered runtime services has exactly on-failure:3. No daemon, private lane manifest or running containers are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_restart_bound_omn21433.py -q -n 0
+    binds_ac:
+      - AC3
   - id: "dod-omn21433-ac8-documentation-surface-item-holds"
     description: "The test reads contracts/OMN-17427.yaml, runs the documentation-surface item's command from the repository root and expects exit 0, then plants each violation in a temporary root and expects a nonzero exit. At the merge base the cited contract is OMN-21433's, so contracts/OMN-17427.yaml is the stale one (at most 5 lines against a 14-line README) and the root run fails; at the head the corrected item passes."
     source: "manual"

@@ -96,6 +96,18 @@ SLOT_SERVICES: tuple[str, ...] = (
 )
 GATEWAY_SERVICE = "onex-api"
 
+#: Services the slot's profile carries only so compose can resolve a ``service:``
+#: build context (OMN-21279). Each is ``scale: 0``, so ``up`` never creates a
+#: container for it. The render may carry them, and carries them only while
+#: ``scale`` reads 0 (OMN-21433).
+BUILD_ONLY_SERVICES: tuple[str, ...] = ("dev-lane-infra-runtime-image",)
+#: The only attributes a build-only service may render with, the only network
+#: it may join and the only profile it may carry. Anything else (``deploy``,
+#: ``ports``, ``volumes``, ``privileged``) escapes the ``scale`` check.
+BUILD_ONLY_ALLOWED_KEYS: frozenset[str] = frozenset({"profiles", "scale", "networks"})
+BUILD_ONLY_NETWORK = "omnibase-infra-network"
+BUILD_ONLY_PROFILE = "prepr"
+
 #: Every environment key whose value is a PostgreSQL DSN. Each one must name a
 #: database carrying this slot's suffix and a principal carrying it too.
 DSN_KEYS: tuple[str, ...] = (
@@ -145,7 +157,40 @@ def check(
             f"A slot that starts a short set is a slot whose verdict covers less "
             f"than it claims."
         )
-    unexpected = sorted(set(services) - expected)
+    for name in BUILD_ONLY_SERVICES:
+        if name not in services:
+            continue
+        build_only = services[name] or {}
+        scale = build_only.get("scale")
+        if scale != 0:
+            problems.append(
+                f"build-only service '{name}' renders with scale "
+                f"{'absent' if 'scale' not in build_only else repr(scale)}, "
+                f"not 0. It exists to be built, and a container for it would "
+                f"run under the dev lane's image name."
+            )
+        extra = sorted(set(build_only) - BUILD_ONLY_ALLOWED_KEYS)
+        if extra:
+            problems.append(
+                f"build-only service '{name}' renders with attribute(s) "
+                f"{extra} beyond {sorted(BUILD_ONLY_ALLOWED_KEYS)}. A "
+                f"deploy.replicas, port, volume, privilege or extra profile "
+                f"is not examined by the scale check and must not ride along."
+            )
+        nets = build_only.get("networks")
+        net_names = sorted(nets) if isinstance(nets, dict | list) else []
+        if net_names != [BUILD_ONLY_NETWORK]:
+            problems.append(
+                f"build-only service '{name}' renders with networks "
+                f"{net_names}, expected only '{BUILD_ONLY_NETWORK}'."
+            )
+        if build_only.get("profiles") != [BUILD_ONLY_PROFILE]:
+            problems.append(
+                f"build-only service '{name}' renders with profiles "
+                f"{build_only.get('profiles')!r}, expected "
+                f"['{BUILD_ONLY_PROFILE}']."
+            )
+    unexpected = sorted(set(services) - expected - set(BUILD_ONLY_SERVICES))
     if unexpected:
         problems.append(
             f"the render carries {len(unexpected)} service(s) that are not the "
