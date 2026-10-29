@@ -51,6 +51,12 @@ consumers:
   projection-api:
     bindings:
       - app_dashboard
+  # The dedicated hook-events kernel writes omninode_internal through the
+  # runtime binding and retains the kernel's analytics connection.
+  projection-claude-hook-events-writer:
+    bindings:
+      - omninode_runtime_service
+      - app_dashboard
 deferred_consumers:
   omnimarket-projection-baselines:
     tracking_ticket: OMN-15360

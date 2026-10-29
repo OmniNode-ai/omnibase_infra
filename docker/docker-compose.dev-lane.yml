@@ -920,6 +920,17 @@ services:
       # and no other container drains it. Scoped to this overlay for the same
       # reason as the poll interval above: prod overlays the same base.
       ONEX_EMIT_EFFECT_SPOOL_DIR: /app/data/.onex_state/event-emit-effect-spool
+      #
+      # OMN-19513: node_projection_claude_hook_events has its own container,
+      # `projection-claude-hook-events-writer` below. This runtime must not also
+      # subscribe it: both would share the one consumer group (the writer sets
+      # the same KAFKA_INSTANCE_ID) and the partition would be split between a
+      # process that is up and one that is still joining its other groups. The
+      # name is checked against the discovered contracts, so a rename of the
+      # node degrades this runtime's health instead of silently leaving two
+      # owners. Scoped to this overlay: the stability lane, which declares no
+      # such container, keeps the node in its main runtime.
+      ONEX_RUNTIME_NODE_EXCLUSION: projection_claude_hook_events
     healthcheck:
       test:
         - CMD
@@ -1122,6 +1133,33 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-18114"
       - "autoheal=true"
+  # ===========================================================================
+  # OMN-19513: opt the claude hook-events projection writer into this lane
+  # ===========================================================================
+  # Declared in docker/docker-compose.infra.yml with the runtime env anchors, under
+  # a compose profile no bring-up requests, exactly as the tenant carrier above.
+  # `profiles: !override` moves it into `runtime`; the environment merge gives it
+  # the analytics DSN the main runtime writes this table through, strict wiring,
+  # the broker SASL credentials, the consumer poll interval and the lane's
+  # placement identity (the lane name the node's own `runtime_lanes` scope
+  # requires: without it the contract is dropped fail-closed with a discovery
+  # error). Placement identity and not the full identity: this container names its
+  # lane but speaks no health for it, because the lane-health projection keeps one
+  # row per lane and `omninode-runtime` is already that row's speaker (OMN-19144).
+  #
+  # No `com.omninode.lane` label: the labels below are the base file's own, so the
+  # derived dev lanes, which relabel every service this file labels for the lane,
+  # have nothing to relabel for a container they never start. The lane census
+  # declares this container by name.
+  #
+  # The main runtime above carries the matching `ONEX_RUNTIME_NODE_EXCLUSION`.
+  # The two halves ship together or not at all: the exclusion without this
+  # container leaves the node consumed by nothing.
+  projection-claude-hook-events-writer:
+    build: *dev_lane_composed_runtime_build
+    profiles: !override ["runtime", "full"]
+    environment:
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
   # ===========================================================================
   # THE THREE OBSERVABILITY CONSUMERS THE PREFIX HID (OMN-18012, phase B)
   # ===========================================================================

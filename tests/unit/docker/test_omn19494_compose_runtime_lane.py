@@ -38,6 +38,11 @@ LANE_VARIABLE = "ONEX_RUNTIME_LANE"
 PROFILE_VARIABLE = "RUNTIME_PROFILE"
 # omnimarket#3547 added effects-owned lane-scoped contracts (OMN-19812).
 LANE_SCOPED_PROFILES = frozenset({"main", "effects"})
+#: The compose profile no bring-up requests (docker-compose.infra.yml). A
+#: service whose merged profiles are exactly this is declared and never started
+#: on the stack, so it owns no contract there and needs no lane (OMN-19513: the
+#: claude hook-events writer, started only by the primary dev lane).
+INERT_CARRIER_PROFILE = "profile-carrier-optin"
 
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:\?|\?|-)([^{}]*))?\}")
 
@@ -79,7 +84,10 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.dev-tenant-fold.yml",
         ),
         lane="compose-dev",
-        lane_naming_services=_LANE_NAMING_SERVICES,
+        # OMN-19513: the claude hook-events writer is a main-profile runtime
+        # that only this lane starts.
+        lane_naming_services=_LANE_NAMING_SERVICES
+        | {"projection-claude-hook-events-writer"},
     ),
     "dev-105": _Stack(
         files=(
@@ -215,17 +223,25 @@ def _merged_lane_scoped_environments(stack: _Stack) -> dict[str, dict[str, str]]
     only services whose merged profile owns lane-scoped contracts.
     """
     merged: dict[str, dict[str, str]] = {}
+    profiles: dict[str, list[str]] = {}
     for compose_file in stack.files:
         services = _load(compose_file).get("services") or {}
         for name, service in services.items():
             if service is None:
                 merged.pop(str(name), None)
+                profiles.pop(str(name), None)
                 continue
             merged.setdefault(str(name), {}).update(_service_environment(service))
+            if isinstance(service, dict) and "profiles" in service:
+                # Every overlay that sets `profiles:` on a base service does so
+                # with `!override` (the tag `_load` strips), so a later file
+                # replaces the earlier list.
+                profiles[str(name)] = [str(item) for item in service["profiles"]]
     return {
         name: env
         for name, env in merged.items()
         if env.get(PROFILE_VARIABLE) in LANE_SCOPED_PROFILES
+        and profiles.get(name) != [INERT_CARRIER_PROFILE]
     }
 
 

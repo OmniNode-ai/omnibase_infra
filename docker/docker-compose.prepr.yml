@@ -546,15 +546,22 @@ services:
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
       - "com.omninode.service=onex-api"
       - "com.omninode.layer=gateway"
-# ---------------------------------------------------------------------------
-# The network is JOINED, never created.
-#
-# `external: true` is what makes this true mechanically. Without it compose
-# would create `omnibase-infra-network` if absent -- and the dangerous case is
-# not absence, it is a slot brought up while the dev lane is down, creating the
-# network with its own settings and owning it, so the dev lane's next bring-up
-# attaches to a network a slot made and a slot's teardown can remove.
-# ---------------------------------------------------------------------------
+      # ---------------------------------------------------------------------------
+      # The network is JOINED, never created.
+      #
+      # `external: true` is what makes this true mechanically. Without it compose
+      # would create `omnibase-infra-network` if absent -- and the dangerous case is
+      # not absence, it is a slot brought up while the dev lane is down, creating the
+      # network with its own settings and owning it, so the dev lane's next bring-up
+      # attaches to a network a slot made and a slot's teardown can remove.
+      # ---------------------------------------------------------------------------
+  # OMN-19513: the claude hook-events projection writer belongs to the primary
+  # dev lane. A slot's lane is outside the node's own `runtime_lanes` scope, so a
+  # slot's main runtime never attaches the node and a writer here would wire zero
+  # contracts. Back to the inert profile the base file declares; SLOT_SERVICES
+  # does not name it either.
+  projection-claude-hook-events-writer:
+    profiles: !override ["profile-carrier-optin"]
 networks:
   omnibase-infra-network:
     name: omnibase-infra-network
