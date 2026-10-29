@@ -92,3 +92,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn20820-ac7-listener-probe-restored
+    description: The catalog-local job consumer-group probe restored after omnibase_infra PR 5261 reads the runtime dynamic contract listener group as the local SASL superuser, passes on a live group, and fails when no listener group has a member or the superuser credentials are stripped or wrong.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py -q -p no:cacheprovider -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
