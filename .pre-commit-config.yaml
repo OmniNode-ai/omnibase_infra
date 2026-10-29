@@ -453,13 +453,6 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). This hook
-      # is `types: [text]`, so it matches on content and would append a newline
-      # to a captured HTTP body or API response -- silently voiding the sha256
-      # that makes it evidence. Observed, not hypothetical: it happened to all
-      # three captures on their first commit and R1 rejected them.
-      - id: end-of-file-fixer
-        exclude: ^\.github/workflows/|\.captured$
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
@@ -489,6 +482,19 @@ repos:
   # Note: ruff replaces both black and isort (10-100x faster)
   - repo: local
     hooks:
+      # `\.captured$`: verbatim incident-replay artifacts (OMN-15547). The
+      # exclusion keeps verbatim artifacts out of the check. Appending a newline
+      # to a captured HTTP body or API response would silently void the sha256
+      # that makes it evidence. Observed, not hypothetical: it happened to all
+      # three captures on their first commit and R1 rejected them.
+      - id: check-end-of-file
+        name: Check files end in exactly one newline (check only)
+        language: pygrep
+        entry: '[^\n]\Z|\n\n\Z'
+        args: [--multiline]
+        types: [text]
+        require_serial: true
+        exclude: ^\.github/workflows/|\.captured$
       # OMN-18434. A test that shells out to git inherits GIT_DIR from the hook
       # running it and rewrites THIS repository instead of its fixture -- which
       # is how a shared canonical clone in this fleet was re-initialized on
@@ -550,22 +556,21 @@ repos:
         stages: [pre-commit]
       - id: ruff-format
         require_serial: true
-        name: ruff format (auto-format)
-        entry: uv run --frozen ruff format
+        name: ruff format (check only)
+        entry: uv run --frozen ruff format --check
         language: system
         types: [python]
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/|src/omnibase_infra/enums/generated/).*$
         stages: [pre-commit]
       - id: ruff-fix
         require_serial: true
-        name: ruff check (auto-fix linting + import sorting)
-        entry: uv run --frozen ruff check --fix --exit-non-zero-on-fix
+        name: ruff check (no auto-fix)
+        entry: uv run --frozen ruff check --no-fix
         language: system
         types: [python]
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/|src/omnibase_infra/enums/generated/).*$
         stages: [pre-commit]
-        # Note: --exit-non-zero-on-fix ensures pre-commit fails if files were modified,
-        # forcing you to re-stage the changes. This keeps pre-commit and CI in sync.
+        # Note: This hook never edits files.
       # Shell hygiene gate (OMN-14761 / F-22). Fail-closed shellcheck over changed
       # shell scripts; same script the shellcheck-gate CI job runs, so local and CI
       # enforcement cannot drift. scripts/lib/** is held to --severity=style; the
@@ -663,13 +668,12 @@ repos:
         pass_filenames: true
         stages: [pre-commit]
         files: ^src/omnibase_infra/cli/.*\.py$
-      # Cleanup: Clear tmp/ directory before commits
-      - id: clean-tmp-directory
-        name: Clean tmp directory
-        entry: bash -c "rm -rf tmp/* 2>/dev/null || true"
-        language: system
-        always_run: true
-        pass_filenames: false
+      # Keep tmp/ scratch files out of commits; leave cleanup to the author.
+      - id: refuse-staged-tmp-files
+        name: Refuse staged tmp/ files
+        entry: tmp/ is scratch space and must not be committed; unstage and remove these files yourself
+        language: fail
+        files: ^tmp/
         stages: [pre-commit]
       - id: lint-pricing-manifest
         require_serial: true
@@ -2272,11 +2276,12 @@ repos:
         language: script
         pass_filenames: true
         stages: [commit-msg]
-      - id: strip-ai-coauthor-trailer
+      - id: refuse-ai-coauthor-trailer
         require_serial: true
-        name: Strip AI-generated Co-Authored-By trailers from commit messages
-        entry: perl -i -ne 'print unless /^co-authored-by:.*claude.*noreply\@anthropic\.com/i'
-        language: system
+        name: Refuse AI-generated Co-Authored-By trailers in commit messages
+        entry: '^co-authored-by:.*claude.*noreply@anthropic\.com'
+        language: pygrep
+        args: [--ignore-case]
         pass_filenames: true
         stages: [commit-msg]
       # OMN-11926: LLM topology contract drift validator
