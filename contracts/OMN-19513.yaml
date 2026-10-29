@@ -7,6 +7,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn19513-merge-group-compose-selection
+    statement: "A pull request that changes a compose recipe runs the tests that read it, so a stale expectation fails on the pull request and not in the merge-queue full suite."
+    acceptance:
+      - id: AC7
+        statement: "AC7: the change-aware selector keeps tests/unit/ for a docker-compose recipe changed beside a tests/ci/ module, and the infra lane's hand-kept overlay-mount expectation names projection-claude-hook-events-writer -- falsifier: uv run pytest tests/unit/scripts/ci/test_detect_test_paths.py -k compose_recipe fails at origin/dev, and tests/unit/docker/test_lane_overlay_dir_resolution.py fails on the tree that mounts the overlay on the writer."
   - id: req-omn19513-runtime-nofile-ulimit
     statement: "Every runtime-image service declares an open-file limit above the 1024 container default."
     acceptance:
@@ -32,7 +37,19 @@ requirements:
     acceptance:
       - id: AC5
         statement: "AC5: with ONEX_RUNTIME_NODE_EXCLUSION naming projection_claude_hook_events, filter_manifest_for_runtime_profile leaves that contract unattached on main and a runtime selecting it attaches only it; the dev lane starts projection-claude-hook-events-writer with the main runtime's KAFKA_INSTANCE_ID so the consumer group keeps its committed offsets -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_node_exclusion_omn19513.py tests/unit/docker/test_omn19513_hook_events_writer.py fails at origin/dev, which has neither file"
+  - id: req-omn19513-hook-events-writer-lane-overlay
+    statement: "The hook-events writer mounts the lane overlay that its inherited Bifrost preflight environment pins."
+    acceptance:
+      - id: AC6
+        statement: "AC6: projection-claude-hook-events-writer binds the project-specific Bifrost overlay read-only at BIFROST_LANE_OVERLAY_PATH with create_host_path false; removing the writer's lane-overlay-mount makes the bound command fail."
 evidence_requirements:
+  - kind: tests
+    description: "The selector keeps tests/unit/ for a compose recipe changed beside a tests/ci/ module, and the infra lane's overlay-mount expectation includes the hook-events writer."
+    command: "uv run pytest tests/unit/scripts/ci/test_detect_test_paths.py tests/unit/docker/test_lane_overlay_dir_resolution.py tests/ci/test_bifrost_lane_overlay.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Hosted-runner deploy configuration check: resolve the writer's YAML anchors and assert its pinned overlay has one read-only project-specific bind that cannot create a missing host file. No live Docker daemon or private overlay is required."
+    command: >-
+      deploy: uv run python -c 'from pathlib import Path; import yaml; s = yaml.safe_load(Path("docker/docker-compose.infra.yml").read_text())["services"]["projection-claude-hook-events-writer"]; p = s["environment"]["BIFROST_LANE_OVERLAY_PATH"]; m = [v for v in s["volumes"] if isinstance(v, dict) and v.get("target") == p]; assert len(m) == 1; assert m[0]["source"].endswith("/${COMPOSE_PROJECT_NAME}.bifrost.yaml"); assert m[0]["read_only"] is True and m[0]["bind"]["create_host_path"] is False'
   - kind: tests
     description: "Render the base and dev-lane compose files and check both spool paths, their persistent mounts, and volume isolation."
     command: "uv run pytest tests/unit/infra/test_emit_spool_on_volume_omn19513.py -q -p no:cacheprovider"
@@ -63,11 +80,35 @@ evidence_requirements:
   - kind: tests
     description: "Real contract discovery plus the profile filter, fed the environment the dev-lane and base compose files render, leave the projection with exactly one owner and the writer on the main runtime's instance id."
     command: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "Check every service that pins a Bifrost overlay, including the hook-events writer, has the corresponding mount."
+    command: "uv run pytest tests/ci/test_bifrost_lane_overlay.py -k 'test_every_service_that_renders_bifrost_mounts_the_overlay_it_pins or test_compose_mounts_typed_overlay_without_model_endpoint_env_wiring' -q -p no:cacheprovider"
+  - kind: manual
+    description: "Hosted-runner deploy configuration check: resolve the writer's YAML anchors and assert its pinned overlay has one read-only project-specific bind that cannot create a missing host file. No live Docker daemon or private overlay is required."
+    command: >-
+      deploy: uv run python -c 'from pathlib import Path; import yaml; s = yaml.safe_load(Path("docker/docker-compose.infra.yml").read_text())["services"]["projection-claude-hook-events-writer"]; p = s["environment"]["BIFROST_LANE_OVERLAY_PATH"]; m = [v for v in s["volumes"] if isinstance(v, dict) and v.get("target") == p]; assert len(m) == 1; assert m[0]["source"].endswith("/${COMPOSE_PROJECT_NAME}.bifrost.yaml"); assert m[0]["read_only"] is True and m[0]["bind"]["create_host_path"] is False'
 emergency_bypass:
   enabled: false
   justification: ""
   follow_up_ticket_id: ""
 dod_evidence:
+  - id: "dod-omn19513-merge-group-compose-selection"
+    description: "The selector test for a compose recipe beside a tests/ci/ module fails at origin/dev a07cd7740, where that diff selects tests/ci/ alone; the infra-lane overlay test fails on the tree that mounts the overlay on the writer (merge-group split 6/15, omnibase_infra#5437)."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/scripts/ci/test_detect_test_paths.py tests/unit/docker/test_lane_overlay_dir_resolution.py tests/ci/test_bifrost_lane_overlay.py -q -p no:cacheprovider"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC7]
+  - id: "dod-omn19513-merge-group-deploy-writer-overlay"
+    description: "Hosted-runner deploy configuration check: the writer's pinned overlay path has exactly one read-only bind with create_host_path false in the compose file the lane deploys from."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run python -c 'from pathlib import Path; import yaml; s = yaml.safe_load(Path("docker/docker-compose.infra.yml").read_text())["services"]["projection-claude-hook-events-writer"]; p = s["environment"]["BIFROST_LANE_OVERLAY_PATH"]; m = [v for v in s["volumes"] if isinstance(v, dict) and v.get("target") == p]; assert len(m) == 1; assert m[0]["source"].endswith("/${COMPOSE_PROJECT_NAME}.bifrost.yaml"); assert m[0]["read_only"] is True and m[0]["bind"]["create_host_path"] is False'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC7]
   - id: "dod-omn19513-runtime-nofile-ulimit"
     description: "The base compose runtime anchor and the runtime catalog manifests declare nofile 65535. 13 of the 14 tests fail against origin/dev b4b7c7f8c, which declares none."
     source: "manual"
@@ -168,3 +209,12 @@ dod_evidence:
         check_value: "uv run pytest tests/integration/runtime/test_hook_events_writer_partition_omn19513.py -q -p no:cacheprovider"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: [AC5]
+  - id: "dod-omn19513-hook-events-writer-lane-overlay"
+    description: "PR #5437 binds the writer's inherited Bifrost overlay pin to its project-specific read-only mount. The command reads product configuration directly and fails at the merge base, where the writer has only its contracts volume."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          uv run python -c 'from pathlib import Path; import yaml; s = yaml.safe_load(Path("docker/docker-compose.infra.yml").read_text())["services"]["projection-claude-hook-events-writer"]; p = s["environment"]["BIFROST_LANE_OVERLAY_PATH"]; m = [v for v in s["volumes"] if isinstance(v, dict) and v.get("target") == p]; assert len(m) == 1; assert m[0]["source"].endswith("/${COMPOSE_PROJECT_NAME}.bifrost.yaml"); assert m[0]["read_only"] is True and m[0]["bind"]["create_host_path"] is False'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: [AC6]

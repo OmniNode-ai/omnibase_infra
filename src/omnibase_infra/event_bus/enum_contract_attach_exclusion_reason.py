@@ -45,6 +45,9 @@ class EnumContractAttachExclusionReason(str, Enum):
         NO_LIVE_DISPATCHER: Every handler entry wires a no-op dispatch, so
             consuming would commit offsets over events no handler runs
             (OMN-17562).
+        DEMAND_DEFERRED: None of the contract's subscribe topics held a record at
+            boot, so its consumer groups are joined when its first request
+            arrives rather than at boot (OMN-18087).
     """
 
     NOT_WIRED = "not_wired"
@@ -53,6 +56,7 @@ class EnumContractAttachExclusionReason(str, Enum):
     RAW_EVENT_PROJECTION_WITHOUT_APPLIER = "raw_event_projection_without_applier"
     PLUGIN_MANAGED = "plugin_managed"
     NO_LIVE_DISPATCHER = "no_live_dispatcher"
+    DEMAND_DEFERRED = "demand_deferred"
 
 
 __all__: list[str] = ["EnumContractAttachExclusionReason"]

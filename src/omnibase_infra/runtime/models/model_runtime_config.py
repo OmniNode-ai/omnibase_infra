@@ -51,6 +51,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.gateway.models import ModelGatewayConfig
+from omnibase_infra.models.model_boot_subscriptions_config import (
+    ModelBootSubscriptionsConfig,
+)
 from omnibase_infra.runtime.models.model_contract_registry_config import (
     ModelContractRegistryConfig,
 )
@@ -89,6 +92,7 @@ class ModelRuntimeConfig(BaseModel):
         gateway: Gateway configuration for envelope signing and realm enforcement [RESERVED]
         local_ingress: Local Unix-socket command ingress configuration [ACTIVE]
         pattern_b_broker: Pattern B broker configuration [ACTIVE]
+        boot_subscriptions: Which auto-wired contracts join at boot [ACTIVE]
 
     Field Status Legend:
         [ACTIVE]   - Currently used by kernel.py
@@ -177,6 +181,10 @@ class ModelRuntimeConfig(BaseModel):
     pattern_b_broker: ModelPatternBBrokerConfig = Field(
         default_factory=ModelPatternBBrokerConfig,
         description="Configuration for the runtime-owned Pattern B broker.",
+    )
+    boot_subscriptions: ModelBootSubscriptionsConfig = Field(
+        default_factory=ModelBootSubscriptionsConfig,
+        description="Which auto-wired contracts join at boot (OMN-18087)",
     )
 
 

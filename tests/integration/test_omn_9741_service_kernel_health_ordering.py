@@ -32,6 +32,10 @@ def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
     subscription window, so ``GET /ready`` raised
     ``ProtocolConfigurationError [ONEX_CORE_041]`` the whole time even though
     the runtime was already processing events via the auto-wired consumers).
+
+    OMN-18087: plugin consumers (delegation among them) start BEFORE the
+    auto-wired subscription interleave, so they do not wait on every
+    auto-wired group join.
     """
     source = _read_service_kernel_source()
 
@@ -47,8 +51,8 @@ def test_health_server_starts_before_kafka_subscription_bootstrap() -> None:
         < health_start_idx
         < runtime_create_idx
         < runtime_attach_idx
-        < subscribe_idx
         < plugin_consumers_idx
+        < subscribe_idx
     )
 
 

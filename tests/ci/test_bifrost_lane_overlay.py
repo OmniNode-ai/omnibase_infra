@@ -76,8 +76,32 @@ def test_compose_mounts_typed_overlay_without_model_endpoint_env_wiring() -> Non
         )
     assert lane_overlay_mounts(COMPOSE_INFRA) == {
         service: [LANE_OVERLAY_MOUNT]
-        for service in _RUNTIME_SERVICES | {"tenant-projection-writer"}
+        for service in _RUNTIME_SERVICES
+        | {"tenant-projection-writer", "projection-claude-hook-events-writer"}
     }
+
+
+def test_every_service_that_renders_bifrost_mounts_the_overlay_it_pins() -> None:
+    """A kernel service that pins the overlay path must also mount the file.
+
+    OMN-21433: projection-claude-hook-events-writer inherited the pin from
+    x-runtime-env but declared no mount, so its entrypoint preflight raised
+    "Bifrost lane overlay not found" on every boot. The pin and the mount are
+    one decision; this reads the pin from the rendered environment so a new
+    kernel service cannot carry one without the other.
+    """
+    services = yaml.safe_load(COMPOSE_INFRA.read_text(encoding="utf-8"))["services"]
+    pinned = {
+        name
+        for name, service in services.items()
+        if (service.get("environment") or {}).get("BIFROST_LANE_OVERLAY_PATH")
+        == LANE_OVERLAY_TARGET
+    }
+
+    # Positive control: the services the pin is known to reach are found.
+    assert pinned >= _RUNTIME_SERVICES
+    assert "projection-claude-hook-events-writer" in pinned
+    assert pinned == set(lane_overlay_mounts(COMPOSE_INFRA))
 
 
 def test_receipt_mode_has_no_legacy_home_dotenv_loader() -> None:
