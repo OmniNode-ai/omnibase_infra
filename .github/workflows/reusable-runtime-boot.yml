@@ -968,7 +968,8 @@ jobs:
   # OMN-19498: boot the LAPTOP PROFILE (catalog bundle `local`, OMN-19496) the
   # way its documentation tells a new engineer to -- `make local-env`, then
   # `make up-local` -- and fail unless the migration gate is healthy, both
-  # runtime kernels report /health status "healthy" with is_running true.
+  # runtime kernels report /health status "healthy" with is_running true, and
+  # the runtime's dynamic contract listener has a live consumer group (OMN-20820).
   #
   # No self-skip: a runner without Docker Compose FAILS this job, as it fails
   # the `compose` mode's boot job since OMN-20147 (OMN-18811 AC4). Probes run through `docker exec`, never a host port, so they
@@ -1239,6 +1240,77 @@ jobs:
             bash -e "$step_file"
             echo "${svc}: stopped -> step failed naming it; started -> step passed"
           done
+
+      - name: Runtime dynamic contract listener has a live consumer group
+        env:
+          LISTENER_TOPIC: onex.evt.platform.node-registration.v1
+        run: |
+          set -euo pipefail
+          broker="${LOCAL_PROJECT}-redpanda"
+          # OMN-20820: omnibase_infra#5261 removed this job's delegate-skill
+          # consumer-group probe, because the local bundle no longer runs an
+          # omnimarket orchestrator. This probe reads a group omnibase_infra's
+          # own runtime opens instead: its post-freeze dynamic contract
+          # listener (runtime_host_process.py, _start_dynamic_contract_listener),
+          # named {env}.{service}.{node_name}-dynamic-contract-listener.consume.
+          # {version}, plus .__i.<instance> when KAFKA_INSTANCE_ID is set, then
+          # .__t.<topic>. The owner and the topic are read from the name, env,
+          # service and instance are not pinned, and liveness comes from
+          # describe: a group with no member is not live.
+          #
+          # Each listing is captured whole before anything reads it, and every
+          # read is a here-string: under pipefail a reader that stops early
+          # (awk's `exit`, `head`) sends SIGPIPE to a writer still producing
+          # rows, and the step then dies with exit 141 and no output, even
+          # with the group live (job 107881660050). The regression test
+          # tests/ci/test_runtime_boot_catalog_local_probe_omn19496.py runs
+          # this step's own text against a stub broker.
+          #
+          # The broker requires SASL, so every rpk call here authenticates as
+          # the local superuser. The password is read from the env file and
+          # handed to docker by name, never on a command line. Its stdin is
+          # /dev/null so it can never swallow the candidate list read below.
+          pass="$(sed -n 's/^REDPANDA_SUPERUSER_PASSWORD=//p' "$LOCAL_ENV_FILE")"
+          if [ -z "$pass" ]; then
+            echo "::error::REDPANDA_SUPERUSER_PASSWORD is absent from the laptop env file"
+            exit 1
+          fi
+          broker_rpk() {
+            RPK_PASS="$pass" docker exec -e RPK_USER=onex-local -e RPK_PASS -e RPK_SASL_MECHANISM=SCRAM-SHA-256 "$broker" rpk "$@" </dev/null
+          }
+          # Every matching group is described, not only the first: the bus adds
+          # .__i.<instance> per process when KAFKA_INSTANCE_ID is set, so more
+          # than one group can match, and the first may be the one with no
+          # member. A group that vanishes between list and describe is retried,
+          # not fatal.
+          groups=""
+          for _ in $(seq 1 30); do
+            if ! groups="$(broker_rpk group list)"; then
+              echo "rpk group list failed; retrying"
+              groups=""
+            fi
+            candidates="$(awk -v suffix=".__t.${LISTENER_TOPIC}" \
+                'index($2, "-dynamic-contract-listener.consume.") && length($2) > length(suffix) && substr($2, length($2) - length(suffix) + 1) == suffix && $3 == "Stable" {print $2}' \
+                <<< "$groups")"
+            while IFS= read -r group; do
+              [ -n "$group" ] || continue
+              if ! describe="$(broker_rpk group describe "$group")"; then
+                echo "rpk group describe ${group} failed; retrying"
+                continue
+              fi
+              head -12 <<< "$describe"
+              members="$(awk '$1 == "MEMBERS" {print $2}' <<< "$describe")"
+              if [ "${members:-0}" -ge 1 ]; then
+                echo "live consumer group ${group} (${members} member) on ${LISTENER_TOPIC}"
+                exit 0
+              fi
+            done <<< "$candidates"
+            sleep 10
+          done
+          # every group the broker listed last, so a real boot shows the names
+          printf '%s\n' "$groups"
+          echo "::error::no live dynamic-contract-listener consumer group on ${LISTENER_TOPIC}"
+          exit 1
 
       # =====================================================================
       # OMN-17427: DEV-LANE CLASS PHASE. The laptop checks above prove the
