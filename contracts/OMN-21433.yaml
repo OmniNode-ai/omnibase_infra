@@ -1,0 +1,32 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21433"
+title: "The documentation-surface item of contracts/OMN-17427.yaml is true on dev and its control can fail"
+summary: "dod-omn17427-documentation-surface asserted a README of at most 5 lines while the dev README is 14 lines (the work-ledger reads section of OMN-20740), so the item was false on dev, and a pull request that cites OMN-17427 and corrects it cannot show a failing control because the receipt gate lays the cited contract over the merge base. The item's line bound is corrected to 20, and a test that runs the item's own command from the repository root is bound here, by a pull request that does not cite OMN-17427, so the merge base keeps the stale contract and fails the test while the head passes."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21433-documentation-surface-item-holds"
+    statement: |-
+      The documentation-surface item of contracts/OMN-17427.yaml is true on dev and still asserts the knowledge-base link, a short README and the absence of the unused documentation paths.
+    acceptance:
+      - id: "AC8"
+        statement: |-
+          AC8: the command check of dod-omn17427-documentation-surface exits 0 from the repository root, and the same command exits nonzero on an oversized README, a README without the knowledge-base link, and each unused documentation path -- falsifier: uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q
+evidence_requirements:
+  - kind: "tests"
+    description: "The test runs the item's own command from the repository root and in a temporary root with each violation planted."
+    command: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21433-ac8-documentation-surface-item-holds"
+    description: "The test reads contracts/OMN-17427.yaml, runs the documentation-surface item's command from the repository root and expects exit 0, then plants each violation in a temporary root and expects a nonzero exit. At the merge base the cited contract is OMN-21433's, so contracts/OMN-17427.yaml is the stale one (at most 5 lines against a 14-line README) and the root run fails; at the head the corrected item passes."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC8"]
