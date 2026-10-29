@@ -137,6 +137,52 @@ exit 2
 """
 
 
+#: A replay of one real broker: the listing and each describe are printed byte
+#: for byte from the recording, after the same -e and credential handling.
+_REPLAY_STUB = """#!/usr/bin/env bash
+set -u
+cat > /dev/null
+[ "$1" = "exec" ] || { echo "stub docker: unexpected $*" >&2; exit 2; }
+shift
+caller_user="${RPK_USER:-}"
+caller_pass="${RPK_PASS:-}"
+caller_mechanism="${RPK_SASL_MECHANISM:-}"
+unset RPK_USER RPK_PASS RPK_SASL_MECHANISM
+while [ "$1" = "-e" ]; do
+  case "$2" in
+    *=*) export "$2" ;;
+    RPK_USER) export RPK_USER="$caller_user" ;;
+    RPK_PASS) export RPK_PASS="$caller_pass" ;;
+    RPK_SASL_MECHANISM) export RPK_SASL_MECHANISM="$caller_mechanism" ;;
+    *) export "$2=$(printenv "$2")" ;;
+  esac
+  shift 2
+done
+shift # the container
+if [ "${RPK_USER:-}" != "onex-local" ] || [ "${RPK_PASS:-}" != "$STUB_PASSWORD" ] \\
+    || [ "${RPK_SASL_MECHANISM:-}" != "SCRAM-SHA-256" ]; then
+  echo "unable to request metadata: SASL is required but not provided" >&2
+  exit 1
+fi
+if [ "$1 $2 $3" = "rpk group list" ]; then
+  cat "$REPLAY_DIR/list.txt"
+  exit 0
+fi
+if [ "$1 $2 $3" = "rpk group describe" ] && [ $# -eq 4 ]; then
+  while IFS=" " read -r name file; do
+    if [ "$name" = "$4" ]; then
+      cat "$REPLAY_DIR/$file"
+      exit 0
+    fi
+  done < "$REPLAY_DIR/index.txt"
+  echo "unable to describe group $4: GROUP_ID_NOT_FOUND" >&2
+  exit 1
+fi
+echo "stub docker: unexpected exec $*" >&2
+exit 2
+"""
+
+
 def _probe_step() -> dict[str, Any]:
     workflow: dict[str, Any] = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"][_JOB]["steps"]
@@ -183,6 +229,46 @@ def _run_probe(
         env["STUB_FLAKY_DESCRIBE"] = str(tmp_path / "describe-failed-once")
     env.update(step.get("env", {}))
     # GitHub runs a `run:` block as `bash -e {0}`; the script sets pipefail itself.
+    return subprocess.run(
+        ["bash", "-e", str(script)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def _run_replay(
+    tmp_path: Path, recording: dict[str, Any]
+) -> subprocess.CompletedProcess[str]:
+    replay = tmp_path / "replay"
+    replay.mkdir()
+    (replay / "list.txt").write_text(recording["group_list"], encoding="utf-8")
+    index = []
+    for number, (name, text) in enumerate(recording["group_describe"].items()):
+        (replay / f"describe-{number}.txt").write_text(text, encoding="utf-8")
+        index.append(f"{name} describe-{number}.txt\n")
+    (replay / "index.txt").write_text("".join(index), encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "docker", _REPLAY_STUB)
+    _write_executable(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+    step = _probe_step()
+    script = tmp_path / "probe.sh"
+    script.write_text(step["run"], encoding="utf-8")
+    env_file = tmp_path / "local.env"
+    env_file.write_text("REDPANDA_SUPERUSER_PASSWORD=stub-secret\n", encoding="utf-8")
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "LOCAL_ENV_FILE": str(env_file),
+        "STUB_PASSWORD": "stub-secret",
+        "LOCAL_PROJECT": _PROJECT,
+        "REPLAY_DIR": str(replay),
+    }
+    env.update(step.get("env", {}))
     return subprocess.run(
         ["bash", "-e", str(script)],
         env=env,
@@ -292,3 +378,23 @@ def test_probe_fails_when_the_superuser_password_is_wrong(tmp_path: Path) -> Non
         env_text="REDPANDA_SUPERUSER_PASSWORD=wrong\n",
     )
     assert result.returncode != 0
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn20820_listener_groups_recorded.json")
+def test_probe_finds_the_listener_group_in_a_recorded_real_broker(
+    tmp_path: Path, recorded_response: dict[str, Any]
+) -> None:
+    """Replay a real broker listing, so the match holds for real group names.
+
+    The recording is rpk's own output from a running omnibase_infra runtime
+    that sets an instance id per process: four listener groups, each with the
+    `.__i.<instance>` part between the version and the topic.
+    """
+    listed = list(recorded_response["group_describe"])
+    assert len(listed) == 4
+    result = _run_replay(tmp_path, recorded_response)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    assert any(
+        f"live consumer group {name} (1 member) on {_TOPIC}" in result.stdout
+        for name in listed
+    )
