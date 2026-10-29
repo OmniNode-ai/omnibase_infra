@@ -26,6 +26,9 @@ evidence_requirements:
   - kind: "tests"
     description: "The effect node's unit tests pass."
     command: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect"
+  - kind: "tests"
+    description: "Against the auth-required Redpanda, a rerun rotates, drift is refused with the password untouched, and the principal sees and writes only its two granted topics."
+    command: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -39,6 +42,24 @@ dod_evidence:
     checks:
       - check_type: "test_passes"
         check_value: "uv run pytest -q --no-cov tests/unit/nodes/node_broker_principal_effect -k grants_complete_before_password"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac2-rerun-and-drift"
+    description: >-
+      Against the auth-required Redpanda, with the real Admin API and Kafka ACL clients: a second apply of the same plan reports rotate with no ACL created and reads back the identical ACL set, and the rotated password authenticates; after an ACL outside the plan is granted, apply reports refused naming the extra topic, the ACL set is unchanged, the previous password still authenticates and the new one does not. Fails at the parent, which has no handler.
+    source: "manual"
+    binds_ac: ["AC2"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k \"rerun or drift\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20822-ac4-enforcement"
+    description: >-
+      Against the auth-required Redpanda, of three provisioned topics the principal is granted two; verify reports exactly those two visible, a produce to a granted topic is delivered, and a produce to the third is refused with TOPIC_AUTHORIZATION_FAILED while the superuser's produce to it is delivered (positive control). Fails at the parent, which has no handler.
+    source: "manual"
+    binds_ac: ["AC4"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "env OMN18012_REQUIRE_HARNESS=1 uv run --frozen pytest tests/integration/customer_path/test_broker_principal_effect.py -q -k enforcement"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20822-ac3-no-secret"
     description: >-
