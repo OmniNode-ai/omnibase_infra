@@ -3685,16 +3685,15 @@ async def bootstrap() -> int:
                 },
             )
 
-            if manifest.total_discovered > 0:
-                # OMN-17985: was a RAW os.getenv read that never consulted the
-                # profile resolved at boot, so an unregistered value reached the
-                # ownership filter unvalidated and emptied the manifest.
-                runtime_profile = resolve_runtime_profile_name()
-                ownership_result = filter_manifest_for_runtime_profile(
-                    manifest=manifest,
-                    runtime_profile=runtime_profile,
-                )
-                manifest = ownership_result.manifest
+            # OMN-17985: use the validated boot profile. OMN-19513: validate
+            # exclusions even when discovery is empty, before any wiring begins.
+            runtime_profile = resolve_runtime_profile_name()
+            ownership_result = filter_manifest_for_runtime_profile(
+                manifest=manifest,
+                runtime_profile=runtime_profile,
+            )
+            manifest = ownership_result.manifest
+            if auto_wiring_manifest_discovered.total_discovered > 0:
                 if ownership_result.folded_profiles:
                     # OMN-17427: this runtime carries other roles' nodes too.
                     logger.info(
