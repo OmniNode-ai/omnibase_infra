@@ -148,6 +148,7 @@ def test_one_more_burndown_line_is_refused_as_baseline_growth(repo: Path) -> Non
     _write(repo, "docs/readme.md", "unrelated\n")
     _commit(repo, f"{TICKET}: unrelated change")
     control = _ratchet(repo, base)
+    assert control.returncode == 0, control.stdout + control.stderr
     assert "[baseline-growth]" not in control.stderr, control.stderr
 
     _write(repo, BURNDOWN, _burndown(listed, unlisted))
@@ -155,6 +156,9 @@ def test_one_more_burndown_line_is_refused_as_baseline_growth(repo: Path) -> Non
     refused = _ratchet(repo, base)
     assert refused.returncode == 1, refused.stdout + refused.stderr
     assert f"{BURNDOWN}: [baseline-growth]" in refused.stderr
+    # The unlisted handler is in the base commit, so the refusal is the grown
+    # burn-down file's and no handler_outside_node finding explains it.
+    assert "[handler_outside_node]" not in refused.stderr, refused.stderr
     assert unlisted in refused.stderr
 
 
