@@ -141,8 +141,10 @@ class BrokerPrincipalError(RuntimeHostError):
     """Listing, applying or verifying a developer principal failed.
 
     The mint spans two APIs and promises no cross-API atomicity, so the error
-    states which mutations had completed: ``acls_applied`` (every planned ACL
-    created and read back) and ``password_set``. It names the operation and the
+    states which mutations this operation had completed: ``acls_applied`` (every
+    planned ACL created and read back) and ``password_set``. List and verify
+    mutate nothing, so both are always false on their errors; they describe this
+    operation's own changes, not the state the broker was already in. It names the operation and the
     Admin API URL. Its text never carries the password: callers pass scrubbed
     text and raise it through ``attempt``.
     """

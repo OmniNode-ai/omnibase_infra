@@ -211,6 +211,52 @@ def test_verify_a_refused_login_is_a_typed_error_without_the_secret() -> None:
         assert SENTINEL not in repr(vars(exc)), type(exc).__name__
 
 
+class _Untouched:
+    """A client that fails the test if verify calls it at all."""
+
+    def list_acls(self, principal: str) -> frozenset[ModelBrokerAclBinding]:
+        raise AssertionError("verify read ACLs it should have refused before")
+
+    def create_acls(
+        self, principal: str, bindings: Iterable[ModelBrokerAclBinding]
+    ) -> None:
+        raise AssertionError("verify never creates an ACL")
+
+    def list_topics_as(self, principal: str, password: SecretStr) -> tuple[str, ...]:
+        raise AssertionError("verify logged in when it should have refused before")
+
+
+def test_verify_refuses_a_refused_plan_before_any_broker_call() -> None:
+    untouched = _Untouched()
+    request = ModelBrokerPrincipalVerifyRequest(
+        plan=ModelDeveloperPrincipalPlan(
+            decision="refused", refusal_kind="device_cap", refusal="cap reached"
+        ),
+        admin_url=ADMIN_URL,
+        password_env=PASSWORD_ENV,
+    )
+    handler = HandlerBrokerPrincipalVerify(
+        acls=untouched, session=untouched, environ={PASSWORD_ENV: SENTINEL}
+    )
+    with pytest.raises(BrokerPrincipalError) as raised:
+        handler.handle(request)
+    assert raised.value.operation == "broker.principal.verify"
+    assert "refused" in str(raised.value)
+
+
+def test_verify_without_the_password_variable_is_an_error_before_any_broker_call() -> (
+    None
+):
+    untouched = _Untouched()
+    handler = HandlerBrokerPrincipalVerify(
+        acls=untouched, session=untouched, environ={}
+    )
+    with pytest.raises(BrokerPrincipalError) as raised:
+        handler.handle(_verify_request())
+    assert PASSWORD_ENV in str(raised.value)
+    assert (raised.value.acls_applied, raised.value.password_set) == (False, False)
+
+
 # --- AC6: no main or effects runtime owns the node; one pre-commit entry ----------
 
 

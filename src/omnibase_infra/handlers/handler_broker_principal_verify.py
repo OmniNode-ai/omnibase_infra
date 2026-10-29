@@ -80,9 +80,24 @@ class HandlerBrokerPrincipalVerify:
     def handle(
         self, request: ModelBrokerPrincipalVerifyRequest
     ) -> ModelBrokerPrincipalVerifyResult:
-        """Compare the ACLs with the plan, then log in as the principal."""
-        principal = request.plan.principal
-        planned = planned_bindings(request.plan)
+        """Compare the ACLs with the plan, then log in as the principal.
+
+        A refused or principal-less plan and an unset password variable are refused
+        before any broker call, as apply refuses them.
+        """
+        plan = request.plan
+        if plan.decision == "refused" or not plan.principal:
+            raise self._fail(
+                request, f"the plan was refused ({plan.refusal_kind}): {plan.refusal}"
+            )
+        raw = environment_value(request.password_env, self._environ)
+        if not raw:
+            raise self._fail(
+                request, f"the password variable {request.password_env} is not set"
+            )
+        password = SecretStr(raw)
+        principal = plan.principal
+        planned = planned_bindings(plan)
         acls, session = attempt(
             lambda: (
                 self._acls or kafka_acls_from_env(),
@@ -108,12 +123,6 @@ class HandlerBrokerPrincipalVerify:
                 verified=False,
                 reason=f"ACLs differ from the plan; missing: {missing}; extra: {extra}",
             )
-        raw = environment_value(request.password_env, self._environ)
-        if not raw:
-            raise self._fail(
-                request, f"the password variable {request.password_env} is not set"
-            )
-        password = SecretStr(raw)
         topics = attempt(
             lambda: session.list_topics_as(principal, password),
             lambda exc: self._fail(
