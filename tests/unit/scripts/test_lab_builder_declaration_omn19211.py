@@ -110,6 +110,22 @@ class TestCacheCeiling:
         configs = {str(b["buildkitd_config"]) for b in _builders().values()}
         assert len(configs) == 1, "two ceilings for one host disk"
 
+    def test_shared_disk_cache_has_an_additional_percentage_ceiling(self) -> None:
+        catch_all = [r for r in self._rules() if r.get("all") is True]
+        assert any(r.get("maxUsedSpace") == "30%" for r in catch_all)
+        assert 30 * len(_builders()) <= 60
+
+    def test_free_space_and_cache_floors_scale_with_the_runner_disk(self) -> None:
+        rules = self._rules()
+        absolute_cap = next(r for r in rules if r.get("maxUsedSpace") == "100GB")
+        assert absolute_cap["reservedSpace"] == "0GB", (
+            "a percentage floor can exceed the absolute ceiling on a large disk"
+        )
+        assert all(r["reservedSpace"] == "5%" for r in rules if r is not absolute_cap)
+        free_space_rules = [r for r in rules if "minFreeSpace" in r]
+        assert free_space_rules
+        assert all(r["minFreeSpace"] == "20%" for r in free_space_rules)
+
 
 @pytest.mark.unit
 class TestConsumersAgreeWithTheDeclaration:

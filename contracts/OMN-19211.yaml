@@ -19,14 +19,14 @@ requirements:
     acceptance:
       - id: "AC2"
         statement: |-
-          AC2: with DEPLOY_AGENT_LANE_BUILDER set the compose build runs on that builder, a builder that does not boot or runs another BuildKit version is removed with its state and created again, a creation failure refuses the build and never falls back to the default builder, and an instance naming no builder is unchanged -- falsifier: cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_lane_builder_omn19211.py -q fails at origin/dev, which has no lane builder module
+          AC2: with DEPLOY_AGENT_LANE_BUILDER set the compose build runs on that builder, a builder that does not boot or runs another BuildKit version is removed with its state and created again, a creation failure refuses the build and never falls back to the default builder, and an instance naming no builder is unchanged -- falsifier: uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q fails at origin/dev, which has no lane builder module
 evidence_requirements:
   - kind: "tests"
     description: "The declaration tests check the builders, the config file, the ceiling equality with the host GC and the workflow and unit wiring."
     command: "uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q"
   - kind: "tests"
     description: "The deploy-agent tests cover ensure, recreate and refuse, and the executor wiring."
-    command: "cd scripts/deploy-agent && uv run --extra dev pytest tests/unit/test_lane_builder_omn19211.py -q"
+    command: "uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q"
   - kind: "manual"
     description: "Deploy check: the declaration and the dev unit at this head name the same lane builder and the config file the builders share; this reads committed configuration and touches no live host."
     command: "deploy: uv run pytest tests/unit/scripts/test_lab_builder_declaration_omn19211.py -q -k 'dev_unit or ceiling or declared_config'"
@@ -48,8 +48,8 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run --extra dev pytest tests/unit/test_lane_builder_omn19211.py -q"
-        cwd: "${OMNI_HOME}/omnibase_infra/scripts/deploy-agent"
+        check_value: "uv run pytest -c pyproject.toml scripts/deploy-agent/tests/unit/test_lane_builder_omn19211.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn19211-deploy-declaration-at-head"
     description: "Deploy probe: the declaration tests that read the dev unit, the shared config file and the cache ceiling pass at this head."
