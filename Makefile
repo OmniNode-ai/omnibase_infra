@@ -199,35 +199,44 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 	  echo "==> OK: the local broker refuses anonymous clients and accepts $(LOCAL_SASL_USER)"
 
 # OMN-20823 (plan D6). The lock directory beside the env file is taken before
-# anything else and released by the trap; a lock whose recorded process is gone
-# is removed and said. The password is generated here, reaches the node only as
-# the variable ONEX_MINT_PASSWORD of docker exec (never an argument), reaches
-# lane-login only on its stdin, and is never printed. `onex node --output receipt`
-# prints one JSON whose .result.handler_result is the orchestrator's result.
+# anything else and released by the trap only while it still holds our pid; a
+# lock whose recorded process is gone is removed and said, under a second guard
+# directory so two runs cannot both recover it. The password is generated here,
+# reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
+# an argument), reaches lane-login only on its stdin, and is never printed. The
+# state-root search reads it from its own environment: exit 0 clean, 10 found,
+# anything else fails closed. `onex node --output receipt` prints one JSON whose
+# .result.handler_result is the orchestrator's result.
 mint-local: _check-docker ## Laptop profile: mint this machine's login on the local broker and prove it with one delegation (OMN-20823)
-	@lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.lock"; \
+	@lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.lock"; guard="$$lock.recover"; \
 	  mkdir -p "$$(dirname "$$lock")" || exit 1; \
+	  busy() { echo "mint-local: busy, lock held by pid $$1 (exit 75)" >&2; exit 75; }; \
 	  if ! mkdir "$$lock" 2>/dev/null; then \
 	    holder=$$(cat "$$lock/pid" 2>/dev/null); \
-	    if [ -n "$$holder" ] && kill -0 "$$holder" 2>/dev/null; then \
-	      echo "mint-local: busy, lock held by pid $$holder (exit 75)" >&2; exit 75; \
+	    if [ -n "$$holder" ] && kill -0 "$$holder" 2>/dev/null; then busy "$$holder"; fi; \
+	    if [ -z "$$holder" ] && [ -n "$$(find "$$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then busy unknown; fi; \
+	    if ! mkdir "$$guard" 2>/dev/null; then \
+	      [ -n "$$(find "$$guard" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$$guard" 2>/dev/null; \
+	      busy "$${holder:-unknown}"; \
 	    fi; \
-	    if [ -z "$$holder" ] && [ -n "$$(find "$$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then \
-	      echo "mint-local: busy, lock held by pid unknown (exit 75)" >&2; exit 75; \
+	    now=$$(cat "$$lock/pid" 2>/dev/null); \
+	    if [ "$$now" = "$$holder" ] && ! { [ -n "$$now" ] && kill -0 "$$now" 2>/dev/null; }; then \
+	      echo "mint-local: removing a stale lock left by pid $${holder:-unknown}, which is not running"; \
+	      rm -rf "$$lock"; \
 	    fi; \
-	    echo "mint-local: removing a stale lock left by pid $${holder:-unknown}, which is not running"; \
-	    rm -rf "$$lock"; \
-	    mkdir "$$lock" 2>/dev/null || { echo "mint-local: busy, another run took the lock (exit 75)" >&2; exit 75; }; \
+	    mkdir "$$lock" 2>/dev/null && echo "$$$$" > "$$lock/pid"; got=$$?; rmdir "$$guard"; \
+	    [ "$$got" -eq 0 ] || busy "$$(cat "$$lock/pid" 2>/dev/null || echo unknown)"; \
 	  fi; \
 	  echo "$$$$" > "$$lock/pid"; \
 	  work=""; container="$(LOCAL_PROJECT)-runtime-effects"; in_dir="/tmp/onex-mint-$$$$"; \
-	  trap 'docker exec -u omniinfra "$$container" rm -rf "$$in_dir" >/dev/null 2>&1; rm -rf "$$lock" $${work:+"$$work"}' EXIT; \
+	  trap 'docker exec -u omniinfra "$$container" rm -rf "$$in_dir" >/dev/null 2>&1; [ "$$(cat "$$lock/pid" 2>/dev/null)" = "$$$$" ] && rm -rf "$$lock"; rm -rf $${work:+"$$work"}' EXIT; \
 	  trap 'exit 130' INT; trap 'exit 143' TERM; \
 	  work=$$(mktemp -d) || exit 1; \
 	  $(MAKE) --no-print-directory check-sasl-local || { \
 	    echo "mint-local: the local broker is not secured; run make up-local first" >&2; exit 1; }; \
 	  user=$$(id -un) && host=$$(hostname -s) || exit 1; \
 	  tenant=$$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)" | tail -n 1); \
+	  scan='import os, pathlib, sys; s = os.environb.get(b"ONEX_MINT_PASSWORD", b""); r = pathlib.Path(sys.argv[1]); sys.exit(2) if not (s and r.is_dir()) else sys.exit(10 if any(s in p.read_bytes() for p in r.rglob("*") if p.is_file()) else 0)'; \
 	  run_node() { \
 	    jq -n --arg mode "$$1" --rawfile decl "$(MINT_DECLARATION)" --arg login "$$user" \
 	      --arg device "$$host" --arg url "$(LOCAL_ADMIN_URL)" --arg pwenv "$$2" \
@@ -238,9 +247,13 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	    docker exec -u omniinfra -e HOME=/home/omniinfra -e ONEX_MINT_PASSWORD "$$container" \
 	      onex node node_developer_principal_mint_orchestrator --input "$$in_dir/input.json" \
 	      --state-root "$$in_dir/state" --output receipt > "$$work/receipt.json"; \
-	    if [ -n "$$2" ] && docker exec -u omniinfra -e ONEX_MINT_PASSWORD "$$container" \
-	        sh -c 'grep -rqF -e "$$ONEX_MINT_PASSWORD" "$$1"' sh "$$in_dir/state"; then \
-	      echo "mint-local: the password was found under the onex node state root" >&2; return 1; \
+	    if [ -n "$$2" ]; then \
+	      docker exec -u omniinfra -e ONEX_MINT_PASSWORD "$$container" python3 -c "$$scan" "$$in_dir/state"; \
+	      case $$? in \
+	        0) ;; \
+	        10) echo "mint-local: the password was found under the onex node state root" >&2; return 1 ;; \
+	        *) echo "mint-local: the onex node state root could not be searched for the password" >&2; return 1 ;; \
+	      esac; \
 	    fi; \
 	    docker exec -u omniinfra "$$container" rm -rf "$$in_dir" || return 1; \
 	    [ "$$(jq -r '.result.handler_result.status // empty' "$$work/receipt.json" 2>/dev/null)" = success ] && return 0; \

@@ -105,11 +105,19 @@ if cmd[:2] == ["mkdir", "-p"]:
 if cmd[:2] == ["rm", "-rf"]:
     subprocess.run(["rm", "-rf", str(fs / cmd[2].lstrip("/"))], check=False)
     sys.exit(0)
-if cmd[:2] == ["sh", "-c"] and "grep" in cmd[2]:
-    secret = inner.get("ONEX_MINT_PASSWORD", "")
-    target = fs / cmd[4].lstrip("/")
-    found = subprocess.run(["grep", "-rqF", "-e", secret, str(target)]).returncode
-    sys.exit(found)
+if cmd[:1] in (["sh"], ["bash"]):
+    # A shell inside the container could expand the secret into a child's argv.
+    print(f"stub docker: refused an in-container shell {cmd}", file=sys.stderr)
+    sys.exit(2)
+if cmd[:2] == ["python3", "-c"]:
+    # The target's state-root search: run its own code, the secret in its env only.
+    if os.environ.get("STUB_SCAN_ERROR") == "1":
+        sys.exit(2)
+    env = {"PATH": os.environ["PATH"]}
+    if "ONEX_MINT_PASSWORD" in inner:
+        env["ONEX_MINT_PASSWORD"] = inner["ONEX_MINT_PASSWORD"]
+    target = str(fs / cmd[3].lstrip("/"))
+    sys.exit(subprocess.run([sys.executable, "-c", cmd[2], target], env=env).returncode)
 if cmd[:2] == ["onex", "node"] and cmd[2] == "node_developer_principal_mint_orchestrator":
     opts = dict(zip(cmd[3::2], cmd[4::2]))
     request = json.loads((fs / opts["--input"].lstrip("/")).read_text())
@@ -188,6 +196,41 @@ sys.exit(2)
 """
 
 
+# `cat` with a barrier: when STUB_LOCK_BARRIER is set, the first two reads of the
+# lock's pid file wait for each other, so two runs both read the same dead holder
+# before either acts on it (the stale-lock race). Every other read is plain cat.
+_STUB_CAT = r"""#!__PYTHON__
+import os, sys, time
+from pathlib import Path
+
+args = sys.argv[1:]
+if os.environ.get("STUB_LOCK_BARRIER") == "1" and len(args) == 1 and args[0].endswith(".mint-local.lock/pid"):
+    gate = Path(os.environ["STUB_ROOT"]) / "barrier"
+    gate.mkdir(exist_ok=True)
+    index = 0
+    while True:
+        try:
+            (gate / str(index)).mkdir()
+            break
+        except FileExistsError:
+            index += 1
+    if index < 2:
+        deadline = time.monotonic() + 10
+        while not (gate / "1").exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+swap = os.environ.get("STUB_LOCK_SWAP_PID")
+if swap and len(args) == 1 and args[0].endswith(".mint-local.lock/pid"):
+    marker = Path(os.environ["STUB_ROOT"]) / "swapped"
+    if not marker.exists():
+        # Answer with the dead holder, then let another run take the lock over.
+        sys.stdout.write(Path(args[0]).read_text())
+        Path(args[0]).write_text(swap + "\n")
+        marker.write_text("")
+        sys.exit(0)
+os.execv("/bin/cat", ["cat", *args])
+"""
+
+
 class _Stack:
     """One fake laptop stack: stubs on PATH, a broker file and an env file."""
 
@@ -200,7 +243,11 @@ class _Stack:
         (self.root / "calls.jsonl").write_text("")
         self.bin = tmp_path / "bin"
         self.bin.mkdir()
-        for name, body in (("docker", _STUB_DOCKER), ("onex", _STUB_ONEX)):
+        for name, body in (
+            ("docker", _STUB_DOCKER),
+            ("onex", _STUB_ONEX),
+            ("cat", _STUB_CAT),
+        ):
             stub = self.bin / name
             stub.write_text(
                 body.replace("__PYTHON__", sys.executable), encoding="utf-8"
@@ -390,6 +437,56 @@ def test_lock_a_stale_lock_is_removed_and_said(tmp_path: Path) -> None:
     assert not lock.exists()
 
 
+def test_lock_two_runs_on_one_stale_lock_make_one_mutation(tmp_path: Path) -> None:
+    """Both runs read the same dead holder before either recovers the lock."""
+    stack = _Stack(tmp_path)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    stack.lock().mkdir()
+    (stack.lock() / "pid").write_text(f"{dead.pid}\n")
+    env = stack.env(STUB_NODE_DELAY="1.5", STUB_LOCK_BARRIER="1")
+    runs = [
+        subprocess.Popen(
+            stack.command(),
+            cwd=_REPO,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    outcomes = [(run.wait(timeout=120), *run.communicate()) for run in runs]
+    assert (stack.root / "barrier" / "1").exists(), "the barrier did not hold both runs"
+    assert len(stack.mutations()) == 1, outcomes
+    assert sorted(o[0] == 0 for o in outcomes) == [False, True], outcomes
+    loser = next(o for o in outcomes if o[0] != 0)
+    assert "mint-local: busy" in loser[2], loser
+
+
+def test_lock_a_lock_taken_over_after_the_stale_read_is_not_removed(
+    tmp_path: Path,
+) -> None:
+    """The run read a dead holder, but by recovery time a live run holds the lock."""
+    stack = _Stack(tmp_path)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    live = subprocess.Popen(["sleep", "60"])
+    try:
+        stack.lock().mkdir()
+        (stack.lock() / "pid").write_text(f"{dead.pid}\n")
+        result = stack.run(STUB_LOCK_SWAP_PID=str(live.pid))
+        assert (stack.root / "swapped").exists(), "the takeover was not staged"
+        assert result.returncode != 0, _out(result)
+        assert f"mint-local: busy, lock held by pid {live.pid}" in result.stderr
+        assert "removing a stale lock" not in result.stdout
+        assert (stack.lock() / "pid").read_text().strip() == str(live.pid)
+        assert stack.mutations() == []
+    finally:
+        live.kill()
+        live.wait()
+
+
 def test_lock_a_live_lock_is_not_removed(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     holder = subprocess.Popen(["sleep", "60"])
@@ -456,6 +553,17 @@ def test_no_secret_a_password_left_in_the_state_root_fails_the_run(
     assert result.returncode != 0
     assert "the password was found under the onex node state root" in result.stderr
     assert stack.stored() == {}, "a leaked password was still stored"
+
+
+def test_no_secret_a_state_root_that_cannot_be_searched_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """A search that cannot run is not a clean search: nothing is stored."""
+    stack = _Stack(tmp_path)
+    result = stack.run(STUB_SCAN_ERROR="1")
+    assert result.returncode != 0
+    assert "could not be searched for the password" in result.stderr
+    assert stack.stored() == {}
 
 
 # --- AC7: the probe's tenant -----------------------------------------------------------
