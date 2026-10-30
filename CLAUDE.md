@@ -386,6 +386,15 @@ The runtime uses plugin-based handler loading from YAML contracts
 
 **Dependency bump checklist:**
 
+RULING 2026-10-29T01:50:26Z sanctions dev-merge sources with only
+`tag = "dev-YYYYMMDDHHMMSS-<sha12>"` as their git ref. Core's `dev_tag_lineage`
+validator verifies tag identity, dev ancestry, declared version and adjacent
+`uv.lock` identity in CI and, per package, in the cascade. Infra's provenance
+script admits this shape and skips its release-tree comparison; other pin
+shapes retain the release-tree check. After core verification, the cascade
+uses `--drop-dev-tag-override` to remove only the single-line source before
+locking the release, preserving unrelated bytes.
+
 1. Update `pyproject.toml` bounds, then `uv sync`. `omnibase-core` is published as
    `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` and pinned exactly only in
    `[tool.uv] override-dependencies` (OMN-19655); the range must admit the override
