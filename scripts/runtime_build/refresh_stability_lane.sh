@@ -87,8 +87,8 @@
 #
 # Release tags only (OMN-21611):
 #   The stability lane runs a pinned release set and never a dev ref. The
-#   set is the committed pin file, config/lab/stability-lane-pin.yaml under
-#   ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
+#   set is the committed pin file, config/lab/lane-overlays/<lane>.release-pin.yaml
+#   under ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
 #   tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket
 #   (lines `  <repo>: <tag>` under `pin:`); --ref overrides the omnibase_infra tag.
 #   Before anything is read from the lane, tagged, checked out, built or
@@ -362,7 +362,7 @@ require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
 # OMN-21288: the main manifest includes the folded effects profile.
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF=""
-PIN_FILE="${ONEX_WORKSPACE_CONFIG_ROOT:+${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/stability-lane-pin.yaml}"
+PIN_FILE="${ONEX_WORKSPACE_CONFIG_ROOT:+${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-overlays/${LANE}.release-pin.yaml}"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
 EFFECTS_MANIFEST_URL="" # OMN-21288: empty = no effects runtime; verify_stability_refresh.py reads "" as None and skips the effects manifest (pinned by test_empty_effects_manifest_url_skips_the_effects_manifest)

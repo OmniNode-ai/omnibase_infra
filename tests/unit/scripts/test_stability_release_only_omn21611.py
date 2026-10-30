@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -31,6 +32,11 @@ RUNTIME_BUILD = REPO_ROOT / "scripts" / "runtime_build"
 REFRESH = RUNTIME_BUILD / "refresh_stability_lane.sh"
 STAGE = RUNTIME_BUILD / "stage_workspace.sh"
 
+#: The lane id the script hardcodes; the pin file is named for it. Read from
+#: the script so no lane id is spelled in this public repository.
+_LANE_MATCH = re.search(r'^readonly LANE="([^"]+)"$', REFRESH.read_text(), re.M)
+assert _LANE_MATCH is not None
+LANE = _LANE_MATCH.group(1)
 DEV_TAG = "dev-20261025205951-5bb5f11404ae"
 RELEASE = {
     "omnibase_infra": "v0.38.74",
@@ -87,7 +93,7 @@ def clones(tmp_path: Path) -> Path:
 
 
 def _write_pin(config_root: Path, pin: dict[str, str]) -> Path:
-    path = config_root / "config" / "lab" / "stability-lane-pin.yaml"
+    path = config_root / "config" / "lab" / "lane-overlays" / f"{LANE}.release-pin.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "schema_version: 1",
