@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# The machine principal drift check (OMN-21622), a user unit on the lab host that runs the
+# dev lane's broker and principal issuer.
+#
+# Reads every principal the developer.principal overlay declares with role machine, lists
+# each one's live ACLs through the running issuer container's own rpk, and exits 1 naming
+# each machine principal and each grant of the issued profile the broker lacks. A grant a
+# private declaration adds is reported as EXTRA and does not fail. It creates and deletes
+# no ACL and sets no password. The host health fleet reads this timer: a failed run is
+# drift for the host, and the journal (SyslogIdentifier onex-principal-grant-audit)
+# carries the MISSING lines.
+#
+# Paths are host facts and live in the env file, never here:
+#   PRINCIPAL_GRANT_AUDIT_PYTHON  an interpreter with PyYAML
+#   PRINCIPAL_GRANT_AUDIT_INFRA   the omnibase_infra checkout the lane deploys from
+#   PRINCIPAL_ISSUER_OVERLAY_FILE the lab developer.principal overlay (the issuer's own)
+#   PRINCIPAL_ISSUER_CONTAINER    the running issuer container
+#   PRINCIPAL_ISSUER_LEDGER       the issuer's issuance ledger (read only when no overlay)
+
+[Unit]
+Description=ONEX dev lane machine principal grant audit (OMN-21622)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Service]
+Type=oneshot
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=%h/.config/onex/principal-grant-audit.env
+ExecStart=/bin/bash -c 'exec "$PRINCIPAL_GRANT_AUDIT_PYTHON" "$PRINCIPAL_GRANT_AUDIT_INFRA/scripts/lab_principal_issuer.py" audit-grants --grants "$PRINCIPAL_GRANT_AUDIT_INFRA/deploy/lab/developer-principal-grants.yaml" --ledger "$PRINCIPAL_ISSUER_LEDGER" --overlay "$PRINCIPAL_ISSUER_OVERLAY_FILE" --role machine --rpk-container "$PRINCIPAL_ISSUER_CONTAINER"'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-principal-grant-audit
+
+[Install]
+WantedBy=default.target

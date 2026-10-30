@@ -389,11 +389,40 @@ COMPACTION_REPLY_TOPICS: tuple[str, ...] = (
 BROKER = "dev"
 
 
+# The machine profile (OMN-21622): every issued principal is one machine's login, and its
+# hook-emit drainer publishes the twelve work-ledger row events and its credential
+# registration. Produce only.
+MACHINE_PROFILE_TOPICS: tuple[str, ...] = (
+    "onex.evt.omnimarket.credential-registered.v1",
+    *(
+        f"onex.evt.omnimarket.work-ledger-{kind}.v1"
+        for kind in (
+            "ack",
+            "claim",
+            "correction",
+            "friction",
+            "hold",
+            "msg",
+            "operator-consent",
+            "release",
+            "ruling",
+            "status",
+            "terminal",
+            "terminal-refused",
+        )
+    ),
+)
+MACHINE_PROFILE_GRANTS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tuple(
+    ("topic", topic, "literal", ("write", "describe"))
+    for topic in MACHINE_PROFILE_TOPICS
+)
+
+
 def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
         for resource, name, pattern, operations in (
-            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
+            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS + MACHINE_PROFILE_GRANTS
         )
         for operation in operations
     }
