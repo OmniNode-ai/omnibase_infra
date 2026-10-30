@@ -12,6 +12,7 @@ since omnibase_core#2085; evidence-autoclose-sweep.yml already names 180 s.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +28,9 @@ CALLER_PATH = (
     / "call-repo-evidence-gate.yml"
 )
 
-# omnibase_core#2102 descends from #2085, which added the check-timeout-seconds input.
-# A pin absent here may not declare the input, and a caller passing an undeclared
-# input is refused by GitHub before the job starts.
-_REUSABLE_SHAS_DECLARING_THE_INPUT = {"1088a7b0303059c035ecc0e3ea33580f9556fe41"}
+CORE = "OmniNode-ai/omnibase_core"
+RECEIPT_GATE_PATH = ".github/workflows/receipt-gate.yml"
+INPUT_NAME = "check-timeout-seconds"
 
 _VERIFIER_DEFAULT_SECONDS = 30
 _RECEIPT_GATE_MAXIMUM_SECONDS = 900
@@ -42,9 +42,40 @@ def _job() -> dict[str, Any]:
     return job
 
 
+def _gh_core(endpoint: str, *flags: str) -> str:
+    """Read one omnibase_core API endpoint; skip when the environment cannot reach it."""
+    try:
+        done = subprocess.run(
+            ["gh", "api", f"repos/{CORE}/{endpoint}", *flags],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        done = None
+    if done is None or done.returncode != 0:
+        pytest.skip(f"omnibase_core {endpoint} is not readable from this environment")
+    return done.stdout
+
+
 def test_caller_pins_a_reusable_that_declares_the_check_timeout_input() -> None:
+    """Read the reusable at the pinned sha and find the input under workflow_call.
+
+    A caller passing an input the reusable does not declare is refused by GitHub
+    before the job starts, so the declaration itself is what this reads.
+    """
     pinned_sha = _job()["uses"].rsplit("@", 1)[1]
-    assert pinned_sha in _REUSABLE_SHAS_DECLARING_THE_INPUT
+    text = _gh_core(
+        f"contents/{RECEIPT_GATE_PATH}?ref={pinned_sha}",
+        "-H",
+        "Accept: application/vnd.github.raw",
+    )
+    reusable = yaml.safe_load(text)
+    # PyYAML reads the bare key `on` as the boolean True.
+    triggers = reusable.get("on", reusable.get(True))
+    declared = triggers["workflow_call"]["inputs"]
+    assert INPUT_NAME in declared, sorted(declared)
 
 
 def test_caller_names_a_ceiling_above_the_verifier_default() -> None:
@@ -54,14 +85,11 @@ def test_caller_names_a_ceiling_above_the_verifier_default() -> None:
     assert _VERIFIER_DEFAULT_SECONDS < int(value) <= _RECEIPT_GATE_MAXIMUM_SECONDS
 
 
-_PINNED_DEV_TAG = "dev-20261030004553-1088a7b03030"
-
-
 def test_caller_sha_pin_is_the_commit_of_the_dev_tag_named_on_the_same_line() -> None:
     """A pull_request_target caller pins by 40-hex sha; the dev tag is named beside it.
 
-    The dev-merge tag name ends in the first twelve hex digits of the commit it
-    points at, so the pinned sha must carry that suffix and the line must name the tag.
+    The tag named in the comment is resolved through the GitHub API and must point at
+    the pinned sha, so a mispaired tag and sha fail here.
     """
     line = next(
         raw
@@ -70,5 +98,7 @@ def test_caller_sha_pin_is_the_commit_of_the_dev_tag_named_on_the_same_line() ->
     )
     pinned_sha = _job()["uses"].rsplit("@", 1)[1]
     assert re.fullmatch(r"[0-9a-f]{40}", pinned_sha), pinned_sha
-    assert _PINNED_DEV_TAG in line.split("#", 1)[1]
-    assert pinned_sha.startswith(_PINNED_DEV_TAG.rsplit("-", 1)[1])
+    tags = re.findall(r"dev-\d{14}-[0-9a-f]{12}", line.split("#", 1)[1])
+    assert len(tags) == 1, line
+    resolved = _gh_core(f"commits/{tags[0]}", "--jq", ".sha").strip()
+    assert resolved == pinned_sha, (tags[0], resolved, pinned_sha)
