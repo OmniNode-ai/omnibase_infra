@@ -286,14 +286,14 @@ class TestRead:
         assert handler.read(tmp_path) is None
 
 
-def test_config_is_read_from_owning_sibling_not_retiring_workspace(
+def test_config_is_read_from_the_declared_owner_not_retiring_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """OMN-19743: a poison config in the retiring root cannot answer."""
-    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     workspace = tmp_path / "omni_home"
-    owner = tmp_path / "omnibase_internal"
+    owner = tmp_path / "declared-owner"
     workspace.mkdir()
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(owner))
     sha = _lagging_workspace(owner)
     legacy = workspace / SOURCE_PATH_IN_REPO
     legacy.parent.mkdir(parents=True)
@@ -307,7 +307,7 @@ def test_config_is_read_from_owning_sibling_not_retiring_workspace(
     assert copy.config_path.read_text(encoding="utf-8") == _TIER1
 
 
-def test_missing_owner_does_not_materialize_retiring_repository(
+def test_undeclared_owner_does_not_materialize_retiring_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
@@ -315,7 +315,7 @@ def test_missing_owner_does_not_materialize_retiring_repository(
     _lagging_workspace(workspace)
     outcome = HandlerWorkspaceRuntimeConfigMaterializer().materialize(workspace)
     assert not outcome.ok
-    assert "omnibase_internal" in outcome.detail
+    assert "ONEX_WORKSPACE_CONFIG_ROOT" in outcome.detail
 
 
 @pytest.mark.parametrize("owner", [None, "retired"])

@@ -52,6 +52,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from tests.ci._prepush_private_table import SYNTHETIC_TABLE
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
@@ -63,7 +64,7 @@ pytestmark = pytest.mark.unit
 
 def _rows() -> list[list[str]]:
     rows = []
-    for line in TABLE.read_text(encoding="utf-8").splitlines():
+    for line in SYNTHETIC_TABLE.splitlines():
         line = line.split("#", 1)[0]
         if not line.strip():
             continue
@@ -85,23 +86,10 @@ def test_no_capacity_row_hardcodes_an_ssh_login() -> None:
     unreachable for everybody else while their own fit host goes unused. This
     assertion is what stops the next row from quietly reintroducing it.
 
-    OMN-17996 moved the VALUE to the private placement overlay, so what this
-    file can still prove is stronger than "no login": the column carries the
-    `@private` token and therefore cannot carry a login, a host, an address or
-    anything else. The same rule is restated in the overlay's own header, which
-    is where a value can now appear at all.
     """
     for row in _rows():
-        if row[1] != "capacity":
-            continue
-        assert row[3] == "@private", (
-            f"{row[0]}: ssh_target {row[3]!r} must be the `@private` token. A "
-            "hardcoded login pins every execution target to one person's "
-            "credentials and reports the whole lab unreachable for everybody "
-            "else (OMN-17280); a hardcoded host publishes the lab address book "
-            "from a public repository (OMN-17996). Put the value in "
-            "${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/prepush_hosts.omnibase_infra.overlay.tsv."
-        )
+        if row[1] == "capacity":
+            assert "@" not in row[3], f"{row[0]} hardcodes an SSH login"
 
 
 def test_identity_rows_carry_no_execution_target() -> None:

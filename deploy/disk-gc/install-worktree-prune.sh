@@ -12,7 +12,7 @@
 # ships the code PR. The worker ships the unit files; the operator runs this on
 # .201 after the PR has merged.
 #
-# Usage (run on 192.168.86.201 after pulling latest):
+# Usage (run on <configured-host> after pulling latest):
 #   bash deploy/disk-gc/install-worktree-prune.sh --preflight   # check only, changes nothing
 #   bash deploy/disk-gc/install-worktree-prune.sh               # install + enable + start timer
 #   bash deploy/disk-gc/install-worktree-prune.sh --status

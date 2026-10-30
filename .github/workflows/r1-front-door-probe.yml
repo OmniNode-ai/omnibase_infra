@@ -125,7 +125,7 @@ jobs:
 
       # The CLI resolves `--lane dev` from `<config root>/config/lab/ci_bus_lanes.yaml`.
       # The workspace root is `.probe-workspace`, whose developer config root is
-      # `.onex/workspace-config` (service_kernel.workspace_runtime_config_root),
+      # `.onex/workspace-config` (HandlerWorkspaceConfigRootResolve),
       # so the lane table from the CI overlay is placed there.
       - name: Fetch the declared CI bus lanes from the CI overlay
         id: lane_table
