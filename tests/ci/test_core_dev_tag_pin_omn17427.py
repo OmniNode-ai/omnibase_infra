@@ -121,6 +121,8 @@ def test_recorded_core_validator_response_matches_the_pin(
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert recorded["tool"]["uv"]["sources"] == manifest["tool"]["uv"]["sources"]
     assert recorded["project"]["dependencies"] == [f"omnibase-core>={VERSION},<0.48.0"]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    assert _locked_core_version_outside_range(recorded, lock) == []
     assert violations(manifest, "omnibase-core") == []
     absent = next(case for case in cases if case["label"] == "absent")
     assert absent["core"]["exit_code"] == 1

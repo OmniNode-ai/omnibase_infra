@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Hold OMN-19655's published >=FLOOR,<NEXT_MINOR shape; core's dev_tag_lineage
-validator, run by CI, owns the tag, override and lock rules.
+"""Hold OMN-19655's published >=FLOOR,<NEXT_MINOR shape. The range admitting the lock is
+held by tests/ci/test_core_dev_tag_pin_omn17427.py; core's dev_tag_lineage owns the tag.
 """
 
 from __future__ import annotations
