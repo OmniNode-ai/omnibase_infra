@@ -32,6 +32,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.ci.check_sibling_compatible_range import violations
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -183,9 +185,7 @@ def test_workflow_validates_at_the_locked_core_with_the_binds_ac_rules() -> None
     version = tuple(int(part) for part in block.split('"', 1)[0].split("."))
     assert version >= CORE_WITH_BINDS_AC_RULES, version
     manifest = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-    overrides = manifest["tool"]["uv"]["override-dependencies"]
-    locked_version = block.split('"', 1)[0]
-    assert f"omnibase-core=={locked_version}" in overrides
+    assert violations(manifest, "omnibase-core") == []
 
 
 # --- this repository's contract -------------------------------------------------

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
+from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     evaluate_done_write_receipt,
 )
 

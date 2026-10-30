@@ -10,7 +10,6 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.57" },
     { name = "omnibase-spi", specifier = "==0.23.7" },
 ]
 
@@ -2366,8 +2365,8 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.47.57"
-source = { registry = "https://pypi.org/simple" }
+version = "0.47.58"
+source = { git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261029143607-342000ec5702#342000ec57020e5258dde41d571420e7c09ed05b" }
 dependencies = [
     { name = "blake3" },
     { name = "click" },
@@ -2383,10 +2382,6 @@ dependencies = [
     { name = "strictyaml" },
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/1c/413df4273052802d5152881cf20e600d15ace9e6a122bc0e2219ecbaacf0/omnibase_core-0.47.57.tar.gz", hash = "sha256:1b2709bf5944b4b6f34e5c169cdceaab5a97fa30c36413ade7cdab41c55c595f", size = 11421172 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/65/85835088ddc257013ef7e89c5f49df8661a3bae4d4805b8039366921c1ee/omnibase_core-0.47.57-py3-none-any.whl", hash = "sha256:ca680e25c1de28f9802c6ecb0d6503096b9b4598f352d66415aae59ef450e1f9", size = 7967606 },
 ]
 
 [[package]]
@@ -2493,7 +2488,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = ">=0.47.31,<0.48.0" },
+    { name = "omnibase-core", git = "https://github.com/OmniNode-ai/omnibase_core.git?tag=dev-20261029143607-342000ec5702" },
     { name = "omnibase-spi", specifier = "==0.23.7" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

@@ -166,7 +166,9 @@ def _build_matrix_from_pyproject(
 # ============================================================================
 # VERSION COMPATIBILITY MATRIX
 # ============================================================================
-# Derived automatically from pyproject.toml at import time (OMN-3203).
+# Derived from the published dependency bounds at import time (OMN-3203).
+# Core resolves from its dev-merge tag alone (OMN-17427); this matrix checks
+# the installed version against the floor range, not a uv version override.
 # No manual update needed — just bump pyproject.toml and the matrix follows.
 #
 # If pyproject.toml cannot be found (e.g. installed package without source),
@@ -175,7 +177,7 @@ def _build_matrix_from_pyproject(
 _FALLBACK_MATRIX: list[VersionConstraint] = [
     VersionConstraint(
         package="omnibase_core",
-        min_version="0.47.31",
+        min_version="0.47.58",
         max_version="0.48.0",
     ),
     VersionConstraint(

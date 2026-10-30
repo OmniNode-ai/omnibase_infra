@@ -684,6 +684,16 @@ requirements:
     acceptance:
       - id: AC17427630003
         statement: 'The sanctioned shape is movable, release range caps still apply, and dropping a source preserves neighbours, comments, other tables and line endings; absence is a no-op and every other shape is refused without changing the file -- falsifier: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov; fails at the merge base'
+  - id: req-omn17427-core-dev-tag-pin
+    statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
+    acceptance:
+      - id: AC17427630002
+        statement: 'The core tag dev-20261029143607-342000ec5702, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+  - id: req-omn17427-core-contract-binding
+    statement: The Done-write gate is bound from its packaged contract with zero new cross-repository node imports.
+    acceptance:
+      - id: AC17427630004
+        statement: 'Contract validation refuses incompatible models, missing handlers and unexported protocol functions; the sweep uses the injected binding and its verdict format matches core at the pin -- falsifier: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov fails at the merge base because this test path and resolver are absent'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3138,3 +3148,27 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630003]
+  - id: dod-omn17427-core-dev-tag-pin
+    description: Pin identity, moved imports, typed shape checker and compatible-version seams; the new pin test path fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630002]
+  - id: dod-omn17427-core-dev-tag-deploy
+    description: Hosted-runner check of tag identity and moved imports without services, containers or credentials; runtime boot proof is separate.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630001, AC17427630002]
+  - id: dod-omn17427-core-contract-binding
+    description: The packaged gate resolves and matches allowed and refused core decisions; planted incompatible contracts are refused and the sweep consults its injected dependency.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630004]
