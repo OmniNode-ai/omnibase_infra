@@ -1,0 +1,44 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21611
+title: "The stability lane runs a pinned release independent of dev: its refresh refuses every ref that is not a release tag"
+summary: >-
+  refresh_stability_lane.sh now runs release tags only. Its tag set comes from the committed pin file (config/lab/stability-lane-pin.yaml under ONEX_WORKSPACE_CONFIG_ROOT, or --pin-file), one v<major>.<minor>.<patch> tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket, with --ref overriding the infra tag. Before it reads the lane, writes state, takes the lane lock, runs the attribution preflight, tags an image, checks a clone out, builds or restarts anything, each tag must be a release tag of its clone: a dev tag, a bare sha, a branch, a lab tag or a dev omnimarket ref is refused, exit 64, naming release-tag-only. The default ref is no longer origin/dev. Each sibling is staged at its own pinned tag through DEPLOY_SIBLING_REFS (stage_workspace.sh passes it to deploy_source_ref.py as --repo-ref), and the lane no longer follows omnimarket's newest dev-* tag. This PR covers AC2. The pin file and the stability broker ACL declaration live in the private config repository; AC1, AC3 and AC4 need the lane brought up on its host and broker logins issued, which this change does not do.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21611-release-only-refresh
+    statement: >-
+      A stability refresh runs a pinned release set and refuses any other ref before it changes anything.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: a stability refresh asked for a dev tag, a bare sha or a dev omnimarket ref is refused before it changes anything -- falsifier: uv run pytest tests/unit/scripts/ -k stability_release_only -q in omnibase_infra
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The refresh, run against real fixture clones with docker, curl, jq, git and the deploy command shimmed and recorded, refuses a dev tag, a bare sha, a branch, a lab tag, a dev omnimarket ref, a missing pin and a tag absent from its clone with exit 64 and no docker, deploy or mutating git call, and plans the pinned release set.
+    command: uv run --frozen pytest tests/unit/scripts/ -k stability_release_only -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21611-ac2-release-only-refusal
+    description: >-
+      The ticket's falsifier. Each refusal case runs the real refresh script against fixture clones under PATH shims and asserts exit 64, release-tag-only, the refused ref named, no docker, curl, jq or deploy call, no git checkout, fetch, reset, tag, worktree or clean, and no state directory. At the merge base the script defaults to origin/dev, has no guard and no --pin-file, so the refusal cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/ -k stability_release_only -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21611-ac2-deploy-probe
+    description: >-
+      Deploy probe. The refresh script GitHub serves at the checked-out commit carries the release-only guard's refusal line. The probe reads the file from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'err \"release-tag-only: ${repo} ref' | grep -qx 1"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

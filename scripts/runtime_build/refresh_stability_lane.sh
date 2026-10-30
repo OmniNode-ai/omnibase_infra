@@ -85,9 +85,23 @@
 #                           healthy, never reaching the health-gate/receipt
 #                           stage.
 #
+# Release tags only (OMN-21611):
+#   The stability lane runs a pinned release set and never a dev ref. The
+#   set is the committed pin file, config/lab/stability-lane-pin.yaml under
+#   ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
+#   tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket
+#   (lines `  <repo>: <tag>` under `pin:`); --ref overrides the omnibase_infra tag.
+#   Before anything is read from the lane, tagged, checked out, built or
+#   restarted, each tag must be a release tag of its clone under OMNI_HOME: a dev
+#   tag, a bare sha, a branch, a lab tag or a dev omnimarket ref is refused,
+#   exit 64, naming release-tag-only. There is no default ref (it was origin/dev).
+#   Each sibling is staged at its own tag (DEPLOY_SIBLING_REFS), and omnimarket
+#   no longer follows its newest dev-* tag on this lane; the deploy handler's
+#   sibling lock-pin check still refuses a set omnimarket's uv.lock disagrees with.
+#
 # Usage:
-#   refresh_stability_lane.sh [--ref <ref>] [--min-contracts <n>] [--execute]
-#       [--lock-timeout <seconds>]
+#   refresh_stability_lane.sh [--pin-file <path>] [--ref <omnibase_infra tag>]
+#       [--min-contracts <n>] [--execute] [--lock-timeout <seconds>]
 #
 # Exit codes:
 #   0  plan printed (dry-run) or refresh SUCCEEDED (health-gate PASS)
@@ -347,7 +361,8 @@ readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 require_contract_var STABILITY_TEST_RUNTIME_MAIN_PORT
 # OMN-21288: the main manifest includes the folded effects profile.
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
-REF="origin/dev"
+REF=""
+PIN_FILE="${ONEX_WORKSPACE_CONFIG_ROOT:+${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/stability-lane-pin.yaml}"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${STABILITY_TEST_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
 EFFECTS_MANIFEST_URL="" # OMN-21288: empty = no effects runtime; verify_stability_refresh.py reads "" as None and skips the effects manifest (pinned by test_empty_effects_manifest_url_skips_the_effects_manifest)
@@ -360,7 +375,7 @@ MODE="plan"
 LANE_LOCK_TIMEOUT_SECONDS="${LANE_LOCK_TIMEOUT_SECONDS:-900}"
 
 usage() {
-    sed -n '4,83p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '4,/^# Exit codes:$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -369,6 +384,7 @@ while [[ $# -gt 0 ]]; do
         --ref)
             [[ -n "${2:-}" ]] || { err "--ref requires a value"; exit 64; }
             REF="$2"; shift 2 ;;
+        --pin-file) PIN_FILE="${2:-}"; shift 2 ;;
         --min-contracts)
             [[ -n "${2:-}" ]] || { err "--min-contracts requires a value"; exit 64; }
             MIN_CONTRACTS="$2"; shift 2 ;;
@@ -444,15 +460,10 @@ else
     exit 64
 fi
 
-run_verify() {
-    # Run verify_stability_refresh.py with the given extra args, print JSON to stdout.
-    run_python "${VERIFY_SCRIPT}" "$@"
-}
-
 run_python() {
     # Run a sibling python script under whichever interpreter this host has.
-    # OMN-18061: extracted from run_verify() so the shared rollback decision
-    # reaches the SAME interpreter selection rather than growing a second one.
+    # OMN-18061: one interpreter selection for the health gate, the shared
+    # rollback decision and the attribution preflight; never a second one.
     local script="$1"; shift
     if [[ "${PYTHON_BIN}" == "uv-run" ]]; then
         uv run --project "${REPO_ROOT}" python "${script}" "$@"
@@ -485,6 +496,20 @@ git_clone() {
     git -c "safe.directory=${clone}" -C "${clone}" "$@"
 }
 
+# --- release-only guard (OMN-21611) -------------------------------------------
+# Before any live read, tag, checkout, build or restart. Each of the four tags
+# (the pin file's, --ref winning for omnibase_infra) must match
+# v<major>.<minor>.<patch> and be a tag of its clone: a dev tag, a bare sha, a
+# branch, a lab tag or a dev omnimarket ref is refused here, by name.
+[[ -z "${PIN_FILE}" || -f "${PIN_FILE}" ]] || { err "release-tag-only: pin file ${PIN_FILE} does not exist (OMN-21611)"; exit 64; }
+PIN_ENTRIES="$(sed -nE 's/^  (omnibase_infra|omnibase_core|omnibase_compat|omnimarket): *([^ #]+).*/\1=\2/p' "${PIN_FILE:-/dev/null}")"
+for repo in omnibase_infra omnibase_core omnibase_compat omnimarket; do
+    tag="$(printf '%s\n%s\n' "${PIN_ENTRIES}" "${REF:+omnibase_infra=${REF}}" | sed -n "s/^${repo}=//p" | tail -n 1)"
+    if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! git_clone "${OMNI_HOME}/${repo}" rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null; then err "release-tag-only: ${repo} ref '${tag:-<none>}' is not a v<major>.<minor>.<patch> release tag of ${OMNI_HOME}/${repo}; a dev tag, bare sha, branch or dev omnimarket ref is refused. Nothing was read from the lane, tagged, checked out, built or restarted (OMN-21611)."; exit 64; fi
+    # omnibase_infra comes first, so the sibling list starts empty, never inherited.
+    if [[ "${repo}" == "omnibase_infra" ]]; then REF="${tag}"; DEPLOY_SIBLING_REFS=""; else DEPLOY_SIBLING_REFS+="${DEPLOY_SIBLING_REFS:+ }${repo}=${tag}"; fi
+done
+
 # --- state / receipt paths ---------------------------------------------------
 STATE_DIR="${HOME}/.omnibase/state/stability_lane_refresh"
 HISTORY_DIR="${STATE_DIR}/history"
@@ -511,7 +536,7 @@ fi
 
 # --- plan / logging -----------------------------------------------------------
 log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
-log "ref             : ${REF}"
+log "ref             : ${REF} (siblings: ${DEPLOY_SIBLING_REFS})"
 log "min contracts   : ${MIN_CONTRACTS}"
 log "core services   : ${CORE_SERVICES[*]}"
 log "build scope     : ${REFRESH_BUILD_SERVICES[*]}"
@@ -548,13 +573,7 @@ if [[ "${MODE}" != "execute" ]]; then
     ATTRIBUTION_ARGS+=(--check-only)
 fi
 ATTRIBUTION_EXIT=0
-if [[ "${PYTHON_BIN}" == "uv-run" ]]; then
-    ATTRIBUTION_RECORD_JSON="$(uv run --project "${REPO_ROOT}" python "${ATTRIBUTION_PREFLIGHT}" \
-        "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
-else
-    ATTRIBUTION_RECORD_JSON="$("${PYTHON_BIN}" "${ATTRIBUTION_PREFLIGHT}" \
-        "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
-fi
+ATTRIBUTION_RECORD_JSON="$(run_python "${ATTRIBUTION_PREFLIGHT}" "${ATTRIBUTION_ARGS[@]}")" || ATTRIBUTION_EXIT=$?
 if [[ "${ATTRIBUTION_EXIT}" -ne 0 ]]; then
     err "lane-deploy attribution preflight REFUSED this refresh (exit ${ATTRIBUTION_EXIT})."
     err "  Nothing was tagged, checked out, built, or restarted."
@@ -567,7 +586,7 @@ fi
 if [[ "${MODE}" != "execute" ]]; then
     log "dry-run: no fetch/checkout/build/restart performed. Re-run with --execute."
     log "would run: OMNI_HOME=${OMNI_HOME} OMNIBASE_INFRA_COMPOSE_PROJECT=${COMPOSE_PROJECT} \\"
-    log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} \\"
+    log "  BUILD_SOURCE=workspace DEPLOY_REF=${REF} DEPLOY_SIBLING_REFS=\"${DEPLOY_SIBLING_REFS}\" \\"
     log "  RUNTIME_BUILD_SERVICES_OVERRIDE=\"${REFRESH_BUILD_SERVICES[*]}\" \\"
     log "  ${DEPLOY_RUNTIME} --execute --force --restart"
     exit 0
@@ -691,9 +710,10 @@ DEPLOY_EXIT=0
     export OMNIBASE_INFRA_COMPOSE_PROJECT="${COMPOSE_PROJECT}"
     export BUILD_SOURCE="workspace"
     export DEPLOY_REF="${REF}"
-    # OMN-19998: omnimarket has no ref named REF, so it falls back to its dev
-    # branch; this stages its newest dev-* tag instead (lab only, never prod).
-    export DEPLOY_FOLLOW_DEV_TAG_REPOS="omnimarket"
+    # OMN-21611: each sibling is staged at its own pinned release tag; none
+    # falls back to a branch and omnimarket no longer follows its newest dev-*
+    # tag (OMN-19998) on this lane.
+    export DEPLOY_SIBLING_REFS
     export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
     "${DEPLOY_RUNTIME}" --repository-root "${REPO_ROOT}" --execute --force --restart
 ) || DEPLOY_EXIT=$?
@@ -775,7 +795,7 @@ PRE_IMAGE_IDS_JSON="$(
 
 GATE1_JSON="${WORKDIR}/gate1.json"
 GATE_EXIT=0
-run_verify \
+run_python "${VERIFY_SCRIPT}" \
     --lane "${LANE}" \
     --expected-revision "${NEW_INFRA_SHA_SHORT}" \
     --pre-image-ids "${PRE_IMAGE_IDS_JSON}" \
@@ -1002,7 +1022,7 @@ else
     log "=== Re-verifying health after rollback ==="
     GATE2_JSON="${WORKDIR}/gate2.json"
     GATE2_EXIT=0
-    run_verify \
+    run_python "${VERIFY_SCRIPT}" \
         --lane "${LANE}" \
         --expected-revision "${OLD_INFRA_REVISION:-unknown}" \
         --pre-image-ids '{}' \
