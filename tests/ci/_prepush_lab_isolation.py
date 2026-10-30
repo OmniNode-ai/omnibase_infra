@@ -11,7 +11,7 @@ ever saw ``h200`` and never had a remote host to dispatch to.
 
 Fixing the scan removed that accidental containment. Observed live on
 2026-08-30, minutes after the fix: `pytest tests/ci/` shipped a real git bundle
-to ``omnibook``, took that host's exclusive slot, and started the full
+to ``gate-host-d``, took that host's exclusive slot, and started the full
 ``tests/unit/`` suite there -- ORIGIN on the remote wrapper named this very test
 process. That is the OMN-16425/OMN-16489 F-01 recursion in its distributed form,
 reached from a unit test instead of a push, and it burns a lab host for an hour

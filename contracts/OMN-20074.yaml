@@ -258,10 +258,10 @@ dod_evidence:
               legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
               retired = namespace['load_selection_oracle'](required)
               assert legacy['header']['corpus']['contracts_discovered'] == 154
-              assert retired['header']['corpus']['contracts_discovered'] == 158
+              assert retired['header']['corpus']['contracts_discovered'] == 159
               assert retired['header']['required_onex_nodes_packages'] == list(required)
               assert retired['header']['required_missing_packages'] == []
-              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 137}
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 138}
               for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
                   assert legacy[section] == retired[section], section
               assert len(retired['dispatchers']) == 128

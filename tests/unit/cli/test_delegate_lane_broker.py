@@ -48,7 +48,6 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bound_lane_client_transport,
 )
-from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
 
 pytestmark = pytest.mark.unit
 
@@ -142,12 +141,34 @@ class TestLaneDeclarationLookup:
         assert "--omnibase-path" in str(exc.value)
 
     def test_absent_declaration_is_refused_naming_the_path(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        owner = tmp_path / "owner"
+        owner.mkdir()
+        for neighbour in ("config", "neighbor", "workspace-config"):
+            planted = tmp_path / neighbour / LANE_DECLARATION_RELATIVE_PATH
+            planted.parent.mkdir(parents=True)
+            planted.write_text(_DECLARATION, encoding="utf-8")
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(owner))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
         with pytest.raises(DelegateLaneSelectionError) as exc:
-            resolve_lane_declaration_path(tmp_path)
-        expected = workspace_runtime_config_root(tmp_path)
-        assert str(expected / LANE_DECLARATION_RELATIVE_PATH) in str(exc.value)
+            resolve_lane_declaration_path(workspace)
+        assert str(owner.resolve() / LANE_DECLARATION_RELATIVE_PATH) in str(exc.value)
+
+    def test_an_undeclared_config_root_is_refused_naming_the_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+        for neighbour in ("config", "neighbor", "workspace-config"):
+            planted = tmp_path / neighbour / LANE_DECLARATION_RELATIVE_PATH
+            planted.parent.mkdir(parents=True)
+            planted.write_text(_DECLARATION, encoding="utf-8")
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        with pytest.raises(DelegateLaneSelectionError) as exc:
+            resolve_lane_declaration_path(workspace)
+        assert "ONEX_WORKSPACE_CONFIG_ROOT" in str(exc.value)
 
     def test_declared_lane_ids_are_listed(self, tmp_path: Path) -> None:
         declaration = resolve_lane_declaration_path(_workspace(tmp_path))
@@ -452,11 +473,12 @@ class TestShippedDeclarationPositiveControl:
                 "no $OMNI_HOME workspace on this host, so the shipped lane "
                 "declaration cannot be read -- UNKNOWN, not a pass"
             )
-        config_root = (
-            Path(_CONFIG_ROOT_AT_IMPORT)
-            if _CONFIG_ROOT_AT_IMPORT
-            else workspace_runtime_config_root(Path(_OMNI_HOME_AT_IMPORT))
-        )
+        if not _CONFIG_ROOT_AT_IMPORT:
+            pytest.skip(
+                "ONEX_WORKSPACE_CONFIG_ROOT is unset on this host, so the shipped "
+                "lane declaration cannot be located -- UNKNOWN, not a pass"
+            )
+        config_root = Path(_CONFIG_ROOT_AT_IMPORT)
         declaration = config_root / LANE_DECLARATION_RELATIVE_PATH
         if not declaration.is_file():
             pytest.skip(

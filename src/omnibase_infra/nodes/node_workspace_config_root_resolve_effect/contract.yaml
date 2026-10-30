@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_workspace_config_root_resolve_effect
+contract_name: node_workspace_config_root_resolve_effect
+node_name: node_workspace_config_root_resolve_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+description: Resolve the workspace config owner using the caller's environment and directory policy.
+runtime_profiles: [local-dev]
+input_model:
+  name: ModelWorkspaceConfigRootRequest
+  module: omnibase_infra.models.workspace.model_workspace_config_root_request
+  description: Workspace root, captured environment and developer config policy.
+output_model:
+  name: ModelWorkspaceConfigRootResolution
+  module: omnibase_infra.models.workspace.model_workspace_config_root_resolution
+  description: Resolved config root and the winning rule.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: workspace_config_root.resolve
+      handler:
+        name: HandlerWorkspaceConfigRootResolve
+        module: omnibase_infra.handlers.handler_workspace_config_root_resolve
+      description: Resolve the config owner by checking directories.
+      supported_operations: [workspace_config_root.resolve]
+      input_model:
+        name: ModelWorkspaceConfigRootRequest
+        module: omnibase_infra.models.workspace.model_workspace_config_root_request
+        description: Typed def-B config root resolution request.
+      output_fields: [config_root, source]
+io_operations:
+  - operation: workspace_config_root.resolve
+    description: Resolve the workspace config root.
+    input_fields: [workspace_root, environment, allow_developer_config]
+    output_fields: [config_root, source]
+capabilities:
+  - name: workspace_config_root.resolve
+    description: Resolve the config owner with caller policy and provenance.
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types: []
+metadata:
+  description: Directory policy shared by runtime and pre-push callers; only local-dev attaches this node.
+  author: OmniNode Team
+  license: MIT
+  tags: [effect, workspace, config]
+  related_tickets: [OMN-17232]

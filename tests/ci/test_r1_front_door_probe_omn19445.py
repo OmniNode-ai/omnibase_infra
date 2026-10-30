@@ -616,8 +616,8 @@ def test_workflow_checks_out_omnimarket_at_the_sibling_pin_as_a_workspace_root()
 def test_workflow_places_the_lane_table_under_the_workspace_config_root() -> None:
     """OMN-20935: the CLI reads <config root>/config/lab/ci_bus_lanes.yaml.
 
-    The workspace root is `.probe-workspace`; with no sibling operator repository
-    and no ONEX_WORKSPACE_CONFIG_ROOT its config root is
+    The workspace root is `.probe-workspace`; with no ONEX_WORKSPACE_CONFIG_ROOT
+    its config root is
     `.probe-workspace/.onex/workspace-config`, where the CI overlay lane table
     is placed. The omnimarket checkout no longer supplies it.
     """
