@@ -33,8 +33,11 @@
 #     when critical/major findings exist).
 #   - The DETERMINISTIC merge surface is "Hostile Review Thread Gate": it
 #     fails while a hostile-reviewer thread has no accepted disposition reply
-#     (`fixed-in <sha>` or `rejected: <reason>`, OMN-17427). No job exits
-#     nonzero on a model's opinion.
+#     (a verified `fixed-in <sha>`, or a `rejected: <reason>` the review bot
+#     accepted, OMN-17427). The review bot is a model that is none of the
+#     voters, run by hostile-review-thread-gate.yml when a rejection is
+#     posted; its verdict is a reply under the workflow token, which this
+#     gate reads. No job exits nonzero on a voter's opinion.
 #   - degraded — fewer than 2 models succeeded (infra) → the reviewer job
 #     FAILS with a named reason (OMN-17492 follow-up, 2026-09-25). It was
 #     informational, and 28 of the 32 PRs merged 2026-09-24T23:18Z..
@@ -609,7 +612,8 @@ jobs:
               note = '\n\n> **Action required**: findings were posted as review threads. ' +
                 'Reply on each thread with `fixed-in <sha>` (the commit of this PR that changed the cited lines) ' +
                 'or `rejected: <reason>`; the reply re-runs the `Hostile Review Thread Gate`, which checks it ' +
-                'and fails while any finding has no accepted reply (OMN-17427).';
+                'and fails while any finding has no accepted reply. A rejection counts only when the review bot ' +
+                '(a model that is none of the voters) accepts it (OMN-17427).';
             }
 
             const body = [
@@ -725,8 +729,9 @@ jobs:
   # post_hostile_review_threads.py publishes findings as resolvable review
   # threads; this job fails while a hostile-reviewer thread lacks an accepted
   # disposition (OMN-17427: a reply `fixed-in <sha>` whose commit touched the
-  # cited lines, or `rejected: <reason>`; a thread resolved without one
-  # blocks). It consults GitHub thread state, the replies and the PR's git
+  # cited lines, or `rejected: <reason>` the review bot accepted; a thread
+  # resolved without one blocks). This job only reads the bot's verdicts; the
+  # bot judges in hostile-review-thread-gate.yml, on the reply. It consults GitHub thread state, the replies and the PR's git
   # history -- never a model verdict. Runs even when the reviewer itself was
   # skipped (draft) or degraded: threads from earlier runs still deserve the
   # gate, and with no thread at all it passes, so a reviewer outage never

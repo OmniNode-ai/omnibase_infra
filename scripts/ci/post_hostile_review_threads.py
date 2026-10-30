@@ -341,8 +341,8 @@ def format_finding_body(finding: dict[str, Any]) -> str:
         "_Reply on this thread with a line `fixed-in <sha>` (the commit of "
         "this PR that changed these lines) or `rejected: <reason>`. The "
         "`Hostile Review Thread Gate` re-runs on the reply, checks it, and "
-        "blocks a merge to dev while any finding has no accepted reply "
-        "(OMN-17427)._"
+        "blocks a merge to dev while any finding has no accepted reply; a "
+        "rejection counts once the review bot accepts it (OMN-17427)._"
     )
 
 
@@ -434,7 +434,9 @@ def build_review(
         "The model is the FINDER, never the gate: merge is gated only by the",
         "deterministic `Hostile Review Thread Gate`, which blocks while a",
         "finding thread has no accepted reply. Answer each one with a line",
-        "`fixed-in <sha>` or `rejected: <reason>` (OMN-17427).",
+        "`fixed-in <sha>` or `rejected: <reason>`; the review bot, a model",
+        "that is none of these voters, accepts or refuses each rejection",
+        "(OMN-17427).",
     ]
     if truncated:
         body_parts += [

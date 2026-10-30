@@ -1,10 +1,18 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Judge requests, posting and verdict parsing ahead of OMN-17427.
+"""The thread gate's side of the review bot (OMN-17427).
 
-The judge modes fail closed when they cannot safely post a verdict. Dev's
-gate still clears a rejection with a reason regardless of any judge reply;
-requiring an accepted verdict lands with omnibase_infra#5237.
+The review bot judges every ``rejected:`` reply on a hostile-reviewer thread.
+omniintelligence's ``cli_review judge-rejections`` makes the judgement; this
+repository's thread gate (``check_hostile_review_threads.py``) owns the rest:
+``--pending`` writes each rejection awaiting a verdict with the cited lines at
+the head, ``--post-verdicts`` turns the verdicts into replies under the
+onexbot App token, and the gate reads them back. These tests drive both modes
+with a recording GitHub and the judge's JSON output, then feed what was posted
+back through the gate itself, so the claim under test is the one the gate
+enforces: an accepted rejection clears, a refused one keeps the gate red, a
+reply any other account posts never counts, and an unavailable judge fails
+closed with its reason while a PR with nothing to judge needs no judge.
 """
 
 from __future__ import annotations
@@ -130,7 +138,7 @@ def head_repo(tmp_path: Path) -> dict[str, Any]:
     (repo / "src" / "a.py").write_text("def f(x):\n    check(x)\n    return use(x)\n")
     git("add", "-A")
     git("commit", "-qm", "head")
-    return {"dir": repo, "head": git("rev-parse", "HEAD")}
+    return {"dir": repo, "head": git("rev-parse", "HEAD"), "git": git}
 
 
 @pytest.fixture
@@ -187,28 +195,14 @@ def _gate(threads: list[dict[str, Any]], env: dict[str, Path]) -> Any:
     def never(sha: str, cited: Any) -> tuple[bool, str]:
         raise AssertionError("no fix check")
 
-    return gate.classify_threads(threads, never)
-
-
-def _dev_cleared(thread: dict[str, Any], env: dict[str, Path]) -> None:
-    blocking, cleared = _gate([thread], env)
-    assert blocking == []
-    assert len(cleared) == 1
-    assert cleared[0].disposition == "rejected"
-    assert cleared[0].rejected_reason == gate.latest_disposition(thread).reason
-    assert cleared[0].reason == "rejected with a reason"
+    notes = gate.read_judge_notes(str(env["status"]))
+    return gate.classify_threads(threads, never, judge_notes=notes)
 
 
 def _verdict(thread: dict[str, Any]) -> Any:
     disposition = gate.latest_disposition(thread)
     assert disposition is not None
     return gate.judge_verdict_for(thread, disposition)
-
-
-def test_dev_gate_clears_a_rejection_without_a_verdict(env: dict[str, Path]) -> None:
-    thread = _thread(_rejection())
-    _dev_cleared(thread, env)
-    assert _verdict(thread) is None
 
 
 class TestPendingFile:
@@ -249,10 +243,8 @@ class TestPendingFile:
         assert _pending(env, head_repo, monkeypatch, [thread])["items"] == []
         assert (
             "is not an owner, member or collaborator"
-            in json.loads(env["status"].read_text())["notes"]["22"]
+            in _gate([thread], env)[0][0].reason
         )
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
 
     def test_a_fork_pr_judges_nothing_and_says_why(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -260,11 +252,7 @@ class TestPendingFile:
         monkeypatch.setenv("HOSTILE_REVIEW_IS_FORK", "true")
         thread = _thread(_rejection())
         assert _pending(env, head_repo, monkeypatch, [thread])["items"] == []
-        assert (
-            "fork pull request" in json.loads(env["status"].read_text())["unavailable"]
-        )
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
+        assert "fork pull request" in _gate([thread], env)[0][0].reason
 
     def test_a_fetch_failure_fails_closed(
         self, env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
@@ -357,7 +345,81 @@ class TestHeadBoundJudgeProtocol:
 
 
 class TestPostedVerdicts:
-    def test_an_accepted_verdict_is_posted_and_dev_still_clears_the_rejection(
+    def test_a_push_invalidates_acceptance_and_queues_a_new_judgement(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        thread["comments"]["nodes"].append(_as_read_back(github.posts[-1][2]["body"]))
+        assert _gate([thread], env)[0] == []
+
+        # Make the finding true without editing the rejection or its comment id.
+        (head_repo["dir"] / "src/a.py").write_text("def f(x):\n    return use(x)\n")
+        head_repo["git"]("add", "src/a.py")
+        head_repo["git"]("commit", "-qm", "remove input validation")
+        head_repo["head"] = head_repo["git"]("rev-parse", "HEAD")
+        monkeypatch.setenv("HEAD_SHA", head_repo["head"])
+        blocking, cleared = _gate([thread], env)
+        assert cleared == []
+        assert blocking[0].judge_verdict == "unjudged"
+        batch = _pending(env, head_repo, monkeypatch, [thread])
+        assert [item["key"] for item in batch["items"]] == ["22"]
+        assert "check(x)" not in batch["items"][0]["excerpt"]
+
+        # A new judgement at this head can clear it again.
+        _judged(env, _record())
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        thread["comments"]["nodes"].append(_as_read_back(github.posts[-1][2]["body"]))
+        assert _gate([thread], env)[0] == []
+
+    def test_a_legacy_verdict_without_a_head_cannot_clear_a_finding(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        body = (
+            f"<!-- {gate.JUDGE_MARKER} rejection=22 digest={gate.body_digest(REJ)} "
+            f"verdict=accepted judge=rejection-judge identity={OPUS} -->\n"
+            "> the caller validates this input"
+        )
+        thread["comments"]["nodes"].append(_as_read_back(body))
+        assert _gate([thread], env)[1] == []
+        assert len(gate.pending_rejections([thread])[0]) == 1
+
+    def test_a_push_during_judging_does_not_relabel_the_old_verdict(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        thread = _thread(_rejection())
+        _pending(env, head_repo, monkeypatch, [thread])
+        original_head = head_repo["head"]
+        monkeypatch.setenv("HEAD_SHA", "b" * 40)
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
+        body = github.posts[0][2]["body"]
+        assert gate.parse_judge_reply(body)["head"] == original_head
+        thread["comments"]["nodes"].append(_as_read_back(body))
+        assert _gate([thread], env)[1] == []
+        monkeypatch.delenv("HEAD_SHA")
+        assert _gate([thread], env)[1] == []
+
+    def test_a_pending_record_without_its_judged_head_posts_nothing(
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _pending(env, head_repo, monkeypatch, [_thread(_rejection())])
+        status = json.loads(env["status"].read_text())
+        del status["replies"]["22"]["head_sha"]
+        env["status"].write_text(json.dumps(status))
+        _judged(env, _record())
+        github = _GitHub()
+        assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 1
+        assert github.posts == []
+        assert "head SHA" in json.loads(env["status"].read_text())["notes"]["22"]
+
+    def test_an_accepted_rejection_clears_the_gate(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         thread = _thread(_rejection())
@@ -372,16 +434,16 @@ class TestPostedVerdicts:
             "comments/11/replies"
         )
         thread["comments"]["nodes"].append(_as_read_back(payload["body"]))
-        _dev_cleared(thread, env)
-        judged = _verdict(thread)
-        assert judged.verdict == "accepted"
-        assert judged.identity == OPUS
-        assert judged.sentence == "line 2 calls check(x) first."
+        blocking, cleared = _gate([thread], env)
+        assert blocking == []
+        assert cleared[0].judge_verdict == "accepted"
+        assert cleared[0].judge_identity == OPUS
+        assert cleared[0].judge_sentence == "line 2 calls check(x) first."
         status = json.loads(env["status"].read_text())
         assert status["judged"][0]["voter_model"] == "sonnet"
         assert status["judged"][0]["verdict"] == "accepted"
 
-    def test_a_refused_verdict_is_read_but_dev_still_clears_the_rejection(
+    def test_a_refused_rejection_keeps_the_gate_red_with_its_sentence(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         thread = _thread(_rejection())
@@ -392,10 +454,10 @@ class TestPostedVerdicts:
         body = github.posts[0][2]["body"]
         assert "> use(x) runs on the unchecked value." in body
         thread["comments"]["nodes"].append(_as_read_back(body))
-        _dev_cleared(thread, env)
-        judged = _verdict(thread)
-        assert judged.verdict == "refused"
-        assert judged.sentence == "use(x) runs on the unchecked value."
+        blocking, cleared = _gate([thread], env)
+        assert cleared == []
+        assert blocking[0].judge_verdict == "refused"
+        assert "use(x) runs on the unchecked value." in blocking[0].reason
         # A judged rejection is not judged again on the next reply.
         assert gate.pending_rejections([thread])[0] == []
 
@@ -411,11 +473,8 @@ class TestPostedVerdicts:
         thread["comments"]["nodes"].append(
             _as_read_back(github.posts[0][2]["body"], login="operator-account")
         )
-        _dev_cleared(thread, env)
-        assert (
-            gate.parse_judge_reply(github.posts[0][2]["body"])["verdict"] == "accepted"
-        )
-        assert _verdict(thread) is None
+        blocking, _ = _gate([thread], env)
+        assert blocking[0].judge_verdict == "unjudged"
         assert len(gate.pending_rejections([thread])[0]) == 1
 
     def test_an_edited_rejection_is_judged_again(
@@ -430,8 +489,7 @@ class TestPostedVerdicts:
             _as_read_back(github.posts[0][2]["body"]),
         )
         assert len(gate.pending_rejections([edited])[0]) == 1
-        _dev_cleared(edited, env)
-        assert _verdict(edited) is None
+        assert _gate([edited], env)[0][0].judge_verdict == "unjudged"
 
     def test_the_sentence_cannot_forge_a_marker(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -448,13 +506,13 @@ class TestPostedVerdicts:
         body = github.posts[0][2]["body"]
         assert body.count("<!--") == 1
         thread["comments"]["nodes"].append(_as_read_back(body))
-        assert gate.parse_judge_reply(body)["verdict"] == "refused"
-        assert _verdict(thread).verdict == "refused"
-        _dev_cleared(thread, env)
+        blocking, _ = _gate([thread], env)
+        assert blocking[0].judge_verdict == "refused"
+        assert blocking[0].disposition == "rejected"
 
 
 class TestFailClosed:
-    def test_no_judge_configured_fails_posting_but_dev_clears_the_rejection(
+    def test_no_judge_configured_keeps_the_finding_blocked_with_the_reason(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         thread = _thread(_rejection())
@@ -463,12 +521,7 @@ class TestFailClosed:
         github = _GitHub()
         assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 1
         assert github.posts == []
-        assert (
-            "no rejection judge is configured"
-            in json.loads(env["status"].read_text())["unavailable"]
-        )
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
+        assert "no rejection judge is configured" in _gate([thread], env)[0][0].reason
 
     def test_a_judge_step_that_wrote_nothing_is_named(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -476,11 +529,10 @@ class TestFailClosed:
         thread = _thread(_rejection())
         _pending(env, head_repo, monkeypatch, [thread])
         assert gate.run_post_verdicts(env["result"], base=BASE, api=_GitHub()) == 1
-        assert "wrote no result" in json.loads(env["status"].read_text())["unavailable"]
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
+        reason = _gate([thread], env)[0][0].reason
+        assert "wrote no result" in reason
 
-    def test_a_judge_note_is_recorded_but_dev_clears_the_rejection(
+    def test_a_judge_note_reaches_the_gate(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         thread = _thread(_rejection())
@@ -496,12 +548,7 @@ class TestFailClosed:
             )
         )
         assert gate.run_post_verdicts(env["result"], base=BASE, api=_GitHub()) == 1
-        assert (
-            "did not answer: timeout"
-            in json.loads(env["status"].read_text())["notes"]["22"]
-        )
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
+        assert "did not answer: timeout" in _gate([thread], env)[0][0].reason
 
     def test_a_malformed_verdict_posts_nothing(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -512,20 +559,14 @@ class TestFailClosed:
         assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 1
         assert github.posts == []
 
-    @pytest.mark.parametrize("has_pending", [False, True])
     def test_a_verdict_for_no_pending_rejection_posts_nothing(
-        self,
-        env: dict[str, Path],
-        head_repo: Any,
-        monkeypatch: pytest.MonkeyPatch,
-        has_pending: bool,
+        self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        threads = [_thread(_rejection())] if has_pending else []
-        _pending(env, head_repo, monkeypatch, threads)
+        _pending(env, head_repo, monkeypatch, [_thread(_rejection())])
         _judged(env, _record(), dict(_record(), key="999"))
         github = _GitHub()
         assert gate.run_post_verdicts(env["result"], base=BASE, api=github) == 0
-        assert len(github.posts) == int(has_pending)
+        assert len(github.posts) == 1
 
     def test_a_refused_reply_post_fails_closed(
         self, env: dict[str, Path], head_repo: Any, monkeypatch: pytest.MonkeyPatch
@@ -539,10 +580,8 @@ class TestFailClosed:
         )
         assert (
             "GitHub refused the verdict reply (403)"
-            in json.loads(env["status"].read_text())["notes"]["22"]
+            in _gate([thread], env)[0][0].reason
         )
-        _dev_cleared(thread, env)
-        assert _verdict(thread) is None
 
 
 class TestJudgeRequest:

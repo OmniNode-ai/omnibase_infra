@@ -80,23 +80,33 @@ gates:
     producer_kind: local
     workflow: hostile-reviewer.yml
     job_path: ["hostile-review-thread-gate"]
-    # neutral_ok, not never, for the deploy-gate reason above: a skip here
-    # does not weaken enforcement. This context is NOT a branch-protection
-    # context; it is enforced only through CI Summary's
-    # EXPECTED_EXTERNAL_CONTEXTS on PRs into dev (DEV_BASE_ONLY_CONTEXTS),
-    # where absent or still running is PENDING (FAILURE at the poller's
-    # deadline) and `skipped` is a FAILURE
-    # (EXTERNAL_GOOD_CONCLUSIONS is {"success"}). The job-level
-    # `if: !cancelled() && github.event_name == 'pull_request'` is the
-    # OMN-18799 fix (a cancelled run must not post a green that evaluated
-    # nothing) and the event guard is always true for this workflow's only
-    # trigger; `needs: [hostile-review]` makes the gate read the threads the
-    # reviewer just posted, and `!cancelled()` runs it whatever the reviewer's
-    # result, so a skipped, degraded or failed reviewer never holds a merge.
+    # mode: REQUIRED and skip_semantics: neutral_ok govern the Required-Check
+    # Skip-Vector Guard (omniclaude .github/actions/required-check-skip-guard/
+    # validate_no_required_check_skip_vectors.py): the guard analyzes only
+    # rows with mode: REQUIRED, and neutral_ok, with a rationale citing a
+    # ticket, suppresses only the guard's conditional-`if:` findings (vectors
+    # 2 and 3); it never suppresses the path-filter or missing-trigger
+    # findings, and it does not say a skip passes.
+    # On PRs into dev, CI Summary (scripts/ci/ci_summary_gate.py) asserts this
+    # context through EXPECTED_EXTERNAL_CONTEXTS (DEV_BASE_ONLY_CONTEXTS):
+    # absent or still running is PENDING (FAILURE at the poller's deadline)
+    # and skipped is FAILURE, because EXTERNAL_GOOD_CONCLUSIONS is
+    # {"success"}. This is not a branch-protection context.
+    # The job runs with `if: !cancelled() && github.event_name ==
+    # 'pull_request'` (the OMN-18799 fix: a cancelled run must not post a
+    # green that evaluated nothing) and `needs: [hostile-review]`, so it reads
+    # the threads the reviewer just posted and runs whatever the reviewer's
+    # result.
+    # Two workflows produce the same job name: hostile-reviewer.yml on each PR
+    # push, and hostile-review-thread-gate.yml re-running it on every thread
+    # reply. The workflow field names hostile-reviewer.yml, the first. Both run
+    # the same script read-only and neither judges: the review bot runs in
+    # hostile-review-judge.yml (workflow_run, default-branch code only), which
+    # produces no PR context.
     skip_semantics: neutral_ok
     # OMN-19854: judges the PR's CI and review threads, not a file, so it has no pre-commit twin.
     pre_commit: not-applicable
-    rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or rejected: <reason>. Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
+    rationale: "OMN-17427, operator RULING 2026-10-21T13:00:04Z: every hostile-reviewer finding thread needs a reply fixed-in <sha> (a commit of the PR that touched the cited lines) or a rejected: <reason> that the review bot accepted (hostile-review-judge.yml posts its verdict). Required on dev only, through CI Summary's EXPECTED_EXTERNAL_CONTEXTS, scoped to dev by DEV_BASE_ONLY_CONTEXTS (absent, running, skipped or red all hold the PR); not a direct branch-protection context. With no thread it passes, so a reviewer outage never holds a merge; hostile-review-thread-gate.yml re-runs the same job name on every thread reply. Measured 2026-10-21 through onex scm: 20/20 of the latest merged dev heads (#5145..#5219) carried it green."
   - name: "call-reject-skip-token / scan / reject-skip-gate-token"
     mode: REQUIRED
     producer_kind: cross_repo

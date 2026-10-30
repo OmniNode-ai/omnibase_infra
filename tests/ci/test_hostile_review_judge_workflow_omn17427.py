@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """OMN-17427: the base-branch judge shares the reviewer's model environment.
 
-When an on-reply run supplies a request, the workflow_run judge uses
+The read-only on-reply gate requests judgement; the workflow_run judge uses
 trusted code, the reviewer's overlay/install steps and the onexbot App token.
 """
 
@@ -115,7 +115,7 @@ def test_the_pending_count_runs_first_and_stdlib_only() -> None:
     assert names.index("Read the judge request as data") == 3
     assert names.index("Fetch the PR's commits as data") == 4
     assert names.index("Find rejections awaiting the review bot") == 5
-    assert "Find rejections awaiting the review bot" not in _gate_steps()
+    assert list(_gate_steps()).index("Find rejections awaiting the review bot") == 1
     pending = _steps()["Find rejections awaiting the review bot"]
     assert pending["id"] == "pending"
     assert pending["run"] == (
@@ -173,14 +173,15 @@ def test_the_verdicts_are_posted_whatever_the_judge_did_then_gated() -> None:
     )
 
 
-def test_dev_gate_runs_independently_and_judge_uploads_its_own_status() -> None:
+def test_the_gate_runs_whatever_the_judge_did_and_reads_its_status() -> None:
     gate = _gate_steps()[GATE]
-    assert "if" not in gate
+    assert gate["if"] == "${{ !cancelled() }}"
     assert gate["run"] == "python3 scripts/ci/check_hostile_review_threads.py"
-    assert "JUDGE_STATUS_PATH" not in gate["env"]
+    assert (
+        gate["env"]["JUDGE_STATUS_PATH"] == _steps()[POST]["env"]["JUDGE_STATUS_PATH"]
+    )
     uploaded = _gate_steps()["Upload the disposition record"]["with"]["path"]
-    assert "hostile-review-dispositions.jsonl" in uploaded
-    assert "hostile-review-judge-status.json" not in uploaded
+    assert "hostile-review-judge-status.json" in uploaded
     assert "hostile-review-judgements.json" not in uploaded
     judged = _steps()["Upload the judgements"]["with"]["path"]
     assert "hostile-review-judge-status.json" in judged
@@ -224,16 +225,13 @@ def test_no_new_secret_is_read() -> None:
 
 def test_the_gate_is_read_only_and_the_judge_has_only_read_permissions() -> None:
     assert _on_reply()["permissions"] == {"contents": "read", "pull-requests": "read"}
-    assert _gate_job().get("permissions", _on_reply()["permissions"]) == {
-        "contents": "read",
-        "pull-requests": "read",
-    }
+    assert _gate_job()["permissions"] == {"contents": "read", "pull-requests": "read"}
     assert _workflow("hostile-review-judge.yml")["permissions"] == {}
     assert _job()["permissions"] == {"actions": "read", "contents": "read"}
 
 
 def test_the_write_token_is_not_persisted_in_the_checkout() -> None:
-    checkout = _steps()["Checkout the base branch (trusted code only)"]
+    checkout = _gate_steps()["Checkout (gate script and PR history)"]
     assert checkout["with"]["persist-credentials"] is False
 
 
@@ -368,11 +366,11 @@ def _find_request_output(tmp_path: Path, pages: list[dict[str, Any]]) -> str:
 def test_the_recorded_on_reply_run_carries_a_request_the_judge_finds(
     tmp_path: Path, recorded_response: dict[str, object]
 ) -> None:
-    """#5237's on-reply run 40189445988 uploaded a judge request; dev has no judge.
+    """#5237's on-reply run 40189445988 uploaded a judge request.
 
     The step reads the artifact listing GitHub returned for that run and finds
-    the request. The same listing without that artifact (what dev's own on-reply
-    workflow uploads: the disposition record alone) makes the judge skip.
+    the request. The same listing without that artifact (an on-reply run that
+    uploaded the disposition record alone) makes the judge skip.
     """
     page = cast("dict[str, Any]", recorded_response["response"])
     names = [artifact["name"] for artifact in page["artifacts"]]

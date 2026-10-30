@@ -72,7 +72,7 @@ def test_the_on_reply_gate_holds_no_secret_or_write_scope() -> None:
     assert pr_head_violations(gate) == []
     assert gate["permissions"] == {"contents": "read", "pull-requests": "read"}
     job = gate["jobs"]["hostile-review-thread-gate"]
-    assert job.get("permissions", gate["permissions"]) == gate["permissions"]
+    assert job["permissions"] == gate["permissions"]
     assert job["timeout-minutes"] == 10
     assert _triggers(gate) == {"pull_request_review", "pull_request_review_comment"}
     text = yaml.safe_dump(gate)

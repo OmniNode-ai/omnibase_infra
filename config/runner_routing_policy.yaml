@@ -826,7 +826,7 @@ hosted_runner_allowlist:
   - path: .github/workflows/hook-push-rehearsal.yml
     reason: "OMN-20413: the hook push rehearsal runs the pre-push set on a GitHub-hosted runner, as the omnibase_core reusable it replaced did. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline, so the pin is a literal hosted label."
   - path: .github/workflows/hostile-review-thread-gate.yml
-    reason: "OMN-17427: re-runs the Hostile Review Thread Gate when a finding thread is answered; it reads GitHub thread state and the PR's git history and touches no lab service. This is a public repository and CI runners are for private repositories only (RULING 2026-10-16T07:07:09Z); omnibase_core's check-public-runner-placement refuses a variable-driven runs-on that is not in its shrink-only baseline, so the pin is a literal hosted label."
+    reason: "OMN-17427: the read-only on-reply gate runs PR-head code without secrets, reads GitHub thread state and PR history, and uploads a judge request. It touches no lab service. This public repository uses a literal hosted label per RULING 2026-10-16T07:07:09Z."
   - path: .github/workflows/hostile-review-judge.yml
     reason: "OMN-17427: the workflow_run judge executes base-branch code and calls the judge model over the CI overlay's public endpoint. It touches no lab service. This is a public repository, so it uses a literal hosted label per RULING 2026-10-16T07:07:09Z."
 # OMN-18031 — per-run routing thresholds for the hosted `route` job.
