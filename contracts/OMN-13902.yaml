@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false; it reports changed=true today -- falsifier: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only'
+  - id: req-omn13902-lock-identity
+    statement: A sibling lock refresh that moves uv.lock also regenerates docker/runners/runner-image.lock.json so the recorded runner image identity matches the recomputed identity.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: The recorded runner image identity equals the identity recomputed from the refreshed uv.lock -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py -q -k recorded_identity_matches_recomputed_identity'
 evidence_requirements:
   - kind: tests
     description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
@@ -49,3 +54,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-13902-ac4
+    description: The recorded runner image identity matches the identity recomputed from the refreshed uv.lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_image_identity.py -q -k recorded_identity_matches_recomputed_identity
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
