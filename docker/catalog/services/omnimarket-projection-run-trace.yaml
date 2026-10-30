@@ -1,0 +1,58 @@
+name: omnimarket-projection-run-trace
+description: Kafka-to-DB projection consumer for delegation run steps into run_trace (OMN-19972)
+# OMN-21279: built by omnimarket FROM the infra runtime image;
+# this repo's image carries no omnimarket.
+image: omnimarket-runtime:latest
+layer: runtime
+container_name: omnimarket-projection-run-trace
+required_env:
+  # The writer writes run_trace through the `tenant_projection` binding and
+  # reads tenant_registry_mirror and projection_watermarks through
+  # `omninode_runtime_service` (omninode_internal); the local bundle injects
+  # all three DSNs. OMNIDASH_ANALYTICS_DB_URL is not a declared binding here;
+  # it is the dashboard-facing settings fallback the sibling writers retain.
+  - OMNIDASH_ANALYTICS_DB_URL
+  - ONEX_TENANT_DB_URL
+  - OMNINODE_INTERNAL_DB_URL
+hardcoded_env:
+  KAFKA_BROKERS: redpanda:9092
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  PYTHONUNBUFFERED: "1"
+  PROJECTION_RUNNER_HEALTH_PORT: "8099"
+operational_defaults:
+  KAFKA_CONSUMER_GROUP: local.omnimarket-projections.run-trace-writer.consume.v1
+  ONEX_LOG_LEVEL: INFO
+ports: null
+healthcheck:
+  # Python is also the writer's interpreter; no image-specific HTTP client.
+  test:
+    - python
+    - -c
+    - "import urllib.request; urllib.request.urlopen('http://localhost:8099/ready', timeout=5).close()"
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 60
+volumes: []
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+  - service: redpanda
+    condition: service_healthy
+  - service: postgres
+    condition: service_healthy
+restart: unless-stopped
+resources:
+  cpus: "0.5"
+  memory: 256M
+  cpus_reservation: "0.1"
+  memory_reservation: 64M
+stop_grace_period: 30s
+command:
+  # This module's __main__ starts RunTraceProjectionWriter().run().
+  - python
+  - -m
+  - omnimarket.nodes.node_projection_run_trace.handlers.handler_run_trace_writer
+labels:
+  com.omninode.service: omnimarket-projection-run-trace
+  com.omninode.layer: runtime
