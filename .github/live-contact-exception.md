@@ -1,0 +1,1 @@
+Live-contact exception: the change moves the repo-evidence caller verifier-version input from 0.4.305 to 0.4.310 and adds no network call; the released omnimarket 0.4.305 and 0.4.310 classify_dependency_pin_only were run against the real omnibase_infra#5453 and #5458 diffs (0.4.305 refuses tool.uv.override-dependencies, 0.4.310 admits it).
