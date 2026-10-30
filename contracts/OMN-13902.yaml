@@ -11,6 +11,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false; it reports changed=true today -- falsifier: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only'
+      - id: AC4
+        statement: 'AC4: The runner image identity lock matches the refreshed uv.lock -- falsifier: python3 scripts/ci/runner_image_identity.py --mode verify'
 evidence_requirements:
   - kind: tests
     description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
@@ -49,3 +51,15 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-13902-ac4
+    description: The regenerated runner image identity lock verifies against the refreshed uv.lock, and uv.lock is consistent with pyproject.toml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: uv lock --check
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
