@@ -178,7 +178,7 @@ class TestCheckoutFollowsTheNewestDevTag:
         _origin_and_clone(tmp_path)
 
         with pytest.raises(
-            mod.DeploySourceRefError, match="origin carries no refs/tags/dev-\\* tag"
+            mod.DeploySourceRefError, match="origin has no refs/tags/dev-\\* tag"
         ) as refused:
             mod.clean_checkout(
                 tmp_path / "omnimarket",

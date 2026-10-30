@@ -101,8 +101,9 @@ def _make_omni_home(tmp_path: Path, *, dirty_repo: str | None = None) -> Path:
     omni_home = tmp_path / "omni_home"
     for repo in SIBLING_REPOS:
         _init_repo(omni_home / repo, _DIST_NAME[repo], dirty=(repo == dirty_repo))
-    # omnibase_infra (the building repo) + spi must exist for the preflight.
-    for repo in ("omnibase_infra", "omnibase_spi"):
+    # omnibase_infra (the building repo) must exist for the preflight; spi is
+    # vendored now (OMN-17427), so the loop above made it.
+    for repo in ("omnibase_infra",):
         _init_repo(omni_home / repo, _DIST_NAME[repo])
     _write_consumer_lock(omni_home)
     return omni_home
