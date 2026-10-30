@@ -1213,6 +1213,7 @@ def test_local_kafka_clients_carry_the_four_sasl_variables_and_wait_sasl(
             "omnimarket-projection-delegation",
             "omnimarket-projection-tenant-credentials",
             "omnimarket-projection-llm-cost",
+            "omnimarket-projection-run-trace",
         }
         assert len(clients) >= 7
     assert set(clients) == expected
@@ -1685,6 +1686,7 @@ def test_local_market_adds_the_projection_api_market_writers_and_bifrost_render(
         "omnimarket-projection-delegation",
         "omnimarket-projection-tenant-credentials",
         "omnimarket-projection-llm-cost",
+        "omnimarket-projection-run-trace",
     }
     assert set(market) == set(local) | writers | {"projection-api"}
     for name in (*sorted(writers), "projection-api"):
@@ -1705,7 +1707,7 @@ def test_local_market_adds_the_projection_api_market_writers_and_bifrost_render(
 
 @pytest.mark.parametrize("project", [DEFAULT_PROJECT, "isolated-project"])
 @pytest.mark.parametrize(
-    ("bundle", "expected_count"), [("omnimarket-projections", 8), ("local-market", 4)]
+    ("bundle", "expected_count"), [("omnimarket-projections", 8), ("local-market", 5)]
 )
 def test_every_market_module_uses_the_project_scoped_market_image_without_build(
     project: str,
