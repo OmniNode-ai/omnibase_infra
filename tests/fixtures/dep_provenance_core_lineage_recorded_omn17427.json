@@ -6,15 +6,16 @@
     "captured_utc": "2026-10-30T04:26:08.475967+00:00",
     "stdout_rewrite": "For each core stdout line, remove the absolute temporary working-directory prefix plus its trailing slash only when that prefix starts the line; preserve every other byte. The diagnostic target is then pyproject.toml.",
     "stderr_capture": "Install the published package before recording; uv installation/download progress is excluded. Both recorded validator commands emitted no stderr.",
-    "working_directory": "Each command runs beside the recorded minimal pyproject.toml; no working-directory path is retained."
+    "working_directory": "Each command runs beside the recorded minimal pyproject.toml; no working-directory path is retained.",
+    "real_case_recaptured_utc": "2026-10-30T16:35:14.855803+00:00"
   },
   "rules": "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved",
   "cases": [
     {
       "label": "real",
-      "tag": "dev-20261029143607-342000ec5702",
-      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-342000ec5702\" }\n",
-      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-342000ec5702\" }\n",
+      "tag": "dev-20261030152335-66d35d2283c3",
+      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261030152335-66d35d2283c3\" }\n",
+      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261030152335-66d35d2283c3\" }\n",
       "core": {
         "command": [
           "uv",
@@ -41,11 +42,11 @@
           "ls-remote",
           "--tags",
           "https://github.com/OmniNode-ai/omnibase_core.git",
-          "refs/tags/dev-20261029143607-342000ec5702",
-          "refs/tags/dev-20261029143607-342000ec5702^{}"
+          "refs/tags/dev-20261030152335-66d35d2283c3",
+          "refs/tags/dev-20261030152335-66d35d2283c3^{}"
         ],
         "exit_code": 0,
-        "stdout": "342000ec57020e5258dde41d571420e7c09ed05b\trefs/tags/dev-20261029143607-342000ec5702\n",
+        "stdout": "66d35d2283c3011c436799eacb9bce1a434ee6c9\trefs/tags/dev-20261030152335-66d35d2283c3\n",
         "stderr": ""
       }
     },
