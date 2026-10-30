@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
@@ -19,6 +21,8 @@ from tests.ci._prepush_private_table import (
     SYNTHETIC_TABLE,
     write_hook_repo,
 )
+
+pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LIBRARY = REPO_ROOT / "scripts/hooks/prepush_dispatch.sh"

@@ -278,6 +278,15 @@ def test_the_pool_resolves_under_the_workspace_config_root(
     expected.parent.mkdir(parents=True)
     shutil.copyfile(POOL_FIXTURE, expected)
     assert pool.load_pool_config() == CFG
+    # with no OMNI_HOME the working directory's own developer config is not adopted
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / ".onex" / "workspace-config").mkdir(parents=True)
+    monkeypatch.delenv("OMNI_HOME")
+    monkeypatch.chdir(elsewhere)
+    with pytest.raises(
+        ValueError, match=r"not configured: set ONEX_WORKSPACE_CONFIG_ROOT"
+    ):
+        pool.load_pool_config()
     # with neither, nothing beside the workspace is adopted and the refusal names the variable
     bare = tmp_path / "bare"
     bare.mkdir()

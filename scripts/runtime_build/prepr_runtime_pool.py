@@ -217,17 +217,17 @@ def _slot_policy() -> ModuleType:
 def default_pool_config() -> Path:
     """The pool table under the workspace config root, or a loud refusal.
 
-    The root is the runtime's workspace config owner for ``$OMNI_HOME``
-    (``HandlerWorkspaceConfigRootResolve``: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when
-    set, else the developer workspace config).
-    There is no in-repo fallback: a fork with no overlay is told how to supply
-    one instead of being pointed at our lab.
+    The root is ``$ONEX_WORKSPACE_CONFIG_ROOT``, else the developer config of
+    ``$OMNI_HOME`` (never a directory beside the working one when it is unset).
+    There is no in-repo fallback: a fork with no overlay is told how to supply one.
     """
     import omnibase_infra.handlers.handler_workspace_config_root_resolve as resolver
     from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 
     registry = os.environ.get("OMNI_HOME", "").strip()
-    request = ModelWorkspaceConfigRootRequest(workspace_root=Path(registry or "."))
+    request = ModelWorkspaceConfigRootRequest(
+        workspace_root=Path(registry or "."), allow_developer_config=bool(registry)
+    )
     resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
     if resolution.config_root is None:
         raise ValueError(

@@ -24,6 +24,14 @@ from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
 pytestmark = pytest.mark.integration
 
+_OWNER_CONFIG = """
+description: "the selected owner's runtime config"
+event_bus:
+  type: "kafka"
+  profile: "local"
+  lane: "dev"
+"""
+
 _NEIGHBOUR_CONFIG = """
 description: "a neighbouring directory's runtime config (must never be read)"
 event_bus:
@@ -89,6 +97,7 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
     else:
         monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("OMNI_HOME", str(workspace))
     handler = cast("_Resolver", handler_class())
     request = request_class.model_validate(
@@ -101,18 +110,26 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
     assert result.source == winner
     assert result.config_root == (None if expected is None else expected.resolve())
 
-    # Real kernel refusal identifies exactly the selected owner's runtime file,
-    # or says that no config root is declared.
-    with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:
-        resolve_embedded_runtime_config(workspace_root=workspace)
+    # The real kernel answers from exactly the selected owner, never a decoy: it
+    # refuses naming the selected owner's file while that file is absent, loads it
+    # once written, and says that no config root is declared when none is.
     if expected is None:
+        with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:
+            resolve_embedded_runtime_config(workspace_root=workspace)
         assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in str(exc.value)
         assert "a config root (none is declared)" in str(exc.value)
     else:
         expected_file = expected.resolve() / "config/onex/runtime/runtime_config.yaml"
+        with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:
+            resolve_embedded_runtime_config(workspace_root=workspace)
         assert f"declares no working-tree runtime config at {expected_file}." in str(
             exc.value
         )
+        expected_file.parent.mkdir(parents=True, exist_ok=True)
+        expected_file.write_text(_OWNER_CONFIG, encoding="utf-8")
+        loaded, provenance = resolve_embedded_runtime_config(workspace_root=workspace)
+        assert loaded.description == "the selected owner's runtime config"
+        assert provenance == f"workspace tier-1 runtime config at {expected_file}"
     # The pre-push guard honours the explicit variable only, never the
     # developer directory, and agrees with the handler under that policy.
     guard_root = _workspace_config_root(env)
