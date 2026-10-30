@@ -56,7 +56,11 @@ KIND_TAG_MISMATCH = "tag-mismatch"
 KIND_ABSENT = "absent"
 
 _SHA = re.compile(r"^[0-9a-f]{7,40}$")
-_RELEASE = re.compile(r"^v?[0-9]+\.[0-9]+(\.[0-9]+)?([.+-][0-9A-Za-z.]+)*$")
+# Dots belong to one suffix segment. Only '+' and '-' separate later segments,
+# so a run of dots cannot be partitioned between nested repetitions.
+_RELEASE = re.compile(
+    r"^v?[0-9]+\.[0-9]+(?:[.+-][0-9A-Za-z.]+(?:[+-][0-9A-Za-z.]+)*)?$"
+)
 
 
 @dataclass(frozen=True)

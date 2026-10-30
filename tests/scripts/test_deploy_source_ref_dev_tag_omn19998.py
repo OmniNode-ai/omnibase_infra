@@ -238,14 +238,28 @@ class TestCheckoutFollowsTheNewestDevTag:
 class TestEveryVendoredSiblingFollowsItsDevTag:
     """The lab paths follow the tags themselves; nobody has to remember a list."""
 
-    def test_stage_workspace_follows_every_vendored_sibling(self) -> None:
-        text = (REPO_ROOT / "scripts/runtime_build/stage_workspace.sh").read_text()
-        assert (
-            'for repo in "${SIBLING_REPOS[@]}"; do\n            checkout_args+=(--follow-dev-tag'
-            in text
+    @pytest.mark.parametrize(
+        "repo", ["omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket"]
+    )
+    def test_checkout_follows_each_vendored_sibling(
+        self, tmp_path: Path, repo: str
+    ) -> None:
+        # The full stage_workspace.sh path, including its automatic follow set,
+        # is exercised in integration/runtime/test_first_party_tag_sources_omn17427.py.
+        origin, (_first, tagged, branch) = _origin_and_clone(tmp_path)
+        if repo != "omnimarket":
+            (tmp_path / "omnimarket").rename(tmp_path / repo)
+        tag = _tag_name("20261016090000", tagged)
+        _git(origin, "tag", tag, tagged)
+        result = mod.clean_checkout(
+            tmp_path / repo,
+            "origin/dev",
+            follow_dev_tag=True,
+            worktree_root=tmp_path / "trees",
         )
-        assert "--follow-dev-tag" in text
-        assert "DEPLOY_FOLLOW_DEV_TAG_REPOS" not in text
+        assert result.head_sha == tagged != branch
+        assert result.ref == tag
+        assert _git(Path(result.path), "rev-parse", "HEAD") == tagged
 
     def test_the_stability_refresh_names_no_follow_list(self) -> None:
         text = (

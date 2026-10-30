@@ -3300,3 +3300,19 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py tests/scripts/test_stage_workspace_vcs_provenance.py tests/scripts/test_sibling_clone_manifest_parity.py -n 0 -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427640001, AC17427640002]
+  - id: dod-omn17427-first-party-tag-runtime-readback
+    description: Runs staging against disposable Git origins, installs real local wheels without an index, and reads tag identity and content parity from the resulting provenance. Each missing sibling tag, a mismatched tag and stale installed content are refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_first_party_tag_sources_omn17427.py tests/scripts/test_first_party_sources_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640001, AC17427640002]
+  - id: dod-omn17427-first-party-tag-hosted-deploy
+    description: Hosted-runner deploy check exercises the staging, wheel install, provenance and runtime audit pipeline with disposable local repositories. Refuses missing or mismatched tags, stale installed bytes and an adversarial release revision. Requires no Docker daemon, broker, credentials, package index or deployed lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_first_party_tag_sources_omn17427.py tests/scripts/test_first_party_sources_omn17427.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640001, AC17427640002]

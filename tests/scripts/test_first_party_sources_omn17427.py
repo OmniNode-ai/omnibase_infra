@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -174,6 +175,40 @@ def test_an_install_from_a_git_tag_passes_and_records_the_tag(tmp_path: Path) ->
     assert core.ok
     assert core.tag == TAGS["omnibase_core"]
     assert core.commit == COMMITS["omnibase_core"]
+
+
+@pytest.mark.parametrize(
+    ("revision", "kind"),
+    [
+        ("v1.2.3", "release"),
+        ("1.2", "release"),
+        ("1.2.3-rc.1+build.2", "release"),
+        ("0.0+..", "release"),
+        ("1.2+foo-bar+baz", "release"),
+        ("1.2+", "branch"),
+        ("1.2++foo", "branch"),
+        ("1.2-rc/next", "branch"),
+    ],
+)
+def test_release_revision_classification(revision: str, kind: str) -> None:
+    assert fps._classify_revision(revision, "a" * 40, CONTRACT)[0] == kind
+
+
+def test_adversarial_release_revision_finishes_in_a_bounded_subprocess() -> None:
+    program = (
+        f"import runpy; m = runpy.run_path({str(CHECKER)!r}); "
+        "contract = m['load_contract'](); "
+        "kind, _ = m['_classify_revision']('0.0+' + '..' * 10000 + '!', '', contract); "
+        "assert kind == 'branch', kind"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 # Each case plants one violation into an otherwise clean environment and names
@@ -524,11 +559,12 @@ def test_contract_packages_are_the_sibling_clone_manifest() -> None:
 
 
 def test_every_vendored_sibling_is_staged_at_its_dev_merge_tag() -> None:
-    stage = (RUNTIME_BUILD / "stage_workspace.sh").read_text(encoding="utf-8")
-    assert 'for repo in "${SIBLING_REPOS[@]}"; do' in stage
-    assert 'checkout_args+=(--follow-dev-tag "${repo}")' in stage
-    assert "m.stamp(" in stage
-    assert 'SIBLING_REPOS=("${SIBLING_VENDORED_REPOS[@]}")' in stage
+    # Behavioral staging and refusal coverage lives in the integration suite.
+    # Keep this assertion about the declared package set independent of shell
+    # spelling, indentation, and line continuations.
+    assert set(_manifest_array("SIBLING_VENDORED_REPOS")) == {
+        package.repo for package in CONTRACT.packages if package.install == "vendored"
+    }
 
 
 def test_the_tag_pattern_is_the_one_the_checkout_and_the_workflows_use() -> None:
@@ -550,10 +586,25 @@ def test_the_image_installs_every_workspace_package_from_the_staged_tree() -> No
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile.runtime").read_text(
         encoding="utf-8"
     )
+    # Parse logical instructions and shell tokens, not exact whitespace or the
+    # spelling of Python's closing brackets. Actual wheel installation, content
+    # parity, and audit readback are exercised by the integration test.
+    logical = re.sub(r"\\\s*\n", " ", dockerfile)
+    instructions = [
+        line[4:] for line in logical.splitlines() if line.startswith("RUN ")
+    ]
+    install = next(
+        line for line in instructions if "--reinstall-package omnibase-core" in line
+    )
+    install_tokens = shlex.split(install)
     for repo, dist in provenance.WORKSPACE_PACKAGES.items():
-        assert f'"{dist} @ file:///workspace/sibling-repos/{repo}"' in dockerfile, repo
-    assert "for repo in omnibase_core omnibase_spi omnibase_compat; do" in dockerfile
-    # the audit that fails the build, and the packages it requires
-    audit = dockerfile.split("import run_audit;", 1)[1].split("fi\n", 1)[0]
-    required = audit.split("]))'", 1)[1].replace("\\", " ").replace(";", " ").split()
+        assert f"{dist} @ file:///workspace/sibling-repos/{repo}" in install_tokens, (
+            repo
+        )
+    audit = next(line for line in instructions if "import run_audit;" in line)
+    lexer = shlex.shlex(audit, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    start = tokens.index("-c") + 2
+    required = tokens[start : tokens.index(";", start)]
     assert required == [*provenance.WORKSPACE_PACKAGES.values(), "omnibase-infra"]
