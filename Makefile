@@ -204,8 +204,8 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 # directory so two runs cannot both recover it. The password is generated here,
 # reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
 # an argument), reaches lane-login only on its stdin, and is never printed. The
-# state-root search reads it from its own environment: exit 0 clean, 10 found,
-# anything else fails closed. `onex node --output receipt` prints one JSON whose
+# state-root search reads it from its own environment and fails on any directory
+# or file it cannot read: exit 0 clean, 10 found, anything else fails closed. `onex node --output receipt` prints one JSON whose
 # .result.handler_result is the orchestrator's result.
 mint-local: _check-docker ## Laptop profile: mint this machine's login on the local broker and prove it with one delegation (OMN-20823)
 	@lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.lock"; guard="$$lock.recover"; \
@@ -236,7 +236,7 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	    echo "mint-local: the local broker is not secured; run make up-local first" >&2; exit 1; }; \
 	  user=$$(id -un) && host=$$(hostname -s) || exit 1; \
 	  tenant=$$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)" | tail -n 1); \
-	  scan='import os, pathlib, sys; s = os.environb.get(b"ONEX_MINT_PASSWORD", b""); r = pathlib.Path(sys.argv[1]); sys.exit(2) if not (s and r.is_dir()) else sys.exit(10 if any(s in p.read_bytes() for p in r.rglob("*") if p.is_file()) else 0)'; \
+	  scan='import os, sys; s = os.environb.get(b"ONEX_MINT_PASSWORD", b""); r = sys.argv[1]; sys.exit(2) if not (s and os.path.isdir(r)) else sys.exit(10 if any(s in open(os.path.join(d, f), "rb").read() for d, _, fs in os.walk(r, onerror=lambda x: (_ for _ in ()).throw(x)) for f in fs) else 0)'; \
 	  run_node() { \
 	    jq -n --arg mode "$$1" --rawfile decl "$(MINT_DECLARATION)" --arg login "$$user" \
 	      --arg device "$$host" --arg url "$(LOCAL_ADMIN_URL)" --arg pwenv "$$2" \
@@ -248,7 +248,7 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	      onex node node_developer_principal_mint_orchestrator --input "$$in_dir/input.json" \
 	      --state-root "$$in_dir/state" --output receipt > "$$work/receipt.json"; \
 	    if [ -n "$$2" ]; then \
-	      docker exec -u omniinfra -e ONEX_MINT_PASSWORD "$$container" python3 -c "$$scan" "$$in_dir/state"; \
+	      docker exec -u omniinfra -e ONEX_MINT_PASSWORD "$$container" python3 -c "$$scan" "$$in_dir/state" 2>/dev/null; \
 	      case $$? in \
 	        0) ;; \
 	        10) echo "mint-local: the password was found under the onex node state root" >&2; return 1 ;; \

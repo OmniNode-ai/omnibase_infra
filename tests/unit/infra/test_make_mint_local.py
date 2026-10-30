@@ -147,6 +147,11 @@ if cmd[:2] == ["onex", "node"] and cmd[2] == "node_developer_principal_mint_orch
             with open(root / "mutations", "a") as m:
                 m.write(f"set_password {principal} caller={os.getppid()}\n")
             result.update(action="rotate" if exists else "create", verified=True, missing_acls=[])
+            if os.environ.get("STUB_UNREADABLE_LEAK") == "1":
+                locked = state_root / "locked"
+                locked.mkdir()
+                (locked / "leak.txt").write_text(secret)
+                locked.chmod(0)
             if os.environ.get("STUB_LEAK_TO_STATE") == "1":
                 (state_root / "leak.txt").write_text(secret)
     (state_root / "result.json").write_text(json.dumps(result))
@@ -564,6 +569,21 @@ def test_no_secret_a_state_root_that_cannot_be_searched_fails_closed(
     assert result.returncode != 0
     assert "could not be searched for the password" in result.stderr
     assert stack.stored() == {}
+
+
+def test_no_secret_an_unreadable_directory_in_the_state_root_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """A leak the search cannot read is not a clean search."""
+    stack = _Stack(tmp_path)
+    try:
+        result = stack.run(STUB_UNREADABLE_LEAK="1")
+        assert result.returncode != 0
+        assert "could not be searched for the password" in result.stderr
+        assert stack.stored() == {}
+    finally:
+        for locked in (stack.root / "container").rglob("locked"):
+            locked.chmod(0o700)
 
 
 # --- AC7: the probe's tenant -----------------------------------------------------------
