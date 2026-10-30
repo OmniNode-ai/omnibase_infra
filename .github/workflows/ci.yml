@@ -1784,6 +1784,15 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
+      - name: Verify dev-merge tag lineage (OMN-17427)
+        env:
+          # Release pins remain until the later first-party iteration pin PR.
+          CORE_LINEAGE_RULES: "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved"
+        run: |
+          uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc" \
+            python -m omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage \
+            pyproject.toml --rules "$CORE_LINEAGE_RULES"
+
       - name: A git-pinned override must build the released tree of its declared version
         env:
           # Read-only, public repos: the commits/trees endpoints work
