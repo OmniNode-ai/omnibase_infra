@@ -384,7 +384,7 @@ while [[ $# -gt 0 ]]; do
         --ref)
             [[ -n "${2:-}" ]] || { err "--ref requires a value"; exit 64; }
             REF="$2"; shift 2 ;;
-        --pin-file) PIN_FILE="${2:-}"; shift 2 ;;
+        --pin-file) [[ -n "${2:-}" ]] || { err "--pin-file requires a value"; exit 64; }; PIN_FILE="$2"; shift 2 ;;
         --min-contracts)
             [[ -n "${2:-}" ]] || { err "--min-contracts requires a value"; exit 64; }
             MIN_CONTRACTS="$2"; shift 2 ;;

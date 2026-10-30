@@ -140,6 +140,7 @@ def _run_refresh(
     config_root: Path | None,
     shims: Path,
     *args: str,
+    attributed: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     env = _env()
     for key in (
@@ -161,6 +162,13 @@ def _run_refresh(
     )
     if config_root is not None:
         env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(config_root)
+    for key in ("ONEX_DEPLOY_REASON", "ONEX_DEPLOY_GRANT_ACK"):
+        env.pop(key, None)
+    if attributed:
+        # The dry run's attribution preflight needs a reason, and the fixture has no
+        # grant registry to read, so the unreadable state is acknowledged on the record.
+        env["ONEX_DEPLOY_REASON"] = "OMN-21611 release-only refresh unit test"
+        env["ONEX_DEPLOY_GRANT_ACK"] = "unreadable-grant-state"
     return subprocess.run(
         ["bash", str(REFRESH), *args],
         env=env,
@@ -171,6 +179,14 @@ def _run_refresh(
     )
 
 
+def _git_subcommand(call: str) -> str:
+    """The git subcommand of a recorded `git ...` call, skipping -c and -C options."""
+    args = call.split()[1:]
+    while args and args[0] in ("-c", "-C"):
+        args = args[2:]
+    return args[0] if args else ""
+
+
 def _assert_refused_before_any_change(
     result: subprocess.CompletedProcess[str], tmp_path: Path, named: str
 ) -> None:
@@ -179,8 +195,8 @@ def _assert_refused_before_any_change(
     assert named in result.stderr
     calls = [c for c in (tmp_path / "calls.log").read_text().splitlines() if c]
     assert not [c for c in calls if c.startswith(("docker", "curl", "jq", "onex-"))]
-    for verb in ("checkout", "fetch", "reset", "tag", "worktree", "clean"):
-        assert not [c for c in calls if f" {verb}" in c], calls
+    git_verbs = {_git_subcommand(c) for c in calls if c.startswith("git ")}
+    assert git_verbs <= {"rev-parse"}, calls
     # No state directory, receipt or lock was written.
     assert not (tmp_path / "home" / ".omnibase").exists()
 
@@ -203,7 +219,14 @@ def test_stability_release_only_refuses_a_bare_sha(
 
 
 @pytest.mark.parametrize(
-    "ref", ["origin/dev", "dev", "lab/stability/20260727T002130Z-5bb0c25d9b71"]
+    "ref",
+    [
+        "origin/dev",
+        "dev",
+        "lab/stability/20260727T002130Z-5bb0c25d9b71",
+        "v0.38.74-rc1",
+        "0.38.74",
+    ],
 )
 def test_stability_release_only_refuses_a_branch_or_lab_tag(
     tmp_path: Path, clones: Path, config_root: Path, shims: Path, ref: str
@@ -262,9 +285,14 @@ def test_stability_release_only_refuses_a_tag_missing_from_its_clone(
 def test_stability_release_only_plans_the_pinned_release_set(
     tmp_path: Path, clones: Path, config_root: Path, shims: Path
 ) -> None:
-    """The pinned set passes the guard; the plan names the infra tag and each sibling tag."""
-    result = _run_refresh(tmp_path, clones, config_root, shims)
+    """The pinned set passes the guard; the dry run exits 0 and hands the deploy each tag."""
+    result = _run_refresh(tmp_path, clones, config_root, shims, attributed=True)
+    assert result.returncode == 0, result.stderr
     assert "release-tag-only" not in result.stderr
+    assert (
+        'DEPLOY_REF=v0.38.74 DEPLOY_SIBLING_REFS="omnibase_core=v0.47.46 '
+        'omnibase_compat=v0.5.7 omnimarket=v0.4.316"'
+    ) in result.stderr
     assert (
         "ref             : v0.38.74 (siblings: omnibase_core=v0.47.46 "
         "omnibase_compat=v0.5.7 omnimarket=v0.4.316)"
@@ -275,7 +303,10 @@ def test_stability_release_only_ref_overrides_the_pinned_infra_tag(
     tmp_path: Path, clones: Path, config_root: Path, shims: Path
 ) -> None:
     _git(clones / "omnibase_infra", "tag", "v0.38.76")
-    result = _run_refresh(tmp_path, clones, config_root, shims, "--ref", "v0.38.76")
+    result = _run_refresh(
+        tmp_path, clones, config_root, shims, "--ref", "v0.38.76", attributed=True
+    )
+    assert result.returncode == 0, result.stderr
     assert "release-tag-only" not in result.stderr
     assert "ref             : v0.38.76 (siblings:" in result.stderr
 
@@ -462,3 +493,28 @@ def test_stability_release_only_stage_without_sibling_refs_falls_back(
         (build_ctx / "workspace" / "sibling-vcs-provenance.json").read_text()
     )
     assert vcs["siblings"]["omnimarket"]["vcs_ref"] != tagged["omnimarket"]
+
+
+def test_stability_release_only_refuses_an_empty_pin_file_flag(
+    tmp_path: Path, clones: Path, shims: Path
+) -> None:
+    result = _run_refresh(tmp_path, clones, None, shims, "--pin-file", "")
+    assert result.returncode == 64, result.stderr
+    assert "--pin-file requires a value" in result.stderr
+    assert not (tmp_path / "home" / ".omnibase").exists()
+
+
+def test_stability_release_only_reads_a_pin_line_with_a_trailing_comment(
+    tmp_path: Path, clones: Path, shims: Path
+) -> None:
+    root = tmp_path / "commented-pin-config"
+    path = _write_pin(root, RELEASE)
+    path.write_text(
+        path.read_text().replace(
+            "  omnimarket: v0.4.316",
+            "  omnimarket: v0.4.316  # chosen by the cloud owner",
+        )
+    )
+    result = _run_refresh(tmp_path, clones, root, shims, attributed=True)
+    assert result.returncode == 0, result.stderr
+    assert "omnimarket=v0.4.316)" in result.stderr
