@@ -144,7 +144,7 @@ def _make_process(
     process._node_identity.node_name = "test-node"
     process._node_identity.version = "v1"
     process._dynamic_contract_unsubscribe = None
-    process._config = None
+    process._config = {"contract_hotload": {"enabled": True, "mode": "on_demand"}}
     process.materialized: list[tuple[str, object, UUID]] = []
     process._get_environment_from_config = MagicMock(return_value="test")
 
