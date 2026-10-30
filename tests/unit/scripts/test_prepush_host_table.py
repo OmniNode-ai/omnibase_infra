@@ -4124,6 +4124,53 @@ def test_only_the_readers_own_absent_status_reads_as_a_neutral_table(
     assert stderr_has in out.split("--- stderr ---", 1)[1], out
 
 
+@pytest.mark.parametrize(
+    "state", ["absent", "committed", "divergent", "uncommitted", "unreadable"]
+)
+def test_private_table_cli_preserves_trust_refusals(tmp_path: Path, state: str) -> None:
+    """The deployed CLI owns the same trust decision used by both guards."""
+    import sys
+
+    root = _git_root_with_table(tmp_path, commit=state != "uncommitted")
+    table = root / PRIVATE_TABLE_REL
+    if state == "absent":
+        table.unlink()
+    elif state == "divergent":
+        table.write_text(table.read_text() + "# divergent\n")
+    elif state == "unreadable":
+        table.unlink()
+        table.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.hooks.pytest_full_suite_host_guard",
+            "--private-table",
+            PRIVATE_TABLE_REL,
+        ],
+        cwd=REPO_ROOT,
+        env={**scrub_git_location_env(), "ONEX_WORKSPACE_CONFIG_ROOT": str(root)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if state == "committed":
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == SYNTHETIC_TABLE
+    elif state == "absent":
+        assert result.returncode == PRIVATE_TABLE_ABSENT_RC, result.stderr
+        assert result.stdout == ""
+    else:
+        reason = {
+            "divergent": "differs between the working tree and HEAD",
+            "uncommitted": "no committed copy at HEAD",
+            "unreadable": "unreadable",
+        }[state]
+        assert result.returncode == 1
+        assert reason in result.stderr
+        assert result.stdout == ""
+
+
 def test_private_table_cli_with_no_declared_root_is_absent_and_says_so() -> None:
     import sys
 
