@@ -266,19 +266,34 @@ def test_the_pool_resolves_under_the_workspace_config_root(
         == (owner / "config" / "lab" / "prepr_runtime_pool.yaml").resolve()
     )
     assert pool.load_pool_config() == CFG
-    # with the override unset, the runtime's config owner of $OMNI_HOME owns it
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
+    # with the override unset, the developer config of $OMNI_HOME owns it
     monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT")
     home = tmp_path / "home"
-    home.mkdir()
+    developer = home / ".onex" / "workspace-config"
+    developer.mkdir(parents=True)
     monkeypatch.setenv("OMNI_HOME", str(home))
-    expected = workspace_runtime_config_root(home) / pool.POOL_CONFIG_RELATIVE
+    expected = developer.resolve() / pool.POOL_CONFIG_RELATIVE
     with pytest.raises(ValueError, match=re.escape(str(expected))):
         pool.load_pool_config()
     expected.parent.mkdir(parents=True)
     shutil.copyfile(POOL_FIXTURE, expected)
     assert pool.load_pool_config() == CFG
+    # with no OMNI_HOME the working directory's own developer config is not adopted
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / ".onex" / "workspace-config").mkdir(parents=True)
+    monkeypatch.delenv("OMNI_HOME")
+    monkeypatch.chdir(elsewhere)
+    with pytest.raises(
+        ValueError, match=r"not configured: set ONEX_WORKSPACE_CONFIG_ROOT"
+    ):
+        pool.load_pool_config()
+    # with neither, nothing beside the workspace is adopted and the refusal names the variable
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (tmp_path / "neighbor").mkdir()
+    monkeypatch.setenv("OMNI_HOME", str(bare))
+    with pytest.raises(ValueError, match="ONEX_WORKSPACE_CONFIG_ROOT"):
+        pool.load_pool_config()
 
 
 def test_201_takes_part_only_through_its_pre_pr_slots() -> None:
@@ -352,7 +367,9 @@ def test_probe_waits_for_the_runtimes_before_reading_health() -> None:
     text = PROVE_SH.read_text(encoding="utf-8")
     probe = text[text.index("probe)") : text.index("tests)")]
     assert probe.index("health wait") < probe.index("== health")
-    assert "health: starting" in probe and "PROBE_WAIT_S" in probe
+    assert "$(starting_count)" in probe and "PROBE_WAIT_S" in probe
+    # OMN-21217: the count reads the runtimes and the composed services still starting
+    assert "health: starting" in text[text.index("starting_count() {") :]
 
 
 def test_isolated_docker_config_pins_the_file_store_and_holds_no_credential(
@@ -829,9 +846,18 @@ def test_a_force_included_resource_is_counted_not_held_against_the_image(
 def test_the_probe_compares_every_repo_under_test_in_both_runtimes() -> None:
     text = PROVE_SH.read_text(encoding="utf-8")
     probe = text[text.index("probe)") : text.index("tests)")]
-    assert 'echo "identity-subject $repo"' in probe
-    assert "for c in $M $E; do" in probe[probe.index("identity-subject") :]
-    assert '"$IMG_LIST_PY"' in probe and '"$PKG_TREE_PY"' in probe
+    # OMN-21217: the readback is one function, and it reads every container that
+    # runs the packages (both kernels, plus the composed services of an
+    # omnimarket proof) and not a fixed pair
+    assert "identity_readback" in probe
+    readback = text[
+        text.index("identity_readback() {") : text.index("live_mentions() {")
+    ]
+    assert 'echo "identity-subject $repo"' in readback
+    assert "containers=$(proof_containers)" in readback
+    assert "for c in $containers; do" in readback[readback.index("identity-subject") :]
+    assert '"$IMG_LIST_PY"' in readback and '"$PKG_TREE_PY"' in readback
+    assert 'echo "$M $E"' in text[text.index("proof_containers() {") :]
 
 
 # ------------------------------------------------------------------ run end to end
@@ -1719,9 +1745,10 @@ def test_prove_script_fetches_market_groups_and_probes_them_as_subjects() -> Non
         '"${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}"' in clone
     )
     assert (
-        '[ -n "${MARKET_PR:-}${MARKET_GROUP:-}${MARKET_REF_SHA:-}" ] '
-        '&& SUBJECTS="$SUBJECTS omnimarket"' in text
+        'market_under_test() { [ -n "${MARKET_PR:-}${MARKET_GROUP:-}${MARKET_REF_SHA:-}" ]; }'
+        in text
     )
+    assert 'market_under_test && s="$s omnimarket"' in text
 
 
 # ------------------------------------------------- overlay and post-up command
@@ -1898,7 +1925,7 @@ def test_the_prove_script_mounts_the_overlay_on_a_slot_and_on_an_isolated_stack(
     isolated = build[build.index("export DEPLOY_SOURCE_REFS_OUT") :]
     assert isolated.index(
         'cp "$OVERLAY_FILE" "$W/local.bifrost.yaml"'
-    ) < isolated.index("catalog.cli generate local")
+    ) < isolated.index('catalog.cli generate "$BUNDLE"')
 
 
 @pytest.mark.unit

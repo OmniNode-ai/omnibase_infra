@@ -205,6 +205,10 @@ services:
   omninode-runtime:
     container_name: omninode-dev-105-runtime
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-105"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
@@ -220,6 +224,10 @@ services:
   runtime-effects:
     container_name: omninode-dev-105-runtime-effects
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "compose-dev-105"
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
@@ -331,6 +339,13 @@ services:
     container_name: omnimarket-dev-105-projection-live-events-writer
     labels:
       com.omninode.lane: dev-105
+  # OMN-19513: the claude hook-events projection writer belongs to the primary
+  # dev lane. This lane's runtime names a lane outside the node's own
+  # `runtime_lanes` scope, so its main runtime never attaches the node and a
+  # writer here would wire zero contracts, which strict wiring turns into a boot
+  # failure. Back to the inert profile the base file declares.
+  projection-claude-hook-events-writer:
+    profiles: !override ["profile-carrier-optin"]
 networks:
   omnibase-infra-network:
     name: omnibase-infra-dev-105-network

@@ -386,6 +386,15 @@ The runtime uses plugin-based handler loading from YAML contracts
 
 **Dependency bump checklist:**
 
+RULING 2026-10-29T01:50:26Z sanctions dev-merge sources with only
+`tag = "dev-YYYYMMDDHHMMSS-<sha12>"` as their git ref. Core's `dev_tag_lineage`
+validator verifies tag identity, dev ancestry, declared version and adjacent
+`uv.lock` identity in CI and, per package, in the cascade. Infra's provenance
+script admits this shape and skips its release-tree comparison; other pin
+shapes retain the release-tree check. After core verification, the cascade
+uses `--drop-dev-tag-override` to remove only the single-line source before
+locking the release, preserving unrelated bytes.
+
 1. Update `pyproject.toml` bounds, then `uv sync`. `omnibase-core` is published as
    `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` and pinned exactly only in
    `[tool.uv] override-dependencies` (OMN-19655); the range must admit the override
@@ -475,7 +484,7 @@ The readers configured by this repository are:
 
 | Caller or reader | Owning implementation | Boundary requiring a change |
 | --- | --- | --- |
-| `.github/workflows/call-repo-evidence-gate.yml` | `omnibase_core/.github/workflows/receipt-gate.yml` at `4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa` | Reads the root at PR head, overlays only that root into the control tree, and compares root evidence against the original merge base for carried evidence. |
+| `.github/workflows/call-repo-evidence-gate.yml` | `omnibase_core/.github/workflows/receipt-gate.yml` at `1088a7b0303059c035ecc0e3ea33580f9556fe41` (dev-merge tag `dev-20261030004553-1088a7b03030`) | Reads the root at PR head, overlays only that root into the control tree, and compares root evidence against the original merge base for carried evidence. |
 | That reusable's verifier | Released `omnimarket==0.4.305`, `node_dod_verify` | Reads the explicit contract path as one YAML document. It can consume composed ordinary YAML; it does not discover fragments. |
 | `.github/workflows/deploy-gate.yml` | `omniclaude/.github/workflows/deploy-gate-reusable.yml` and `.github/actions/deploy-gate/validate_pr_deploy_required.py`, caller pin `ed4300f8a427ead7f099daf69cedc012907cdbd3` | Sparse-checks out the caller's contracts and tests only `<ticket>.yaml` for deploy evidence. |
 | `scripts/ci/check_deploy_scope_dod.py` | This repository | Mirrors both hosted readers; must change in the same adoption to keep parity. |

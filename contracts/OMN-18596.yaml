@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-18596
-title: "The runtime image pins omninode-intelligence at v0.25.0 from the plugin pin cascade"
-summary: The plugin pin cascade moved the omninode-intelligence pin in docker/Dockerfile.runtime to omninode-intelligence>=0.25.0,<1.0.0, a value the merge base does not carry.
+title: "The runtime image pins omninode-memory at v0.18.7 from the plugin pin cascade"
+summary: The plugin pin cascade moved the omninode-memory pin in docker/Dockerfile.runtime to omninode-memory>=0.18.7,<1.0.0, a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -10,10 +10,10 @@ requirements:
     statement: docker/Dockerfile.runtime carries the plugin pins this cascade produced.
     acceptance:
       - id: AC1
-        statement: "AC1: docker/Dockerfile.runtime pins omninode-intelligence as omninode-intelligence>=0.25.0,<1.0.0 and every plugin at or above its recorded floor -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
+        statement: "AC1: docker/Dockerfile.runtime pins omninode-memory as omninode-memory>=0.18.7,<1.0.0 and every plugin at or above its recorded floor -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
 evidence_requirements:
   - kind: tests
-    description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for omninode-intelligence v0.25.0.
+    description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for omninode-memory v0.18.7.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
 emergency_bypass:
   enabled: false
@@ -21,7 +21,7 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-plugin-pin-cascade-floors
-    description: The runtime image pins every plugin at or above the floor this cascade recorded, including omninode-intelligence omninode-intelligence>=0.25.0,<1.0.0.
+    description: The runtime image pins every plugin at or above the floor this cascade recorded, including omninode-memory omninode-memory>=0.18.7,<1.0.0.
     source: manual
     checks:
       - check_type: test_passes
@@ -29,11 +29,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-plugin-pin-cascade-deploy-probe
-    description: Deploy probe. The runtime Dockerfile at the checked-out commit carries omninode-intelligence>=0.25.0,<1.0.0; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+    description: Deploy probe. The runtime Dockerfile at the checked-out commit carries omninode-memory>=0.18.7,<1.0.0; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
     source: manual
     checks:
       - check_type: command
         check_value: |-
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"omninode-intelligence>=0.25.0,<1.0.0"'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"omninode-memory>=0.18.7,<1.0.0"'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]

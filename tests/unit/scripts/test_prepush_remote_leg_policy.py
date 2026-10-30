@@ -59,6 +59,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 LIB = REPO_ROOT / "scripts" / "hooks" / "prepush_dispatch.sh"
@@ -145,11 +147,22 @@ def _synth_repo(tmp_path: Path, name: str = "synth") -> Path:
         _TABLE, encoding="utf-8"
     )
     (repo / "README.md").write_text("synthetic tree\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "init", "-q", "."],
+        cwd=repo,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=repo,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "table"],
         cwd=repo,
+        env=scrub_git_location_env(os.environ),
         check=True,
     )
     return repo
@@ -205,7 +218,7 @@ _prepush_timeout_cmd() {{
         check=False,
         stdin=subprocess.DEVNULL,
         env={
-            **os.environ,
+            **scrub_git_location_env(os.environ),
             "PREPUSH_LOAD_OVERRIDE_MAP": "",
             "PREPUSH_SLOT_OVERRIDE_MAP": "",
             "PREPUSH_MEM_OVERRIDE_MAP": "",
@@ -619,3 +632,29 @@ def test_the_policy_is_constants_not_env_indirection() -> None:
         assert re.search(rf"^{const}=[^$]", lib, re.MULTILINE), (
             f"{const} must be a bare constant, not a ${{VAR:-...}} indirection"
         )
+
+
+def test_verified_private_table_travels_beside_bundle_and_wrapper_receives_path(
+    tmp_path: Path,
+) -> None:
+    from tests.ci._prepush_private_table import (
+        PRIVATE_TABLE_REL,
+        SYNTHETIC_TABLE,
+        write_private_root,
+    )
+
+    root = write_private_root(tmp_path)
+    out, capture, calls = _dispatch_one_leg(
+        tmp_path,
+        body_extra=(
+            f'PREPUSH_PRIVATE_TABLE_REL="{PRIVATE_TABLE_REL}"\n'
+            f'ONEX_WORKSPACE_CONFIG_ROOT="{root}"\n'
+        ),
+    )
+    assert (capture / "host_table_private.tsv").read_text() == SYNTHETIC_TABLE
+    wrapper = (capture / "prepush_smart_tests.sh").read_text()
+    assert 'PRIVATE_REL="${11:-}"' in wrapper
+    assert 'ONEX_WORKSPACE_CONFIG_ROOT="$RUNDIR/workspace_config"' in wrapper
+    assert '"$RUNDIR/workspace_config/$PRIVATE_REL"' in wrapper
+    assert f"'{PRIVATE_TABLE_REL}'" in calls.read_text()
+    assert "NO completion marker" in out.stderr

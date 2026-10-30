@@ -285,19 +285,33 @@ services:
   # profile (which every dependency now is), and a slot must not wait on, or
   # be able to restart, a dev-lane container.
   # =========================================================================
+  # OMN-21433: every slot service restarts at most three times on failure. The
+  # inherited `unless-stopped` looped a service that cannot start (three writers
+  # exit in a slot on the dev-principal check) 9047 times against the shared
+  # Postgres; now it stays exited and the slot reports it.
   # OMN-21279: the dev overlay's build-only infra image, which the slot's
   # runtime services build omnimarket's composed image FROM. Compose refuses a
   # `service:` build context that names a service outside the active profile,
   # so it moves onto `prepr` with them. Its scale 0 is inherited: no container.
+  # `networks` is overridden onto the dev network because a service with none
+  # makes compose create a `default` network, and a slot never creates one
+  # (prepr_verify_rendered_slot.py refuses it; OMN-21433).
   dev-lane-infra-runtime-image:
     profiles: !override ["prepr"]
+    networks: !override
+      - omnibase-infra-network
   omninode-runtime:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime"
     depends_on: !override []
     ports: !override
       - "${PREPR_RUNTIME_MAIN_PORT:?PREPR_RUNTIME_MAIN_PORT must be set - the slot's reserved runtime port from prepr_slot_policy.py}:8085"
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       # OMN-19494 (LO4): the slot's own lane id, `prepr-1` or `prepr-2`. This
       # file layers over docker-compose.dev-lane.yml, which declares
@@ -326,6 +340,7 @@ services:
       # turn a branch defect into an intermittent one.
   runtime-effects:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-effects"
     depends_on: !override []
     ports: !override
@@ -338,6 +353,10 @@ services:
       # comment-only match still fails it.
       - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8085"
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
@@ -378,6 +397,7 @@ services:
       - "com.omninode.layer=runtime"
   runtime-worker:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-worker"
     depends_on: !override []
     environment:
@@ -394,6 +414,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-api:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-api"
     depends_on: !override []
     ports: !override
@@ -406,6 +427,7 @@ services:
       - "com.omninode.layer=runtime"
   tenant-projection-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-tenant-projection-writer"
     depends_on: !override []
     environment:
@@ -440,6 +462,7 @@ services:
   # -------------------------------------------------------------------------
   projection-tenant-registry-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-registry-writer"
     depends_on: !override []
     environment:
@@ -451,6 +474,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-delegation-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-delegation-writer"
     depends_on: !override []
     environment:
@@ -462,6 +486,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-registration-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-registration-writer"
     depends_on: !override []
     environment:
@@ -473,6 +498,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-savings-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-savings-writer"
     depends_on: !override []
     environment:
@@ -484,6 +510,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-tenant-credentials-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-tenant-credentials-writer"
     depends_on: !override []
     environment:
@@ -495,6 +522,7 @@ services:
       - "com.omninode.layer=runtime"
   projection-live-events-writer:
     profiles: !override ["prepr"]
+    restart: "on-failure:3"
     container_name: "omnimarket-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-projection-live-events-writer"
     depends_on: !override []
     environment:
@@ -527,6 +555,7 @@ services:
   # -------------------------------------------------------------------------
   onex-api:
     profiles: !override ["prepr-gateway"]
+    restart: "on-failure:3"
     container_name: "onex-api-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}"
     depends_on: !override []
     ports: !override
@@ -546,15 +575,22 @@ services:
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
       - "com.omninode.service=onex-api"
       - "com.omninode.layer=gateway"
-# ---------------------------------------------------------------------------
-# The network is JOINED, never created.
-#
-# `external: true` is what makes this true mechanically. Without it compose
-# would create `omnibase-infra-network` if absent -- and the dangerous case is
-# not absence, it is a slot brought up while the dev lane is down, creating the
-# network with its own settings and owning it, so the dev lane's next bring-up
-# attaches to a network a slot made and a slot's teardown can remove.
-# ---------------------------------------------------------------------------
+      # ---------------------------------------------------------------------------
+      # The network is JOINED, never created.
+      #
+      # `external: true` is what makes this true mechanically. Without it compose
+      # would create `omnibase-infra-network` if absent -- and the dangerous case is
+      # not absence, it is a slot brought up while the dev lane is down, creating the
+      # network with its own settings and owning it, so the dev lane's next bring-up
+      # attaches to a network a slot made and a slot's teardown can remove.
+      # ---------------------------------------------------------------------------
+  # OMN-19513: the claude hook-events projection writer belongs to the primary
+  # dev lane. A slot's lane is outside the node's own `runtime_lanes` scope, so a
+  # slot's main runtime never attaches the node and a writer here would wire zero
+  # contracts. Back to the inert profile the base file declares; SLOT_SERVICES
+  # does not name it either.
+  projection-claude-hook-events-writer:
+    profiles: !override ["profile-carrier-optin"]
 networks:
   omnibase-infra-network:
     name: omnibase-infra-network

@@ -504,9 +504,8 @@ services:
   redpanda:
     # OMN-20275: OPERATOR-CONSENT 2026-10-27T06:37:48Z authorizes only
     # this dev broker (19092) at a 12G arena inside a 16g container cap.
-    # The deploy agent reuses this command on every refresh. Literal bounds
-    # prevent a stale operator env from restoring the exhausted 3G/6G arena
-    # or exceeding consent. Leave 4 GiB for non-Seastar allocations.
+    # Values are rendered from runtime policy, including its private overlay.
+    # The policy model and deploy preflight enforce the consent ceiling.
     command:
       - redpanda
       - start
@@ -519,10 +518,10 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory 12G
+      - --memory ${DEV_REDPANDA_MEMORY:?DEV_REDPANDA_MEMORY must be rendered from runtime policy}
       - --default-log-level=warn
       - --set topic_partitions_per_shard=7000
-    mem_limit: 16g
+    mem_limit: ${DEV_REDPANDA_MEM_LIMIT:?DEV_REDPANDA_MEM_LIMIT must be rendered from runtime policy}
     mem_reservation: ${DEV_REDPANDA_MEM_RESERVATION:-4g}
     environment:
       DEV_KAFKA_SASL_USERNAME: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the dev lane's broker readiness probe reads through the Kafka API as the synthetic SCRAM principal (OMN-18012/OMN-18789); resolved from the operator env file, never inlined here}
@@ -619,7 +618,7 @@ services:
   # built with no credentials at all -- does not. The IAM leg stays a staging
   # concern.
   redpanda-scram-user:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     container_name: omnibase-infra-redpanda-scram-user
     entrypoint: ["/bin/sh", "-c"]
     environment:
@@ -724,7 +723,7 @@ services:
   # are AWS_MSK_IAM over SASL_SSL. The mechanism differs; the failure mode
   # pinned -- a client built with no credentials at all -- does not.
   redpanda-sasl-enable:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     container_name: omnibase-infra-redpanda-sasl-enable
     entrypoint: ["/bin/sh", "-c"]
     environment:
@@ -764,7 +763,7 @@ services:
   # the existing order after the SASL flip on both cold and warm deploys.
   redpanda-partition-cap:
     environment:
-      REDPANDA_PROFILE_MEMORY: "12G"
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:?DEV_REDPANDA_MEMORY must be rendered from runtime policy}
       RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set}
       REDPANDA_CONTROL_PLANE_TOPIC: onex.tenant.events
@@ -921,6 +920,30 @@ services:
       # and no other container drains it. Scoped to this overlay for the same
       # reason as the poll interval above: prod overlays the same base.
       ONEX_EMIT_EFFECT_SPOOL_DIR: /app/data/.onex_state/event-emit-effect-spool
+      #
+      # OMN-19513: node_projection_claude_hook_events has its own container,
+      # `projection-claude-hook-events-writer` below. This runtime must not also
+      # subscribe it: both would share the one consumer group (the writer sets
+      # the same KAFKA_INSTANCE_ID) and the partition would be split between a
+      # process that is up and one that is still joining its other groups. The
+      # name is checked against the discovered contracts, so a rename of the
+      # node degrades this runtime's health instead of silently leaving two
+      # owners. Scoped to this overlay: the stability lane, which declares no
+      # such container, keeps the node in its main runtime.
+      ONEX_RUNTIME_NODE_EXCLUSION: projection_claude_hook_events
+      #
+      # -- Lane tenant (OMN-21551) ---------------------------------------------
+      # omnimarket's mode-2 environment observer reports for the install
+      # identity, and on a compose lane, which never runs `onex local init`, for
+      # this configured tenant instead. Unset, it refused every run with
+      # identity_absent (113 in 30 minutes on 2026-10-29) and
+      # local-environment.v1 served no rows. The house tenant is the one this
+      # lane's tenant_registry_mirror already records (slug omninode, from
+      # onex.tenant.events), so no seed step runs here: the catalog's
+      # local-tenant-registry-seed derives its uuid from a slug and would record
+      # a second row. runtime-effects carries the same value. Every overlay that
+      # layers this file blanks it.
+      ONEX_TENANT_ID: ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}
     healthcheck:
       test:
         - CMD
@@ -1030,9 +1053,14 @@ services:
       # this one overlay value; all of them run in this container. Unset, every
       # compaction command falls back pack_builder_unavailable and every source
       # read is denied. It is the context-source access tenant only, a separate
-      # variable from the lane identity ONEX_TENANT_ID, which this file leaves
-      # alone. Non-secret; the operator env may override the dev-lane default.
+      # variable from the lane tenant ONEX_TENANT_ID below, and neither follows
+      # the other. Non-secret; the operator env may override the dev-lane default.
       ONEX_CONTEXT_SOURCE_TENANT_ID: ${DEV_LANE_CONTEXT_SOURCE_TENANT_ID:-lab}
+      #
+      # -- Lane tenant (OMN-21551) ---------------------------------------------
+      # The same house tenant as omninode-runtime above, and for the same
+      # reason: the mode-2 environment observer runs in this container.
+      ONEX_TENANT_ID: ${DEV_LANE_TENANT_ID:-820272f9-4aaf-5add-a2df-0af942852ab2}
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
@@ -1123,6 +1151,33 @@ services:
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-18114"
       - "autoheal=true"
+  # ===========================================================================
+  # OMN-19513: opt the claude hook-events projection writer into this lane
+  # ===========================================================================
+  # Declared in docker/docker-compose.infra.yml with the runtime env anchors, under
+  # a compose profile no bring-up requests, exactly as the tenant carrier above.
+  # `profiles: !override` moves it into `runtime`; the environment merge gives it
+  # the analytics DSN the main runtime writes this table through, strict wiring,
+  # the broker SASL credentials, the consumer poll interval and the lane's
+  # placement identity (the lane name the node's own `runtime_lanes` scope
+  # requires: without it the contract is dropped fail-closed with a discovery
+  # error). Placement identity and not the full identity: this container names its
+  # lane but speaks no health for it, because the lane-health projection keeps one
+  # row per lane and `omninode-runtime` is already that row's speaker (OMN-19144).
+  #
+  # No `com.omninode.lane` label: the labels below are the base file's own, so the
+  # derived dev lanes, which relabel every service this file labels for the lane,
+  # have nothing to relabel for a container they never start. The lane census
+  # declares this container by name.
+  #
+  # The main runtime above carries the matching `ONEX_RUNTIME_NODE_EXCLUSION`.
+  # The two halves ship together or not at all: the exclusion without this
+  # container leaves the node consumed by nothing.
+  projection-claude-hook-events-writer:
+    build: *dev_lane_composed_runtime_build
+    profiles: !override ["runtime", "full"]
+    environment:
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
   # ===========================================================================
   # THE THREE OBSERVABILITY CONSUMERS THE PREFIX HID (OMN-18012, phase B)
   # ===========================================================================
@@ -2117,6 +2172,100 @@ services:
       - "com.omninode.layer=runtime"
       - "com.omninode.lane=dev"
       - "com.omninode.ticket=OMN-17530"
+      - "autoheal=true"
+  # OMN-21481 -- the public cost estimator page (/cost-estimator, OMN-20388),
+  # served from this lane so teammates open it without anyone's laptop running.
+  # Its API is onex-api above: /v1/estimator/* is answered there, and this
+  # service carries only the web front end's page and its thin /api/estimator/*
+  # proxy to onex-api over the lane network.
+  #
+  # TAG-REFERENCED, like onex-api, and for the same reason: the image is built
+  # out of a different repository, the web front end's, with that repository's
+  # own Dockerfile, on the lab host:
+  #   docker build \
+  #     --label ai.omninode.image.source-repo=<web front-end repository> \
+  #     --label org.opencontainers.image.revision="$(git -C <its clone> rev-parse HEAD)" \
+  #     -t omnibase-infra-cost-estimator-web:dev-lane <its clone>
+  # Those two labels are what the RT-6 readback certifies a recreated container
+  # by: a foreign source repository at a stated revision. An image built without
+  # them fails that readback by name, never silently.
+  #
+  # ITS OWN PROFILE, `cost-estimator`, and not `runtime`. The other dev
+  # instances layer this file and bring up `--profile runtime`; a runtime
+  # service here would start on each of them with no API image to talk to. On
+  # this lane every deploy path names the service explicitly -- it is a member
+  # of REFRESH_BUILD_SERVICES and of DEV_LANE_ONLY_RUNTIME_SERVICES in bash and
+  # in the deploy agent -- and compose enables the profile of a service named on
+  # the command line, so every dev-lane redeploy recreates it and the page comes
+  # back with no manual step.
+  #
+  # `pull_policy: never`: the image exists in no registry, and a pull attempt
+  # would only replace a clear "no such image" with a registry error.
+  #
+  # FAILURE MODE, stated: because every dev-lane deploy names this service, a
+  # lab host on which the image is absent fails that deploy's recreate step with
+  # "No such image: ...cost-estimator-web:dev-lane", the same way onex-api fails
+  # when its pinned tag has been collected. Image GC removes only images no
+  # container uses, so a running page keeps its image. Recovery is the build
+  # above followed by the deploy again; nothing else in the lane depends on it.
+  #
+  # The lane has no login, so the next-auth names carry non-secret
+  # placeholders that pass the front end's own validators: AUTH_URL must not be
+  # a loopback origin (OMN-16209), so it names a reserved never-resolvable
+  # .invalid host (RFC 6761), as onex-api's placeholder origins do. The estimator
+  # routes are public and never call Keycloak.
+  #
+  # Host port 3080: unclaimed on the lab host, and distinct from 3000 and
+  # projection-api's 3002.
+  cost-estimator-web:
+    image: ${COST_ESTIMATOR_WEB_IMAGE:-omnibase-infra-cost-estimator-web:dev-lane}
+    pull_policy: never
+    container_name: omninode-cost-estimator-web
+    profiles: ["cost-estimator"]
+    networks:
+      - omnibase-infra-network
+    restart: unless-stopped
+    # No depends_on onex-api, deliberately: onex-api waits on the omninode_cloud
+    # migration one-shots, and only onex-api may sit behind that gate
+    # (OMN-18496). The page needs no ordering -- with onex-api down its upload
+    # route answers 503 and every page still renders.
+    ports:
+      - "3080:3000"
+    environment:
+      FEATURE_ESTIMATOR_ENABLED: "true"
+      # A production build of the front end redirects any host it does not know
+      # to its public origin; visitors reach this lane at the lab host's own
+      # name and port, so the lane opts in to serving that host (OMN-21481).
+      OMNIWEB_SERVE_ANY_HOST: "true"
+      DELEGATION_API_BASE_URL: "http://onex-api:8000"
+      ONEX_API_BASE_URL: "http://onex-api:8000"
+      AUTH_URL: "https://cost-estimator.invalid"
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: "dev-lane-cost-estimator-no-login-placeholder"
+      KEYCLOAK_ISSUER: "https://cost-estimator.invalid/realms/placeholder"
+      KEYCLOAK_CLIENT_ID: "placeholder"
+      KEYCLOAK_CLIENT_SECRET: "placeholder"
+      NODE_ENV: "production"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/cost-estimator"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *dev_lane_logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      - "com.omninode.service=cost-estimator-web"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=dev"
+      - "com.omninode.ticket=OMN-21481"
       - "autoheal=true"
 volumes:
   # Declared here and not in the base: the two one-shots that use it exist only

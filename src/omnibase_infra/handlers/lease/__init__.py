@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
 from omnibase_infra.handlers.lease.handler_lease_orchestrator import (
     HandlerLeaseAcquire,
     HandlerLeaseRelease,
@@ -20,9 +19,10 @@ from omnibase_infra.handlers.lease.handler_lease_reducer import (
     LeaseProjectionState,
     reduce_lease_event,
 )
-from omnibase_infra.handlers.lease.handler_lease_store import (
+from omnibase_infra.handlers.lease.lease_fence import check_fence
+from omnibase_infra.handlers.lease.lease_store import (
     LEASE_PREFIX,
-    HandlerLeaseStore,
+    LeaseStore,
     lease_kinds_from_spec,
     lease_store_from_config,
     resource_prefix,
@@ -36,7 +36,7 @@ __all__ = [
     "HandlerLeaseReducer",
     "HandlerLeaseRelease",
     "HandlerLeaseRenew",
-    "HandlerLeaseStore",
+    "LeaseStore",
     "LeaseProjectionState",
     "check_fence",
     "lease_kinds_from_spec",

@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Minimal etcd v3 client over the JSON gRPC gateway (OMN-21421).
 
-Covers the calls placement and the generic lease (OMN-21424) need: lease
-grant, single keepalive, revoke, an atomic create-if-absent transaction, a
-general transaction, key and prefix reads. The gateway takes
+Covers the calls placement needs: lease grant, single keepalive, revoke, an
+atomic create-if-absent transaction, key and prefix reads. The gateway takes
 base64 keys and values and returns 64-bit integers as JSON strings.
 """
 
@@ -22,10 +21,6 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.runtime.models.model_http_client_config import (
-    ModelHttpClientConfig,
-)
-from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 _JsonObject = dict[str, object]
 
@@ -45,22 +40,11 @@ def _prefix_end(prefix: str) -> str:
 
 
 class HandlerPlacementEtcd:
-    """Async etcd v3 JSON-gateway client over an injected HTTP client.
+    """Async etcd v3 JSON-gateway client; every request is bounded by ``timeout_s``."""
 
-    The caller builds the ``httpx.AsyncClient`` and sets its timeout, which
-    bounds every request; this handler constructs no transport of its own. It
-    takes over the client's lifetime: ``aclose`` closes it.
-    """
-
-    def __init__(self, endpoint: str, client: httpx.AsyncClient) -> None:
+    def __init__(self, endpoint: str, *, timeout_s: float = 1.0) -> None:
         self._endpoint = endpoint.rstrip("/")
-        self._client = client
-
-    @classmethod
-    async def connect(cls, endpoint: str, timeout_s: float) -> HandlerPlacementEtcd:
-        """Build the handler over a provider-made client bounded by ``timeout_s``."""
-        provider = ProviderHttpClient(ModelHttpClientConfig(timeout_seconds=timeout_s))
-        return cls(endpoint, await provider.create())
+        self._client = httpx.AsyncClient(timeout=timeout_s)
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -183,59 +167,5 @@ class HandlerPlacementEtcd:
             if isinstance(entry, dict)
         }
 
-    async def txn(
-        self,
-        *,
-        compare: list[_JsonObject],
-        success: list[_JsonObject],
-        failure: list[_JsonObject],
-    ) -> tuple[bool, int, list[_JsonObject]]:
-        """Run one etcd transaction; returns ``(succeeded, revision, responses)``."""
-        payload = await self._post(
-            "/v3/kv/txn",
-            {"compare": compare, "success": success, "failure": failure},
-        )
-        header = payload.get("header")
-        revision = (
-            int(str(header.get("revision", "0"))) if isinstance(header, dict) else 0
-        )
-        responses = payload.get("responses")
-        return (
-            bool(payload.get("succeeded", False)),
-            revision,
-            [r for r in responses if isinstance(r, dict)]
-            if isinstance(responses, list)
-            else [],
-        )
 
-    async def get_prefix_entries(self, prefix: str) -> list[tuple[str, str, int, int]]:
-        """Read a prefix; returns ``(key, value, create_revision, lease_id)`` per key."""
-        payload = await self._post(
-            "/v3/kv/range", {"key": _b64(prefix), "range_end": _prefix_end(prefix)}
-        )
-        kvs = payload.get("kvs")
-        if not isinstance(kvs, list):
-            return []
-        return [
-            (
-                _unb64(entry.get("key")),
-                _unb64(entry.get("value")),
-                int(str(entry.get("create_revision", "0"))),
-                int(str(entry.get("lease", "0"))),
-            )
-            for entry in kvs
-            if isinstance(entry, dict)
-        ]
-
-
-def b64(text: str) -> str:
-    """Base64 of ``text`` as the JSON gateway takes keys and values."""
-    return _b64(text)
-
-
-def unb64(text: object) -> str:
-    """Decode a base64 key or value from a JSON gateway reply."""
-    return _unb64(text)
-
-
-__all__ = ["HandlerPlacementEtcd", "b64", "unb64"]
+__all__ = ["HandlerPlacementEtcd"]

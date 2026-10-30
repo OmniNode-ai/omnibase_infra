@@ -74,18 +74,7 @@ if [ -n "$IP_MATCHES_CONFIG" ]; then
     FAILED=1
 fi
 
-# R4: Decommissioned M2 Ultra endpoint specifically
-# (192.168.86.200 port 29092/9092/19092 — old Redpanda before OMN-3431)  # cloud-bus-ok OMN-4922
-# Catching it prevents stale references from being reintroduced in production docs/config.
-DECOMMISSIONED_MATCHES=$(grep -rn --include="*.py" --include="*.sh" --include="*.yaml" --include="*.yml" --exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir=".proof-dependencies" --exclude-dir=".git" -E "192\.168\.86\.200:(29092|9092|19092)" "${SCAN_PATHS[@]}" 2>/dev/null | grep -v "check_kafka_no_hardcoded_fallback.sh" | grep -v "# kafka-fallback-ok" | grep -v "# noqa" | grep -v "# onex-allow-internal-ip" || true)  # cloud-bus-ok OMN-4922
-
-if [ -n "$DECOMMISSIONED_MATCHES" ]; then
-    echo "ERROR: Decommissioned M2 Ultra Redpanda endpoint detected:"
-    echo "$DECOMMISSIONED_MATCHES"
-    echo ""
-    echo "FIX: M2 Ultra Redpanda was decommissioned 2026-03-03 (OMN-3431)."
-    echo "     Use KAFKA_BOOTSTRAP_SERVERS env var instead."
-    FAILED=1
-fi
+# The generic private-address rules also cover decommissioned endpoints;
+# deployment-specific endpoint values do not belong in the shipped validator.
 
 exit $FAILED

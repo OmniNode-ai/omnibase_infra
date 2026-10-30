@@ -11,12 +11,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from omnibase_infra.topology.application_database import load_topology_profile
-from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
-    STATE_IO_TABLE_DECLARATIONS,
-    ContractTableDeclaration,
+from omnibase_infra.handlers.table_grant_declarations import (
+    supplemental_table_declarations,
 )
+from omnibase_infra.topology.application_database import load_topology_profile
+from omnibase_infra.topology.table_grant_derivation import ContractTableDeclaration
 from omnibase_infra.validation.application_database_domain_enforcement import (
     application_database_created_catalog_identities,
     application_database_sql_target_requirements,
@@ -714,8 +713,7 @@ def validate_changed_sql(
         ownership_identities += _supplemental_ownership_identities(
             repository,
             ownership_identities,
-            declarations=STATE_IO_TABLE_DECLARATIONS
-            + LEGACY_MIGRATION_TABLE_DECLARATIONS,
+            declarations=supplemental_table_declarations(),
         )
     except ValueError as exc:
         ownership_identities = ()

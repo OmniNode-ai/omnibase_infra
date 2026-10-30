@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID
 
 import yaml
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.handlers.lease.handler_lease_store import (
-    HandlerLeaseStore,
+from omnibase_infra.handlers.lease.lease_store import (
+    LeaseStore,
     lease_store_from_config,
 )
 from omnibase_infra.models.lease import (
@@ -49,7 +50,7 @@ def _contract() -> dict[str, object]:
     return loaded
 
 
-async def _lease_store_from_contract() -> HandlerLeaseStore:
+async def _lease_store_from_contract() -> LeaseStore:
     """Build the store from the contract's overlay-resolved descriptor values."""
     descriptor = _contract().get("descriptor")
     if not isinstance(descriptor, dict):
@@ -83,13 +84,30 @@ def lease_reply_event(reply: ModelLeaseReply) -> ModelLeaseReply:
     return _OUTCOME_MODELS[reply.outcome].model_validate(reply, from_attributes=True)
 
 
+def _refused_for_lease(
+    kind: str, resource: str, lease_id: UUID, error: ValueError
+) -> ModelLeaseReply:
+    """A renew or release the store cannot take (an undeclared kind) still gets its answer.
+
+    The caller waits on the reply topics for this ``lease_id``; an unanswered
+    command would leave it waiting out its whole budget.
+    """
+    return ModelLeaseReply(
+        outcome="lease-refused",
+        kind=kind,
+        resource=resource,
+        lease_id=lease_id,
+        reason=str(error),
+    )
+
+
 class HandlerLeaseOrchestratorBase:
     """Shared construction and classification of the three lease handlers."""
 
-    def __init__(self, store: HandlerLeaseStore | None = None) -> None:
+    def __init__(self, store: LeaseStore | None = None) -> None:
         self._store = store
 
-    async def _lease_store(self) -> HandlerLeaseStore:
+    async def _lease_store(self) -> LeaseStore:
         if self._store is None:
             self._store = await _lease_store_from_contract()
         return self._store
@@ -123,22 +141,32 @@ class HandlerLeaseAcquire(HandlerLeaseOrchestratorBase):
 
 
 class HandlerLeaseRenew(HandlerLeaseOrchestratorBase):
-    """``lease-renewed`` at the same fence, or ``lease-expired``."""
+    """``lease-renewed`` at the same fence, ``lease-expired``, or ``lease-refused``."""
 
     async def handle(self, request: ModelLeaseRenewRequest) -> ModelLeaseReply:
-        reply = await (await self._lease_store()).renew(
-            request.kind, request.resource, request.lease_id
-        )
+        store = await self._lease_store()
+        try:
+            reply = await store.renew(request.kind, request.resource, request.lease_id)
+        except ValueError as exc:
+            reply = _refused_for_lease(
+                request.kind, request.resource, request.lease_id, exc
+            )
         return lease_reply_event(reply)
 
 
 class HandlerLeaseRelease(HandlerLeaseOrchestratorBase):
-    """``lease-released``, or ``lease-expired`` when the grant was already gone."""
+    """``lease-released``, ``lease-expired`` when the grant was already gone, or ``lease-refused``."""
 
     async def handle(self, request: ModelLeaseReleaseRequest) -> ModelLeaseReply:
-        reply = await (await self._lease_store()).release(
-            request.kind, request.resource, request.lease_id
-        )
+        store = await self._lease_store()
+        try:
+            reply = await store.release(
+                request.kind, request.resource, request.lease_id
+            )
+        except ValueError as exc:
+            reply = _refused_for_lease(
+                request.kind, request.resource, request.lease_id, exc
+            )
         return lease_reply_event(reply)
 
 

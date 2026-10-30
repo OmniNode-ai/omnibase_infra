@@ -66,6 +66,16 @@
       ],
       "source": "docker logs omnibase-infra-redpanda and journalctl -k on h201, read 2026-10-26T15:5xZ by lane fill-defect-dev-broker-crash-cause-20261026T1538Z",
       "note": "Container restarted 14:00:21Z by unless-stopped; RestartCount 2, OOMKilled false, --memory=12G --reserve-memory=0M --smp=1 --overprovisioned. Host h201 at 15:50Z: 94164 MB RAM, 42984 MB available, swap 59110 of 204799 MB used."
+    },
+    {
+      "at": "2026-10-28T08:35:30Z",
+      "kind": "SIGSEGV on shard 0 in scheduling group kafka (si_code 4294967290), on redpandadata/redpanda:v25.1.12",
+      "frames": [
+        "0x4a6742b kafka::group_manager::list_groups(list_groups_filter_data const&) const +0x1cb (nm -D over /opt/redpanda/libexec/redpanda of the running v25.1.12 container; the offset is the same +0x1cb as the v24.3.18 crashes of 2026-10-26T12:19:27Z and 14:00:12Z)",
+        "0xae61b1c, 0xaee4262, 0x4070f: nearest dynamic symbols are operator delete[] and permit_unsafe_log_operation::_flag, far too large a distance to trust (unverified)"
+      ],
+      "source": "lane dev-broker-unhealthy-0945 (backtrace head), symbolized by lane dev-broker-crash-fix-1025 (OMN-20769) on h201 2026-10-28; container started 2026-10-27T11:44:31Z, RestartCount 1, OOMKilled false, cluster_version 15",
+      "note": "v25.1.12 is the first hop, not the fix: the CORE-16883 backport shipped in v25.3.16, and no v25.2.x release carries it. One crash in about 21 hours on v25.1.12 against 5 in 17 hours on v24.3.18 before the memory cap."
     }
   ],
   "symbolization": "nm -D --defined-only over /opt/redpanda/libexec/redpanda copied out of the running container; PIE, so backtrace addresses are offsets; nearest preceding dynamic symbol. The binary carries no debug info.",
@@ -137,7 +147,7 @@
       "redpandadata/redpanda:v25.3.18"
     ],
     "guard": "tests/unit/docker/test_dev_broker_upgrade_path_omn21279.py refuses a dev pin more than one feature release past the deployed volume",
-    "pending": "the first hop is proven on a copy of the dev data volume (hop_proof.data_copy_run) and v25.1.12 is pinned by OMN-21279; deploy v25.1.12 to the dev broker and read it back, then pin and deploy v25.2.14 and v25.3.18 one at a time; no hop is deployed yet",
+    "pending": "v25.1.12 is live on the dev broker (read back 2026-10-28: image v25.1.12, cluster_version 15) and crashed in list_groups +0x1cb; OMN-20769 pins v25.2.14 (second hop, no fix in it) and moves deployed_feature_release to 25.1; deploy it and read it back, then pin v25.3.18, the first image on the path that carries the fix",
     "hop_proof": {
       "guard": "tests/unit/docker/test_dev_broker_hop_logical_versions_omn21279.py refuses a declared hop whose image needs a newer logical version than the previous image leaves, and a chain image with no measured entry",
       "scratch_run": "2026-10-26 on h200, synthetic v24.3.18 volume with 20 topics, 400 groups, 3000 records on hop-t0, a SCRAM superuser and enable_sasl true: cluster_version 14 -> 15 -> 16 -> 17 across v25.1.12, v25.2.14, v25.3.18; topics 20, groups 400, high watermark 3000, committed offset 3000, the user and the unauthenticated refusal unchanged at every hop; a second seeded volume repeated the same four hops with topics 20 and groups 400 at each",
@@ -185,7 +195,74 @@
         "v25.3.18": 16
       },
       "declared_in": "docker/redpanda/dev_broker_upgrade_path.yaml logical_versions",
-      "procedure": "per hop on one volume: docker run <image> redpanda start --mode dev-container --smp 1 --memory <M> --set topic_partitions_per_shard=7000 -v <volume>:/var/lib/redpanda/data; wait for /v1/status/ready; wait until /v1/features cluster_version equals node_latest_version; count rpk topic list and rpk group list (SASL credentials through the docker exec environment); docker stop; next image. Not committed as a script: the canonical-file-shape ratchet (OMN-20304) refuses new scripts outside canonical locations."
+      "procedure": "per hop on one volume: docker run <image> redpanda start --mode dev-container --smp 1 --memory <M> --set topic_partitions_per_shard=7000 -v <volume>:/var/lib/redpanda/data; wait for /v1/status/ready; wait until /v1/features cluster_version equals node_latest_version; count rpk topic list and rpk group list (SASL credentials through the docker exec environment); docker stop; next image. Not committed as a script: the canonical-file-shape ratchet (OMN-20304) refuses new scripts outside canonical locations.",
+      "hop2_landing_readbacks": [
+        {
+          "ticket": "OMN-20769",
+          "host": "h201",
+          "volume_kind": "fresh scratch volume",
+          "published_ports": [],
+          "records": [
+            {
+              "at": "2026-10-28T22:10:59.739809+00:00",
+              "kind": "before-hop",
+              "image": "redpandadata/redpanda:v25.1.12",
+              "features": {
+                "cluster_version": 15,
+                "node_latest_version": 15,
+                "node_earliest_version": 12
+              }
+            },
+            {
+              "at": "2026-10-28T22:11:00.388572+00:00",
+              "kind": "produced",
+              "output": "Produced to partition 0 at offset 0 with timestamp 1793225460062."
+            },
+            {
+              "at": "2026-10-28T22:11:03.772489+00:00",
+              "kind": "after-hop",
+              "image": "redpandadata/redpanda:v25.2.14",
+              "image_id": "sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2",
+              "features": {
+                "cluster_version": 16,
+                "node_latest_version": 16,
+                "node_earliest_version": 15
+              },
+              "restart_count": 0,
+              "consumed": "{\n  \"topic\": \"landing-l18183-lab-proof\",\n  \"value\": \"landing-l18183-lab-hop-record\",\n  \"timestamp\": 1793225460062,\n  \"partition\": 0,\n  \"offset\": 0\n}",
+              "health": {
+                "cluster_uuid": "f516b340-1d1b-4eaa-9495-03df97935dab",
+                "is_healthy": true,
+                "unhealthy_reasons": [],
+                "controller_id": 0,
+                "all_nodes": [
+                  0
+                ],
+                "nodes_down": [],
+                "nodes_in_recovery_mode": [],
+                "leaderless_partitions": [],
+                "leaderless_count": 0,
+                "under_replicated_count": 0,
+                "under_replicated_partitions": []
+              },
+              "project": "landing-l18183-lab",
+              "network": "none",
+              "volume": "landing-l18183-lab-data"
+            },
+            {
+              "at": "2026-10-28T22:11:04.277289+00:00",
+              "kind": "cleanup",
+              "scratch_container_removed": true,
+              "scratch_volume_removed": true
+            }
+          ],
+          "not_tested": [
+            "current live-data copy",
+            "client load",
+            "long-term crash mitigation"
+          ]
+        }
+      ]
     }
   },
   "request_census": {
@@ -284,5 +361,319 @@
     },
     "reading": "The 3G arena is below what this volume's 4605 topics and the 8100 client connections need: the broker aborts on allocation failure at the cap, in fetch handling and in start-up recovery, where it did not at 12G. The cap replaced a crash about every 3.4 h (5 in 17 h, three of them with ListGroups frames) with an allocation-failure abort about every 14 min (12 in 170 min). The ListGroups fix path in fix_path is unchanged and still pending. Not measured: the smallest arena this volume survives (no copy of the 51 GB volume was started on the loaded h201: load average 57, swap in use), and which client calls drive the metadata volume.",
     "decision_needed": "OPERATOR-CONSENT 2026-10-25T17:53:44Z approved a 2-4 GB cap and scripts/preflight_required_compose_env.py refuses anything outside 2-4 GiB, so this lane did not move the arena. Options for the operator: restore the 12G arena (the floor docker-compose.dev-bus-ha.yml records), set an arena between 4 GiB and 12G with a matching container limit, or cut the topic and connection count first (deleting topics is destructive and needs a named list)."
+  },
+  "bundle_digest_derivation_omn20769": {
+    "base_commit": "4090b069f179a06a5b1357f967b8e3d5730002e2",
+    "head_commit": "4ce160c35e2034df2ba4bf2f5b867a033cfbe086",
+    "changed_bundles": 12,
+    "unchanged_bundles": 5,
+    "equal_render_pairs": [
+      [
+        "core",
+        "secrets"
+      ],
+      [
+        "observability",
+        "tracing"
+      ]
+    ],
+    "negative_control": {
+      "change": "/services/redpanda/restart = no",
+      "non_image_drift_detected": true
+    },
+    "bundles": [
+      {
+        "bundle": "auth",
+        "base_sha256": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
+        "head_sha256": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
+        "contains_redpanda": false,
+        "changed_paths": []
+      },
+      {
+        "bundle": "canary",
+        "base_sha256": "8ff1bcc0dc58a11a5a9dde7f4fc2b818d7dc7cc96a17ee6733cb0321359ea8ba",
+        "head_sha256": "f97220aed2d70824c38cf1e78025dd213aa341306e0e1bf5bdfd6b7b4840a675",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "core",
+        "base_sha256": "663ac6789aab6ecfb91309a2a16a40c0a216630118bd343a848e02c64e291d34",
+        "head_sha256": "1d012e6afe2ad676ab15b4780db4806e93fe3644976db07190ba3471c200a7f1",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "fault-injection",
+        "base_sha256": "9a9d7e9d10b296ee574312533c0cd983e7a5e2cde20807703fe9bf829a67ecf5",
+        "head_sha256": "8f75dd1958859b933220c2352d5c4e1f3c8c317d1dac0045d95f78fcc1d206f6",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "memgraph",
+        "base_sha256": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
+        "head_sha256": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
+        "contains_redpanda": false,
+        "changed_paths": []
+      },
+      {
+        "bundle": "observability",
+        "base_sha256": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+        "head_sha256": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+        "contains_redpanda": false,
+        "changed_paths": []
+      },
+      {
+        "bundle": "omnidash",
+        "base_sha256": "140b592a40afcf51cb3ad1bca9305b5e32456e1e14677bcdc5ad2afb29117f0e",
+        "head_sha256": "6313d078d8901190efa856871c6c305b858099d7e472385bcbf638b10579b607",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "omnimarket-projections",
+        "base_sha256": "7e1f519ec8652c3f3ce04b06cf3dc8d9de5bcab114fa51b1db7c6a5a63f9c826",
+        "head_sha256": "b6e99848847d4af6cda7a8289336c7fe95cc836d5e17e3b372a8272a883b9278",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "omnimemory",
+        "base_sha256": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
+        "head_sha256": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
+        "contains_redpanda": false,
+        "changed_paths": []
+      },
+      {
+        "bundle": "runtime",
+        "base_sha256": "5f16c82ad5aa90ce25296d21ad48e010c50616997dc4f9c2a7113edf95548a8d",
+        "head_sha256": "c485c5a45a40050a9496a32e6e8fbafac7a18d03c550acb9cabd9000ad1d84a3",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "runtime-core",
+        "base_sha256": "0e638ddbb3908f1acab91383fa0a48daf70221ba8b7d33b3f4a1be97ce1a36d4",
+        "head_sha256": "d1445a8a07580f2c1658906595e519f0d5f71d2a787410c8509116d538885853",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "runtime-infrastructure",
+        "base_sha256": "500a78daf88115e7e7f5fa1f35682abeab1eaaf13ef94b8c28e236d78aa4d115",
+        "head_sha256": "67c641280893ca6024fd9876b68da09f5db53604ea5ec39bb80a50f4ec52f57c",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "runtime-integrations",
+        "base_sha256": "321400a4009d6646f3105f2c54329000c92a5e67c84598fe5e08815338b12d36",
+        "head_sha256": "becf59c5917d835f5148c9449bcec688b593792c89b1d31d6a62666b31d6b623",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "runtime-observability-projections",
+        "base_sha256": "f8d6407e0af53c76b0199c2bf9a4659bbf4db06ac83424c63b629f46adefb95b",
+        "head_sha256": "843681c597dcf5ba7e0d1fd223c1bae557f8dc8a69c132f0c9376eb8365da052",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "secrets",
+        "base_sha256": "663ac6789aab6ecfb91309a2a16a40c0a216630118bd343a848e02c64e291d34",
+        "head_sha256": "1d012e6afe2ad676ab15b4780db4806e93fe3644976db07190ba3471c200a7f1",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "tenant-path",
+        "base_sha256": "8eaca79a4b2b49273ebbf35749eee19ed771dc80d0e4270a1927156edce44382",
+        "head_sha256": "688af00bc71e039804506f35c81ec9dece439fdeda15b7f993bb1d2a7929a62c",
+        "contains_redpanda": true,
+        "changed_paths": [
+          "/services/redpanda/image"
+        ]
+      },
+      {
+        "bundle": "tracing",
+        "base_sha256": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+        "head_sha256": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+        "contains_redpanda": false,
+        "changed_paths": []
+      }
+    ],
+    "read_at": "2026-10-28T23:00:06.926188+00:00",
+    "host": "h105",
+    "explanation": "On lab host h105, a replay used CatalogResolver and generate_compose to hash json.dumps(render, sort_keys=True, default=str).encode() with SHA-256. The catalog and _OTHER_BUNDLE_DIGESTS were extracted from merge base 4090b069f179a06a5b1357f967b8e3d5730002e2 and dispatch head 4ce160c35e2034df2ba4bf2f5b867a033cfbe086 using git show. All 17 old and all 17 new pins matched their recomputed hashes. 12 bundle renders changed solely at /services/redpanda/image from redpandadata/redpanda:v25.1.12 to redpandadata/redpanda:v25.2.14, and restoring that one field reproduced each whole base render. Five bundles were unchanged: auth, memgraph, observability, omnimemory, and tracing. Core and secrets include Redpanda through dependency resolution and have the same render hash. No tests, baseline, CI script, or gate configuration was edited in this worker. The record embeds the exact Python replay and its per-bundle old/new hashes so a reviewer can reproduce it without changing the pins.",
+    "algorithm": "SHA256(json.dumps(generate_compose(CatalogResolver(catalog_dir=...).resolve([bundle])), sort_keys=True, default=str).encode())",
+    "replay_source_sha256": "6c63fb0b21d8229465ade0af980da1446c506e2cdfd685f0fdee82003d041d80",
+    "replay_python": [
+      "import ast",
+      "import copy",
+      "import hashlib",
+      "import json",
+      "import subprocess",
+      "import tempfile",
+      "from pathlib import Path",
+      "",
+      "from omnibase_infra.docker.catalog.generator import generate_compose",
+      "from omnibase_infra.docker.catalog.resolver import CatalogResolver",
+      "",
+      "BASE = '4090b069f179a06a5b1357f967b8e3d5730002e2'",
+      "HEAD = '4ce160c35e2034df2ba4bf2f5b867a033cfbe086'",
+      "TEST = 'tests/unit/infra/test_catalog_local_profile.py'",
+      "",
+      "",
+      "def git(*args):",
+      "    return subprocess.check_output(['git', *args], text=True)",
+      "",
+      "",
+      "def pins(ref):",
+      "    tree = ast.parse(git('show', f'{ref}:{TEST}'))",
+      "    return next(ast.literal_eval(node.value) for node in tree.body",
+      "                if isinstance(node, ast.Assign)",
+      "                and any(isinstance(t, ast.Name) and t.id == '_OTHER_BUNDLE_DIGESTS' for t in node.targets))",
+      "",
+      "",
+      "def digest(render):",
+      "    return hashlib.sha256(json.dumps(render, sort_keys=True, default=str).encode()).hexdigest()",
+      "",
+      "",
+      "old_pins, new_pins = pins(BASE), pins(HEAD)",
+      "assert old_pins.keys() == new_pins.keys()",
+      "rows = []",
+      "all_renders = {}",
+      "with tempfile.TemporaryDirectory() as tmp:",
+      "    catalogs = {}",
+      "    for label, ref in [('base', BASE), ('head', HEAD)]:",
+      "        catalog = Path(tmp) / label",
+      "        for path in git('ls-tree', '-r', '--name-only', ref, 'docker/catalog').splitlines():",
+      "            target = catalog / Path(path).relative_to('docker/catalog')",
+      "            target.parent.mkdir(parents=True, exist_ok=True)",
+      "            target.write_text(git('show', f'{ref}:{path}'))",
+      "        catalogs[label] = catalog",
+      "    for bundle in sorted(new_pins):",
+      "        renders = {label: generate_compose(CatalogResolver(catalog_dir=str(path)).resolve([bundle]))",
+      "                   for label, path in catalogs.items()}",
+      "        all_renders[bundle] = renders",
+      "        before, after = renders['base'], renders['head']",
+      "        old_hash, new_hash = digest(before), digest(after)",
+      "        assert old_hash == old_pins[bundle], (bundle, 'base pin mismatch')",
+      "        assert new_hash == new_pins[bundle], (bundle, 'head pin mismatch')",
+      "        changed = before != after",
+      "        if changed:",
+      "            normalized = copy.deepcopy(after)",
+      "            assert before['services']['redpanda']['image'] == 'redpandadata/redpanda:v25.1.12'",
+      "            assert after['services']['redpanda']['image'] == 'redpandadata/redpanda:v25.2.14'",
+      "            normalized['services']['redpanda']['image'] = before['services']['redpanda']['image']",
+      "            assert normalized == before, (bundle, 'non-image drift')",
+      "        rows.append({'bundle': bundle, 'base_sha256': old_hash, 'head_sha256': new_hash,",
+      "                     'contains_redpanda': 'redpanda' in after['services'],",
+      "                     'changed_paths': ['/services/redpanda/image'] if changed else []})",
+      "for label in ('base', 'head'):",
+      "    assert all_renders['core'][label] == all_renders['secrets'][label]",
+      "    assert all_renders['observability'][label] == all_renders['tracing'][label]",
+      "negative = copy.deepcopy(all_renders['core']['head'])",
+      "negative['services']['redpanda']['image'] = all_renders['core']['base']['services']['redpanda']['image']",
+      "negative['services']['redpanda']['restart'] = 'no'",
+      "assert negative != all_renders['core']['base'], 'unrelated restart drift must remain visible'",
+      "print(json.dumps({'base_commit': BASE, 'head_commit': HEAD,",
+      "                  'changed_bundles': sum(bool(r['changed_paths']) for r in rows),",
+      "                  'unchanged_bundles': sum(not r['changed_paths'] for r in rows),",
+      "                  'equal_render_pairs': [['core', 'secrets'], ['observability', 'tracing']],",
+      "                  'negative_control': {'change': '/services/redpanda/restart = no', 'non_image_drift_detected': True},",
+      "                  'bundles': rows}, indent=2))"
+    ],
+    "replay_command": "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen python -c 'import json; from pathlib import Path; record = json.loads(Path(\"docs/incidents/OMN-21279/dev-broker-crash-cause.json\").read_text())[\"bundle_digest_derivation_omn20769\"]; exec(\"\\n\".join(record[\"replay_python\"]))'",
+    "runtime_readback": {
+      "host": "h201",
+      "project": "landing-l18192-lab",
+      "container": "landing-l18192-lab-redpanda",
+      "volume": "landing-l18192-lab-data",
+      "network": "none",
+      "published_ports": [],
+      "scope": "fresh scratch volume; no lane containers or live data changed",
+      "topic": "landing-l18192-proof",
+      "produced": "Produced to partition 0 at offset 0 with timestamp 1793228446919.",
+      "retained_record": "landing-l18192-hop-record",
+      "reads": [
+        {
+          "read_at": "2026-10-28T23:00:47.247017+00:00",
+          "image": "redpandadata/redpanda:v25.1.12",
+          "image_id": "sha256:840030ecf6194070bf5b5824331518faffa1c9af5765c378606f5f462efad994",
+          "cluster_version": 15,
+          "node_latest_version": 15,
+          "node_earliest_version": 12,
+          "restart_count": 0,
+          "health": {
+            "cluster_uuid": "a35de456-80c2-4d68-bdd3-39b4980a65b0",
+            "is_healthy": true,
+            "unhealthy_reasons": [],
+            "controller_id": 0,
+            "all_nodes": [
+              0
+            ],
+            "nodes_down": [],
+            "nodes_in_recovery_mode": [],
+            "leaderless_partitions": [],
+            "leaderless_count": 0,
+            "under_replicated_count": 0,
+            "under_replicated_partitions": []
+          }
+        },
+        {
+          "read_at": "2026-10-28T23:00:50.154877+00:00",
+          "image": "redpandadata/redpanda:v25.2.14",
+          "image_id": "sha256:b53a3a981be7536c2b5240efa13d7284e760ed01911627f3533e628117e427e2",
+          "cluster_version": 16,
+          "node_latest_version": 16,
+          "node_earliest_version": 15,
+          "restart_count": 0,
+          "health": {
+            "cluster_uuid": "a35de456-80c2-4d68-bdd3-39b4980a65b0",
+            "is_healthy": true,
+            "unhealthy_reasons": [],
+            "controller_id": 0,
+            "all_nodes": [
+              0
+            ],
+            "nodes_down": [],
+            "nodes_in_recovery_mode": [],
+            "leaderless_partitions": [],
+            "leaderless_count": 0,
+            "under_replicated_count": 0,
+            "under_replicated_partitions": []
+          }
+        }
+      ],
+      "cleanup": {
+        "container_removed": true,
+        "volume_removed": true
+      }
+    }
   }
 }

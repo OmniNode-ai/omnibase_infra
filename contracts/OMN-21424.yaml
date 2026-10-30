@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21424
 title: "Generic lease orchestrator, reducer and projection"
 summary: >-
-  Adds the generic lease to the OMN-21418 GenericLease model (FenceMonotonicPerResource, NoEffectWithStaleFence, ExpiredLeaseFreesResource): src/omnibase_infra/handlers/lease/ (an etcd store where a grant is one transaction creating a free slot key and the request key on a fresh etcd lease, the fence is that transaction's revision, a renewal is a keepalive at the same fence; a pure projection reducer keeping the highest fence per (kind, resource); a projection writer whose upsert never lowers a fence), src/omnibase_infra/models/lease/, the check_fence port at src/omnibase_infra/handlers/lease/handler_lease_fence.py (ok, stale, expired, unknown; the ticket names runtime/placement/fence.py, where the canonical-file-shape ratchet refuses new code), the forward migration docker/migrations/forward/112_create_lease_projection.sql, and the node_lease_orchestrator, node_lease_reducer and node_projection_lease contracts with no topic declared. Stacked on OMN-21421 (runtime election). The eight lease topics, runtime wiring and the onex lease CLI verb are not in this change: placing the lease orchestrator as a primary reads the contract placement block, which waits on an omnibase_core release carrying omnibase_core#2098.
+  Adds the generic lease to the OMN-21418 GenericLease model (FenceMonotonicPerResource, NoEffectWithStaleFence, ExpiredLeaseFreesResource): src/omnibase_infra/handlers/lease/ (an etcd store where a grant is one transaction creating a free slot key and the request key on a fresh etcd lease, the fence is that transaction's revision, a renewal is a keepalive at the same fence; a pure projection reducer keeping the highest fence per (kind, resource); a projection writer whose upsert never lowers a fence), src/omnibase_infra/models/lease/, the check_fence port at src/omnibase_infra/handlers/lease/lease_fence.py (ok, stale, expired, unknown; the ticket names runtime/placement/fence.py, where the canonical-file-shape ratchet refuses new code), the forward migration docker/migrations/forward/112_create_lease_projection.sql, and the node_lease_orchestrator, node_lease_reducer and node_projection_lease contracts with no topic declared. Stacked on OMN-21421 (runtime election). The eight lease topics, runtime wiring and the onex lease CLI verb are not in this change: placing the lease orchestrator as a primary reads the contract placement block, which waits on an omnibase_core release carrying omnibase_core#2098.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -48,11 +48,11 @@ evidence_requirements:
     description: "The generic lease suites (two lease stores on a real etcd, two runtime processes on a three-member etcd, the projection and check_fence unit tests) pass."
     command: "uv run pytest tests/integration/runtime/placement/test_generic_lease_omn21424.py tests/unit/handlers/lease tests/integration/nodes/test_lease_nodes_contract_discovery_omn21424.py -q -n 0"
   - kind: tests
-    description: "The lease wiring suites (the eight topics in the node contracts, the kernel's wire_from_manifest over the three lease contracts on a real etcd, and the onex lease verb against a three-member etcd) pass."
+    description: "The lease wiring suites (the eight topics in the node contracts, the kernel's wire_from_manifest over the three lease contracts on a real etcd, and the onex lease verb, which publishes its commands to the orchestrator over the bus, against a three-member etcd) pass."
     command: "uv run pytest tests/unit/nodes/test_lease_topics_contract_omn21424.py tests/integration/runtime/placement/test_lease_wiring_omn21424.py tests/integration/runtime/placement/test_lease_cli_omn21424.py -q -n 0"
   - kind: manual
     description: "Deploy validation command for the caller-contract deploy gate: the committed lease source read at the checkout commit. It starts nothing and touches no running lane."
-    command: "deploy: gh api contents of handler_lease_store.py, handler_lease_projection.py and handlers/lease/handler_lease_fence.py at HEAD"
+    command: "deploy: gh api contents of lease_store.py, handler_lease_projection.py and handlers/lease/lease_fence.py at HEAD"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -120,16 +120,16 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/lease_store.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F '_absent(slot_key),' > /dev/null &&
           gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_projection.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'WHERE lease_projection.fence < EXCLUDED.fence' > /dev/null &&
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/handler_lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/lease/lease_fence.py?ref=$(git rev-parse HEAD)" --jq .content |
             base64 -d | grep -F 'return EnumLeaseFenceStatus.STALE' > /dev/null
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21424-ac3-bus-and-cli
     description: >-
-      The three lease contracts loaded from disk are wired by the kernel's wire_from_manifest onto an in-memory bus with the orchestrator's contract-declared etcd endpoint and kinds; an acquire on the acquire command topic is granted, a second holder is refused, and the repeated request_id is granted again with the first lease_id and fence; renew and release answer on their own event topics. The onex lease verb, through three members of one etcd cluster, grants on one host, returns the same lease_id and fence for the repeated request_id on a second host, refuses another holder, and shows, renews and releases the grant.
+      The three lease contracts loaded from disk are wired by the kernel's wire_from_manifest onto an in-memory bus with the orchestrator's contract-declared etcd endpoint and kinds; an acquire on the acquire command topic is granted, a second holder is refused, and the repeated request_id is granted again with the first lease_id and fence; renew and release answer on their own event topics. The onex lease verb publishes acquire, renew and release on the orchestrator's command topics of the named lane and prints the orchestrator's answer from its event topics, with the kernel's wire_from_manifest wiring the real orchestrator contract over each of three members of one etcd cluster: it grants on one host, returns the same lease_id and fence for the repeated request_id on a second host, is refused for another holder, renews and releases the grant, and `show` reads the grant from a third host. A kind the orchestrator does not declare is answered with lease-refused.
     source: manual
     checks:
       - check_type: test_passes

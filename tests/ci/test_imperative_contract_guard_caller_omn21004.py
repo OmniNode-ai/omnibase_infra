@@ -26,6 +26,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 CALLER = WORKFLOWS / "imperative-contract-guard.yml"
 ALLOWLIST = ROOT / "imperative-contract-allowlist.yaml"
 CORE_SHA_PREFIX = "031148215"
+CANONICAL_SHAPE_TAG = "dev-20261029151319-6e0a5eee541a"
 CORE_USES = "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml"
 RECORDED_PATHS = [
     "omnibase_infra/nodes/node_architecture_validator/handlers/handler_architecture_validation.py",
@@ -159,7 +160,7 @@ def test_caller_uses_core_and_keeps_the_job_and_context() -> None:
             ), path
 
 
-def test_canonical_shape_hook_and_ci_use_the_exemption_commit() -> None:
+def test_canonical_shape_uses_the_node_entry_tag() -> None:
     repos = _mapping(ROOT / ".pre-commit-config.yaml")["repos"]
     assert isinstance(repos, list)
     (hook_repo,) = [
@@ -168,7 +169,7 @@ def test_canonical_shape_hook_and_ci_use_the_exemption_commit() -> None:
         if any(hook["id"] == "canonical-file-shape" for hook in repo["hooks"])
     ]
     assert hook_repo["repo"] == "https://github.com/OmniNode-ai/omnibase_core"
-    assert hook_repo["rev"] == _caller_sha()
+    assert hook_repo["rev"] == CANONICAL_SHAPE_TAG
     (boundary_repo,) = [
         repo
         for repo in repos
@@ -179,7 +180,7 @@ def test_canonical_shape_hook_and_ci_use_the_exemption_commit() -> None:
     jobs = _mapping(WORKFLOWS / "ci.yml")["jobs"]
     assert isinstance(jobs, dict)
     assert jobs["canonical-file-shape"]["env"]["CANONICAL_FILE_SHAPE_CORE"].endswith(
-        f"@{_caller_sha()}"
+        f"@{CANONICAL_SHAPE_TAG}"
     )
     assert jobs["node-boundary-imports"]["env"]["NODE_BOUNDARY_CORE"].endswith(
         f"@{_caller_sha()}"

@@ -145,10 +145,16 @@ from omnibase_infra.event_bus.event_bus_kafka import (
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
+    DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
+    ENV_WORKSPACE_CONFIG_ROOT,
+    HandlerWorkspaceConfigRootResolve,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
+from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
     ProtocolIntentEffect,
@@ -271,12 +277,6 @@ TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 # declares them and are never shipped in this package: lab configuration is
 # not hardcoded in the product every customer runs (OMN-19184).
 WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
-
-# Bootstrap location for the workspace's tier-1 config owner.
-ENV_WORKSPACE_CONFIG_ROOT = "ONEX_WORKSPACE_CONFIG_ROOT"
-# OMN-20700: public lab-onboarding.sh phase 2 writes developer tier-1 config
-# here, relative to the workspace root.
-DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH = Path(".onex") / "workspace-config"
 
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
@@ -1513,28 +1513,6 @@ class WorkspaceRuntimeConfigMissingError(ProtocolConfigurationError):
     """
 
 
-def workspace_runtime_config_root(workspace_root: Path) -> Path:
-    """Resolve the config owner, independently of the registry's state root.
-
-    ONEX_WORKSPACE_CONFIG_ROOT is a bootstrap location, never a transport
-    selector. Resolution order is a non-blank environment override, the sibling
-    ``../omnibase_internal`` if it is a directory, then ``.onex/workspace-config``
-    if it is a directory, otherwise the sibling path for the caller to refuse.
-    All results are resolved. A developer install never needs a private
-    repository (OMN-20700). There is no retiring-root read.
-    """
-    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
-    if configured:
-        return Path(configured).resolve()
-    sibling = workspace_root / ".." / "omnibase_internal"
-    if sibling.is_dir():
-        return sibling.resolve()
-    developer = workspace_root / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
-    if developer.is_dir():
-        return developer.resolve()
-    return sibling.resolve()
-
-
 def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
     *,
@@ -1567,8 +1545,8 @@ def resolve_embedded_runtime_config(
        working-tree config under the owning config root
        answers (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling
        composes on top of tier-0. The file belongs to the config owner, selected by
-       ``ONEX_WORKSPACE_CONFIG_ROOT``, the sibling operator repository, or the
-       developer workspace's ``.onex/workspace-config`` (OMN-20700),
+       ``ONEX_WORKSPACE_CONFIG_ROOT`` (the deployment's overlay or host installer
+       sets it) or the developer workspace's ``.onex/workspace-config`` (OMN-20700),
        never to this package. The retiring registry root is never read. A bound
        root with neither copy is REFUSED rather than
        answered with tier-0: binding a workspace root is a claim to be a
@@ -1632,6 +1610,11 @@ def resolve_embedded_runtime_config(
             HandlerWorkspaceRuntimeConfigMaterializer,
         )
 
+        config_root = (
+            HandlerWorkspaceConfigRootResolve()
+            .handle(ModelWorkspaceConfigRootRequest(workspace_root=workspace_root))
+            .config_root
+        )
         copy = HandlerWorkspaceRuntimeConfigMaterializer().read(workspace_root)
         if copy is not None:
             config = load_runtime_config(
@@ -1639,7 +1622,7 @@ def resolve_embedded_runtime_config(
             )
             provenance = (
                 f"workspace tier-1 runtime config materialised from "
-                f"{SOURCE_REF}@{copy.sha} in {workspace_runtime_config_root(workspace_root)} "
+                f"{SOURCE_REF}@{copy.sha} in {config_root} "
                 f"at {copy.materialized_at.isoformat()} "
                 f"({copy.config_path})"
             )
@@ -1650,24 +1633,24 @@ def resolve_embedded_runtime_config(
                     f"the materialiser refreshes it on every default `onex delegate` run"
                 )
             return config, provenance
-        workspace_contracts = (
-            workspace_runtime_config_root(workspace_root)
-            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
-        )
-        workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
-        if workspace_config.is_file():
-            config = load_runtime_config(
-                workspace_contracts, correlation_id=correlation_id
+        workspace_config: Path | None = None
+        if config_root is not None:
+            workspace_contracts = (
+                config_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
             )
-            return config, f"workspace tier-1 runtime config at {workspace_config}"
+            workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
+            if workspace_config.is_file():
+                config = load_runtime_config(
+                    workspace_contracts, correlation_id=correlation_id
+                )
+                return config, f"workspace tier-1 runtime config at {workspace_config}"
         materialized_config = (
             workspace_root
             / MATERIALIZED_CONTRACTS_RELATIVE_PATH
             / DEFAULT_RUNTIME_CONFIG
         )
         missing_owner_details = ""
-        if not os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip():
-            sibling = (workspace_root / ".." / "omnibase_internal").resolve()
+        if config_root is None:
             developer_config = (
                 workspace_root.resolve()
                 / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
@@ -1675,15 +1658,15 @@ def resolve_embedded_runtime_config(
                 / DEFAULT_RUNTIME_CONFIG
             )
             missing_owner_details = (
-                f" {ENV_WORKSPACE_CONFIG_ROOT} is unset; the sibling operator "
-                f"repository path is {sibling} and the developer config path "
-                f"is {developer_config}."
+                f" {ENV_WORKSPACE_CONFIG_ROOT} is unset and no developer config "
+                f"exists at {developer_config}."
             )
         raise WorkspaceRuntimeConfigMissingError(
             f"workspace root {workspace_root} is bound but has no materialised "
             f"runtime config at {materialized_config} (the copy comes from "
             f"{SOURCE_REF} of the config owner) and declares no working-tree runtime "
-            f"config at {workspace_config}. A bound workspace root is a "
+            f"config at {workspace_config or 'a config root (none is declared)'}. "
+            f"A bound workspace root is a "
             f"registry workspace, and its transport comes from its own tier-1 "
             f"config; it is never answered with the shipped in-memory default, "
             f"which would strand the workspace's evidence in local storage "
@@ -1699,10 +1682,10 @@ def resolve_embedded_runtime_config(
             context=ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="resolve_workspace_runtime_config",
-                target_name=str(workspace_config),
+                target_name=str(workspace_config or ENV_WORKSPACE_CONFIG_ROOT),
                 correlation_id=correlation_id or generate_correlation_id(),
             ),
-            config_path=str(workspace_config),
+            config_path=str(workspace_config or ""),
         )
     config = _load_tier0_runtime_config(
         correlation_id=correlation_id or generate_correlation_id(),
@@ -3685,16 +3668,15 @@ async def bootstrap() -> int:
                 },
             )
 
-            if manifest.total_discovered > 0:
-                # OMN-17985: was a RAW os.getenv read that never consulted the
-                # profile resolved at boot, so an unregistered value reached the
-                # ownership filter unvalidated and emptied the manifest.
-                runtime_profile = resolve_runtime_profile_name()
-                ownership_result = filter_manifest_for_runtime_profile(
-                    manifest=manifest,
-                    runtime_profile=runtime_profile,
-                )
-                manifest = ownership_result.manifest
+            # OMN-17985: use the validated boot profile. OMN-19513: validate
+            # exclusions even when discovery is empty, before any wiring begins.
+            runtime_profile = resolve_runtime_profile_name()
+            ownership_result = filter_manifest_for_runtime_profile(
+                manifest=manifest,
+                runtime_profile=runtime_profile,
+            )
+            manifest = ownership_result.manifest
+            if auto_wiring_manifest_discovered.total_discovered > 0:
                 if ownership_result.folded_profiles:
                     # OMN-17427: this runtime carries other roles' nodes too.
                     logger.info(
@@ -4503,6 +4485,45 @@ async def bootstrap() -> int:
             )
             health_server.attach_manifest(_introspection_manifest)
 
+        # --- Pass 2: Start consumers for ready plugins only ---
+        # OMN-18087: Pass 2 runs BEFORE the auto-wired interleave below. Plugin
+        # consumers (delegation among them) are a handful of topics; behind the
+        # interleave they waited for every auto-wired group join, and on the dev lane on
+        # 2026-10-28 delegation had no consumer for 37 minutes of that wait.
+        # ready_plugins is a subset of activated_plugins: only plugins that
+        # completed wire_handlers() successfully. This prevents starting
+        # consumers for plugins with no handlers/dispatchers wired.
+        for plugin in ready_plugins:
+            plugin_id = plugin.plugin_id
+            try:
+                consumer_result = await plugin.start_consumers(plugin_config)
+                if not consumer_result.success:
+                    logger.warning(
+                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
+                        plugin_id,
+                        consumer_result.get_error_message_or_default(
+                            consumer_result.message or "unknown"
+                        ),
+                        correlation_id,
+                    )
+                    continue
+                if consumer_result.unsubscribe_callbacks:
+                    plugin_unsubscribe_callbacks.extend(
+                        consumer_result.unsubscribe_callbacks
+                    )
+                logger.info(
+                    "Plugin '%s' consumers started (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                )
+            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
+                logger.warning(
+                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
+                    plugin_id,
+                    correlation_id,
+                    exc_info=True,
+                )
+
         # OMN-13768: the long-running Kafka subscription work (per-contract
         # boot interleave, plugin consumer start, ContractRegistrationEventRouter
         # wiring) now runs AFTER RuntimeHostProcess is created/registered/attached
@@ -4591,6 +4612,28 @@ async def bootstrap() -> int:
             # Without this the gate waits forever on a contract the interleave
             # filtered out, and /ready is 503 for the life of the process.
             _attach_exclusions: list[ModelContractAttachExclusion] = []
+            # OMN-18087: the runtime config contract declares which contracts
+            # join at boot. ``in_use`` joins only the contracts whose topics
+            # hold a record on the broker and starts each of the rest on its
+            # first request; the in-memory bus has no broker to ask, so it
+            # joins every contract as before.
+            from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
+                HandlerKafkaTopicDemandSource,
+            )
+
+            _demand_source: HandlerKafkaTopicDemandSource | None = None
+            if config.boot_subscriptions.policy == "in_use" and isinstance(
+                event_bus, EventBusKafka
+            ):
+                _demand_source = HandlerKafkaTopicDemandSource(event_bus.config)
+            logger.info(
+                "Boot subscription policy=%s demand_start=%s (OMN-18087, "
+                "correlation_id=%s)",
+                config.boot_subscriptions.policy,
+                _demand_source is not None,
+                correlation_id,
+            )
+            _demand_watch_stops: list[Callable[[], Awaitable[None]]] = []
             auto_wired_subscriptions = await subscribe_wired_contract_topics(
                 manifest=auto_wiring_manifest_for_subscriptions,
                 report=auto_wiring_report,
@@ -4604,7 +4647,10 @@ async def bootstrap() -> int:
                 exclusions_out=_attach_exclusions,
                 core_runtime_topics=core_runtime_topics,
                 core_runtime_owners=core_runtime_owners,
+                demand_source=_demand_source,
+                demand_watch_stops_out=_demand_watch_stops,
             )
+            plugin_unsubscribe_callbacks.extend(_demand_watch_stops)
             _contract_attach_gate.exclude(tuple(_attach_exclusions))
             _contract_attach_gate.record(tuple(_attach_results))
             _gate_status = _contract_attach_gate.status()
@@ -4771,41 +4817,6 @@ async def bootstrap() -> int:
                     len(_unattached_at_boot),
                     sorted(r.contract_name for r in _unattached_at_boot),
                     correlation_id,
-                )
-
-        # --- Pass 2: Start consumers for ready plugins only ---
-        # ready_plugins is a subset of activated_plugins: only plugins that
-        # completed wire_handlers() successfully. This prevents starting
-        # consumers for plugins with no handlers/dispatchers wired.
-        for plugin in ready_plugins:
-            plugin_id = plugin.plugin_id
-            try:
-                consumer_result = await plugin.start_consumers(plugin_config)
-                if not consumer_result.success:
-                    logger.warning(
-                        "Plugin '%s' failed to start consumers: %s (correlation_id=%s)",
-                        plugin_id,
-                        consumer_result.get_error_message_or_default(
-                            consumer_result.message or "unknown"
-                        ),
-                        correlation_id,
-                    )
-                    continue
-                if consumer_result.unsubscribe_callbacks:
-                    plugin_unsubscribe_callbacks.extend(
-                        consumer_result.unsubscribe_callbacks
-                    )
-                logger.info(
-                    "Plugin '%s' consumers started (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                )
-            except Exception:  # noqa: BLE001 — boundary: logs warning and degrades
-                logger.warning(
-                    "Plugin '%s' failed to start consumers (correlation_id=%s)",
-                    plugin_id,
-                    correlation_id,
-                    exc_info=True,
                 )
 
         plugin_activation_duration = time.time() - plugin_activation_start

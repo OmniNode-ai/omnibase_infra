@@ -20,9 +20,9 @@ from pathlib import Path
 
 import httpx
 
-from omnibase_infra.handlers.lease import HandlerLeaseStore
+from omnibase_infra.handlers.lease import LeaseStore
+from omnibase_infra.handlers.lease.lease_etcd_gateway import LeaseEtcdGateway
 from omnibase_infra.handlers.placement import (
-    HandlerPlacementEtcd,
     HandlerPlacementRuntime,
     ModelPlacementPolicy,
 )
@@ -39,7 +39,7 @@ def _lines(path: Path) -> list[dict[str, object]]:
 
 class LeasePrimaryNode:
     def __init__(
-        self, runtime_id: str, store: HandlerLeaseStore, requests: Path, replies: Path
+        self, runtime_id: str, store: LeaseStore, requests: Path, replies: Path
     ) -> None:
         self.runtime_id = runtime_id
         self.store = store
@@ -95,8 +95,8 @@ async def main() -> None:
     parser.add_argument("--replies", type=Path, required=True)
     parser.add_argument("--ready", type=Path, required=True)
     args = parser.parse_args()
-    adapter = HandlerPlacementEtcd(args.endpoint, httpx.AsyncClient(timeout=2.0))
-    store = HandlerLeaseStore(
+    adapter = LeaseEtcdGateway(args.endpoint, httpx.AsyncClient(timeout=2.0))
+    store = LeaseStore(
         adapter, [ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=3)]
     )
     node = LeasePrimaryNode(args.runtime_id, store, args.requests, args.replies)

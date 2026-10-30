@@ -43,7 +43,9 @@ import os
 import subprocess
 from pathlib import Path
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 from tests.ci._prepush_lab_isolation import gh_offline_env, network_free_lab_env
+from tests.ci._prepush_private_table import write_hook_repo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
@@ -72,7 +74,7 @@ case "$args" in
     cat "$PREPUSH_TEST_SELECTION_JSON"
     exit 0
     ;;
-  *pytest*)
+  "run pytest"*)
     echo "STUB-PYTEST-INVOKED $args"
     echo "STUB-PYTEST-ENV ALLOW=${PREPUSH_ALLOW_LOCAL_FULL_SUITE:-UNSET} \
 CANARY=${PREPUSH_CANARY_LEAK_PROBE:-UNSET} \
@@ -105,6 +107,7 @@ def _run_hook(
     additionally shadows `hostname` with a stub that produces nothing, driving
     the guard's unresolvable-hostname branch deterministically on any host.
     """
+    repo = write_hook_repo(tmp_path, REPO_ROOT)
     selection_file = tmp_path / "selection.json"
     selection_file.write_text(
         json.dumps(
@@ -127,12 +130,14 @@ def _run_hook(
         hostname_stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
         hostname_stub.chmod(0o755)
 
-    env = dict(os.environ)
+    env = dict(scrub_git_location_env(os.environ))
     for leaky in _LEAKY_VARS:
         env.pop(leaky, None)
     env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
     env["PREPUSH_TEST_SELECTION_JSON"] = str(selection_file)
     env["PREPUSH_BASE_REF"] = "HEAD"
+    env["OMNI_HOME"] = ""
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(tmp_path / "empty_config")
     env["PREPUSH_200_HOSTNAME"] = _NON_MATCHING_HOSTNAME
     # OMN-16991: this harness forces first-entry behavior on a de-designated
     # host, which now reaches the lab-dispatch leg. Keep it network-free -- a
@@ -144,7 +149,7 @@ def _run_hook(
 
     return subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
-        cwd=REPO_ROOT,
+        cwd=repo,
         env=env,
         capture_output=True,
         text=True,

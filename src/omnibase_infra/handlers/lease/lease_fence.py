@@ -12,18 +12,18 @@ from __future__ import annotations
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
-from omnibase_infra.handlers.lease.handler_lease_store import (
+from omnibase_infra.handlers.lease.lease_etcd_gateway import (
+    LeaseEtcdGateway,
+)
+from omnibase_infra.handlers.lease.lease_store import (
     LEASE_PREFIX,
     resource_prefix,
-)
-from omnibase_infra.handlers.placement.handler_placement_etcd import (
-    HandlerPlacementEtcd,
 )
 from omnibase_infra.models.lease import EnumLeaseFenceStatus
 
 
 async def check_fence(
-    adapter: HandlerPlacementEtcd,
+    adapter: LeaseEtcdGateway,
     *,
     kind: str,
     resource: str,
@@ -46,11 +46,11 @@ async def check_fence(
     return EnumLeaseFenceStatus.UNKNOWN
 
 
-class HandlerLeaseFence:
+class LeaseFence:
     """``check_fence`` bound to one etcd adapter, for an effect target to hold."""
 
     def __init__(
-        self, adapter: HandlerPlacementEtcd, *, prefix: str = LEASE_PREFIX
+        self, adapter: LeaseEtcdGateway, *, prefix: str = LEASE_PREFIX
     ) -> None:
         self._adapter = adapter
         self._prefix = prefix
@@ -77,4 +77,4 @@ class HandlerLeaseFence:
         )
 
 
-__all__ = ["HandlerLeaseFence", "check_fence"]
+__all__ = ["LeaseFence", "check_fence"]

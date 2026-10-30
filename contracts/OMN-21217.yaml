@@ -1,0 +1,44 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21217"
+title: "Vendor the hosted credential ordered-model and credential model-version migrations"
+summary: >-
+  T5 deployment component of AC1: carry the routing overlay's ordered models migration (node_delegation_routing_reducer 0007) and the credential row's models and version migration (node_projection_tenant_credentials 0009) byte for byte, each with its exact tenant ledger binding and forward-only classification. This identity check does not prove runtime PostgreSQL CAS, a lane application, T6 routing or T7 dashboard management.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-hosted-ordered-model-deployment"
+    statement: "The deployment artifact must carry the same schema migration as the hosted credential writer."
+    acceptance:
+      - id: "AC1"
+        statement: >-
+          A hosted credential created with two models projects them in the order given, and two replaces carrying the same expected_version apply one and refuse the other. This repository proves only the migration delivery component; the writer's real PostgreSQL tests and serving-lane application remain separate required evidence.
+evidence_requirements:
+  - kind: "tests"
+    description: "For both migrations: exact source bytes, unique tenant ledger binding and forward-only classification."
+    command: "uv run pytest tests/unit/migrations/test_omn21217_ordered_models_vendor.py -q -n 0 --no-cov"
+dod_evidence:
+  - id: "dod-omn21217-t5-ordered-model-migration-vendor"
+    description: "AC1 deployment identity only: a missing or altered 0007 or 0009, a wrong ledger binding or a wrong classification fails."
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn21217_ordered_models_vendor.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn21217-lab-proof-composed-image"
+    description: >-
+      Lab-proof delivery component, not an AC: the catalog CLI that the omnimarket lab proof calls carries the image-containers command, so the proof can name every container that runs the composed omnimarket image. A tree without it fails.
+    source: "manual"
+    binds_ac: ["AC1"]
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/infra/test_catalog_composed_image_omn21217.py tests/integration/docker/test_catalog_image_containers_cli_omn21217.py -q -n 0 --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/docker/catalog/cli.py?ref=f1e5be301c80e4df9eda733b0e3e54778058a888' --jq .content | base64 -d | grep -c 'def cmd_image_containers'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""

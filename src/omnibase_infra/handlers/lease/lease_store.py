@@ -22,8 +22,8 @@ from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.handlers.placement.handler_placement_etcd import (
-    HandlerPlacementEtcd,
+from omnibase_infra.handlers.lease.lease_etcd_gateway import (
+    LeaseEtcdGateway,
     b64,
     unb64,
 )
@@ -56,15 +56,15 @@ def lease_kinds_from_spec(spec: str) -> tuple[ModelLeaseKindPolicy, ...]:
     return tuple(policies)
 
 
-async def lease_store_from_config(endpoint: str, kinds_spec: str) -> HandlerLeaseStore:
+async def lease_store_from_config(endpoint: str, kinds_spec: str) -> LeaseStore:
     """Build the lease store from a resolved etcd endpoint and kind list."""
     if not endpoint.strip():
         raise ValueError("the lease etcd endpoint resolved empty")
     if not kinds_spec.strip():
         raise ValueError("the lease kinds resolved empty")
     kinds = lease_kinds_from_spec(kinds_spec)
-    adapter = await HandlerPlacementEtcd.connect(endpoint.strip(), 5.0)
-    return HandlerLeaseStore(adapter, kinds)
+    adapter = await LeaseEtcdGateway.connect(endpoint.strip(), 5.0)
+    return LeaseStore(adapter, kinds)
 
 
 def resource_prefix(kind: str, resource: str, *, prefix: str = LEASE_PREFIX) -> str:
@@ -72,12 +72,12 @@ def resource_prefix(kind: str, resource: str, *, prefix: str = LEASE_PREFIX) -> 
     return f"{prefix}{kind}/{resource}/"
 
 
-class HandlerLeaseStore:
+class LeaseStore:
     """Acquire, renew, release and show leases; every grant is one etcd transaction."""
 
     def __init__(
         self,
-        adapter: HandlerPlacementEtcd,
+        adapter: LeaseEtcdGateway,
         kinds: Sequence[ModelLeaseKindPolicy],
         *,
         prefix: str = LEASE_PREFIX,
@@ -281,7 +281,7 @@ def _range_entry(responses: list[dict[str, object]]) -> tuple[str, int] | None:
 
 __all__ = [
     "LEASE_PREFIX",
-    "HandlerLeaseStore",
+    "LeaseStore",
     "lease_kinds_from_spec",
     "lease_store_from_config",
     "resource_prefix",

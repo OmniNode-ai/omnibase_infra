@@ -20,6 +20,17 @@ output_model:
 capabilities:
   - name: lease.projection.upsert
     description: Write one lease projection row.
+# The table is owned and granted here, not in a hand-kept table: the grant
+# derivation reads this repository's own node contracts as well as the pinned
+# omnimarket contracts.
+db_io:
+  db_tables:
+    - name: lease_projection
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/112_create_lease_projection.sql
+      access: read_write
+      role: lease_projection
 handler_routing:
   routing_strategy: payload_type_match
   handlers:

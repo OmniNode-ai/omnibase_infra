@@ -32,8 +32,10 @@ from deploy_agent import recreate_supervisor
 from deploy_agent.build_budget import (
     HARD_UPPER_BOUND_SECONDS,
     EnumBuildOutcome,
+    LaneBuilderError,
     ModelBuildBudget,
     derive_image_build_budget,
+    lane_builder_env,
     parse_build_progress,
 )
 from deploy_agent.compose_budget import (
@@ -1946,28 +1948,14 @@ LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
-def _workspace_config_root(workspace_root: Path) -> Path:
-    """The workspace-config owner, from the runtime's own resolver (OMN-19743).
-
-    ``ONEX_WORKSPACE_CONFIG_ROOT`` when set, otherwise the workspace's sibling
-    operator repository or its developer config. Imported here, not at module
-    load, because the resolver lives in the runtime kernel module.
-    """
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
-    return workspace_runtime_config_root(workspace_root)
-
-
-def resolve_lane_overlay_dir(
-    env: Mapping[str, str], repo_dir: str = REPO_DIR
-) -> str | None:
+def resolve_lane_overlay_dir(env: Mapping[str, str]) -> str | None:
     """Resolve the private lane-overlay directory every lane compose file mounts.
 
     ``ONEX_LANE_OVERLAY_DIR`` when it names a directory; otherwise
-    ``config/lab/lane-overlays`` under the workspace-config owner of the
-    workspace that holds this deploy clone (``REPO_DIR/..``). The workspace is
-    derived from the clone, not from ``OMNI_HOME``, because the agent's unit
-    names a different ``OMNI_HOME`` level than its clone's workspace.
+    ``config/lab/lane-overlays`` under ``ONEX_WORKSPACE_CONFIG_ROOT``, which the
+    deployment's host installer sets in this agent's unit. The agent installs the
+    published runtime package, so it reads the variable itself instead of
+    importing the runtime's resolver, and it guesses no directory beside its clone.
 
     Returns ``None`` when no directory exists. The caller then leaves the
     variable unset, and compose refuses every lane file with the mount's own
@@ -1976,12 +1964,50 @@ def resolve_lane_overlay_dir(
     configured = env.get(LANE_OVERLAY_DIR_ENV, "").strip()
     if configured:
         return str(Path(configured).resolve()) if Path(configured).is_dir() else None
-    candidate = (
-        _workspace_config_root(Path(repo_dir).parent) / LANE_OVERLAY_RELATIVE_DIR
+    owner = env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
+    candidate = Path(owner).resolve() / LANE_OVERLAY_RELATIVE_DIR if owner else None
+    return str(candidate) if candidate and candidate.is_dir() else None
+
+
+def _dev_broker_policy_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Render dev-201's broker contract at each read, after all settings.
+
+    Other lanes and brokers never consume this private contract overlay.
+    Use the deploy source's renderer/model, rather than the installed wheel,
+    so a source refresh and its validation change together.
+    """
+    allowed = env.get(ENV_ALLOWED_LANES, "").strip()
+    if (
+        not allowed
+        or not is_lab_dev_fence(parse_allowed_lanes(allowed))
+        or _ActiveDeployLane.lane not in (None, EnumRuntimeLane.DEV)
+        or active_dev_instance() != "dev-201"
+    ):
+        return {}
+    command = [
+        sys.executable,
+        f"{REPO_DIR}/scripts/render_runtime_policy_env.py",
+        "--dev-broker-only",
+        "--format",
+        "json",
+    ]
+    overlay_root = env.get(LANE_OVERLAY_DIR_ENV)
+    if overlay_root:
+        command.extend(["--overlay-root", overlay_root])
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
     )
-    if candidate.is_dir():
-        return str(candidate.resolve())
-    return None
+    if result.returncode:
+        # Do not echo subprocess stderr; policy validation may include input.
+        raise RuntimeError("dev broker runtime policy rendering refused")
+    rendered = json.loads(result.stdout)
+    if (
+        not isinstance(rendered, dict)
+        or set(rendered) != {"DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"}
+        or not all(isinstance(value, str) and value for value in rendered.values())
+    ):
+        raise RuntimeError("dev broker runtime policy renderer returned invalid values")
+    return rendered
 
 
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -2043,6 +2069,8 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # explicit per-dispatch pinned-image resolution.
     if extra_env:
         env.update(extra_env)
+    # Contract values win over inherited, operator, lane-fragment and caller settings.
+    env.update(_dev_broker_policy_env(env))
     return env
 
 
@@ -5688,8 +5716,19 @@ class DeployExecutor:
         # marker written on the way in would report the core phase failed
         # whenever a later runtime build raised.
         build_phase = Phase.CORE if scope == Scope.CORE else Phase.RUNTIME
+        # OMN-19211: an instance that names a declared builder builds on it
+        # instead of dockerd's embedded BuildKit, whose cache index loads before
+        # dockerd's API and stopped every container on the lab host when it was damaged.
+        # Resolved before the timed command: creating a builder is not a build
+        # and must not spend the build's ceiling. Refused, never fallen back, when
+        # the builder cannot be made ready.
         try:
-            result = _run(cmd, timeout=timeout, env=_compose_env())
+            build_env = {**_compose_env(), **lane_builder_env(os.environ)}
+        except LaneBuilderError:
+            on_phase_update(build_phase, PhaseStatus.FAILED)
+            raise
+        try:
+            result = _run(cmd, timeout=timeout, env=build_env)
         except subprocess.TimeoutExpired as exc:
             on_phase_update(build_phase, PhaseStatus.FAILED)
             # OMN-18615 (AC2): say what the build had DONE, not only what it

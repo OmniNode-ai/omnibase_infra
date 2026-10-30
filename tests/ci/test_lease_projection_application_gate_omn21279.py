@@ -13,11 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.topology.application_database import load_topology_profile
-from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
-    STATE_IO_TABLE_DECLARATIONS,
+from omnibase_infra.handlers.table_grant_declarations import (
+    supplemental_table_declarations,
 )
+from omnibase_infra.topology.application_database import load_topology_profile
 from omnibase_infra.validation.application_database_domain_enforcement import (
     application_database_created_catalog_identities,
     lint_application_database_sql,
@@ -49,8 +48,7 @@ def test_lease_projection_ownership_is_declared() -> None:
         for identity in _supplemental_ownership_identities(
             _ROOT,
             (),
-            declarations=STATE_IO_TABLE_DECLARATIONS
-            + LEGACY_MIGRATION_TABLE_DECLARATIONS,
+            declarations=supplemental_table_declarations(),
         )
     }
     assert created <= declared

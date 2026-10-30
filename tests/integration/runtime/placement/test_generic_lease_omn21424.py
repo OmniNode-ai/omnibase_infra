@@ -24,9 +24,9 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from omnibase_infra.handlers.lease import HandlerLeaseStore
-from omnibase_infra.handlers.lease.handler_lease_fence import check_fence
-from omnibase_infra.handlers.placement import HandlerPlacementEtcd
+from omnibase_infra.handlers.lease import LeaseStore
+from omnibase_infra.handlers.lease.lease_etcd_gateway import LeaseEtcdGateway
+from omnibase_infra.handlers.lease.lease_fence import check_fence
 from omnibase_infra.models.lease import (
     EnumLeaseFenceStatus,
     ModelLeaseAcquireRequest,
@@ -57,15 +57,15 @@ def _request(
 @pytest.fixture
 async def two_stores(
     etcd: EtcdProcess,
-) -> AsyncIterator[tuple[HandlerLeaseStore, HandlerLeaseStore]]:
+) -> AsyncIterator[tuple[LeaseStore, LeaseStore]]:
     adapters = [
-        HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=10.0))
+        LeaseEtcdGateway(etcd.endpoint, httpx.AsyncClient(timeout=10.0))
         for _ in range(2)
     ]
     try:
         yield (
-            HandlerLeaseStore(adapters[0], KINDS),
-            HandlerLeaseStore(adapters[1], KINDS),
+            LeaseStore(adapters[0], KINDS),
+            LeaseStore(adapters[1], KINDS),
         )
     finally:
         for adapter in adapters:
@@ -73,7 +73,7 @@ async def two_stores(
 
 
 async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
-    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
+    two_stores: tuple[LeaseStore, LeaseStore],
 ) -> None:
     a, b = two_stores
     # The exclusive kind's 2 s TTL is for the expiry tests. Under load the 100
@@ -92,7 +92,7 @@ async def test_ac1_hundred_concurrent_acquires_grant_exactly_one(
 
 
 async def test_capacity_two_kind_grants_two_with_distinct_fences(
-    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
+    two_stores: tuple[LeaseStore, LeaseStore],
 ) -> None:
     a, b = two_stores
     replies = await asyncio.gather(
@@ -107,7 +107,7 @@ async def test_capacity_two_kind_grants_two_with_distinct_fences(
 
 
 async def test_ac2_regrant_after_expiry_has_a_strictly_greater_fence(
-    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
+    two_stores: tuple[LeaseStore, LeaseStore],
 ) -> None:
     a, b = two_stores
     fences: list[int] = []
@@ -122,7 +122,7 @@ async def test_ac2_regrant_after_expiry_has_a_strictly_greater_fence(
 
 
 async def test_ac3_repeated_request_id_returns_the_same_lease_and_fence(
-    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore],
+    two_stores: tuple[LeaseStore, LeaseStore],
 ) -> None:
     a, b = two_stores
     request = _request("idempotent", "holder")
@@ -144,10 +144,10 @@ async def test_ac3_repeated_request_id_returns_the_same_lease_and_fence(
 
 
 async def test_ac6_check_fence_stale_expired_and_ok(
-    two_stores: tuple[HandlerLeaseStore, HandlerLeaseStore], etcd: EtcdProcess
+    two_stores: tuple[LeaseStore, LeaseStore], etcd: EtcdProcess
 ) -> None:
     a, b = two_stores
-    adapter = HandlerPlacementEtcd(etcd.endpoint, httpx.AsyncClient(timeout=5.0))
+    adapter = LeaseEtcdGateway(etcd.endpoint, httpx.AsyncClient(timeout=5.0))
     try:
         old = await a.acquire(_request("fenced", "old", "pair"))
         released = await a.release("pair", "fenced", old.lease_id)
@@ -186,7 +186,7 @@ async def test_ac6_check_fence_stale_expired_and_ok(
 
 
 async def _acquire_until_granted(
-    store: HandlerLeaseStore, resource: str, *, deadline_s: float
+    store: LeaseStore, resource: str, *, deadline_s: float
 ) -> ModelLeaseReply:
     deadline = time.monotonic() + deadline_s
     while time.monotonic() < deadline:

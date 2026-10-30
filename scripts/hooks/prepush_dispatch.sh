@@ -36,13 +36,16 @@
 # -----------------------------------------------------------------------------
 PREPUSH_HOST_TABLE_REL="scripts/hooks/prepush_hosts.tsv"
 
-# prepush_table_text -- prints the committed table, or returns 1 with a reason
-# on stderr. Reading from HEAD (not the working tree) is what stops an
-# uncommitted row from self-designating this machine as an authorizing gate
-# host; the working-tree divergence check stops the inverse trick of editing
-# the file after a commit that CI already saw.
+# prepush_table_text -- prints the committed shipped table followed by the
+# deployment's private table, or returns 1 with a reason on stderr. Reading from
+# HEAD (not the working tree) is what stops an uncommitted row from
+# self-designating this machine as an authorizing gate host; the working-tree
+# divergence check stops the inverse trick of editing the file after a commit
+# that CI already saw. An ABSENT private table is the neutral default (the
+# shipped disabled row alone), never an error; a private table that is present
+# and unreadable or divergent refuses.
 prepush_table_text() {
-  local head_copy work_copy
+  local head_copy work_copy private_copy private_rc=0
   if ! head_copy="$(git -C "$REPO_ROOT" show "HEAD:${PREPUSH_HOST_TABLE_REL}" 2> /dev/null)"; then
     printf 'host table absent at HEAD (%s)\n' "$PREPUSH_HOST_TABLE_REL" >&2
     return 1
@@ -54,93 +57,60 @@ prepush_table_text() {
       return 1
     fi
   fi
+  private_copy="$(prepush_private_table_text)" || private_rc=$?
+  if [ "$private_rc" -ne 0 ] && [ "$private_rc" -ne "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ]; then
+    return 1
+  fi
   printf '%s\n' "$head_copy"
+  [ "$private_rc" -ne 0 ] || printf '%s\n' "$private_copy"
+  return 0
 }
 
 # -----------------------------------------------------------------------------
-# Private placement overlay -- OMN-17996 (epic OMN-17992)
+# Private deployment table -- OMN-20939
 # -----------------------------------------------------------------------------
-# The committed table carries `@private` in ssh_target, uv_abs_path and
-# workroot. The transport target is resolved from the committed hostname column;
-# private ssh configuration may map that host alias to a lab address, but an
-# unversioned overlay may not choose where a git bundle is copied. The overlay
-# only hydrates the non-transport path values.
-#
-# Authorization is the (label, role, hostname, mode) columns of the committed
-# table, still read from HEAD, still refusing on working-tree divergence, and
-# still re-checked on the remote host by pytest_full_suite_host_guard.py against
-# its own `hostname -s`. So the OMN-16688 "no file on disk to forge" premise is
-# untouched: the overlay cannot add a host, redirect a bundle to a different
-# host, or make an unresolved row usable.
-#
-# Resolution is fail-fast with no default (CLAUDE.md rule 8): there is no
-# fallback path and no built-in address. OMNI_HOME unset, or the file absent,
-# The owner is ONEX_WORKSPACE_CONFIG_ROOT or the sibling operator repository.
-# The retiring registry config is never read. Missing owner data
-# leaves path columns UNRESOLVED and emits a diagnostic. A row with incomplete
-# overlay data is resolved the same way: `-` for ssh_target and empty for
-# uv/workroot, so lab placement is SKIPPED and the caller falls through to the
-# pre-existing precedence. It never refuses a push: a placement optimisation
-# that bricks pushes is the failure mode this hook family already rejected once.
-PREPUSH_HOST_OVERLAY_REL="config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+# The shipped table above carries the schema and a neutral disabled row. The
+# deployment's hosts live in a private table with the same fifteen columns,
+# found through ONEX_WORKSPACE_CONFIG_ROOT, which the deployment's own overlay or
+# host installer sets. Unset means no deployment table: the shipped neutral row
+# alone, said so on stderr. There is no built-in path and no lab value in this
+# file (CLAUDE.md rule 8).
+# The caller names the file (a repo-relative-to-the-config-root path); the shared
+# library carries no repo name. Unset means no deployment table is declared.
+PREPUSH_PRIVATE_TABLE_REL="${PREPUSH_PRIVATE_TABLE_REL:-}"
 
-# prepush_overlay_path -- absolute path to the private overlay, or rc=1 with a
-# reason on stderr. There is no fallback path and no built-in address.
-prepush_overlay_path() {
-  local path
-  if [ -z "${OMNI_HOME:-}" ]; then
-    printf 'placement overlay unresolved: OMNI_HOME is not set (%s)\n' \
-      "$PREPUSH_HOST_OVERLAY_REL" >&2
-    return 1
-  fi
-  path="${ONEX_WORKSPACE_CONFIG_ROOT:-${OMNI_HOME}/../omnibase_internal}/${PREPUSH_HOST_OVERLAY_REL}"
-  if [ ! -f "$path" ]; then
-    printf 'placement overlay absent at %s\n' "$path" >&2
-    return 1
-  fi
-  printf '%s' "$path"
+# Python owns private-table resolution and HEAD parity for both entry points.
+# The reader's exit status is a closed vocabulary: 0 table printed, 78 no table
+# declared (the neutral default), 1 present but untrusted. 78 is not a status
+# argparse (2), uv (2), a shell lookup failure (126, 127) or an uncaught Python
+# exception (1) can produce, so every failure of the reader itself, a missing uv
+# included, lands on the refusal side with its own diagnostic on stderr, and only
+# the reader's declaration reads as absent. PREPUSH_PRIVATE_TABLE_ABSENT_RC
+# carries the 78.
+PREPUSH_PRIVATE_TABLE_ABSENT_RC=78
+
+prepush_private_table_text() {
+  local library_root rc=0
+  library_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || return 1
+  (
+    cd "$library_root" || exit 1
+    ONEX_WORKSPACE_CONFIG_ROOT="${ONEX_WORKSPACE_CONFIG_ROOT:-}" UV_FROZEN=1 \
+      uv run python -m scripts.hooks.pytest_full_suite_host_guard \
+      --private-table "$PREPUSH_PRIVATE_TABLE_REL" "$@"
+  ) || rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ] || rc=1
+  return "$rc"
 }
 
-# prepush_table_rows -- data rows only (comments and blanks dropped), with the
-# `@private` placement columns hydrated from the overlay.
+prepush_private_table_status() {
+  prepush_private_table_text --status
+}
+
+# prepush_table_rows -- data rows only (comments and blanks dropped).
 prepush_table_rows() {
-  local overlay
-  overlay="$(prepush_overlay_path)" || overlay="/dev/null"
-  prepush_table_text | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d' | awk \
-    -F'\t' -v OFS='\t' -v OVL="$overlay" '
-      # The overlay is matched by FILENAME rather than the NR==FNR idiom on
-      # purpose: an EMPTY or absent overlay (/dev/null) contributes zero
-      # records, and NR==FNR would then be true for the FIRST TABLE ROW and
-      # silently eat it.
-      FILENAME == OVL {
-        line = $0
-        sub(/#.*$/, "", line)
-        if (line ~ /^[ \t]*$/) next
-        split(line, f, "\t")
-        if (f[1] == "") next
-        uvv[f[1]] = f[3]
-        wrv[f[1]] = f[4]
-        next
-      }
-      {
-        needs_private = ($4 == "@private" || $6 == "@private" || $8 == "@private")
-        complete_overlay = (($1 in uvv) && uvv[$1] ~ /^\// && ($1 in wrv) && wrv[$1] ~ /^\//)
-        if (needs_private && !complete_overlay) {
-          print "placement overlay incomplete for " $1 "; skipping row placement" > "/dev/stderr"
-          if ($4 == "@private") { $4 = "-" }
-          if ($6 == "@private") { $6 = "" }
-          if ($8 == "@private") { $8 = "" }
-          print
-          next
-        }
-        # The transport target is the committed hostname. Private ssh config is
-        # where lab addresses and account-specific login details belong; the
-        # unversioned overlay never controls where the git bundle is copied.
-        if ($4 == "@private") { $4 = $3 }
-        if ($6 == "@private") { $6 = uvv[$1] }
-        if ($8 == "@private") { $8 = wrv[$1] }
-        print
-      }' "$overlay" -
+  local table
+  table="$(prepush_table_text)" || return 1
+  printf '%s\n' "$table" | sed -e 's/#.*$//' -e '/^[[:space:]]*$/d'
 }
 
 # prepush_field ROW N -- Nth tab-separated field of ROW.
@@ -884,12 +854,13 @@ pick_capacity_host() {
   done
   PREPUSH_PROBE_LOG="${PREPUSH_PROBE_LOG% }"
   [ -n "$recs" ] || return 1
-  # Tier-major (field 10, OMN-17485), then ascending load ratio within a tier:
+  # Tier-major (field 10, OMN-17485), then ascending load ratio within a tier.
+  # Equal-load slots use numeric slot index so slot 1 precedes slot 2:
   # every fit default-tier host is tried before any last_resort host, and
   # within a tier the cheapest host is tried first with the rest staying
   # available as fallbacks. The record keeps the true measured ratio in field
   # 1 -- the demotion lives in the sort key, never in the evidence.
-  PREPUSH_FIT_RECORDS="$(printf '%s' "$recs" | sed '/^[[:space:]]*$/d' | sort -t'|' -k10,10n -k1,1g)"
+  PREPUSH_FIT_RECORDS="$(printf '%s' "$recs" | sed '/^[[:space:]]*$/d' | sort -t'|' -k10,10n -k1,1g -k9,9n)"
   prepush_select_candidate 1
 }
 
@@ -948,7 +919,7 @@ EOF
 # Its DIRECTORY is what matters (OMN-17549): the table's own column header
 # records that "uv is on NO host's non-interactive PATH", and every host's uv
 # is provisioned into the same directory as that host's other user-installed
-# tools -- `/home/jonah/.local/bin/uv` on h201 sits beside the `shellcheck`
+# tools -- the configured uv path on a host sits beside the `shellcheck`
 # the shell-hygiene gate shells out to by bare name. The remote leg already
 # gets that directory for free as `$(dirname "$UV")`; the local leg has to look
 # it up. It is the row's dir rather than `$HOME`'s because a NON-OWNER actor
@@ -1148,7 +1119,7 @@ PREPUSH_REACH_CONNECT_TIMEOUT=4
 # `.` to execvp, which would put the repo working directory on PATH). The
 # committed table's uv directory for this host is added alongside it, because
 # `$HOME` is the wrong answer for a NON-OWNER actor: on h201 the row declares
-# `/home/jonah/.local/bin/uv` and `shellcheck` lives beside it, while a
+# its provisioned uv path and `shellcheck` lives beside it, while a
 # collaborator's `${HOME}/.local/bin` holds neither.
 prepush_developer_shell_path() {
   local uvbin uvdir lc rowuv rowdir
@@ -1416,7 +1387,7 @@ prepush_sha256_file() {
 
 # prepush_remote_gc TARGET RUNDIR WORKROOT -- reclaim the transplanted tree and
 # prune stale run directories. A clone plus `uv sync --all-extras` is ~0.5 GB
-# per run and nothing pruned it: two dispatches left 1.0 GB on omnibook, the
+# per run and nothing pruned it: two dispatches left 1.0 GB on the configured target, the
 # host the picker prefers, which fills a laptop disk in a few hundred pushes and
 # then starts failing runs for a reason that looks nothing like its cause. The
 # small artifacts (MARKER, suite.log, sync.log) are deliberately KEPT -- they
@@ -1659,7 +1630,7 @@ prepush_remote_run() {
   local heavy_what repo head_sha runid workroot ssh_t uv label rundir
   local bundle argvfile runner localdir marker rc=0 argv_sha log_sha
   local m_exit m_head m_argv m_log m_collected started ended dur
-  local readback wrapper_exit base_ref base_sha slot_idx remote_cmd tcmd
+  local readback wrapper_exit base_ref base_sha slot_idx remote_cmd tcmd privfile private_rc
   heavy_what="$1"
   # Resolved by the hook before it ever reaches here; empty in a driver that
   # exercises the library alone, which the wrapper handles as "skip".
@@ -1677,7 +1648,7 @@ prepush_remote_run() {
   runid="${repo}-$(printf '%s' "$head_sha" | cut -c1-12)-$$"
   rundir="${workroot}/runs/${runid}"
 
-  localdir="$(mktemp -d 2> /dev/null)" || return 1
+  localdir="$(mktemp -d "${TMPDIR:-/tmp}/prepush.XXXXXX" 2> /dev/null)" || return 1
   bundle="${localdir}/tree.bundle"
   argvfile="${localdir}/argv.txt"
   runner="${localdir}/prepush_smart_tests.sh"
@@ -1704,6 +1675,22 @@ prepush_remote_run() {
   prepush_remote_pytest_flags >> "$argvfile"
   argv_sha="$(prepush_sha256_file "$argvfile")"
 
+  # OMN-20939: the deployment's host rows are not in the bundle (the shipped table
+  # carries none), so the rows this dispatch verified travel beside it and the
+  # target's conftest guard reads the same table. Absent on a deployment with no
+  # private table, in which case the target designates nothing.
+  privfile="${localdir}/host_table_private.tsv"
+  private_rc=0
+  prepush_private_table_text > "$privfile" || private_rc=$?
+  if [ "$private_rc" -eq "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ]; then
+    rm -f "$privfile"
+    privfile=""
+  elif [ "$private_rc" -ne 0 ]; then
+    log "remote leg: private host table could not be verified"
+    rm -rf "$localdir"
+    return 1
+  fi
+
   # The remote wrapper is NAMED prepush_smart_tests.sh on purpose. .201's queue
   # runner gates every lane on `ps ax | grep prepush_smart_tests.sh` ("no other
   # heavy prepush running host-wide, covers foreign runs not launched through
@@ -1717,6 +1704,7 @@ prepush_remote_run() {
 set -uo pipefail
 RUNDIR="$1"; UV="$2"; HEAD_SHA="$3"; ARGV_SHA="$4"; ORIGIN="$5"; WORKROOT="$6"
 BASE_REF="${7:-}"; BASE_SHA="${8:-}"; SLOT_INDEX="${9:-1}"
+PRIVATE_REL="${11:-}"
 # The repo this bundle carries, so the registry root below can name it. Passed
 # rather than derived: RUNDIR's basename is `<repo>-<sha12>-<pid>` and repo
 # names contain both separators, so splitting it back apart is guesswork.
@@ -1734,18 +1722,18 @@ unset ENABLE_SMART_TESTS || true
 export ONEX_PREPUSH_HOOK_ACTIVE="remote-leg:${ORIGIN}"
 
 # PATH PARITY WITH A DEVELOPER SHELL. A non-interactive ssh session gets a
-# minimal PATH -- on omnibook literally `/usr/bin:/bin:/usr/sbin:/sbin`, with
+# minimal PATH -- on the configured target literally `/usr/bin:/bin:/usr/sbin:/sbin`, with
 # neither the Homebrew prefix nor ~/.local/bin on it. The suite shells out to
 # tools by BARE NAME (`uv` in tests/unit/infra/test_catalog_cli.py, `shellcheck`
 # in the shell-hygiene gate tests), so without this a transplanted run fails in
 # ways the same tree never fails locally: the first full-suite dispatch to
-# omnibook returned 8 reds, every one a FileNotFoundError for a tool that WAS
+# the configured target returned 8 reds, every one a FileNotFoundError for a tool that WAS
 # installed on that host, just not on the ssh PATH. A false red here HARD-BLOCKS
 # a push, so this is part of the verdict meaning anything -- not a convenience.
 #
 # The list below was macOS-only by construction (OMN-16989): `/opt/homebrew/bin`
 # has no meaning on a Linux row, and the fleet's only Linux capacity row is
-# h201. Measured there non-interactively 2026-08-30, `ssh jonah@192.168.86.201
+# h201. Measured there non-interactively 2026-08-30, `ssh <configured-host>
 # 'echo $PATH'` prints
 # `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin`
 # -- `~/.local/bin` is absent, and BOTH `uv` and `shellcheck` live there, so the
@@ -1866,6 +1854,15 @@ mkdir -p "$RUNDIR/omni_home" || { echo "REGISTRY_ROOT_MKDIR_FAILED" >&2; exit 98
 ln -s "$RUNDIR/tree" "$RUNDIR/omni_home/$REPO_NAME" || { echo "REGISTRY_ROOT_LINK_FAILED" >&2; exit 98; }
 OMNI_HOME="$RUNDIR/omni_home"
 export OMNI_HOME
+unset ONEX_WORKSPACE_CONFIG_ROOT
+# The deployment host table the dispatching side verified (OMN-20939), laid out
+# where the conftest guard's workspace-config resolver looks for it.
+if [ -f "$RUNDIR/host_table_private.tsv" ] && [ -n "$PRIVATE_REL" ]; then
+  mkdir -p "$(dirname "$RUNDIR/workspace_config/$PRIVATE_REL")" || { echo "WORKSPACE_CONFIG_MKDIR_FAILED" >&2; exit 98; }
+  cp "$RUNDIR/host_table_private.tsv" "$RUNDIR/workspace_config/$PRIVATE_REL" || { echo "WORKSPACE_CONFIG_COPY_FAILED" >&2; exit 98; }
+  ONEX_WORKSPACE_CONFIG_ROOT="$RUNDIR/workspace_config"
+  export ONEX_WORKSPACE_CONFIG_ROOT
+fi
 
 "$UV" sync --all-extras > "$RUNDIR/sync.log" 2>&1 || { echo "UV_SYNC_FAILED" >&2; exit 93; }
 # THE COLLECTED COUNT IS READ FROM A MACHINE-READABLE REPORT (OMN-17787).
@@ -1874,7 +1871,7 @@ export OMNI_HOME
 # the selection green" from "this host ran NOTHING and exited 0".
 #
 # THE DEFECT THIS CLOSES, measured 2026-09-03 by reading two run dirs on the
-# SAME host (h101, /Users/Shared/onex-prepush/runs/) read-only:
+# SAME host (h101, <configured-workroot>/runs/) read-only:
 #
 #   omnibase_infra-edeb29875ef7-3319   argv "tests/unit/"
 #     suite.log:7  `collected 25911 items`      MARKER collected=25911  963.74s
@@ -1939,7 +1936,7 @@ REMOTE
     rm -rf "$localdir"
     return 1
   fi
-  if ! scp -q -o ConnectTimeout=6 -o BatchMode=yes "$bundle" "$argvfile" "$runner" "${ssh_t}:${rundir}/" > /dev/null 2>&1; then
+  if ! scp -q -o ConnectTimeout=6 -o BatchMode=yes "$bundle" "$argvfile" "$runner" ${privfile:+"$privfile"} "${ssh_t}:${rundir}/" > /dev/null 2>&1; then
     log "remote leg: transfer to ${label} failed"
     rm -rf "$localdir"
     return 1
@@ -1970,7 +1967,7 @@ REMOTE
   # dispatch_to_lab_host treats as a placement miss and walks past. Fail-closed
   # posture is unchanged -- a genuine remote RED still carries a marker and
   # still refuses the push.
-  remote_cmd="cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}' '${base_ref}' '${base_sha}' '${slot_idx}' '${repo}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0"
+  remote_cmd="cd '${rundir}' || exit 96; chmod +x prepush_smart_tests.sh || exit 97; ./prepush_smart_tests.sh '${rundir}' '${uv}' '${head_sha}' '${argv_sha}' '$(hostname -s 2> /dev/null || echo unknown):$$' '${workroot}' '${base_ref}' '${base_sha}' '${slot_idx}' '${repo}' '${PREPUSH_PRIVATE_TABLE_REL}'; rc=\$?; echo REMOTE_WRAPPER_EXIT=\$rc; echo \$rc > '${rundir}/WRAPPER_EXIT'; exit 0"
   tcmd="$(_prepush_timeout_cmd)"
   if [ -n "$tcmd" ]; then
     "$tcmd" "$PREPUSH_REMOTE_EXEC_TIMEOUT_SECONDS" \

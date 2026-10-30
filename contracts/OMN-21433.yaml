@@ -1,0 +1,87 @@
+schema_version: 1.0.0
+ticket_id: OMN-21433
+title: A pull request is proven on a lab slot from a tag at its head, before it merges
+summary: >-
+  Lane premerge-lab-1105. The pre-PR slot pool could not bring any slot up on the dev head of 2026-10-28: OMN-21279 put the build-only dev-lane-infra-runtime-image on the slot profile and the rendered-slot verifier refused it (exit 12) with its reason dropped from the receipt. The verifier now accepts that service only at scale 0 and the overlay attaches it to the dev network, so compose creates no default network; the pool driver prints the verifier's mismatch lines on exit 12.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-slot-render-accepts-build-only-image
+    statement: Declared by this pull request under the factory minting ticket; not transcribed from a ticket body.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the rendered-slot verifier accepts dev-lane-infra-runtime-image at scale 0, refuses it at any other scale, and the slot overlay attaches it to omnibase-infra-network -- falsifier: test_prepr_verify_lane_entrypoint_omn18893.py build_only cases, red on the previous head'
+      - id: AC2
+        statement: 'AC2: INFRA_TAG and MARKET_TAG select the tagged head for the build and test trees, pull refs remain the default, mismatched heads fail the readback, and a base control removes PR tags and identity.'
+      - id: AC3
+        statement: 'AC3: every slot runtime service declares a bounded on-failure restart policy.'
+  - id: "req-omn21433-documentation-surface-item-holds"
+    statement: |-
+      The documentation-surface item of contracts/OMN-17427.yaml is true on dev and still asserts the knowledge-base link, a short README and the absence of the unused documentation paths.
+    acceptance:
+      - id: "AC8"
+        statement: |-
+          AC8: the command check of dod-omn17427-documentation-surface exits 0 from the repository root, and the same command exits nonzero on an oversized README, a README without the knowledge-base link, and each unused documentation path -- falsifier: uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q
+  - id: "req-omn21433-check-ceiling-named"
+    statement: |-
+      The repo-evidence caller names the per-check ceiling the receipt-gate reusable takes as an input, so a test-passing check on a hosted runner is judged by what it asserts and not killed at the verifier's 30 s default.
+    acceptance:
+      - id: "AC9"
+        statement: |-
+          AC9: the caller pins a receipt-gate reusable that declares check-timeout-seconds and passes a whole number of seconds above 30 and at most 900 -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q fails at the merge base, whose caller passes no ceiling
+evidence_requirements:
+  - kind: "tests"
+    description: "The test runs the item's own command from the repository root and in a temporary root with each violation planted."
+    command: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
+  - kind: "tests"
+    description: "The caller's pinned reusable declares the input and the caller passes a ceiling in range."
+    command: "uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn-21433-ac1-slot-render
+    description: >-
+      AC1, deploy scope. The slot overlay and the rendered-slot verifier are covered by the verify-lane entrypoint tests, and a pre-PR slot built from the branch passed the render check on the lab host (receipt in the pull request body). The four lab_overlay cases read the private lane manifest, which a hosted runner does not have, so this command deselects them; the Lane Census Staleness job selects them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_lane_entrypoint_omn18893.py -q -n 0 -m "not lab_overlay"
+    binds_ac:
+      - AC1
+  - id: dod-omn-21433-ac2-tag-behavior
+    description: >-
+      AC2. Execute the shell clone phase against disposable local Git repositories with different tag and pull heads, inspect both resulting trees, and exercise the driver's base-control parameter filtering. No GitHub access or lab lane manifest is required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_pool_tag_ref_omn21433.py -q -n 0
+    binds_ac:
+      - AC2
+  - id: dod-omn-21433-ac3-restart-policy
+    description: >-
+      AC3, deploy scope. Run Docker Compose config with the infra, dev-lane and prepr files and both slot profiles, using synthetic credentials and the checked-in runtime policy. Assert that each of the twelve rendered runtime services has exactly on-failure:3. No daemon, private lane manifest or running containers are required.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_prepr_slot_restart_bound_omn21433.py -q -n 0
+    binds_ac:
+      - AC3
+  - id: "dod-omn21433-ac8-documentation-surface-item-holds"
+    description: "The test reads contracts/OMN-17427.yaml, runs the documentation-surface item's command from the repository root and expects exit 0, then plants each violation in a temporary root and expects a nonzero exit. At the merge base the cited contract is OMN-21433's, so contracts/OMN-17427.yaml is the stale one (at most 5 lines against a 14-line README) and the root run fails; at the head the corrected item passes."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC8"]
+  - id: "dod-omn21433-ac9-check-ceiling-named"
+    description: "The test reads the caller workflow and expects the pinned reusable to be one that declares check-timeout-seconds and the passed value to be a whole number from 31 to 900. At the merge base the caller passes no ceiling, so the second test fails there."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC9"]

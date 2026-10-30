@@ -239,6 +239,11 @@ def test_the_shipped_table_names_a_runtime_lane_for_every_dev_instance() -> None
 def dev_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A dev-lane agent process whose overlay clone holds the non-acting fragment."""
     clone = _overlay_clone(tmp_path, {_fragment_path(): _fragment(NON_ACTING)})
+    # Compose also reads broker policy from its deploy source (OMN-20275).
+    monkeypatch.setattr(
+        executor_mod, "REPO_DIR", str(Path(__file__).resolve().parents[4])
+    )
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(tmp_path))
     monkeypatch.setenv("DEPLOY_AGENT_ALLOWED_LANES", "dev")
     monkeypatch.setattr(executor_mod._LaneOverlayClone, "path", clone)
     monkeypatch.setattr(

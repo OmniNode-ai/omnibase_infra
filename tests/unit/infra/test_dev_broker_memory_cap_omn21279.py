@@ -16,6 +16,7 @@ from types import ModuleType
 import pytest
 from dotenv import dotenv_values
 
+from scripts.render_runtime_policy_env import load_contract, render_env
 from tests.ci._compose_render_omn21099 import DEV_LANE_STACK, load_compose, render_stack
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -57,16 +58,21 @@ def _checker() -> ModuleType:
 
 
 def test_checker_accepts_the_real_dev_broker_configuration() -> None:
-    # The overlay replaces the base command and fixes both bounds as literals.
     services = load_compose("docker-compose.dev-lane.yml")["services"]
     broker = services["redpanda"]
-    command = " ".join(broker["command"])
-    assert "--memory 12G" in command
-    assert broker["mem_limit"] == "16g"
-    _checker()._check_broker_memory(broker)
-    assert (
-        services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
-        == "12G"
+    assert any(
+        arg.startswith("--memory ${DEV_REDPANDA_MEMORY:?") for arg in broker["command"]
+    )
+    assert broker["mem_limit"].startswith("${DEV_REDPANDA_MEM_LIMIT:?")
+    assert services["redpanda-partition-cap"]["environment"][
+        "REDPANDA_PROFILE_MEMORY"
+    ].startswith("${DEV_REDPANDA_MEMORY:?")
+    rendered = render_env(load_contract())
+    _checker()._check_broker_memory(
+        {
+            "command": ["--memory", rendered["DEV_REDPANDA_MEMORY"]],
+            "mem_limit": rendered["DEV_REDPANDA_MEM_LIMIT"],
+        }
     )
 
 
@@ -81,6 +87,12 @@ def test_checker_accepts_the_real_dev_broker_configuration() -> None:
         ("6G", "8g"),
         ("13G", "16g"),
         ("12G", "17g"),
+        ("12.00000000000000000000000001G", "16g"),
+        ("12G", "16.00000000000000000000000001g"),
+        ("12288.000000001M", "16g"),
+        ("12G", "16384.000000001m"),
+        ("0G", "16g"),
+        ("12G", "12g"),
         ("12289M", "16g"),
         ("12287M", "16g"),
         ("12G", "16385m"),
@@ -224,18 +236,70 @@ def test_deploy_preflight_checks_the_real_dev_stack(advertise_host: str | None) 
 
 @pytest.mark.parametrize("memory", ["3G", "6G", "12G", "24G"])
 @pytest.mark.usefixtures("docker_compose")
-def test_rendered_dev_broker_keeps_consented_12g_16g(memory: str) -> None:
-    services = render_stack(DEV_LANE_STACK, {"DEV_REDPANDA_MEMORY": memory})
+def test_rendered_dev_broker_consumes_policy_and_preflight_enforces_bounds(
+    memory: str,
+) -> None:
+    services = render_stack(
+        DEV_LANE_STACK, {"DEV_REDPANDA_MEMORY": memory, "DEV_REDPANDA_MEM_LIMIT": "16g"}
+    )
     broker = services["redpanda"]
-    assert "--memory 12G" in " ".join(broker["command"])
+    assert f"--memory {memory}" in " ".join(broker["command"])
     assert int(broker["mem_limit"]) == 16 * 1024**3
     assert (
         services["redpanda-partition-cap"]["environment"]["REDPANDA_PROFILE_MEMORY"]
-        == "12G"
+        == memory
     )
+    if memory != "12G":
+        with pytest.raises(ValueError):
+            _checker()._check_broker_memory(broker)
+    else:
+        _checker()._check_broker_memory(broker)
 
 
 def test_deploy_agent_env_declares_consented_dev_memory() -> None:
     policy = dotenv_values(ROOT / "docker/runtime-policy.env")
     assert policy["DEV_REDPANDA_MEMORY"] == "12G"
     assert policy["DEV_REDPANDA_MEM_LIMIT"] == "16g"
+
+
+@pytest.mark.parametrize("missing", ["DEV_REDPANDA_MEMORY", "DEV_REDPANDA_MEM_LIMIT"])
+def test_checker_refuses_unset_contract_variable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    missing: str,
+) -> None:
+    compose = tmp_path / "docker-compose.dev-lane.yml"
+    compose.write_text(
+        "services:\n  redpanda:\n    command: ['--memory ${DEV_REDPANDA_MEMORY:?required}']\n    mem_limit: ${DEV_REDPANDA_MEM_LIMIT:?required}\n"
+    )
+    monkeypatch.setenv("DEV_REDPANDA_MEMORY", "12G")
+    monkeypatch.setenv("DEV_REDPANDA_MEM_LIMIT", "16g")
+    monkeypatch.delenv(missing)
+    assert _checker().main(["--compose-file", str(compose)]) == 1
+    assert missing in capsys.readouterr().err
+
+
+def test_checker_refuses_a_different_partition_cap_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+
+    module = _checker()
+    rendered = {
+        "services": {
+            "redpanda": {"command": ["--memory", "12G"], "mem_limit": "16g"},
+            "redpanda-partition-cap": {
+                "environment": {"REDPANDA_PROFILE_MEMORY": "3G"}
+            },
+        }
+    }
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps(rendered)
+        ),
+    )
+    with pytest.raises(ValueError, match="profile memory"):
+        module._check_dev_broker_stack([], tmp_path / "unused.env")

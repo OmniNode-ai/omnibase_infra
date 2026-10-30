@@ -17,8 +17,6 @@ import os
 import time
 from pathlib import Path
 
-import httpx
-
 from omnibase_infra.handlers.placement import (
     HandlerPlacementEtcd,
     HandlerPlacementRuntime,
@@ -132,7 +130,7 @@ async def main() -> None:
     parser.add_argument("--failover-target-s", type=float, default=10.0)
     args = parser.parse_args()
     node = ProbeNode(args.runtime_id, args.out, args.store, args.topic)
-    adapter = HandlerPlacementEtcd(args.endpoint, httpx.AsyncClient(timeout=1.0))
+    adapter = HandlerPlacementEtcd(args.endpoint)
     runtime = HandlerPlacementRuntime(
         runtime_id=args.runtime_id,
         adapter=adapter,

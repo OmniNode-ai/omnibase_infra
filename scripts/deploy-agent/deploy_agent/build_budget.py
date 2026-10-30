@@ -66,12 +66,14 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from deploy_agent.compose_budget import ComposeBudgetError, _ComposeLoader
 from deploy_agent.host_conditions import ModelHostConditions
@@ -484,3 +486,194 @@ def derive_image_build_budget(
         model_seconds=max(floor_seconds, derived),
         host=host,
     )
+
+
+# ============================================================================
+# OMN-19211: DEDICATED LANE BUILDER
+#
+# PDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# # SPDX-License-Identifier: MIT
+# ============================================================================
+
+LANE_BUILDER_ENV: Final = "DEPLOY_AGENT_LANE_BUILDER"
+BUILDX_BUILDER_ENV: Final = "BUILDX_BUILDER"
+
+# scripts/deploy-agent/deploy_agent/lane_builder.py -> the repository root.
+REPO_ROOT: Final = Path(__file__).resolve().parents[3]
+DECLARATION_PATH: Final = REPO_ROOT / "deploy" / "buildkit" / "builders.yaml"
+
+_BUILDKIT_VERSION_RE: Final = re.compile(r"^BuildKit version:\s+(\S+)", re.MULTILINE)
+_DRIVER_RE: Final = re.compile(r"^Driver:\s+(\S+)", re.MULTILINE)
+
+CommandRunner = Callable[[Sequence[str], int], "subprocess.CompletedProcess[str]"]
+
+
+class LaneBuilderError(RuntimeError):
+    """The declared builder could not be made ready; the build must not run."""
+
+
+class ModelBuilderSpec(BaseModel):
+    """One declared builder."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    driver: str = Field(min_length=1)
+    image: str = Field(min_length=1)
+    buildkitd_config: str = Field(min_length=1)
+    driver_opts: Mapping[str, str]
+    bootstrap_timeout_seconds: int = Field(gt=0)
+
+    @property
+    def image_version(self) -> str:
+        """The tag of the pinned image, the string ``buildx inspect`` reports."""
+        _, _, tag = self.image.rpartition(":")
+        return tag
+
+
+class ModelEngineFloor(BaseModel):
+    """The Docker Engine floor every lab host is declared to reach."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    min_docker_ce: str = Field(min_length=1)
+
+
+class ModelBuilderDeclaration(BaseModel):
+    """``deploy/buildkit/builders.yaml``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: str
+    builders: Mapping[str, ModelBuilderSpec]
+    engine: ModelEngineFloor
+
+
+def load_declaration(path: Path = DECLARATION_PATH) -> ModelBuilderDeclaration:
+    return ModelBuilderDeclaration.model_validate(yaml.safe_load(path.read_text()))
+
+
+def resolve_spec(
+    key: str, declaration: ModelBuilderDeclaration | None = None
+) -> ModelBuilderSpec:
+    decl = declaration if declaration is not None else load_declaration()
+    try:
+        return decl.builders[key]
+    except KeyError:
+        raise LaneBuilderError(
+            f"{LANE_BUILDER_ENV}={key!r} names no builder in {DECLARATION_PATH.name}; "
+            f"declared: {sorted(decl.builders)}"
+        ) from None
+
+
+def create_command(spec: ModelBuilderSpec, repo_root: Path = REPO_ROOT) -> list[str]:
+    """The ``docker buildx create`` argv that realises the declaration."""
+    opts = [f"image={spec.image}"] + [f"{k}={v}" for k, v in spec.driver_opts.items()]
+    return [
+        "docker",
+        "buildx",
+        "create",
+        "--name",
+        spec.name,
+        "--driver",
+        spec.driver,
+        "--driver-opt",
+        ",".join(opts),
+        "--buildkitd-config",
+        str(repo_root / spec.buildkitd_config),
+        "--bootstrap",
+    ]
+
+
+def _run(argv: Sequence[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(argv), capture_output=True, text=True, timeout=timeout, check=False
+    )
+
+
+def _is_ready(spec: ModelBuilderSpec, run: CommandRunner) -> bool:
+    """True when the builder exists, boots, and is the declared driver and version."""
+    result = run(
+        ["docker", "buildx", "inspect", spec.name, "--bootstrap"],
+        spec.bootstrap_timeout_seconds,
+    )
+    if result.returncode != 0:
+        return False
+    driver = _DRIVER_RE.search(result.stdout)
+    version = _BUILDKIT_VERSION_RE.search(result.stdout)
+    return (
+        driver is not None
+        and driver.group(1) == spec.driver
+        and version is not None
+        and version.group(1) == spec.image_version
+    )
+
+
+def _exists(spec: ModelBuilderSpec, run: CommandRunner) -> bool:
+    return (
+        run(["docker", "buildx", "inspect", spec.name], spec.bootstrap_timeout_seconds)
+    ).returncode == 0
+
+
+def ensure_builder(
+    spec: ModelBuilderSpec,
+    *,
+    repo_root: Path = REPO_ROOT,
+    run: CommandRunner = _run,
+) -> None:
+    """Make the declared builder exist, boot and match its declaration.
+
+    A builder that is absent is created. A builder that exists but does not boot,
+    or boots as another driver or BuildKit version, is removed WITH its state
+    volume and created again: that is the recovery from a damaged cache index,
+    and the only state it discards is build-cache reuse. Raises
+    :class:`LaneBuilderError` if the second creation does not leave a ready
+    builder.
+    """
+    if _is_ready(spec, run):
+        return
+    if _exists(spec, run):
+        logger.warning(
+            "builder %s exists but is not ready as declared; removing it and its "
+            "state, then creating it again",
+            spec.name,
+        )
+        removed = run(
+            ["docker", "buildx", "rm", "--force", spec.name],
+            spec.bootstrap_timeout_seconds,
+        )
+        if removed.returncode != 0:
+            raise LaneBuilderError(
+                f"builder {spec.name} could not be removed: {removed.stderr.strip()}"
+            )
+    created = run(create_command(spec, repo_root), spec.bootstrap_timeout_seconds)
+    if created.returncode != 0:
+        raise LaneBuilderError(
+            f"builder {spec.name} could not be created: {created.stderr.strip()}"
+        )
+    if not _is_ready(spec, run):
+        raise LaneBuilderError(
+            f"builder {spec.name} was created but is not ready as declared "
+            f"(driver {spec.driver}, BuildKit {spec.image_version})"
+        )
+
+
+def lane_builder_env(
+    environ: Mapping[str, str],
+    *,
+    declaration: ModelBuilderDeclaration | None = None,
+    repo_root: Path = REPO_ROOT,
+    run: CommandRunner = _run,
+) -> dict[str, str]:
+    """The environment overlay that points a build at its declared builder.
+
+    Empty when ``DEPLOY_AGENT_LANE_BUILDER`` is unset, which leaves the build on
+    the host's default builder. When set, the builder is ensured first, so the
+    returned overlay is only ever handed back for a builder that is ready.
+    """
+    key = environ.get(LANE_BUILDER_ENV, "").strip()
+    if not key:
+        return {}
+    spec = resolve_spec(key, declaration)
+    ensure_builder(spec, repo_root=repo_root, run=run)
+    return {BUILDX_BUILDER_ENV: spec.name}

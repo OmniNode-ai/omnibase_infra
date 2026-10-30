@@ -16,7 +16,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-import httpx
 import pytest
 
 from omnibase_infra.handlers.placement import (
@@ -77,7 +76,7 @@ _Nodes = dict[str, tuple[Literal["any", "primary"], RecordingNode]]
 def _runtime(runtime_id: str, endpoint: str, nodes: _Nodes) -> HandlerPlacementRuntime:
     runtime = HandlerPlacementRuntime(
         runtime_id=runtime_id,
-        adapter=HandlerPlacementEtcd(endpoint, httpx.AsyncClient(timeout=1.0)),
+        adapter=HandlerPlacementEtcd(endpoint),
         nodes={
             name: (
                 ModelPlacementPolicy(mode=mode, failover_target_s=FAILOVER_TARGET_S),

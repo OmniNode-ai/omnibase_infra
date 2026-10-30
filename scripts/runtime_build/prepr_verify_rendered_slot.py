@@ -96,6 +96,31 @@ SLOT_SERVICES: tuple[str, ...] = (
 )
 GATEWAY_SERVICE = "onex-api"
 
+#: Services the slot's profile carries only so compose can resolve a ``service:``
+#: build context (OMN-21279). Each is ``scale: 0``, so ``up`` never creates a
+#: container for it. The render may carry them, and carries them only while
+#: ``scale`` reads 0 (OMN-21433).
+BUILD_ONLY_SERVICES: tuple[str, ...] = ("dev-lane-infra-runtime-image",)
+#: The only attributes a build-only service may render with, the only network
+#: it may join and the only profile it may carry. Anything else (``deploy``,
+#: ``ports``, ``volumes``, ``privileged``) escapes the ``scale`` check.
+#:
+#: ``build`` is the kind's own attribute: a service that exists to be built
+#: renders its build section, and a policy that refused it refused the kind
+#: (measured 2026-10-30 on the dev head, exit 12, slot 1). It is bounded below
+#: to the three sub-keys the dev overlay declares, so a build-time escape
+#: (``network``, ``ssh``, ``secrets``, ``additional_contexts``, ``target``)
+#: is still refused.
+BUILD_ONLY_ALLOWED_KEYS = frozenset({"profiles", "scale", "networks", "build"})
+BUILD_ONLY_BUILD_KEYS = frozenset({"context", "dockerfile", "args"})
+#: ``docker compose config --format json`` renders an unset ``command`` and
+#: ``entrypoint`` as an explicit ``null`` on a build service. A null is the
+#: absence of the attribute and starts nothing; any value is not, and is
+#: refused like every other attribute outside the allowed set.
+BUILD_ONLY_NULL_ONLY_KEYS = frozenset({"command", "entrypoint"})
+BUILD_ONLY_NETWORK = "omnibase-infra-network"
+BUILD_ONLY_PROFILE = "prepr"
+
 #: Every environment key whose value is a PostgreSQL DSN. Each one must name a
 #: database carrying this slot's suffix and a principal carrying it too.
 DSN_KEYS: tuple[str, ...] = (
@@ -145,7 +170,39 @@ def check(
             f"A slot that starts a short set is a slot whose verdict covers less "
             f"than it claims."
         )
-    unexpected = sorted(set(services) - expected)
+    for name in BUILD_ONLY_SERVICES:
+        if name not in services:
+            continue
+        svc = services[name] or {}
+        scale, profiles, nets = (
+            svc.get("scale"),
+            svc.get("profiles"),
+            svc.get("networks"),
+        )
+        build = svc.get("build", {})
+        bad_build = not isinstance(build, dict) or set(build) - BUILD_ONLY_BUILD_KEYS
+        extra = sorted(
+            key
+            for key in svc
+            if key not in BUILD_ONLY_ALLOWED_KEYS
+            and not (key in BUILD_ONLY_NULL_ONLY_KEYS and svc[key] is None)
+        )
+        net_names = sorted(nets) if isinstance(nets, dict | list) else []
+        # Each tuple is (violated, what the render shows). A scale other than 0
+        # runs a container under the dev lane's image name; an attribute outside
+        # the kind's shape, a build-time escape in the build section, a network
+        # or a profile beyond the slot's is not examined by the scale check.
+        rules = (
+            (scale != 0, f"scale {scale!r}, not 0"),
+            (extra, f"attribute(s) {extra} beyond the kind's shape"),
+            (bad_build, f"a build section beyond {sorted(BUILD_ONLY_BUILD_KEYS)}"),
+            (net_names != [BUILD_ONLY_NETWORK], f"networks {net_names}"),
+            (profiles != [BUILD_ONLY_PROFILE], f"profiles {profiles!r}"),
+        )
+        problems += [
+            f"build-only service '{name}' renders {w}." for bad, w in rules if bad
+        ]
+    unexpected = sorted(set(services) - expected - set(BUILD_ONLY_SERVICES))
     if unexpected:
         problems.append(
             f"the render carries {len(unexpected)} service(s) that are not the "

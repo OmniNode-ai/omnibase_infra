@@ -312,9 +312,8 @@ FINDING_KIND_SEVERITY: dict[str, str] = {
 #: OMN-20934: the lane manifest and the committed census describe one lab's
 #: hosts, lanes and addresses, so they are private deployment config (operator
 #: RULING 2026-10-10T21:57:38Z) and this repository ships neither. They live in
-#: the workspace config root: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when set,
-#: otherwise the owner the runtime resolves for ``$OMNI_HOME``
-#: (``workspace_runtime_config_root``, the one resolver of that root).
+#: the workspace config root, ``$ONEX_WORKSPACE_CONFIG_ROOT``, which the
+#: deployment's overlay or host installer sets.
 ENV_WORKSPACE_CONFIG_ROOT = "ONEX_WORKSPACE_CONFIG_ROOT"
 LANE_CENSUS_RELATIVE = Path("config") / "lab" / "lane-census"
 MANIFEST_NAME = "lane-manifest.yaml"
@@ -340,26 +339,12 @@ def lane_census_dir() -> Path:
     Fails loud rather than falling back to anything in this repository: a
     fork with no overlay is told how to supply one, never pointed at our lab.
     The census driver runs under a bare interpreter on a lab host, where the
-    runtime package is not importable, so there the variable is required.
+    runtime package is not importable, so the variable is required.
     """
     configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
-    if configured:
-        return Path(configured).resolve() / LANE_CENSUS_RELATIVE
-    registry = os.environ.get("OMNI_HOME", "").strip()
-    if not registry:
-        raise _not_configured(
-            f"neither {ENV_WORKSPACE_CONFIG_ROOT} nor OMNI_HOME is set"
-        )
-    try:
-        from omnibase_infra.runtime.service_kernel import (
-            workspace_runtime_config_root,
-        )
-    except ImportError as exc:
-        raise _not_configured(
-            f"{ENV_WORKSPACE_CONFIG_ROOT} is unset and this interpreter cannot "
-            f"resolve the root from OMNI_HOME ({exc})"
-        ) from exc
-    return workspace_runtime_config_root(Path(registry)) / LANE_CENSUS_RELATIVE
+    if not configured:
+        raise _not_configured(f"{ENV_WORKSPACE_CONFIG_ROOT} is unset")
+    return Path(configured).resolve() / LANE_CENSUS_RELATIVE
 
 
 def _required_file(name: str) -> Path:

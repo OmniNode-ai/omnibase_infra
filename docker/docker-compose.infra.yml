@@ -660,7 +660,7 @@ services:
   #            All broker addresses are hardcoded literals in compose.
   # Memory: REDPANDA_MEMORY defaults to 8G. Override via env for constrained hosts.
   redpanda:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     ulimits:
       nofile:
         soft: 65535
@@ -778,7 +778,7 @@ services:
   # this container to complete before starting, to avoid hitting partition limits
   # on fresh Redpanda volumes.
   redpanda-partition-cap:
-    image: redpandadata/redpanda:v25.1.12
+    image: redpandadata/redpanda:v25.2.14
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
     extends:
@@ -1639,6 +1639,81 @@ services:
       - "com.omninode.service=tenant-projection-writer"
       - "com.omninode.layer=runtime"
       - "com.omninode.ticket=OMN-18114"
+      - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
+      - "autoheal=true"
+  # ==========================================================================
+  # Claude hook-events projection writer (dedicated carrier)
+  # ==========================================================================
+  # OMN-19513. `node_projection_claude_hook_events` projects every captured
+  # Claude Code hook event into omninode_internal.claude_hook_events. On the dev
+  # lane it was auto-wired inside `omninode-runtime`, whose boot subscribes about
+  # 560 consumer groups one at a time. Measured 2026-10-28 by lane
+  # hook-proj-fix-1028: each runtime restart left this projection unsubscribed
+  # for about 19 minutes (01:12Z and again 01:44Z), the table's newest row fell
+  # 11 hours behind, and nothing logged an error because from the main
+  # runtime's point of view the group simply had not joined yet.
+  #
+  # WHAT THIS IS. The ONEX runtime kernel, same image and entrypoint, booted over
+  # a manifest of exactly one contract: `ONEX_RUNTIME_NODE_SELECTION` names it.
+  # The lane overlay sets `ONEX_RUNTIME_NODE_EXCLUSION` to the same name on the
+  # main runtime, so the node has one consumer-group owner. It is a kernel and
+  # not a BaseProjectionRunner for the reason the tenant carrier above records:
+  # the writer resolves its database through the topology binding the kernel
+  # hands it, and a standalone runner is topology-blind.
+  #
+  # SAME CONSUMER GROUP, SO NO OFFSET RESET. The group id is derived from the
+  # node identity and then carries the process's KAFKA_INSTANCE_ID
+  # (`...consume.1.0.0.__i.runtime-main.__t.onex.evt.omniclaude.hook-event.v1`).
+  # This container therefore sets `KAFKA_INSTANCE_ID: runtime-main`, the same
+  # value as the main runtime, so the committed offsets carry over. Two
+  # processes sharing that value is safe only because the exclusion above makes
+  # sure they never both subscribe this node's topic.
+  #
+  # WHY DECLARED HERE AND STARTED NOWHERE BY DEFAULT. Same reason as the tenant
+  # carrier: the runtime env anchors live in this file and YAML anchors do not
+  # cross compose files. The profile below is one no lane's bring-up requests;
+  # the primary dev lane opts in by overriding `profiles:` in its overlay, and
+  # every other lane renders this service and never starts it.
+  projection-claude-hook-events-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-projection-claude-hook-events-writer
+    profiles: ["profile-carrier-optin"]
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
+      OTEL_SERVICE_NAME: omnimarket-projection-claude-hook-events-writer
+      RUNTIME_PROFILE: main
+      ONEX_RUNTIME_NODE_SELECTION: projection_claude_hook_events
+      ONEX_RUNTIME_CAPABILITIES: projection.writer
+      ONEX_GROUP_ID: onex-runtime-claude-hook-events-writer
+      KAFKA_INSTANCE_ID: runtime-main
+      OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: "false"
+      POSTGRES_HOST: postgres
+    stop_grace_period: 90s
+    # OMN-21433: the kernel renders the Bifrost delegation contract in its
+    # entrypoint preflight (x-runtime-env pins BIFROST_LANE_OVERLAY_PATH), so it
+    # needs the lane overlay at the pinned path like every other kernel service.
+    # Without this mount the preflight raised "Bifrost lane overlay not found"
+    # and the container stopped after its declared 5 boot failures.
+    volumes:
+      - ../contracts:/app/contracts:ro
+      - *lane-overlay-mount
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    labels:
+      - "com.omninode.service=projection-claude-hook-events-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.ticket=OMN-19513"
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
       - "autoheal=true"
   # ==========================================================================

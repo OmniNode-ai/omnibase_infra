@@ -1,0 +1,92 @@
+{
+  "_provenance": {
+    "source": "Live GitHub git ls-remote and the published core dev_tag_lineage runtime; exact command arguments and exit codes are stored in each case.",
+    "core_tag": "dev-20261030041443-a5b07b5aeafc",
+    "core_commit": "a5b07b5aeafcb4bbe2d702d3cc533c2a1dc9fead",
+    "captured_utc": "2026-10-30T04:26:08.475967+00:00",
+    "stdout_rewrite": "For each core stdout line, remove the absolute temporary working-directory prefix plus its trailing slash only when that prefix starts the line; preserve every other byte. The diagnostic target is then pyproject.toml.",
+    "stderr_capture": "Install the published package before recording; uv installation/download progress is excluded. Both recorded validator commands emitted no stderr.",
+    "working_directory": "Each command runs beside the recorded minimal pyproject.toml; no working-directory path is retained."
+  },
+  "rules": "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved",
+  "cases": [
+    {
+      "label": "real",
+      "tag": "dev-20261029143607-342000ec5702",
+      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-342000ec5702\" }\n",
+      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-342000ec5702\" }\n",
+      "core": {
+        "command": [
+          "uv",
+          "run",
+          "--no-project",
+          "--with",
+          "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc",
+          "python",
+          "-m",
+          "omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage",
+          "pyproject.toml",
+          "--rules",
+          "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved",
+          "--package",
+          "omnibase-core"
+        ],
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "ls_remote": {
+        "command": [
+          "git",
+          "ls-remote",
+          "--tags",
+          "https://github.com/OmniNode-ai/omnibase_core.git",
+          "refs/tags/dev-20261029143607-342000ec5702",
+          "refs/tags/dev-20261029143607-342000ec5702^{}"
+        ],
+        "exit_code": 0,
+        "stdout": "342000ec57020e5258dde41d571420e7c09ed05b\trefs/tags/dev-20261029143607-342000ec5702\n",
+        "stderr": ""
+      }
+    },
+    {
+      "label": "absent",
+      "tag": "dev-20261029143607-000000000000",
+      "pyproject_toml": "[project]\nname = \"dep-provenance-recording\"\ndependencies = [\"omnibase-core>=0.47.58,<0.48.0\"]\n\n[tool.uv.sources]\nomnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-000000000000\" }\n",
+      "source_line": "omnibase-core = { git = \"https://github.com/OmniNode-ai/omnibase_core.git\", tag = \"dev-20261029143607-000000000000\" }\n",
+      "core": {
+        "command": [
+          "uv",
+          "run",
+          "--no-project",
+          "--with",
+          "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc",
+          "python",
+          "-m",
+          "omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage",
+          "pyproject.toml",
+          "--rules",
+          "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved",
+          "--package",
+          "omnibase-core"
+        ],
+        "exit_code": 1,
+        "stdout": "pyproject.toml: tag_absent: omnibase-core: tag='dev-20261029143607-000000000000': tag is absent from its remote (successful remote contact returned no tag)\n",
+        "stderr": ""
+      },
+      "ls_remote": {
+        "command": [
+          "git",
+          "ls-remote",
+          "--tags",
+          "https://github.com/OmniNode-ai/omnibase_core.git",
+          "refs/tags/dev-20261029143607-000000000000",
+          "refs/tags/dev-20261029143607-000000000000^{}"
+        ],
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -44,9 +44,9 @@ must not pay that at import time.
 
 The declaration is located under the workspace config root, the same root
 every other private-config reader resolves
-(``service_kernel.workspace_runtime_config_root``: ``$ONEX_WORKSPACE_CONFIG_ROOT``,
-else the sibling operator repository, else the developer workspace's
-``.onex/workspace-config``). The workspace root it resolves against comes from
+(``HandlerWorkspaceConfigRootResolve``: ``$ONEX_WORKSPACE_CONFIG_ROOT``,
+else the developer workspace's ``.onex/workspace-config``, else none and the
+lookup is refused). The workspace root it resolves against comes from
 the ``--omnibase-path`` flag (``$OMNIBASE_PATH``) that ``onex delegate`` binds
 for the omnimarket drift guard, so no new environment read enters the CLI. When
 the declaration cannot be located the command is refused with the path it
@@ -73,7 +73,7 @@ __all__ = [
 
 #: Where the lane -> broker declaration sits inside the workspace config root
 #: (OMN-20935). A relative path, joined onto the root that
-#: ``service_kernel.workspace_runtime_config_root`` resolves for the workspace:
+#: ``HandlerWorkspaceConfigRootResolve`` resolves for the workspace:
 #: rule 6 forbids an absolute one.
 LANE_DECLARATION_RELATIVE_PATH = Path("config") / "lab" / "ci_bus_lanes.yaml"
 
@@ -101,7 +101,7 @@ def resolve_lane_declaration_path(workspace_root: Path | None) -> Path:
             that cannot be read is refused rather than guessed.
     """
     if workspace_root is None:
-        message = (
+        raise DelegateLaneSelectionError(
             "cannot locate the lane declaration: no workspace root is set. "
             "Pass --omnibase-path <workspace root> (or export "
             "$OMNIBASE_PATH, which that flag binds to; the sanctioned wrapper "
@@ -109,19 +109,23 @@ def resolve_lane_declaration_path(workspace_root: Path | None) -> Path:
             f"{LANE_DECLARATION_RELATIVE_PATH} can be read. The broker "
             "address is never taken from the environment (OMN-16871)."
         )
-        raise DelegateLaneSelectionError(message)
 
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+    from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
+        HandlerWorkspaceConfigRootResolve,
+    )
+    from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 
-    config_root = workspace_runtime_config_root(workspace_root)
-    declaration = config_root / LANE_DECLARATION_RELATIVE_PATH
-    if not declaration.is_file():
-        message = (
-            f"the lane declaration {declaration} does not exist. It is the "
+    request = ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
+    config_root = HandlerWorkspaceConfigRootResolve().handle(request).config_root
+    declaration = config_root and config_root / LANE_DECLARATION_RELATIVE_PATH
+    if not declaration or not declaration.is_file():
+        raise DelegateLaneSelectionError(
+            f"the lane declaration {declaration or LANE_DECLARATION_RELATIVE_PATH} "
+            "does not exist (with no workspace config root declared, set "
+            "ONEX_WORKSPACE_CONFIG_ROOT). It is the "
             "only source a broker address is resolved from, so a delegation "
             "over the shared bus is refused without it (OMN-16871)."
         )
-        raise DelegateLaneSelectionError(message)
     return declaration
 
 
@@ -145,11 +149,10 @@ def declared_lane_ids(declaration: Path) -> tuple[str, ...]:
 
     lanes = raw.get("lanes") if isinstance(raw, dict) else None
     if not isinstance(lanes, dict) or not lanes:
-        message = (
+        raise DelegateLaneSelectionError(
             f"the lane declaration at {declaration} declares no lanes; there "
             "is nothing to address a delegation to."
         )
-        raise DelegateLaneSelectionError(message)
     return tuple(sorted(str(lane_id) for lane_id in lanes))
 
 
@@ -211,8 +214,7 @@ def resolve_lane_selection_at(
     try:
         transport = load_lane_transport(declaration, lane)
     except ValueError as exc:
-        message = f"lane {lane!r} is not usable: {exc}"
-        raise DelegateLaneSelectionError(message) from exc
+        raise DelegateLaneSelectionError(f"lane {lane!r} is not usable: {exc}") from exc
 
     return ModelDelegateLaneSelection(
         lane=transport.lane,
@@ -266,23 +268,21 @@ def resolve_lane_target(
     """
     if bus != _KAFKA_BUS:
         if lane is not None:
-            message = (
+            raise DelegateLaneSelectionError(
                 f"--lane {lane!r} is only valid with --bus kafka (got --bus "
                 f"{bus}). An in-process bus has no broker to address, so a "
                 "lane selection here would be silently ignored."
             )
-            raise DelegateLaneSelectionError(message)
         return None
 
     if lane is not None and kafka_bootstrap is not None:
-        message = (
+        raise DelegateLaneSelectionError(
             f"--lane {lane!r} and --kafka-bootstrap {kafka_bootstrap!r} both "
             "name a broker for this delegation. Pass one: --lane resolves the "
             "address from the lane declaration, --kafka-bootstrap states it "
             "directly (for a lane-internal address no declaration can carry, "
             "such as a container on the lane's own compose network)."
         )
-        raise DelegateLaneSelectionError(message)
 
     if kafka_bootstrap is not None:
         return None
