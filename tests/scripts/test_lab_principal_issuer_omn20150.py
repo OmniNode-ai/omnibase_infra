@@ -1946,3 +1946,84 @@ def test_h105_audit_cli_reports_missing_terminal_grants(
     assert f"missing={6 if missing_terminals else 0} extra=0" in output
     assert broker.set_calls == []
     assert broker.acl_argvs == []
+
+
+# --- onex scm pr-create is declared whole or not at all (OMN-17427, lane pr-create-acl-1310) ---
+# `onex scm pr-create` produces the command topic, then reads the completed or failed terminal. A
+# principal that holds only some of those six topic rows fails with TopicAuthorizationFailedError
+# on the first topic it lacks: h203's lane login did on github-repo-write-completed from
+# 2026-10-18 (declared 2026-10-21, still unapplied on 2026-10-30), and h105 sat on the terminal reads alone until
+# the command write was consented. Every principal addition that touches a pr-create topic must
+# hold all six rows; a later addition is held to the same rule without being named here.
+SCM_PR_CREATE_TOPIC_ROWS = frozenset(
+    {
+        lpi.AclRow("topic", SCM_WRITE_REQUESTED, "literal", operation)
+        for operation in ("write", "describe")
+    }
+    | {
+        lpi.AclRow("topic", topic, "literal", operation)
+        for topic in SCM_WRITE_TERMINALS
+        for operation in ("read", "describe")
+    }
+)
+
+
+def _missing_pr_create_rows(declaration: lpi.Declaration, principal: str) -> list[str]:
+    """The pr-create topic rows `principal` lacks, or nothing when it holds none of them."""
+    held = lpi.expected_acl_rows(declaration, principal)
+    if not any(row.name in SCM_TOPICS for row in held):
+        return []
+    return sorted(
+        f"{row.name} {row.operation}" for row in SCM_PR_CREATE_TOPIC_ROWS - held
+    )
+
+
+def test_every_declared_pr_create_principal_holds_all_six_topic_rows(
+    declaration: lpi.Declaration,
+) -> None:
+    owners = [owner for owner, _ in declaration.principal_grants]
+    assert H105 in owners
+    for principal in owners:
+        assert _missing_pr_create_rows(declaration, principal) == [], principal
+
+
+@pytest.mark.parametrize("row", sorted(SCM_PR_CREATE_TOPIC_ROWS, key=str))
+def test_a_pr_create_topic_without_its_acl_is_found(
+    tmp_path: Path, row: lpi.AclRow
+) -> None:
+    """The planted fault: one pr-create topic row is absent from the principal's grants."""
+    path, _ = _h105_policy_copy(tmp_path)
+    planted = tmp_path / H105_DERIVED.name
+    doc = json.loads(planted.read_text())
+    kept = [
+        grant
+        for grant in doc["grants"]
+        if not (
+            grant["resource"] == row.name
+            and grant["operation"] == row.operation.upper()
+        )
+    ]
+    assert len(kept) == len(doc["grants"]) - 1, "the row to remove must exist"
+    planted.write_text(json.dumps({**doc, "grants": kept}))
+    declaration = lpi.load_declaration(path)
+    assert _missing_pr_create_rows(declaration, H105) == [f"{row.name} {row.operation}"]
+    assert _missing_pr_create_rows(lpi.load_declaration(GRANTS), H105) == []
+
+
+def test_a_principal_holding_only_the_terminal_reads_is_found(tmp_path: Path) -> None:
+    """h105 before the command-write consent: the terminals are readable, nothing is published."""
+    path, _ = _h105_policy_copy(tmp_path)
+    planted = tmp_path / H105_DERIVED.name
+    doc = json.loads(planted.read_text())
+    doc["grants"] = [g for g in doc["grants"] if g["resource"] != SCM_WRITE_REQUESTED]
+    planted.write_text(json.dumps(doc))
+    assert _missing_pr_create_rows(lpi.load_declaration(path), H105) == [
+        f"{SCM_WRITE_REQUESTED} describe",
+        f"{SCM_WRITE_REQUESTED} write",
+    ]
+
+
+def test_a_principal_without_any_pr_create_topic_is_not_asked_to_hold_them(
+    declaration: lpi.Declaration,
+) -> None:
+    assert _missing_pr_create_rows(declaration, "dev-fixture-laptop") == []

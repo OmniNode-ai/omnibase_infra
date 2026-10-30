@@ -3645,25 +3645,29 @@ def build_post_merge_event(
     }
 
 
-def read_uv_override_pins(pyproject: Path) -> dict[str, str]:
-    """The exact dependency pins the delivered tree declares.
-
-    Read from ``[tool.uv] override-dependencies``, which is where this
-    repository pins ``omnibase-core`` exactly; a tree declaring none has no pins
-    to attest and RAISES rather than reporting an empty set as an identity.
-    """
+# Two places hold an exact pin: `[tool.uv] override-dependencies`, and a
+# `[tool.uv.sources]` git source resolved from a TAG. omnibase-core is pinned by
+# the second since it resolves solely from its dev-merge tag (RULING
+# 2026-10-29T01:50:26Z, OMN-17427), recorded as `<name> @ git+<url>@<tag>`. A
+# tree declaring neither has no pins to attest and RAISES rather than reporting
+# an empty set as an identity.
+def read_uv_pins(pyproject: Path) -> dict[str, str]:
+    """The exact dependency pins the delivered tree declares."""
     import tomllib  # stdlib since 3.11, imported here to keep import time flat
 
     document = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    entries = document.get("tool", {}).get("uv", {}).get("override-dependencies", [])
-    pins: dict[str, str] = {}
+    uv = document.get("tool", {}).get("uv", {})
+    entries = uv.get("override-dependencies", [])
+    pins = {
+        k.lower(): f"{k} @ git+{v['git']}@{v['tag']}"
+        for k, v in uv.get("sources", {}).items()
+        if "tag" in v
+    }
     for entry in entries:
-        match = re.match(r"^\s*([A-Za-z0-9_.-]+)", str(entry))
-        if match:
+        if match := re.match(r"^\s*([A-Za-z0-9_.-]+)", str(entry)):
             pins[match.group(1).lower()] = str(entry).strip()
     if not pins:
-        msg = f"{pyproject} declares no [tool.uv] override-dependencies pins"
-        raise ValueError(msg)
+        raise ValueError(f"{pyproject} declares no override or tag-sourced pins")
     return pins
 
 
@@ -3697,7 +3701,7 @@ def collect_post_merge_identity(
     fingerprint = hashlib.sha256("\n".join(sorted(applied)).encode("utf-8")).hexdigest()
     return {
         "generation": generation.to_dict(),
-        "pins": read_uv_override_pins(pyproject),
+        "pins": read_uv_pins(pyproject),
         "image_ids": image_ids,
         "overlay_digest": digest_files(overlay_files),
         "migration_fingerprint": f"sha256:{fingerprint}",

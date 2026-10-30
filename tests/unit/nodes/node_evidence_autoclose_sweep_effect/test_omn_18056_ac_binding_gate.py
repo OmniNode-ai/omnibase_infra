@@ -599,7 +599,9 @@ async def test_the_gate_consumes_the_legs_verdict_not_merely_calls_it(
     ) -> tuple[str, tuple[str, ...], tuple[object, ...]]:
         return sentinel, ("AC-STUB",), ()
 
-    monkeypatch.setattr(module, "_ac_binding_gap", _always_a_gap)
+    monkeypatch.setattr(
+        module.resolve_done_write_receipt_gate(), "ac_binding_gap", _always_a_gap
+    )
 
     linear = _FakeLinear(_DESCRIPTION_THREE_LABELLED_ACS)
     handler = _handler(
@@ -640,7 +642,9 @@ async def test_the_leg_releasing_is_what_lets_the_same_ticket_flip(
     ) -> tuple[str, tuple[str, ...], tuple[object, ...]]:
         return "", (), ()
 
-    monkeypatch.setattr(module, "_ac_binding_gap", _never_a_gap)
+    monkeypatch.setattr(
+        module.resolve_done_write_receipt_gate(), "ac_binding_gap", _never_a_gap
+    )
 
     linear = _FakeLinear(_DESCRIPTION_THREE_LABELLED_ACS)
     handler = _handler(
@@ -674,11 +678,12 @@ def test_the_binding_leg_is_on_the_only_flip_path_and_has_no_off_switch() -> Non
     tree = ast.parse(source)
 
     called = {
-        node.func.id
+        node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Name, ast.Attribute))
     }
-    assert "_ac_binding_gap" in called, (
+    assert "ac_binding_gap" in called, (
         "_ac_binding_gap is defined but never called — the binding leg is "
         "dead code and the counter-only predicate is reachable again."
     )
@@ -686,7 +691,7 @@ def test_the_binding_leg_is_on_the_only_flip_path_and_has_no_off_switch() -> Non
     # It is called BEFORE the counting rules, so the reported hold names a
     # criterion rather than a ratio.
     assert source.index(
-        "_ac_binding_gap(description, verdict, ticket_id)"
+        "self._gate.ac_binding_gap(description, verdict, ticket_id)"
     ) < source.index("ac_gap_reason, uncovered = _ac_coverage_gap(")
 
     # No skip surface anywhere: not a request field, not a CLI flag.

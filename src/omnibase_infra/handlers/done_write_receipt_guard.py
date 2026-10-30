@@ -4,7 +4,7 @@
 
 OMN-20368. Operator ruling (2026-10-02): a ticket reaches Done only on a PASS
 dod_verify whose checks bind every acceptance criterion. The rule itself is
-``omnibase_core.handlers.handler_done_write_receipt_gate`` (lifted out of the evidence-
+``node_done_write_receipt_gate_compute`` (lifted out of the evidence-
 autoclose closer so that omnimarket and this repo evaluate one implementation).
 This module is the infra half: it runs the verifier the way the closer does,
 reads the verdict off either declared receipt arm, and hands verdict plus the
@@ -28,19 +28,142 @@ this module.
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.resources
 import json
 import logging
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
-    evaluate_done_write_receipt,
-    extract_dod_verify_verdict,
-)
+import yaml
+
+from omnibase_core.models.ticket.model_ac_binding_row import ModelAcBindingRow
 from omnibase_core.models.ticket.model_done_write_decision import (
     ModelDoneWriteDecision,
 )
+from omnibase_core.models.ticket.model_done_write_receipt_request import (
+    ModelDoneWriteReceiptRequest,
+)
+from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.errors import ContainerWiringError, ModelInfraErrorContext
+from omnibase_infra.protocols.protocol_done_write_receipt_gate import (
+    ProtocolDoneWriteReceiptGate,
+)
+
+DONE_WRITE_RECEIPT_GATE_NODE = "node_done_write_receipt_gate_compute"
+
+
+class DoneWriteGateResolutionError(ContainerWiringError):
+    """The packaged Done-write contract cannot bind a compatible gate."""
+
+
+class DoneWriteReceiptGateBinding:
+    """Bind the contract's handler and its validated public helper functions."""
+
+    def __init__(
+        self,
+        handle: Callable[[ModelDoneWriteReceiptRequest], ModelDoneWriteDecision],
+        exports: ProtocolDoneWriteReceiptGate,
+    ) -> None:
+        self._handle = handle
+        self.has_verified_bound_check = exports.has_verified_bound_check
+        self.as_int = exports.as_int
+        self.extract_dod_verify_verdict = exports.extract_dod_verify_verdict
+        self.live_acceptance_criteria_items = exports.live_acceptance_criteria_items
+        self.canonical_ac_label = exports.canonical_ac_label
+        self.criterion_is_state_shaped = exports.criterion_is_state_shaped
+        self.ac_binding_gap = exports.ac_binding_gap
+        self.check_records = exports.check_records
+        self.check_status = exports.check_status
+        self.verdict_is_all_verified = exports.verdict_is_all_verified
+        self.evaluate_done_write_receipt = exports.evaluate_done_write_receipt
+
+    def decide(self, request: ModelDoneWriteReceiptRequest) -> ModelDoneWriteDecision:
+        return self._handle(request)
+
+
+@lru_cache(maxsize=1)
+def resolve_done_write_receipt_gate() -> ProtocolDoneWriteReceiptGate:
+    """Bind node_done_write_receipt_gate_compute from its packaged contract.
+
+    An incompatible or unreadable contract refuses resolution; no alternate
+    handler or implementation is selected.
+    """
+    try:
+        nodes_package = "omnibase_core.nodes"
+        contract_path = importlib.resources.files(nodes_package).joinpath(
+            DONE_WRITE_RECEIPT_GATE_NODE, "contract.yaml"
+        )
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        expected = {
+            "name": DONE_WRITE_RECEIPT_GATE_NODE,
+            "input_model": f"{ModelDoneWriteReceiptRequest.__module__}.{ModelDoneWriteReceiptRequest.__qualname__}",
+            "output_model": f"{ModelDoneWriteDecision.__module__}.{ModelDoneWriteDecision.__qualname__}",
+        }
+        if not isinstance(contract, dict):
+            raise ValueError("contract must be a mapping")
+        for key, value in expected.items():
+            if contract.get(key) != value:
+                raise ValueError(f"contract {key} does not match the gate protocol")
+        routing = contract.get("handler_routing")
+        if not isinstance(routing, dict):
+            raise ValueError("handler_routing must be a mapping")
+        default = routing.get("default_handler")
+        if not isinstance(default, str) or default.count(":") != 1:
+            raise ValueError("default_handler must name a node-relative module:Class")
+        module_name, class_name = default.split(":")
+        if not class_name.isidentifier() or not all(
+            part.isidentifier() for part in module_name.split(".")
+        ):
+            raise ValueError("default_handler must name a node-relative module:Class")
+        contract_package = f"{nodes_package}.{DONE_WRITE_RECEIPT_GATE_NODE}"
+        module = importlib.import_module(f"{contract_package}.{module_name}")
+        exported = getattr(module, "__all__", ())
+        members = tuple(
+            name
+            for protocol in ProtocolDoneWriteReceiptGate.__mro__
+            for name in protocol.__dict__
+            if not name.startswith("_") and name != "decide"
+        )
+        if not isinstance(exported, (list, tuple)) or class_name not in exported:
+            raise ValueError("contract handler class is missing from __all__")
+        for name in members:
+            if name not in exported or not callable(getattr(module, name, None)):
+                raise ValueError(
+                    f"protocol member {name} is missing from __all__ or not callable"
+                )
+        handler_class = getattr(module, class_name, None)
+        if not isinstance(handler_class, type) or not callable(
+            getattr(handler_class, "handle", None)
+        ):
+            raise ValueError("default_handler names no class with handle")
+        handle = handler_class().handle
+        return DoneWriteReceiptGateBinding(
+            cast(
+                "Callable[[ModelDoneWriteReceiptRequest], ModelDoneWriteDecision]",
+                handle,
+            ),
+            cast("ProtocolDoneWriteReceiptGate", module),
+        )
+    except (
+        OSError,
+        ImportError,
+        AttributeError,
+        TypeError,
+        ValueError,
+        yaml.YAMLError,
+    ) as exc:
+        raise DoneWriteGateResolutionError(
+            f"Cannot resolve {DONE_WRITE_RECEIPT_GATE_NODE}: {exc}",
+            context=ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.RUNTIME,
+                operation="resolve_done_write_receipt_gate",
+            ),
+        ) from exc
+
 
 logger = logging.getLogger(__name__)
 
@@ -236,14 +359,17 @@ class DoneWriteReceiptGuard:
                     f"(exit_code={exit_code}): {error}"
                 ),
             )
-        verdict, why = extract_dod_verify_verdict(result)
+        gate = resolve_done_write_receipt_gate()
+        verdict, why = gate.extract_dod_verify_verdict(result)
         if verdict is None:
             return ModelDoneWriteDecision(
                 allowed=False,
                 reason=f"dod_verify exit_code={exit_code}: {why}",
             )
-        return evaluate_done_write_receipt(
-            ticket_id=ticket_id, description=description, verdict=verdict
+        return gate.decide(
+            ModelDoneWriteReceiptRequest(
+                ticket_id=ticket_id, description=description, verdict=verdict
+            )
         )
 
     async def enforce(
@@ -259,6 +385,8 @@ class DoneWriteReceiptGuard:
 __all__ = [
     "DEFAULT_DOD_VERIFY_TIMEOUT_SECONDS",
     "DoneWriteReceiptGuard",
+    "DoneWriteGateResolutionError",
+    "resolve_done_write_receipt_gate",
     "DoneWriteRefusedError",
     "LINEAR_COMPLETED_STATE_TYPE",
     "LINEAR_DONE_STATE_NAME",

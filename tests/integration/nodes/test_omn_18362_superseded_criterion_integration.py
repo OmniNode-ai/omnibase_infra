@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
+from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     canonical_ac_label as _canonical_ac_label,
 )
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
+from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     live_acceptance_criteria_items as _live_acceptance_criteria_items,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (

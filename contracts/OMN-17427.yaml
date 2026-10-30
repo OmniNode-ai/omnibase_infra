@@ -6,6 +6,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn17427-scm-pr-create-acl-whole
+    statement: A principal addition that grants any onex scm pr-create topic grants all six topic rows, so a pr-create caller never fails on the first topic it lacks.
+    acceptance:
+      - id: AC17427575701
+        statement: Every principal in principal_grants_from that holds a github-repo-write topic holds WRITE and DESCRIBE on the command topic and READ and DESCRIBE on the completed and failed terminals, and removing any one of the six rows from the h105 source is found by name.
   - id: req-omn17427-create-topics-responses
     statement: Topic provisioning classifies returned Kafka CreateTopics errors before recording creation and confirms only broker-present topics.
     acceptance:
@@ -700,6 +705,16 @@ requirements:
         statement: 'AC17427004001: the verifier accepts the build-only dev-lane-infra-runtime-image as docker compose config renders it for slot 1 (a build section of context, dockerfile and args, a null command and a null entrypoint, scale 0, the dev network, the prepr profile) -- falsifier: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q fails at the merge base'
       - id: AC17427004002
         statement: 'AC17427004002: the verifier still refuses a build section with a network, ssh, secrets, additional_contexts or target key, a command or an entrypoint with a value, any other attribute, a scale other than 0, and a second build-only service -- falsifier: the same file, each case planted'
+  - id: req-omn17427-core-dev-tag-pin
+    statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
+    acceptance:
+      - id: AC17427630002
+        statement: 'The core tag dev-20261029143607-342000ec5702, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+  - id: req-omn17427-core-contract-binding
+    statement: The Done-write gate is bound from its packaged contract with zero new cross-repository node imports.
+    acceptance:
+      - id: AC17427630004
+        statement: 'Contract validation refuses incompatible models, missing handlers and unexported protocol functions; the sweep uses the injected binding and its verdict format matches core at the pin -- falsifier: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov fails at the merge base because this test path and resolver are absent'
   - id: req-omn17427-delegation-budget-readings-grant
     statement: The delegation budget readings table (OMN-21326 AC3, moved off the operator machine) is delivered to the lab runtime with exactly SELECT, INSERT and UPDATE for omninode_runtime, ahead of the omnimarket contract pin.
     acceptance:
@@ -924,6 +939,14 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-scm-pr-create-acl-whole
+    description: The declaration test walks every principal addition for the six pr-create topic rows and plants each missing row in a copy of the h105 source. Unit tests read repository files only; the live broker is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "pr_create"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427575701]
   - id: dod-omn17427-topic-ceiling-wire
     description: Real aiokafka admin methods and encoded then decoded Kafka responses exercise contract discovery, capacity refusal, cache contents, cleanup and readiness. The network boundary is synthetic; no live broker is claimed.
     source: manual
@@ -3219,6 +3242,30 @@ dod_evidence:
     binds_ac:
       - AC17427004001
       - AC17427004002
+  - id: dod-omn17427-core-dev-tag-pin
+    description: Pin identity, moved imports, typed shape checker and compatible-version seams; the new pin test path fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630002]
+  - id: dod-omn17427-core-dev-tag-deploy
+    description: Hosted-runner check of tag identity and moved imports without services, containers or credentials; runtime boot proof is separate.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630001, AC17427630002]
+  - id: dod-omn17427-core-contract-binding
+    description: The packaged gate resolves and matches allowed and refused core decisions; planted incompatible contracts are refused and the sweep consults its injected dependency.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630004]
   - id: dod-omn17427-delegation-budget-readings-grant
     description: The vendored delegation budget readings migrations, the interim table declaration and the regenerated topology catalogs derive the runtime grant for every profile. Fails at the merge base, which declares no such table.
     source: manual
