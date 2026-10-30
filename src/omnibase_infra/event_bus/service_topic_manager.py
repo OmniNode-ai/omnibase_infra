@@ -49,6 +49,9 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.models.event_bus.model_create_topic_refusal import (
+    ModelCreateTopicRefusal,
+)
 from omnibase_infra.topics.broker_capacity_probe import (
     bind_policy_to_broker_capacity,
     is_invalid_replication_factor_error,
@@ -823,6 +826,9 @@ class TopicProvisioner:
             )
 
             for spec in resolved_specs:
+                topic_name = apply_topic_namespace(
+                    spec.suffix, namespace=self._topic_namespace
+                )
                 try:
                     # One spec object drives BOTH the NewTopic and the record,
                     # exactly as the single-topic path does. Building the
@@ -848,7 +854,18 @@ class TopicProvisioner:
                         else {},
                     )
 
-                    await admin.create_topics([new_topic])
+                    response = await admin.create_topics([new_topic])
+                    # aiokafka raises nothing for a per-topic error: read the
+                    # response or a refused topic is recorded as created.
+                    refusal = ModelCreateTopicRefusal.from_response(response, physical)
+                    if refusal is not None and refusal.is_already_exists:
+                        raise TopicAlreadyExistsError(physical)
+                    if refusal is not None:
+                        raise refusal.as_exception(
+                            created=len(created),
+                            planned=len(resolved_specs),
+                            metadata=metadata,
+                        )
                     created.append(physical)
                     self._note_topic_created(physical, creation_spec)
                     logger.info(
@@ -860,24 +877,16 @@ class TopicProvisioner:
                     )
 
                 except TopicAlreadyExistsError:
-                    existing.append(
-                        apply_topic_namespace(
-                            spec.suffix, namespace=self._topic_namespace
-                        )
-                    )
-                    self._note_topic_created(
-                        apply_topic_namespace(
-                            spec.suffix, namespace=self._topic_namespace
-                        )
-                    )
+                    existing.append(topic_name)
+                    self._note_topic_created(topic_name)
                     logger.debug(
                         "Topic already exists: %s",
-                        apply_topic_namespace(
-                            spec.suffix, namespace=self._topic_namespace
-                        ),
+                        topic_name,
                         extra={"correlation_id": str(correlation_id)},
                     )
 
+                except TopicReplicationPolicyError:
+                    raise
                 except Exception as e:
                     # Boundary: an unhostable replica count is re-raised
                     # fail-closed; everything else degrades to a warning.
@@ -888,23 +897,15 @@ class TopicProvisioner:
                         # status="partial" is the silent-uncreated-topic bug the
                         # capacity measurement was supposed to make impossible.
                         raise unhostable_replication_error(
-                            topic=apply_topic_namespace(
-                                spec.suffix, namespace=self._topic_namespace
-                            ),
+                            topic=topic_name,
                             requested_replication_factor=spec.replication_factor,
                             policy=self._policy,
                             cause=e,
                         ) from e
-                    failed.append(
-                        apply_topic_namespace(
-                            spec.suffix, namespace=self._topic_namespace
-                        )
-                    )
+                    failed.append(topic_name)
                     logger.warning(
                         "Failed to create topic %s: %s",
-                        apply_topic_namespace(
-                            spec.suffix, namespace=self._topic_namespace
-                        ),
+                        topic_name,
                         type(e).__name__,
                         extra={
                             "correlation_id": str(correlation_id),
