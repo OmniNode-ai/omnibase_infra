@@ -1,0 +1,40 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21604
+title: "The onex delegate CLI and dispatch port take a task class's time limit from the site overlay instead of 240 seconds"
+summary: >-
+  The delegate CLI's terminal model now reads the budget_source a delegation terminal names, which says where the run's execution budget came from: a task-class contract entry or a site overlay file. receipt.json records it beside the budget evidence or refusal it describes, and it is omitted when the terminal names none. This PR covers AC2's receipt side. The CLI's overlay-aware budget (AC1) arrives through the task-class authority omnimarket registers. The 240 s dispatch default and the consumer deadline headroom (AC3) are left for a later change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21604-receipt-budget-source
+    statement: >-
+      A run's receipt.json records the limit it ran under and where that limit came from.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: a run's receipt.json records the limit it ran under and a budget_source naming the contract or overlay it came from -- falsifier: uv run pytest asserting the receipt's budget_source names the overlay path when one is set and the contract otherwise
+evidence_requirements:
+  - kind: tests
+    command: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_budget_contract.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21604-ac2-receipt-budget-source
+    description: >-
+      The receipt budget block keeps the terminal's budget_source beside the budget evidence (an overlay path) and beside a pre-dispatch refusal (a contract entry), and adds none when the terminal names none. At the merge base the terminal model drops the key, so the block has no budget_source and the two source cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/cli/test_delegate_terminal_budget_contract.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21604-receipt-deploy-probe
+    description: >-
+      Deploy probe. The delegate CLI GitHub serves at the checked-out commit copies budget_source into the receipt's budget block. The probe reads the file from GitHub at that commit and exits nonzero on a tree without that line, so it fails at the merge base.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -qF 'named = {\"budget_source\": result.budget_source} if result.budget_source else {}'"
