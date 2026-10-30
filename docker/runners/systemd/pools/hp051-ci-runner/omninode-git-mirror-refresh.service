@@ -15,8 +15,8 @@ Group=jonah
 Environment=HOME=/home/jonah
 Environment=OMNI_GIT_MIRROR_ROOT=/data/scratch/git-mirror
 ExecStart=/home/jonah/.omnibase/runners/docker/runners/git-mirror-refresh.sh
-# A failed upstream fetch leaves a stale-but-usable mirror; the runner-side pre-seed is fail-open.
-SuccessExitStatus=0 1
+# No SuccessExitStatus: the script exits 1 on a failed fetch, clone or pack step, and the unit must then read failed so a
+# persistently stale mirror is visible. Runners stay fail-open (the pre-seed tolerates a stale mirror); the timer keeps firing.
 TimeoutStartSec=900
 Nice=10
 IOSchedulingClass=idle

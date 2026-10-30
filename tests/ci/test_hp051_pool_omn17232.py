@@ -36,6 +36,16 @@ def _compose() -> dict[str, Any]:
     return cast("dict[str, Any]", yaml.safe_load(COMPOSE.read_text(encoding="utf-8")))
 
 
+def _directives(unit: str) -> dict[str, str]:
+    """Uncommented ``Key=value`` lines of a unit file, last value winning."""
+    pairs = (
+        line.split("=", 1)
+        for line in unit.splitlines()
+        if "=" in line and not line.lstrip().startswith(("#", "["))
+    )
+    return {key.strip(): value.strip() for key, value in pairs}
+
+
 def test_every_runner_carries_the_opt_in_label_and_no_required_pool_label() -> None:
     services = _compose()["services"]
     assert len(services) == 4
@@ -75,6 +85,10 @@ def test_the_pool_has_its_own_git_mirror_on_the_data_volume() -> None:
     # The address is host configuration: a required file, so the unit refuses to start without it.
     assert "EnvironmentFile=/etc/default/omninode-git-mirror\n" in daemon
     assert "--listen=${OMNI_GIT_MIRROR_LISTEN}" in daemon
+    # Parsed, not grepped: the env file is required (no leading '-'), and ExecStart is a git daemon with the flags below.
+    directives = _directives(daemon)
+    assert directives["EnvironmentFile"] == "/etc/default/omninode-git-mirror"
+    assert directives["ExecStart"].split()[0] == "/usr/lib/git-core/git-daemon"
     assert "--port=9418" in daemon
     assert f"--base-path={MIRROR_ROOT}" in daemon
     # Read-only exposure: the daemon is never given receive-pack, and listens on no wildcard address.
@@ -83,6 +97,9 @@ def test_the_pool_has_its_own_git_mirror_on_the_data_volume() -> None:
     refresh = MIRROR_REFRESH.read_text(encoding="utf-8")
     assert f"Environment=OMNI_GIT_MIRROR_ROOT={MIRROR_ROOT}" in refresh
     assert "Type=oneshot" in refresh
+    # A failing refresh must surface as a failed unit; exit 1 is never declared a success.
+    assert "SuccessExitStatus" not in _directives(refresh)
+    assert _directives(refresh)["ExecStart"].endswith("/git-mirror-refresh.sh")
     timer = MIRROR_TIMER.read_text(encoding="utf-8")
     assert "Unit=omninode-git-mirror-refresh.service" in timer
 
