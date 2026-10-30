@@ -46,6 +46,16 @@ def _services(bundle: str) -> dict[str, Any]:
     return services
 
 
+def _readiness_probe_code(port: int) -> str:
+    probe = _services("local-market")[_WRITER]["healthcheck"]["test"]
+    assert probe[:3] == ["CMD", "python", "-c"]
+    code = probe[3]
+    assert isinstance(code, str)
+    # Fail before executing if the catalog address changed or is ambiguous.
+    assert code.count("localhost:8099") == 1
+    return code.replace("localhost:8099", f"127.0.0.1:{port}")
+
+
 pytestmark = pytest.mark.unit
 
 
@@ -87,14 +97,12 @@ def test_run_trace_readiness_probe_observes_http_status(status: int) -> None:
             self.send_response(status if self.path == "/ready" else 404)
             self.end_headers()
 
-    probe = _services("local-market")[_WRITER]["healthcheck"]["test"]
-    assert probe[:3] == ["CMD", "python", "-c"]
     with HTTPServer(("127.0.0.1", 0), ReadinessHandler) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             # Only replace the address; execute the rendered probe's actual code.
-            code = probe[3].replace("localhost:8099", f"127.0.0.1:{server.server_port}")
+            code = _readiness_probe_code(server.server_port)
             result = subprocess.run(
                 [sys.executable, "-c", code],
                 capture_output=True,
@@ -108,23 +116,28 @@ def test_run_trace_readiness_probe_observes_http_status(status: int) -> None:
 
 
 def test_run_trace_readiness_probe_refuses_a_stopped_server() -> None:
-    probe = _services("local-market")[_WRITER]["healthcheck"]["test"]
     # Reserve a port without listening so no other test can take the address.
     with HTTPServer(
         ("127.0.0.1", 0), BaseHTTPRequestHandler, bind_and_activate=False
     ) as server:
         server.server_bind()
-        code = probe[3].replace("localhost:8099", f"127.0.0.1:{server.server_port}")
+        code = _readiness_probe_code(server.server_port)
+        # A dedicated exit code distinguishes a transport failure from syntax
+        # errors or other failures, without inspecting exception formatting.
+        transport_check = (
+            "import urllib.error\n"
+            "try:\n"
+            f"    exec({code!r})\n"
+            "except (urllib.error.URLError, ConnectionError, TimeoutError):\n"
+            "    raise SystemExit(42)\n"
+        )
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", transport_check],
             capture_output=True,
             timeout=10,
             check=False,
         )
-    assert result.returncode != 0
-    # An unlistening port can refuse or time out depending on the platform.
-    # urllib wraps either transport failure without a stable OS error message.
-    assert b"urllib.error.URLError:" in result.stderr
+    assert result.returncode == 42, result.stderr.decode()
 
 
 def test_run_trace_writer_waits_for_migrations_and_sasl() -> None:
