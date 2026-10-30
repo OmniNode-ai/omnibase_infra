@@ -1,0 +1,44 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21622
+title: "Machine login profile: one declared grant set every machine principal receives at issuance, with a drift check"
+summary: >-
+  Every principal the lab issuer mints is one machine's login, and a machine that runs the Claude Code hook edge also runs the hook-emit drainer, which publishes the twelve work-ledger row events and registers its credentials. Those thirteen produce grants are now bindings of the one declared profile (deploy/lab/developer-principal-bindings.yaml, derived by node_broker_grant_derive_compute), so the issuer grants them in the act that mints a principal and no machine needs a follow-up grant. audit-grants --role machine audits the machines a developer.principal overlay declares (omnibase_core EnumDeveloperPrincipalRole) and fails naming each machine and each grant of the profile the broker lacks; a grant a private declaration adds is reported and does not fail. A user timer runs it every 15 minutes through the issuer container. The private overlay rows and the health fleet's watch of the timer live in the private config repository.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21622-machine-profile
+    statement: >-
+      A machine login is minted holding the whole machine profile, and a check names any declared machine that lacks a grant of it.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: a resolved, wired mechanism enforces RULING 2026-10-30T21:35:44Z lane=orchestrator-31d9, linked to it by a CORRECTION row carrying mechanism=<repo path> -- falsifier: `python3 plugins/omni/skills/queue-status/scripts/ruling_mechanisms.py` no longer lists 2026-10-30T21:35:44Z as unmechanized
+evidence_requirements:
+  - kind: tests
+    description: >-
+      Issuance grants every work-ledger row event and credential registration (produce only) and the append client in one act; the machine audit passes a machine holding the profile, fails naming the machine and the missing grant when one is planted missing, reports a private extra without failing, never lists a developer row's ACLs, and refuses a role no row holds and a role without an overlay.
+    command: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21622-ac1-machine-profile-and-audit
+    description: >-
+      The mechanism's own tests. At the merge base the issued profile has no work-ledger row event or credential registration grant and audit-grants has no --role, so the issuance and audit cases fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21622-ac1-derived-profile
+    description: >-
+      The committed derived grants are the derive node's output of the bindings that now carry the machine profile, and the issued set pins it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -n 0 -p no:cacheprovider -k "typed_by_hand or nodes_output"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
