@@ -98,8 +98,8 @@ VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 # its install is local makes a regression (core silently reverting to the
 # enum-less released wheel) fail the build instead of crash-looping at runtime.
 WORKSPACE_PACKAGES: dict[str, str] = {
-    "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
+    repo: repo.replace("_", "-")
+    for repo in ("omnibase_core", "omnibase_spi", "omnibase_compat")
 }
 
 

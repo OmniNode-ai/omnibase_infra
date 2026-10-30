@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17427 stage 0: where every first-party package of a dev-lane image comes
+# from. The dev lane boots its composed runtime on dev-merge tags and on nothing
+# else: no sha, no branch, no release and no exact version for any package
+# listed here (RULING 2026-10-29T01:50:26Z, "We iterate with tags, not with
+# releases").
+#
+# Read by first_party_sources.py (beside this file), which classifies what an
+# image actually installed against this policy. The package set is the sibling
+# clone manifest's (scripts/runtime_build/sibling_clone_manifest.sh);
+# tests/scripts/test_first_party_sources_contract_omn17427.py holds the two
+# equal, so a sibling added on one side and forgotten on the other fails CI.
+#
+# install:
+#   vendored       staged by stage_workspace.sh at the repository's newest
+#                  dev-merge tag and installed from that staged tree.
+#   build-context  the repository whose Docker build context is the image.
+schema_version: 1.0.0
+policy: dev-merge-tag
+# The name a dev-merge tag carries. The same pattern the tag workflows
+# (.github/workflows/dev-merge-tag.yml in each repository) write and
+# scripts/runtime_build/deploy_source_ref.py reads.
+tag_pattern: '^dev-(?P<stamp>\d{14})-(?P<sha12>[0-9a-f]{12})$'
+packages:
+  - distribution: omnibase-core
+    repo: omnibase_core
+    install: vendored
+  - distribution: omnibase-spi
+    repo: omnibase_spi
+    install: vendored
+  - distribution: omnibase-compat
+    repo: omnibase_compat
+    install: vendored
+  - distribution: omnimarket
+    repo: omnimarket
+    install: vendored
+  - distribution: omnibase-infra
+    repo: omnibase_infra
+    install: build-context

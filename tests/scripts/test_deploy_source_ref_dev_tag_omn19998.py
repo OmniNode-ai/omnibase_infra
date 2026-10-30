@@ -166,21 +166,27 @@ class TestCheckoutFollowsTheNewestDevTag:
         assert result.expected_sha == head
         assert result.dev_tag_from == ""
 
-    def test_no_tag_on_origin_builds_the_branch_and_says_so(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    def test_no_tag_on_origin_is_refused_not_built_from_the_branch(
+        self, tmp_path: Path
     ) -> None:
-        _origin, (_first, _second, head) = _origin_and_clone(tmp_path)
+        """OMN-17427 stage 0: a branch head is not a dev-merge tag.
 
-        result = mod.clean_checkout(
-            tmp_path / "omnimarket",
-            "origin/dev",
-            follow_dev_tag=True,
-            worktree_root=tmp_path / "trees",
-        )
+        This used to build the branch and say so on stderr. The dev lane takes no
+        first-party package from a branch, so a repository with no dev tag on
+        origin refuses the build until its tag workflow has cut one.
+        """
+        _origin_and_clone(tmp_path)
 
-        assert result.expected_sha == head
-        assert result.dev_tag_from == ""
-        assert "has no refs/tags/dev-* tag" in capsys.readouterr().err
+        with pytest.raises(
+            mod.DeploySourceRefError, match="origin carries no refs/tags/dev-\\* tag"
+        ) as refused:
+            mod.clean_checkout(
+                tmp_path / "omnimarket",
+                "origin/dev",
+                follow_dev_tag=True,
+                worktree_root=tmp_path / "trees",
+            )
+        assert refused.value.exit_code == mod.CHECKOUT_FAILED
 
     def test_a_newest_tag_off_the_branch_is_refused(self, tmp_path: Path) -> None:
         origin, (first, _second, _head) = _origin_and_clone(tmp_path)
@@ -229,29 +235,30 @@ class TestCheckoutFollowsTheNewestDevTag:
         assert row["dev_tag_from"] == "origin/dev"
 
 
-class TestTheLabCallersNameOmnimarket:
-    """The lab paths set the follow list themselves; nobody has to remember it."""
+class TestEveryVendoredSiblingFollowsItsDevTag:
+    """The lab paths follow the tags themselves; nobody has to remember a list."""
 
-    def test_stage_workspace_passes_the_follow_list(self) -> None:
+    def test_stage_workspace_follows_every_vendored_sibling(self) -> None:
         text = (REPO_ROOT / "scripts/runtime_build/stage_workspace.sh").read_text()
-        assert "${DEPLOY_FOLLOW_DEV_TAG_REPOS:-}" in text
+        assert (
+            'for repo in "${SIBLING_REPOS[@]}"; do\n            checkout_args+=(--follow-dev-tag'
+            in text
+        )
         assert "--follow-dev-tag" in text
+        assert "DEPLOY_FOLLOW_DEV_TAG_REPOS" not in text
 
-    def test_the_stability_refresh_follows_omnimarket(self) -> None:
+    def test_the_stability_refresh_names_no_follow_list(self) -> None:
         text = (
             REPO_ROOT / "scripts/runtime_build/refresh_stability_lane.sh"
         ).read_text()
-        assert 'export DEPLOY_FOLLOW_DEV_TAG_REPOS="omnimarket"' in text
+        assert "DEPLOY_FOLLOW_DEV_TAG_REPOS" not in text
 
-    def test_the_deploy_agent_follows_omnimarket(self) -> None:
+    def test_the_deploy_agent_no_longer_hands_the_build_a_follow_list(self) -> None:
         tracking = (
             REPO_ROOT / "scripts/deploy-agent/deploy_agent/tracking_ref.py"
         ).read_text()
         executor = (
             REPO_ROOT / "scripts/deploy-agent/deploy_agent/executor.py"
         ).read_text()
-        assert 'DEV_TAG_FOLLOWED_REPOSITORIES: Final = ("omnimarket",)' in tracking
-        assert (
-            "staging_env[ENV_FOLLOW_DEV_TAG_REPOS] = "
-            '" ".join(DEV_TAG_FOLLOWED_REPOSITORIES)' in executor
-        )
+        assert "DEPLOY_FOLLOW_DEV_TAG_REPOS" not in tracking
+        assert "ENV_FOLLOW_DEV_TAG_REPOS" not in executor

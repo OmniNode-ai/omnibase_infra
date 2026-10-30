@@ -34,6 +34,7 @@ SCHEMA_FILE = REPO_ROOT / "scripts" / "runtime_build" / "build-provenance-schema
 # per-repo provenance this asserts.
 SIBLING_REPOS = (
     "omnibase_core",
+    "omnibase_spi",
     "omnibase_compat",
     "omnimarket",
 )
@@ -233,6 +234,7 @@ def test_manifest_uses_infra_vcs_ref_and_folds_vcs_provenance(tmp_path: Path) ->
     app_dir.mkdir(parents=True)
     for repo in (
         "omnibase_core",
+        "omnibase_spi",
         "omnibase_compat",
         "omnimarket",
     ):
@@ -293,3 +295,10 @@ def test_schema_declares_per_repo_vcs_provenance_and_infra_vcs_ref() -> None:
         "siblings"
     ]["additionalProperties"]
     assert set(sibling_schema["required"]) == {"vcs_ref", "vcs_dirty", "vcs_branch"}
+    # OMN-17427: the stamp command adds the tag and the build context, and the
+    # install audit adds the classification.
+    assert "dev_merge_tag" in sibling_schema["properties"]
+    assert (
+        "build_context" in schema["properties"]["per_repo_vcs_provenance"]["properties"]
+    )
+    assert "first_party_sources" in schema["properties"]

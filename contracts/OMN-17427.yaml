@@ -710,6 +710,13 @@ requirements:
     acceptance:
       - id: AC17427630002
         statement: 'The core tag dev-20261029143607-342000ec5702, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+  - id: req-omn17427-first-party-dev-merge-tags
+    statement: 'Stage 0 of the goal: the dev lane boots its composed runtime on first-party dev-merge tags. Every vendored sibling (core, spi, compat, omnimarket) is staged at its newest dev-merge tag with no caller opt-in, a sibling with no tag is refused instead of built from its branch, the image installs spi from the staged tree, and the build fails when any first-party package of the image resolves from a sha, a branch, a release or an exact version.'
+    acceptance:
+      - id: AC17427640001
+        statement: 'The audit passes an environment whose five first-party packages come from dev-merge tags (a git install of the tag, or a staged tree whose record carries the tag) and names each planted violation -- a sha, a branch, a release tag, a release archive, an index install, a tag naming another commit, a dirty staged tree, a staged tree with no tag, an unbound local install and an absent required package -- falsifier: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py -n 0 -q --no-cov fails at the merge base because the audit does not exist'
+      - id: AC17427640002
+        statement: 'Every vendored sibling follows its newest dev-merge tag in the build and in the deploy agent, a repository with no dev-merge tag refuses the checkout, the staging record carries each tree dev-merge tag and the build context, and the provenance script records and enforces the audit -- falsifier: uv run --frozen pytest tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py tests/scripts/test_stage_workspace_vcs_provenance.py tests/scripts/test_sibling_clone_manifest_parity.py -n 0 -q --no-cov fails at the merge base, where only omnimarket follows its tag and a repository with no tag builds its branch'
   - id: req-omn17427-core-contract-binding
     statement: The Done-write gate is bound from its packaged contract with zero new cross-repository node imports.
     acceptance:
@@ -934,6 +941,9 @@ evidence_requirements:
   - kind: tests
     description: A fake AIOKafkaConsumer records the reply consumer's constructor kwargs under a bound SASL lane transport with the Kafka auth environment cleared; no broker is contacted.
     command: uv run pytest tests/unit/runtime/test_request_response_wiring.py tests/unit/event_bus/test_msk_auth_direct_clients.py -q
+  - kind: tests
+    description: The first-party source audit against throwaway environments, each violation planted, and the contract, the clone manifest, the deploy agent and the Dockerfile agreeing on the same package set.
+    command: uv run pytest tests/scripts/test_first_party_sources_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -3282,3 +3292,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_omn19513_hook_events_writer.py -q -k mounts_the_ingress_socket_directory --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427546801]
+  - id: dod-omn17427-first-party-dev-merge-tags
+    description: The audit, the tag-following checkout, the staging record and the provenance fold-in; at the merge base the audit does not exist and only omnimarket follows its tag.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_first_party_sources_omn17427.py tests/scripts/test_deploy_source_ref_dev_tag_omn19998.py tests/scripts/test_stage_workspace_vcs_provenance.py tests/scripts/test_sibling_clone_manifest_parity.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640001, AC17427640002]
