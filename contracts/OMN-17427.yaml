@@ -684,6 +684,13 @@ requirements:
     acceptance:
       - id: AC17427630003
         statement: 'The sanctioned shape is movable, release range caps still apply, and dropping a source preserves neighbours, comments, other tables and line endings; absence is a no-op and every other shape is refused without changing the file -- falsifier: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov; fails at the merge base'
+  - id: req-omn17427-slot-build-kind
+    statement: The rendered-slot verifier admits the image-build service the way compose renders it, and only that kind.
+    acceptance:
+      - id: AC17427004001
+        statement: 'AC17427004001: the verifier accepts the build-only dev-lane-infra-runtime-image as docker compose config renders it for slot 1 (a build section of context, dockerfile and args, a null command and a null entrypoint, scale 0, the dev network, the prepr profile) -- falsifier: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q fails at the merge base'
+      - id: AC17427004002
+        statement: 'AC17427004002: the verifier still refuses a build section with a network, ssh, secrets, additional_contexts or target key, a command or an entrypoint with a value, any other attribute, a scale other than 0, and a second build-only service -- falsifier: the same file, each case planted'
   - id: req-omn17427-core-dev-tag-pin
     statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
     acceptance:
@@ -3148,6 +3155,34 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630003]
+  - id: dod-omn17427-slot-build-kind-render
+    description: Renders the infra, dev-lane and prepr compose chain for slot 1 with synthetic inputs and feeds the build-only service to the verifier. Fails at the merge base, whose allowed keys exclude build. Needs no daemon, credential or lane manifest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'real_render or lab_host_refused'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004001
+  - id: dod-omn17427-slot-build-kind-bounds
+    description: Plants each build-time escape, each valued command or entrypoint, each extra attribute, a nonzero scale and a second build service. Each extra-attribute case requires a passing control and exactly the diagnostic naming that key. Runs independently of sibling test modules and Docker; fails at the merge base for the build-section and exact extra-attribute diagnostics.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'not real_render'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004002
+  - id: dod-omn17427-slot-build-kind-deploy
+    description: Hosted-runner deploy check exercises the rendered build-only shape and its refusal bounds against the verifier with synthetic service data. Requires no Docker client, daemon, lane manifest or credentials; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'not real_render'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004001
+      - AC17427004002
   - id: dod-omn17427-core-dev-tag-pin
     description: Pin identity, moved imports, typed shape checker and compatible-version seams; the new pin test path fails at the merge base.
     source: manual
