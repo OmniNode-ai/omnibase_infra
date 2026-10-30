@@ -7,9 +7,11 @@ from __future__ import annotations
 import importlib
 import tomllib
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from packaging.requirements import Requirement
 
 from scripts.ci.check_sibling_compatible_range import violations
 
@@ -41,6 +43,38 @@ def test_core_tag_alone_range_and_lock_agree() -> None:
     assert parse_qs(source.query) == {"tag": [TAG]}
     assert source.fragment == COMMIT
     assert COMMIT.startswith(TAG.rsplit("-", 1)[1])
+
+
+def _locked_core_version_outside_range(
+    manifest: dict[str, Any], lock: dict[str, Any]
+) -> list[str]:
+    """Version uv.lock locks for core when the published range does not admit it.
+
+    The dev-merge tag source leaves uv.lock with a git URL and no specifier, so uv
+    no longer compares the published range with the resolved version (OMN-19655).
+    """
+    (published,) = (
+        Requirement(item)
+        for item in manifest["project"]["dependencies"]
+        if item.startswith("omnibase-core")
+    )
+    (locked,) = (p for p in lock["package"] if p["name"] == "omnibase-core")
+    return (
+        [] if published.specifier.contains(locked["version"]) else [locked["version"]]
+    )
+
+
+def test_published_core_range_admits_the_locked_core() -> None:
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    assert _locked_core_version_outside_range(manifest, lock) == []
+
+
+@pytest.mark.parametrize("version", ["0.47.57", "0.48.0", "0.49.1"])
+def test_a_locked_core_outside_the_published_range_is_found(version: str) -> None:
+    manifest = {"project": {"dependencies": ["omnibase-core>=0.47.58,<0.48.0"]}}
+    lock = {"package": [{"name": "omnibase-core", "version": version}]}
+    assert _locked_core_version_outside_range(manifest, lock) == [version]
 
 
 def test_moved_done_write_consumers_use_the_pinned_node() -> None:
