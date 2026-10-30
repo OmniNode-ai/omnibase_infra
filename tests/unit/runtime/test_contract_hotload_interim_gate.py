@@ -20,6 +20,7 @@ import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -40,7 +41,10 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 pytestmark = pytest.mark.unit
 
-_PROD_ENVIRONMENT = "onex-prod"  # k8s/onex-prod/runtime/configmap.yaml ONEX_ENVIRONMENT
+# The allowlist is configuration: these names live in the planted runtime config
+# of each test, never in the code under test.
+_LAB_ENVIRONMENT = "sandbox"
+_ALLOWLIST = [_LAB_ENVIRONMENT, "sandbox-b"]
 
 # A parseable handler-shell contract: the strict shell parse accepts it, so with
 # the gate on it is cached and materialized.
@@ -65,6 +69,10 @@ ORDINARY_NODE_CONTRACT = (
     Path(__file__).resolve().parents[3]
     / "src/omnibase_infra/nodes/node_contract_registry_reducer/contract.yaml"
 )
+
+
+class _PastTheGateError(Exception):
+    """Raised by a stubbed step that runs only after the gate has passed."""
 
 
 def _hotload(**fields: object) -> dict[str, object]:
@@ -173,21 +181,45 @@ class TestModelContractHotloadConfig:
     def test_default_is_off(self) -> None:
         assert ModelContractHotloadConfig().enabled is False
 
+    def test_default_allowlist_is_empty(self) -> None:
+        assert ModelContractHotloadConfig().allowed_environments == ()
+
     def test_mode_is_required_when_enabled(self) -> None:
         with pytest.raises(ValueError, match="mode is required"):
-            ModelContractHotloadConfig(enabled=True)
+            ModelContractHotloadConfig(enabled=True, allowed_environments=("dev",))
+
+    def test_allowlist_is_required_when_enabled(self) -> None:
+        with pytest.raises(ValueError, match="allowed_environments is required"):
+            ModelContractHotloadConfig(enabled=True, mode="on_demand")
+
+    @pytest.mark.parametrize("names", [[""], ["  "], ["dev", " "]])
+    def test_blank_allowlist_names_are_refused(self, names: list[str]) -> None:
+        with pytest.raises(ValueError, match="blank name"):
+            ModelContractHotloadConfig.model_validate(
+                {"enabled": False, "allowed_environments": names}
+            )
+
+    def test_allowlist_names_are_trimmed_and_lowercased(self) -> None:
+        gate = ModelContractHotloadConfig.model_validate(
+            {
+                "enabled": True,
+                "mode": "on_demand",
+                "allowed_environments": [" Sandbox "],
+            }
+        )
+        assert gate.allowed_environments == ("sandbox",)
 
     @pytest.mark.parametrize("mode", ["on_demand", "full_load"])
     def test_enabled_with_a_known_mode(self, mode: str) -> None:
         gate = ModelContractHotloadConfig.model_validate(
-            {"enabled": True, "mode": mode}
+            {"enabled": True, "mode": mode, "allowed_environments": _ALLOWLIST}
         )
         assert gate.enabled is True
 
     def test_unknown_mode_and_unknown_field_are_refused(self) -> None:
         with pytest.raises(ValueError):
             ModelContractHotloadConfig.model_validate(
-                {"enabled": True, "mode": "always"}
+                {"enabled": True, "mode": "always", "allowed_environments": _ALLOWLIST}
             )
         with pytest.raises(ValueError):
             ModelContractHotloadConfig.model_validate({"enabled": False, "extra": 1})
@@ -205,7 +237,11 @@ class TestRuntimeConfigFileCarriesTheSwitch:
         config = ModelRuntimeConfig.model_validate(
             {
                 "name": "hotload_gate",
-                "event_bus": {"type": "inmemory", "profile": "local"},
+                "event_bus": {
+                    "type": "inmemory",
+                    "profile": "local",
+                    "environment": _LAB_ENVIRONMENT,
+                },
             }
             | file_content
         )
@@ -218,11 +254,19 @@ class TestRuntimeConfigFileCarriesTheSwitch:
     def test_file_with_the_block_reaches_the_gate(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
         config = self._host_config(
-            {"contract_hotload": {"enabled": True, "mode": "full_load"}}
+            {
+                "contract_hotload": {
+                    "enabled": True,
+                    "mode": "full_load",
+                    "allowed_environments": _ALLOWLIST,
+                }
+            }
         )
-        assert _host(config)._resolve_contract_hotload_gate().mode == "full_load"
+        gate = _host(config)._resolve_contract_hotload_gate()
+        assert gate.mode == "full_load"
+        assert gate.allowed_environments == tuple(_ALLOWLIST)
 
 
 # ---------------------------------------------------------------------------
@@ -231,42 +275,119 @@ class TestRuntimeConfigFileCarriesTheSwitch:
 
 
 class TestGateResolution:
+    """Hot load is permitted only where the declared allowlist names the
+    environment. The planted fixtures: production-like names that a denylist
+    would miss (``prod-eu``, ``onex-production``), an unset environment, and an
+    allowed lab environment."""
+
     def test_no_block_is_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
         assert _host({})._resolve_contract_hotload_gate().enabled is False
 
-    def test_enabled_in_a_non_production_environment(
+    def test_enabled_in_an_allowed_lab_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("ONEX_ENVIRONMENT", "dev")
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
         gate = _host(
-            _hotload(enabled=True, mode="on_demand")
+            _hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST)
         )._resolve_contract_hotload_gate()
         assert gate.enabled is True
 
-    def test_enabled_with_the_real_prod_environment_value_is_a_boot_error(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "environment",
+        [" SANDBOX ", "Sandbox"],
+        ids=["padded-upper", "mixed-case"],
+    )
+    def test_allowlist_match_ignores_case_and_padding(
+        self, environment: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("ONEX_ENVIRONMENT", _PROD_ENVIRONMENT)
-        host = _host(_hotload(enabled=True, mode="on_demand"))
-        with pytest.raises(ProtocolConfigurationError, match="production"):
+        monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
+        config = {
+            **_hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST),
+            "event_bus": {"environment": _LAB_ENVIRONMENT},
+        }
+        assert _host(config)._resolve_contract_hotload_gate().enabled is True
+
+    @pytest.mark.parametrize(
+        "environment",
+        [
+            "prod-eu",
+            "onex-production",
+            "onex-prod",
+            "prd",
+            "live",
+            "sandbox-prod",
+            "onex-de",
+            "PROD",
+            " Production ",
+        ],
+    )
+    def test_enabled_in_an_environment_the_list_does_not_name_is_refused(
+        self, environment: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
+        host = _host(
+            _hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST)
+        )
+        with pytest.raises(ProtocolConfigurationError, match="does not name"):
             host._resolve_contract_hotload_gate()
 
-    def test_enabled_with_a_prod_event_bus_environment_is_a_boot_error(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "value", [None, "", "   "], ids=["unset", "empty", "blank"]
+    )
+    def test_enabled_in_an_unset_environment_is_refused(
+        self, value: str | None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        if value is None:
+            monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        else:
+            monkeypatch.setenv("ONEX_ENVIRONMENT", value)
+        # Even an event bus environment the list names does not stand in for
+        # the unset process environment.
         config = {
-            **_hotload(enabled=True, mode="full_load"),
-            "event_bus": {"environment": _PROD_ENVIRONMENT},
+            **_hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST),
+            "event_bus": {"environment": _LAB_ENVIRONMENT},
         }
-        with pytest.raises(ProtocolConfigurationError, match="production"):
+        with pytest.raises(ProtocolConfigurationError, match="unset"):
             _host(config)._resolve_contract_hotload_gate()
 
-    def test_disabled_in_prod_is_the_normal_state(
+    def test_unset_environment_defaulted_to_local_is_not_on_the_list(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("ONEX_ENVIRONMENT", _PROD_ENVIRONMENT)
+        """A config dump carries the event bus default ``local``; it is
+        refused unless the list names it, and an unset process environment is
+        refused regardless."""
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        config = ModelRuntimeConfig.model_validate(
+            {
+                "name": "hotload_gate",
+                "event_bus": {"type": "inmemory", "profile": "local"},
+                "contract_hotload": {
+                    "enabled": True,
+                    "mode": "on_demand",
+                    "allowed_environments": [_LAB_ENVIRONMENT],
+                },
+            }
+        ).model_dump(mode="json")
+        with pytest.raises(ProtocolConfigurationError, match="unset"):
+            _host(config)._resolve_contract_hotload_gate()
+
+    def test_event_bus_environment_outside_the_list_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
+        config = {
+            **_hotload(enabled=True, mode="full_load", allowed_environments=_ALLOWLIST),
+            "event_bus": {"environment": "prod-eu"},
+        }
+        with pytest.raises(ProtocolConfigurationError, match="prod-eu"):
+            _host(config)._resolve_contract_hotload_gate()
+
+    @pytest.mark.parametrize("environment", ["prod-eu", "onex-production", "onex-prod"])
+    def test_disabled_outside_the_list_is_the_normal_state(
+        self, environment: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
         assert _host({})._resolve_contract_hotload_gate().enabled is False
         assert (
             _host(_hotload(enabled=False))._resolve_contract_hotload_gate().enabled
@@ -278,28 +399,73 @@ class TestGateResolution:
         [
             "yes",
             {"enabled": True},
-            {"enabled": True, "mode": "always"},
+            {"enabled": True, "mode": "on_demand"},
+            {"enabled": True, "mode": "on_demand", "allowed_environments": []},
+            {"enabled": True, "mode": "on_demand", "allowed_environments": "dev"},
+            {"enabled": True, "mode": "on_demand", "allowed_environments": [""]},
+            {"enabled": True, "mode": "always", "allowed_environments": ["dev"]},
             {"enabled": False, "surprise": 1},
         ],
     )
     def test_malformed_block_is_a_boot_error(
         self, block: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "dev")
         with pytest.raises(ProtocolConfigurationError):
             _host({"contract_hotload": block})._resolve_contract_hotload_gate()
 
     @pytest.mark.asyncio
-    async def test_start_refuses_before_the_event_bus_starts(
+    @pytest.mark.parametrize("environment", ["prod-eu", "onex-production", None])
+    async def test_start_refuses_before_validation_and_the_event_bus(
+        self, environment: str | None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if environment is None:
+            monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        else:
+            monkeypatch.setenv("ONEX_ENVIRONMENT", environment)
+        bus = _RecordingBus()
+        host = _host(
+            _hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST),
+            bus,
+        )
+        host._is_running = False
+        validate = AsyncMock()
+        monkeypatch.setattr(host, "_validate_architecture", validate)
+        # The message names the allowlist, so only this gate can satisfy it.
+        with pytest.raises(ProtocolConfigurationError, match="allowed_environments"):
+            await host.start()
+        validate.assert_not_awaited()
+        assert bus.start_awaited is False
+
+    @pytest.mark.asyncio
+    async def test_start_passes_the_gate_when_the_list_names_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("ONEX_ENVIRONMENT", _PROD_ENVIRONMENT)
-        bus = _RecordingBus()
-        host = _host(_hotload(enabled=True, mode="on_demand"), bus)
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
+        host = _host(
+            _hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST)
+        )
         host._is_running = False
-        with pytest.raises(ProtocolConfigurationError, match="production"):
+
+        monkeypatch.setattr(
+            host, "_validate_architecture", AsyncMock(side_effect=_PastTheGateError)
+        )
+        with pytest.raises(_PastTheGateError):
             await host.start()
-        assert bus.start_awaited is False
+
+    @pytest.mark.asyncio
+    async def test_start_with_the_gate_off_does_not_consult_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "prod-eu")
+        host = _host({})
+        host._is_running = False
+
+        monkeypatch.setattr(
+            host, "_validate_architecture", AsyncMock(side_effect=_PastTheGateError)
+        )
+        with pytest.raises(_PastTheGateError):
+            await host.start()
 
 
 # ---------------------------------------------------------------------------
@@ -355,12 +521,17 @@ class TestControlGateOnMaterializes:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("RUNTIME_PROFILE", "main")
-        monkeypatch.setenv("ONEX_ENVIRONMENT", "dev")
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
         bus = _RecordingBus()
         host = _host(
             {
                 "handler_source": {"mode": "kafka_events"},
-                **_hotload(enabled=True, mode="on_demand"),
+                "event_bus": {"environment": _LAB_ENVIRONMENT},
+                **_hotload(
+                    enabled=True,
+                    mode="on_demand",
+                    allowed_environments=_ALLOWLIST,
+                ),
             },
             bus,
         )

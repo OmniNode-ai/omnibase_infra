@@ -1951,8 +1951,9 @@ class RuntimeHostProcess:
         assert_venv_purity()
 
         # Step 0c: Resolve the contract hot-load gate (OMN-20079). A switch that
-        # is on in a production environment, or a malformed block, fails the
-        # boot here, before the event bus starts or anything is wired.
+        # is on in an environment the declared allowlist does not name (or in an
+        # unset environment), or a malformed block, fails the boot here, before
+        # architecture validation, the event bus or any wiring.
         self._resolve_contract_hotload_gate()
 
         # Step 1: Validate architecture compliance FIRST (OMN-1138)

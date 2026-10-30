@@ -29,8 +29,18 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 pytestmark = pytest.mark.unit
 
-# The listener runs only where the runtime config opts in (OMN-20079).
-_HOTLOAD_ON: dict[str, object] = {"enabled": True, "mode": "on_demand"}
+# The listener runs only where the runtime config opts in and its allowlist
+# names the environment (OMN-20079).
+_HOTLOAD_ON: dict[str, object] = {
+    "enabled": True,
+    "mode": "on_demand",
+    "allowed_environments": ["dev"],
+}
+
+
+@pytest.fixture(autouse=True)
+def _dev_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_ENVIRONMENT", "dev")
 
 
 def _join_timeout() -> InfraTimeoutError:
