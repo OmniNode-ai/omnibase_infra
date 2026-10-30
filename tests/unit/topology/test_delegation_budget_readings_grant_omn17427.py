@@ -3,6 +3,7 @@
 """The delegation budget readings table binds to the runtime role the way the lab runtime does (OMN-17427)."""
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,9 @@ def test_the_write_uses_only_the_runtime_table_grant(profile: str) -> None:
     (declaration,) = (
         d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
     )
-    _resolve_projection_database_target((declaration.table,), topology)
+    target = _resolve_projection_database_target((declaration.table,), topology)
+    assert target.database_refs == ("application",)
+    assert target.physical_schemas == ("omninode_internal",)
     principal = topology.databases["application"].principals["omninode_runtime"]
     grants = [g for g in principal.grants if _TABLE in g.objects]
     assert len(grants) == 1
@@ -59,17 +62,21 @@ def test_the_interim_declaration_has_delivered_migrations() -> None:
     create = _ROOT / declaration.table.migration
     assert create.is_file()
     grant = create.parent / "0001_grant_omninode_runtime_delegation_budget_readings.sql"
-    # The complete executable SQL, so a second GRANT widening the privileges or
-    # admitting another principal cannot hide after a substring.
-    executable = " ".join(
-        line.split("--", 1)[0].strip() for line in grant.read_text().splitlines()
-    )
-    grants = [s.strip() for s in executable.split(";") if s.strip().startswith("GRANT")]
-    assert grants == [
+    # The complete executable SQL: comments stripped, then every statement that
+    # can change privileges or objects, in any case, must be one of the three.
+    executable = re.sub(r"--[^\n]*", "", grant.read_text())
+    statements = [" ".join(s.split()) for s in executable.split(";") if s.strip()]
+    mutating = [
+        s
+        for s in statements
+        if re.match(r"(grant|revoke|alter|create|drop)\b", s, re.IGNORECASE)
+    ]
+    assert mutating == [
         "GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime",
         "GRANT SELECT, INSERT, UPDATE ON omninode_internal.delegation_budget_readings TO omninode_runtime",
         "GRANT USAGE ON SEQUENCE omninode_internal.delegation_budget_readings_projection_cursor_seq TO omninode_runtime",
     ]
+    assert not re.search(r"default\s+privileges", executable, re.IGNORECASE)
 
 
 @pytest.mark.parametrize(
