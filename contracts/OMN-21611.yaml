@@ -50,7 +50,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'err \"release-tag-only: ${repo} ref' | grep -qx 1"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/scripts/runtime_build/refresh_stability_lane.sh?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'is not a v<major>.<minor>.<patch> release tag of' | grep -qx 1"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
   - id: dod-omn21611-ac1-refresh-plans-the-pin
