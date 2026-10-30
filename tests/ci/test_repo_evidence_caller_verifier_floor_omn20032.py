@@ -18,7 +18,7 @@ REQUIRED_CHECKS_PATH = REPO_ROOT / ".github" / "required-checks.yaml"
 
 # omnibase_core#1932: the squash commit that adds VERIFIER_FLOOR to the reusable's
 # "Install the pinned verifier" step.
-_FLOOR_REUSABLE_SHA = "abc2cb3e85b962bb8dc5a12a308d8a723b3f42a4"
+_FLOOR_REUSABLE_SHA = "1088a7b0303059c035ecc0e3ea33580f9556fe41"
 
 # 0.4.303 is the first omnimarket release carrying omnimarket#3511, the refusal of
 # a contract that leaves an acceptance criterion unbound.

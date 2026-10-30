@@ -103,7 +103,7 @@ def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
 
 def test_caller_pins_the_s6_part1_inputs() -> None:
     job = _job()
-    assert job["uses"].endswith("@abc2cb3e85b962bb8dc5a12a308d8a723b3f42a4")
+    assert job["uses"].endswith("@1088a7b0303059c035ecc0e3ea33580f9556fe41")
     assert job["with"].get("shadow") == "false"
     assert job["with"].get("compare-with-occ") == "false"
 

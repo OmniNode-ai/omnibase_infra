@@ -75,7 +75,7 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@abc2cb3e85b962bb8dc5a12a308d8a723b3f42a4 # OMN-21433: omnibase_core#2102 squash on dev; descends from #1932 (the VERIFIER_FLOOR 0.4.303 refusal) and carries #2085, the check-timeout-seconds input, and #2079, which verifies only the evidence a pull request adds or changes
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@1088a7b0303059c035ecc0e3ea33580f9556fe41 # dev-20261030004553-1088a7b03030; OMN-21433: omnibase_core#2102 squash on dev; descends from #1932 (the VERIFIER_FLOOR 0.4.303 refusal) and carries #2085, the check-timeout-seconds input, and #2079, which verifies only the evidence a pull request adds or changes
     with:
       evidence-source: caller
       verifier-version: 0.4.305
