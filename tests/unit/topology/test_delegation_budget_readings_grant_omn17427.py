@@ -26,7 +26,7 @@ _TABLE = "delegation_budget_readings"
 # Shipped bytes of the vendored migrations; re-pin with the ledger row when the
 # omnimarket source changes.
 _EXPECTED = {
-    "0000_create_delegation_budget_readings.sql": "f926cd9bf7612ebdaf1a19bfcaa2edbbcd5305bbd96bc991336200ee1733fe9e",
+    "0000_create_delegation_budget_readings.sql": "835bc4e3b5e9f93c0ca0bea530e02cf616eb27c56b0397903827fc89fb83e595",
     "0001_grant_omninode_runtime_delegation_budget_readings.sql": "7dec2aba11f649d51da66d6968ba78d51f2a2b2ef47cd624048c2fe1c4ea4b90",
 }
 

@@ -85,7 +85,7 @@ ALTER TABLE omninode_internal.delegation_budget_readings
 DO $constraints$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'omninode_internal.delegation_budget_readings'::regclass
           AND conname = 'pk_delegation_budget_readings'
     ) THEN
@@ -93,7 +93,7 @@ BEGIN
             ADD CONSTRAINT pk_delegation_budget_readings PRIMARY KEY (correlation_id);
     END IF;
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
+        SELECT 1 FROM pg_catalog.pg_constraint
         WHERE conrelid = 'omninode_internal.delegation_budget_readings'::regclass
           AND conname = 'ck_delegation_budget_readings_status'
     ) THEN
@@ -107,7 +107,7 @@ $constraints$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_delegation_budget_readings_projection_cursor
     ON omninode_internal.delegation_budget_readings (projection_cursor);
 
--- The question the AC3 readback asks: which completed terminals ended in this window?
+-- The question the AC3 readback asks: which terminals were observed in this window, by status?
 CREATE INDEX IF NOT EXISTS idx_delegation_budget_readings_observed_at
     ON omninode_internal.delegation_budget_readings (observed_at, status);
 
