@@ -1,0 +1,70 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21587
+title: "The collaborator lane builds its five runtime and projection services from the infra-only runtime image, so none of them boots"
+summary: >-
+  The collaborator lane compose file built its five runtime and projection services from infra's docker/Dockerfile.runtime, which since OMN-21279 installs no omnimarket and sets no BIFROST_BASE_CONTRACT_PATH. They now build on omnimarket's composed image the way docker/docker-compose.dev-lane.yml does: a composed build anchor on the staged workspace/sibling-repos/omnimarket checkout, FROM a build-only scale-0 infra service that merges the lane's runtime base. The OMN-21279 unit check now also reads this standalone file, and the render test pins the composed recipe in the rendered config. AC2 is superseded by AC3 (owner decision 2026-10-30 about 06:42Z); by the owner's explicit exception to TK-31 of 2026-10-30 about 08:29Z it is bound to the same evidence as AC3 rather than left unbound, and it is reported as superseded, not as separately met.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21587-composed-lane-image
+    statement: >-
+      The collaborator lane builds its five runtime and projection services on omnimarket's composed image, keeping every lane-scoped name, port and volume, and the rebuilt lane runs them healthy.
+    # Criterion text is the ticket's, with the lab host's name replaced by "the lab host" and the lane compose file named generically for this public repository; drift is judged by label.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the collaborator lane compose file builds all five services on omnimarket's composed image the way docker-compose.dev-lane.yml does, keeping every lane-scoped name, port and volume -- falsifier: uv run pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/integration/infra/test_lakshman_compose_render.py -q, whose new collaborator-lane cases fail on the pre-change file
+      - id: AC2
+        statement: >-
+          AC2: rebuilt from the change on the lab host, the five services run healthy for a 5-minute hold with zero restarts and answer /health on 58085, 58086 and 53002 -- falsifier: docker inspect on the lab host of the five containers shows a restart count above 0 or a status other than healthy, or curl -sf on any of the three ports fails
+      - id: AC3
+        statement: >-
+          AC3: rebuilt from the change on the lab host, the five runtime and projection services are Docker-healthy with 0 restarts after a 5-minute hold, /health answers 200 on 58085, 58086 and 53002, and in the runtimes' /health body (58085, 58086) no entry of details.runtime_health.dimensions other than projection_attachment has a status other than HEALTHY; projection_attachment is exempt because the lane's declared writer coverage (tests/ci/test_lane_projection_writer_coverage_omn17562.py) explains it -- falsifier: docker inspect on the lab host of the five containers shows a restart count above 0 or a status other than healthy, or curl -sf on 58085, 58086 or 53002 fails, or any details.runtime_health.dimensions entry on 58085 or 58086 other than projection_attachment has a status other than HEALTHY
+evidence_requirements:
+  - kind: tests
+    description: The collaborator lane's five market workloads build on the composed image, statically and in the rendered config.
+    command: uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py tests/integration/infra/test_lakshman_compose_render.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21587-ac1-static-composed-recipe
+    description: >-
+      The OMN-21279 market-image check and the recipe check read the collaborator lane file; both fail at the merge base, whose five services build the infra-only image.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_dev_lane_composed_runtime_image_omn21279.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21587-ac1-render-composed-recipe
+    description: >-
+      The rendered lane config selects the build-only infra service and builds the five services on the composed recipe on the lane's own ports, network, names and volumes; the composed-image case fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/infra/test_lakshman_compose_render.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21587-ac3-render-selection
+    description: >-
+      Hosted stand-in for the lane criteria (owner's choice of the OMN-21371 pattern, 2026-10-30): the rendered build of every market workload is omnimarket's recipe on the infra image. Hosted CI has no lane container; the lane probe below is the local Done gate's runtime proof and, as in OMN-21371, binds no criterion so the hosted verifier does not require its control. AC2 is bound here by the owner's explicit exception to TK-31: AC2 is superseded by AC3 and is reported as superseded, not as separately met.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/infra/test_lakshman_compose_render.py -q -n 0 -p no:cacheprovider -k composed_market_image
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC3]
+  - id: dod-omn21587-lane-probe
+    description: >-
+      Post-deploy point read on the lab host's collaborator lane: each of the five services is live running, healthy and at 0 restarts; /health answers on 58085, 58086 and 53002 and every curl's own exit status is checked; each runtime's dimensions list names all ten expected dimensions, has no duplicate name, and no row but projection_attachment is non-HEALTHY. It does not prove the 5-minute hold, which is the lane verify receipt. Hosted CI has no lane container, so only the local Done gate runs it; as in OMN-21371 it binds no criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -c 'set -euo pipefail; for c in omninode-lakshman-runtime omninode-lakshman-runtime-effects omnimarket-lakshman-projection-api omnimarket-lakshman-projection-delegation-writer omnimarket-lakshman-projection-tenant-registry-writer; do state="$(docker inspect -f "{{.State.Status}} {{.State.Running}} {{.State.Health.Status}} {{.RestartCount}}" "$c")"; test "$state" = "running true healthy 0"; done; for p in 58085 58086 53002; do curl -sf -o /dev/null --max-time 10 "http://localhost:$p/health"; done; for p in 58085 58086; do body="$(curl -sf --max-time 10 "http://localhost:$p/health")"; printf "%s" "$body" | python3 -c "import json,sys; d=json.load(sys.stdin); rows=d[\"details\"][\"runtime_health\"][\"dimensions\"]; names=[x[\"name\"] for x in rows]; need={\"discovery_errors\",\"empty_consumer_groups\",\"topic_coverage\",\"projection_attachment\",\"projection_dlq_saturation\",\"projection_write_path\",\"consumer_sync\",\"dispatch_deadline\",\"projection_apply_divergence\",\"projection_delta_dropped\"}; bad=[x[\"name\"] for x in rows if x[\"status\"] != \"HEALTHY\" and x[\"name\"] != \"projection_attachment\"]; sys.exit(0 if need <= set(names) and len(names) == len(set(names)) and not bad else 1)"; done'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

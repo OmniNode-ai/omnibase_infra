@@ -111,13 +111,22 @@ x-logging-defaults: &logging-defaults
   options:
     max-size: "10m"
     max-file: "3"
+# OMN-21587: the composed runtime, infra plus omnimarket, built the way
+# docker-compose.dev-lane.yml builds it (OMN-21279). The infra image carries no
+# omnimarket -- ruling 2026-10-15T21:52:44Z, market depends on infra -- and no
+# BIFROST_BASE_CONTRACT_PATH. omnimarket's own Dockerfile.runtime, built FROM
+# the build-only `lakshman-infra-runtime-image` service, installs omnimarket and
+# sets that path. Stage the omnimarket checkout at
+# workspace/sibling-repos/omnimarket before a build.
+x-lakshman-composed-runtime-build: &lakshman-composed-runtime-build
+  context: ../workspace/sibling-repos/omnimarket
+  dockerfile: Dockerfile.runtime
+  additional_contexts:
+    infra-runtime: "service:lakshman-infra-runtime-image"
+  args:
+    INFRA_RUNTIME_IMAGE: infra-runtime
 x-runtime-base: &runtime-base
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile.runtime
-    args:
-      BUILD_SOURCE: "${BUILD_SOURCE:-release}"
-      EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+  build: *lakshman-composed-runtime-build
   profiles: ["lakshman"]
   networks: !override
     - omnibase-infra-lakshman-network
@@ -490,6 +499,22 @@ services:
       - omnibase-infra-lakshman-network
     restart: "no"
     logging: *logging-defaults
+  # OMN-21587: the build-only infra half of the composed runtime image. Merges
+  # *runtime-base so it shares the composed services' profile and network (a
+  # `service:` build context must name a service in the active profile). The
+  # explicit build replaces the anchor's composed build.
+  lakshman-infra-runtime-image:
+    !!merge <<: *runtime-base
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        BUILD_SOURCE: "${BUILD_SOURCE:-release}"
+        EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
+    # No container_name: scale 0 means no container ever starts.
+    # As with the dev lane's build-only service, the lab's lane manifest
+    # has nothing to declare. (OMN-21587)
+    scale: 0
   omninode-runtime:
     !!merge <<: *runtime-base
     container_name: omninode-lakshman-runtime

@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.integration.infra.test_lakshman_compose_render import COMPOSE_FILE
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -192,3 +194,45 @@ def test_composed_builds_use_the_staged_market_recipe_and_build_only_infra() -> 
     assert infra["build"]["dockerfile"] == "docker/Dockerfile.runtime"
     assert infra["scale"] == 0
     assert "runtime" in infra["profiles"]
+
+
+# OMN-21587: this collaborator lane is a standalone file that merges no base,
+# so the dev stack above never reads it. Same check, same recipe, against that
+# file.
+_COLLABORATOR_LANE = _REPO / COMPOSE_FILE
+LAKSHMAN_COMPOSED_SERVICES = frozenset(
+    {
+        "omninode-runtime",
+        "runtime-effects",
+        "projection-api",
+        "projection-delegation-writer",
+        "projection-tenant-registry-writer",
+    }
+)
+
+
+def test_real_lakshman_lane_has_no_market_workloads_on_the_infra_only_image() -> None:
+    assert (
+        find_services_without_market_image(
+            load_compose(_COLLABORATOR_LANE),
+            (_DOCKER / "Dockerfile.runtime").read_text(encoding="utf-8"),
+        )
+        == {}
+    )
+
+
+def test_lakshman_composed_builds_use_the_staged_market_recipe() -> None:
+    services = load_compose(_COLLABORATOR_LANE)
+    for name in sorted(LAKSHMAN_COMPOSED_SERVICES):
+        build = services[name]["build"]
+        assert build["context"] == "../workspace/sibling-repos/omnimarket", name
+        assert build["dockerfile"] == "Dockerfile.runtime", name
+        assert build["args"]["INFRA_RUNTIME_IMAGE"] == "infra-runtime", name
+        assert build["additional_contexts"]["infra-runtime"] == (
+            "service:lakshman-infra-runtime-image"
+        ), name
+    infra = services["lakshman-infra-runtime-image"]
+    assert infra["build"]["context"] == ".."
+    assert infra["build"]["dockerfile"] == "docker/Dockerfile.runtime"
+    assert infra["scale"] == 0
+    assert infra["profiles"] == services["omninode-runtime"]["profiles"]
