@@ -199,3 +199,67 @@ def test_construction_failure_cannot_satisfy_completed_receipt_evidence() -> Non
             require_budget_evidence=False,
             require_contract_evidence=False,
         )
+
+
+_OVERLAY_SOURCE = (
+    "overlay:/srv/overlays/delegation_budgets/overlay.yaml"
+    "#execution_budgets.code_generation"
+)
+
+
+@pytest.mark.unit
+def test_receipt_block_names_the_overlay_the_limit_came_from() -> None:
+    """OMN-21604 AC2: the receipt records the limit and where it came from."""
+    block = _budget_outcome_receipt_block(
+        _terminal(
+            budget_evidence={
+                "requested_timeout_seconds": 300,
+                "task_class_timeout_ceiling_seconds": 600,
+                "execution_timeout_seconds": 300,
+                "terminal_delivery_margin_seconds": 60,
+            },
+            budget_source=_OVERLAY_SOURCE,
+        )
+    )
+
+    assert block["budget_source"] == _OVERLAY_SOURCE
+    assert block["budget_evidence"] == {
+        "requested_timeout_seconds": 300,
+        "task_class_timeout_ceiling_seconds": 600,
+        "execution_timeout_seconds": 300,
+        "terminal_delivery_margin_seconds": 60,
+    }
+
+
+@pytest.mark.unit
+def test_receipt_block_names_the_contract_on_a_refusal() -> None:
+    contract_source = "contract:task_class_contracts.v1.yaml#execution_budgets.document"
+    block = _budget_outcome_receipt_block(
+        _terminal(
+            budget_refusal={
+                "reason": "timeout_exceeds_task_class_ceiling",
+                "task_type": "document",
+                "requested_timeout_seconds": 241,
+                "task_class_timeout_ceiling_seconds": 240,
+            },
+            budget_source=contract_source,
+        )
+    )
+
+    assert block["budget_source"] == contract_source
+
+
+@pytest.mark.unit
+def test_receipt_block_invents_no_source_for_a_terminal_without_one() -> None:
+    block = _budget_outcome_receipt_block(
+        _terminal(
+            budget_evidence={
+                "requested_timeout_seconds": None,
+                "task_class_timeout_ceiling_seconds": 240,
+                "execution_timeout_seconds": 240,
+                "terminal_delivery_margin_seconds": 60,
+            }
+        )
+    )
+
+    assert "budget_source" not in block
