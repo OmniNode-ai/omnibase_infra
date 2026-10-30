@@ -71,7 +71,7 @@ def test_retired_occ_uses_captured_inventory_without_changing_selection(
     )
     for section in ("dispatchers", "routes", "probes", "discovery_errors"):
         assert retired[section] == legacy[section], section
-    assert len(retired["probes"]) == 1096
+    assert len(retired["probes"]) == 1097
 
 
 @pytest.mark.parametrize("missing", ["omnibase-core", "omnibase-infra"])
