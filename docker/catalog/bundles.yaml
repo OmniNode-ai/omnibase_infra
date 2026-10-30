@@ -115,6 +115,11 @@ local:
     # A laptop is the dogfood shape (the lab's dogfood lane runs on laptops), a
     # registered non-lab lane: the lab-scoped nodes are excluded without error.
     ONEX_RUNTIME_LANE: dogfood
+    # OMN-19988: the laptop's main kernel publishes the runtime tick, so tick
+    # subscribers (the local environment observer among them) run here as they
+    # do on the dev lane. Every runtime entry receives it; only the main role
+    # reads it (runtime_scheduler.start_lane_runtime_scheduler).
+    ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
     # OMN-20820: the broker requires SASL/SCRAM; every client authenticates as
     # the superuser redpanda-local-sasl creates. The password is the operator's,
@@ -186,6 +191,10 @@ local-market:
     - omnimarket-projection-delegation
     - omnimarket-projection-tenant-credentials
     - omnimarket-projection-llm-cost
+    # OMN-19972 (T2.8): the run-trace writer is a standalone runner under runtime
+    # profile projection-writer-run-trace (omnimarket#4542), so no kernel carries
+    # it; it needs the omnimarket image, so it lives here, not in `local`.
+    - omnimarket-projection-run-trace
   includes: [local]
   # OMN-21279: these kernels run the omnimarket-runtime image.
   env_default_overrides:
@@ -208,6 +217,8 @@ local-market:
     omnimarket-projection-tenant-credentials:
       redpanda-local-sasl: service_completed_successfully
     omnimarket-projection-llm-cost:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-run-trace:
       redpanda-local-sasl: service_completed_successfully
   inject_env:
     BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml

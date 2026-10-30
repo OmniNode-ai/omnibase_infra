@@ -66,6 +66,7 @@ def test_a_composed_image_replaces_the_runtime_image_on_every_service_that_runs_
         "omnimarket-projection-delegation",
         "omnimarket-projection-tenant-credentials",
         "omnimarket-projection-llm-cost",
+        "omnimarket-projection-run-trace",
     } <= on_image
     # nothing on the infra image is left over, and no service builds it
     assert all(s["image"] != _INFRA_IMAGE for s in services.values())
