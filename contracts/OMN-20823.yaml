@@ -120,7 +120,7 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20823-deploy-probe-handler-source"
     description: >-
-      deploy-scope source readback for a node no deployed runtime carries (its only profile is local-dev): read the mint handler at the evaluated commit through GitHub and require the handler class the change introduces; it does not deploy a service or claim a runtime runs it; fails at the parent, which has no such file; the AC1 tests above exercise the handler's behaviour.
+      deploy-scope source readback for a node no deployed runtime carries (its only profile is local-dev): read the mint handler at the evaluated commit through GitHub and require the handler class the change introduces; it does not deploy a service or claim a runtime runs it; it fails at the merge base with dev, 2e4087d1b, which has no such file; every commit on this branch from b1f3f6123 onward carries it; the AC1 tests above exercise the handler's behaviour.
     source: "manual"
     binds_ac: ["AC1"]
     checks:
