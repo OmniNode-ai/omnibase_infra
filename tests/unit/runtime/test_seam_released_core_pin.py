@@ -41,6 +41,8 @@ from typing import Any, Final
 
 import pytest
 
+from scripts.ci.check_sibling_compatible_range import violations
+
 _FIXTURE_DIR: Final[Path] = (
     Path(__file__).resolve().parents[2] / "fixtures" / "seams" / "core_release"
 )
@@ -101,10 +103,7 @@ def test_seam_released_core_pin_importable_and_typed() -> None:
     assert len(core_packages) == 1
     expected_version = core_packages[0]["version"]
     manifest = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert (
-        f"omnibase-core=={expected_version}"
-        in manifest["tool"]["uv"]["override-dependencies"]
-    )
+    assert violations(manifest, "omnibase-core") == []
     assert tuple(int(part) for part in expected_version.split(".")) >= tuple(
         int(part) for part in fixture["core_version"].split(".")
     )

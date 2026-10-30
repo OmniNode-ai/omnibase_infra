@@ -17,7 +17,7 @@ def test_fallback_matrix_rejects_the_previous_core_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     installed_versions = {
-        "omnibase_core": "0.47.30",
+        "omnibase_core": "0.47.57",
         "omnibase_spi": version("omnibase-spi"),
     }
     monkeypatch.setattr(vc, "_get_installed_version", installed_versions.get)
@@ -25,15 +25,15 @@ def test_fallback_matrix_rejects_the_previous_core_pin(
     errors = vc.check_version_compatibility(vc._FALLBACK_MATRIX)
 
     assert errors == [
-        "omnibase_core: 0.47.30 is incompatible (required >=0.47.31,<0.48.0)"
+        "omnibase_core: 0.47.57 is incompatible (required >=0.47.58,<0.48.0)"
     ]
 
 
-def test_fallback_matrix_accepts_the_release_core_pin(
+def test_fallback_matrix_accepts_the_dev_tag_core_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     installed_versions = {
-        "omnibase_core": "0.47.31",
+        "omnibase_core": "0.47.58",
         "omnibase_spi": version("omnibase-spi"),
     }
     monkeypatch.setattr(vc, "_get_installed_version", installed_versions.get)

@@ -13,6 +13,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 from omnibase_infra.runtime.version_compatibility import check_version_compatibility
+from scripts.ci.check_sibling_compatible_range import violations
 
 pytestmark = pytest.mark.unit
 
@@ -33,10 +34,7 @@ def test_core_cascade_resolves_at_least_the_triggering_release() -> None:
     assert locked_version >= RELEASE_FLOOR, (
         f"core cascade requires >= {RELEASE_FLOOR}; uv.lock resolves {locked_version}"
     )
-    assert (
-        f"omnibase-core=={locked_version}"
-        in manifest["tool"]["uv"]["override-dependencies"]
-    )
+    assert violations(manifest, "omnibase-core") == []
     core_requirements = [
         Requirement(spec)
         for spec in manifest["project"]["dependencies"]
