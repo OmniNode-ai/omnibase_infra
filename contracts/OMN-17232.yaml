@@ -1,0 +1,189 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17232
+title: Pre-push host identity and placement come from the private deployment table
+summary: >-
+  This contract covers the pre-push overlay prerequisite assigned to this lane. The public repository ships only a disabled neutral row. The caller declares the full private table, the shared library verifies committed configuration, and the remote pytest guard receives the same rows. These checks do not claim the parent ticket's runtime rollout, consumer census, or reboot acceptance.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-prepush-private-table
+    statement: Deployment identity and capacity must be injected through a private workspace table.
+    acceptance:
+      - id: AC1
+        statement: The public table has schema comments and exactly one neutral disabled local row; a planted additional row is refused and named.
+      - id: AC2
+        statement: With no configuration root, a missing registry root, or a root without the table, only the neutral row remains, no host is designated or picked, and the status explains how to configure a table.
+      - id: AC3
+        statement: The synthetic default-tier h051 row places a heavy lane before a fit last-resort row, then places a second lane in slot 2 while skipping an unreachable host.
+      - id: AC4
+        statement: A private table in a git root is read from HEAD and refused when edited or never committed, in both the shell hook and Python guard.
+      - id: AC5
+        statement: The repo-agnostic library takes the private table path from its caller and transports verified rows beside the bundle for the remote guard.
+      - id: AC6
+        statement: The Python guard has no built-in host identity and explains how to supply the private table when none is configured; the existing focused pre-push tests pass with synthetic deployment data.
+  - id: req-prepush-reader-fails-closed
+    statement: The shell hook reads the private table through a reader whose only absent signal is its own dedicated status.
+    acceptance:
+      - id: AC9
+        statement: A missing uv, a usage error, a crash or a killed reader is a refusal that names its cause, never the neutral table; only the CLI's dedicated absent status (78) reads as neutral, and an unset root is said so on stderr.
+  - id: req-prepush-shared-resolver
+    statement: The kernel and pre-push guard share one contract-declared workspace config owner resolver.
+    acceptance:
+      - id: AC7
+        statement: The kernel resolves the workspace config owner through the one contract-declared resolver and holds no resolver of its own; the resolver names no directory beside the workspace root, so an unset ONEX_WORKSPACE_CONFIG_ROOT with no developer config yields no root and each caller uses its neutral default or refuses naming the variable.
+      - id: AC8
+        statement: The resolver node runs from its contract and the contract-routed handler, kernel and pre-push guard agree on a real directory tree for the variable, the developer directory and the unset case, including the guard's developer-config opt-out and its refusal to adopt a neighbouring directory.
+evidence_requirements:
+  - kind: tests
+    description: Synthetic fixtures cover public-table leakage, missing configuration, concurrent slots, committed authority, and remote transport without live lab dependencies.
+    command: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-prepush-neutral-ac1
+    description: Run the shipped-file check and its planted extra-row positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "neutral_disabled_row or positive_control"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-prepush-unconfigured-ac2
+    description: Exercise all three missing-configuration cases; require no identity or placement and a configuration diagnostic.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k unconfigured_deployment
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-prepush-concurrent-slots-ac3
+    description: Real probe functions over stub SSH place the first lane in h051 and the second in h051.2 with an unreachable row skipped.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k synthetic_high_slot
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-prepush-committed-table-ac4
+    description: Git-root fixtures verify committed reads and both uncommitted refusal cases, including the Python identity reader.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "committed_deployment or uncommitted_edit_to_the_deployment or never_committed or python_guard_refuses_uncommitted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-prepush-remote-table-ac5
+    description: Capture the transferred full private table and remote wrapper, including the eleventh positional table path and workspace-config root.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "verified_private_table or declared_by_the_caller"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC5]
+  - id: dod-prepush-guard-and-regression-ac6
+    description: Synthetic guard fixtures pin the unconfigured-host refusal, table setup instructions, grant path, and divergent-table diagnostic within the hosted verifier budget. Full regression validation remains in evidence_requirements.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k "python_guard_without_private_table or python_guard_refuses_uncommitted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly -k "direct_invocation_refused_on_non_200_host or direct_invocation_refuses_divergent_private_table"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
+  - id: dod-prepush-private-table-cli-deploy
+    description: >-
+      Hosted-runner artifact probe executes the shipped private-table CLI with synthetic committed, absent, divergent, uncommitted and unreadable tables. It asserts the transported contents, exit codes and specific diagnostics without private deployment configuration or network reads. The CLI option is absent at the merge base, making the control falsifiable. This verifies the deployment hook artifact without claiming a live runtime rollout.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -p no:randomly -k private_table_cli_preserves_trust_refusals
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-prepush-reader-fails-closed-ac9
+    description: Stub uv exiting 78, 2, 1, 127 and killed, and no uv at all, drive the shell reader; only 78 reads as neutral. The CLI with no declared root exits 78 and says so on stderr.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py -q -n 0 --no-cov -p no:randomly -k "only_the_readers_own_absent_status or no_declared_root_is_absent"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]
+  - id: dod-prepush-shared-root-policy-deploy
+    description: Synthetic artifact regression verifies captured environments and the pre-push developer-config opt-out while preserving default runtime config precedence. No private deployment table or network is needed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/cli/test_omn20700_developer_workspace_config_owner.py -q -p no:randomly -k "declared_root or adopts_neither or captured_environment or fresh_developer or declared_owner or beside_the_workspace or variable_still"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-prepush-process-integration
+    description: Real Bash and Python processes share the committed explicit-root table, refuse working-tree drift, and return to the neutral row when the table is absent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/scripts/test_prepush_private_table_omn17232.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC4, AC5]
+  - id: dod-prepush-container-cli-deploy
+    description: >-
+      Hosted-runner deployment artifact probe executes this checkout's Python guard in a disposable Python container without network access or private configuration. A synthetic explicit root must return the dedicated absence code 78 (not 2, which argparse and uv use for their own failures), then the exact declared table, then an unreadable-table refusal. The merge-base CLI lacks --private-table and fails the absence-code assertion. This checks the deployed CLI artifact, not the parent ticket's runtime rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          docker run --rm --network none \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/app:ro" -w /app \
+            python:3.12-bookworm python -c '
+          import os, pathlib, subprocess, sys, tempfile
+          with tempfile.TemporaryDirectory() as directory:
+              root = pathlib.Path(directory)
+              relative = "config/onex/overlays/prepush_hosts/prepush_hosts.omnibase_infra.tsv"
+              table = root / relative
+              table.parent.mkdir(parents=True)
+              environment = {**os.environ, "ONEX_WORKSPACE_CONFIG_ROOT": str(root)}
+              command = [sys.executable, "-m", "scripts.hooks.pytest_full_suite_host_guard", "--private-table", relative]
+              def probe():
+                  return subprocess.run(command, env=environment, text=True, capture_output=True, timeout=30)
+              absent = probe()
+              assert absent.returncode == 78 and not absent.stdout, absent
+              row = "probe\tcapacity\tprobe.invalid\t-\t1\t-\t-\t-\tnone\t1\t-\tauthorizing\tallowed\tdefault\tSynthetic deployment probe\n"
+              table.write_text(row)
+              present = probe()
+              assert present.returncode == 0 and present.stdout == row, present
+              table.unlink()
+              table.mkdir()
+              unreadable = probe()
+              assert unreadable.returncode == 1 and not unreadable.stdout and "unreadable" in unreadable.stderr, unreadable
+              print("prepush-container-cli: absent=78 present=exact unreadable=1")
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4, AC6]
+  - id: dod-prepush-shared-resolver-ac7
+    description: Assert the kernel contains no resolver function and both callers import and invoke the shared handler.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/handlers/test_handler_workspace_config_root_resolve.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-prepush-contract-resolver-ac8
+    description: Load handler and models from the node contract and compare the real kernel and guard against actual directory trees for every precedence rule and developer-config policy.
+    source: manual
+    binds_ac: [AC8]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/nodes/test_workspace_config_root_resolve_node_omn17232.py -q -n 0 --no-cov -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-prepush-resolver-merged-source
+    description: Hermetic deployed-source readback of the kernel at the evaluated commit; the shared resolver import and call are absent at the merge base.
+    source: manual
+    binds_ac: [AC7]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "HandlerWorkspaceConfigRootResolve" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra

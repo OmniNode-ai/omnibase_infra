@@ -35,6 +35,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from tests.ci._prepush_private_table import PRIVATE_TABLE_REL
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUARD_MODULE = REPO_ROOT / "scripts" / "hooks" / "pytest_full_suite_host_guard.py"
 GRANT_MODULE = REPO_ROOT / "scripts" / "hooks" / "prepush_override_grant.py"
@@ -156,7 +159,7 @@ def test_violation_message_none_when_host_undetermined() -> None:
     assert (
         guard.full_suite_host_violation_message(
             host="",
-            target_hostname="stickybeatz-studio",
+            target_hostname="gate-host-a",
             override_authorized=False,
         )
         is None
@@ -166,8 +169,8 @@ def test_violation_message_none_when_host_undetermined() -> None:
 def test_violation_message_none_when_host_matches_case_insensitive() -> None:
     assert (
         guard.full_suite_host_violation_message(
-            host="Stickybeatz-Studio",
-            target_hostname="stickybeatz-studio",
+            host="Gate-Host-A",
+            target_hostname="gate-host-a",
             override_authorized=False,
         )
         is None
@@ -177,9 +180,9 @@ def test_violation_message_none_when_host_matches_case_insensitive() -> None:
 def test_violation_message_none_when_host_matches_201_gate_runner() -> None:
     assert (
         guard.full_suite_host_violation_message(
-            host="gate-runner-201",
-            target_hostname="stickybeatz-studio",
-            additional_target_hostnames=("gate-runner-201",),
+            host="gate-runner-b",
+            target_hostname="gate-host-a",
+            additional_target_hostnames=("gate-runner-b",),
             override_authorized=False,
         )
         is None
@@ -193,8 +196,8 @@ def test_violation_message_none_when_override_authorized() -> None:
     authorization, not an ambient inheritable flag."""
     assert (
         guard.full_suite_host_violation_message(
-            host="omnibook",
-            target_hostname="stickybeatz-studio",
+            host="gate-host-d",
+            target_hostname="gate-host-a",
             override_authorized=True,
         )
         is None
@@ -203,13 +206,13 @@ def test_violation_message_none_when_override_authorized() -> None:
 
 def test_violation_message_present_on_real_mismatch() -> None:
     message = guard.full_suite_host_violation_message(
-        host="omnibook",
-        target_hostname="stickybeatz-studio",
+        host="gate-host-d",
+        target_hostname="gate-host-a",
         override_authorized=False,
     )
     assert message is not None
-    assert "omnibook" in message
-    assert "stickybeatz-studio" in message
+    assert "gate-host-d" in message
+    assert "gate-host-a" in message
     assert "prepush_override_grant.py mint" in message, (
         "the refusal must name the supported override path; a refusal with no "
         "alternative is how a gate gets disabled outright"
@@ -246,6 +249,7 @@ def _write_synthetic_project(tmp_path: Path) -> Path:
         "    enforce(config, 'tests')\n",
         encoding="utf-8",
     )
+    _write_host_table(project, "localhost", "disabled")
     tests_dir = project / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_x.py").write_text(
@@ -281,6 +285,8 @@ def _hermetic_subprocess_env(env_overrides: dict[str, str]) -> dict[str, str]:
         "GITHUB_ACTIONS",
         "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
         "PREPUSH_200_HOSTNAME",
+        "ONEX_WORKSPACE_CONFIG_ROOT",
+        "OMNI_HOME",
         "PYTEST_ADDOPTS",
         "PYTEST_CURRENT_TEST",
     ):
@@ -305,7 +311,7 @@ _GIT_SCOPING_ENV_VARS = (
 
 
 def _no_git_env() -> dict[str, str]:
-    env = dict(os.environ)
+    env = dict(scrub_git_location_env(os.environ))
     for name in _GIT_SCOPING_ENV_VARS:
         env.pop(name, None)
     return env
@@ -319,7 +325,6 @@ def _git_init(project: Path) -> None:
     scope binds nothing). So the behavioral grant test needs a real, if
     minimal, worktree rather than a bare directory.
     """
-    env = _no_git_env()
     for args in (
         ["init", "-q"],
         ["config", "user.email", "test@example.com"],
@@ -328,7 +333,11 @@ def _git_init(project: Path) -> None:
         ["commit", "-q", "-m", "synthetic project", "--no-gpg-sign"],
     ):
         subprocess.run(
-            ["git", *args], cwd=project, env=env, capture_output=True, check=True
+            ["git", *args],
+            cwd=project,
+            env=scrub_git_location_env(os.environ),
+            capture_output=True,
+            check=True,
         )
 
 
@@ -352,6 +361,7 @@ def test_direct_invocation_refused_on_non_200_host(tmp_path: Path) -> None:
     (no `git push` in sight) on a non-.200 host is refused BEFORE
     collection."""
     project = _write_synthetic_project(tmp_path)
+    _git_init(project)
     result = _run_pytest(
         project,
         env_overrides={"PREPUSH_200_HOSTNAME": _GUARANTEED_NON_MATCHING_HOSTNAME},
@@ -361,7 +371,7 @@ def test_direct_invocation_refused_on_non_200_host(tmp_path: Path) -> None:
         f"run on a non-.200 host; got exit {result.returncode}. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "not the designated .200 build host" in result.stderr, (
+    assert "no gate host is configured" in result.stderr, (
         f"expected the refusal message; got stderr={result.stderr!r}"
     )
     assert "1 passed" not in result.stdout, (
@@ -376,7 +386,17 @@ def test_direct_invocation_allowed_when_host_matches(tmp_path: Path) -> None:
     project = _write_synthetic_project(tmp_path)
     real_host = guard.resolve_local_hostname()
     assert real_host, "this test requires a resolvable local hostname"
-    result = _run_pytest(project, env_overrides={"PREPUSH_200_HOSTNAME": real_host})
+    _write_host_table(project, "localhost", "disabled")
+    _git_init(project)
+    root = tmp_path / "private_config"
+    table = root / PRIVATE_TABLE_REL
+    table.parent.mkdir(parents=True)
+    table.write_text(
+        f"hx\tcapacity\t{real_host.lower()}\t-\t1\t-\t-\t-\tnone\t1\t-\tauthorizing\tallowed\tdefault\tSynthetic current host\n"
+    )
+    result = _run_pytest(
+        project, env_overrides={"ONEX_WORKSPACE_CONFIG_ROOT": str(root)}
+    )
     assert result.returncode == 0, (
         f"expected the run to proceed on a matching host; got exit "
         f"{result.returncode}. stdout={result.stdout!r} stderr={result.stderr!r}"
@@ -517,7 +537,7 @@ def test_direct_invocation_allowed_with_a_minted_grant(tmp_path: Path) -> None:
         "the grant must be SPENT after one use -- a reusable grant is an "
         "environment variable with extra steps"
     )
-    assert "not the designated .200 build host" in refused.stderr
+    assert "no gate host is configured" in refused.stderr
 
     receipts = (
         project / ".onex_state" / "prepush_override" / "receipts.jsonl"
@@ -592,7 +612,7 @@ def test_full_suite_refused_when_the_committed_table_only_shadows_this_host(
     assert result.returncode != 0, (
         f"a shadow row must not authorize; got exit {result.returncode}"
     )
-    assert "not the designated .200 build host" in result.stderr
+    assert "no gate host is configured" in result.stderr
 
 
 def test_an_uncommitted_table_row_cannot_self_designate_this_host(
@@ -613,3 +633,26 @@ def test_an_uncommitted_table_row_cannot_self_designate_this_host(
     assert result.returncode != 0, (
         f"an uncommitted row must be ignored, not honored; got exit {result.returncode}"
     )
+
+
+def test_direct_invocation_refuses_divergent_private_table_before_grant(
+    tmp_path: Path,
+) -> None:
+    project = _write_synthetic_project(tmp_path)
+    _git_init(project)
+    root = tmp_path / "private"
+    table = root / PRIVATE_TABLE_REL
+    table.parent.mkdir(parents=True)
+    table.write_text("# committed private table\n", encoding="utf-8")
+    _git_init(root)
+    table.write_text("# divergent private table\n", encoding="utf-8")
+    result = _run_pytest(
+        project, env_overrides={"ONEX_WORKSPACE_CONFIG_ROOT": str(root)}
+    )
+    assert result.returncode == 1
+    assert (
+        "private host table differs between the working tree and HEAD" in result.stderr
+    )
+    assert "no gate host is configured" not in result.stderr
+    assert "INTERNALERROR" not in result.stderr
+    assert "1 passed" not in result.stdout

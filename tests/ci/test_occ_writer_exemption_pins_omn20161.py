@@ -6,6 +6,9 @@
 OMN-20074 retired both OCC preflight callers. The caller-mode receipt gate
 still delegates to core, so keep its pin coverage and assert that no preflight
 caller remains in the live workflow inventory.
+Since OMN-20074 the pinned gate derives the writer app's pin-only verdict in its
+writer_pin_only step, so the pin check looks for that step rather than the retired
+occ_preflight_wait flag.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ USES = re.compile(
     re.MULTILINE,
 )
 WRITER_APP = "onexbot-occ-writer"
-PIN_PROBE_FLAG = "--check-no-companion-required"
+PIN_ONLY_STEP = "id: writer_pin_only"
 
 
 def _callers() -> list[tuple[str, str, str]]:
@@ -75,4 +78,4 @@ def test_receipt_gate_pin_carries_writer_app_exemption(name: str, ref: str) -> N
     assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{name} pins receipt-gate.yml at {ref}"
     text = _fetch_core_file(ref, ".github/workflows/receipt-gate.yml")
     assert WRITER_APP in text
-    assert PIN_PROBE_FLAG in text
+    assert PIN_ONLY_STEP in text

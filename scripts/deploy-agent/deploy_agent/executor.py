@@ -1948,28 +1948,14 @@ LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
 LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
 
 
-def _workspace_config_root(workspace_root: Path) -> Path:
-    """The workspace-config owner, from the runtime's own resolver (OMN-19743).
-
-    ``ONEX_WORKSPACE_CONFIG_ROOT`` when set, otherwise the workspace's sibling
-    operator repository or its developer config. Imported here, not at module
-    load, because the resolver lives in the runtime kernel module.
-    """
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
-    return workspace_runtime_config_root(workspace_root)
-
-
-def resolve_lane_overlay_dir(
-    env: Mapping[str, str], repo_dir: str = REPO_DIR
-) -> str | None:
+def resolve_lane_overlay_dir(env: Mapping[str, str]) -> str | None:
     """Resolve the private lane-overlay directory every lane compose file mounts.
 
     ``ONEX_LANE_OVERLAY_DIR`` when it names a directory; otherwise
-    ``config/lab/lane-overlays`` under the workspace-config owner of the
-    workspace that holds this deploy clone (``REPO_DIR/..``). The workspace is
-    derived from the clone, not from ``OMNI_HOME``, because the agent's unit
-    names a different ``OMNI_HOME`` level than its clone's workspace.
+    ``config/lab/lane-overlays`` under ``ONEX_WORKSPACE_CONFIG_ROOT``, which the
+    deployment's host installer sets in this agent's unit. The agent installs the
+    published runtime package, so it reads the variable itself instead of
+    importing the runtime's resolver, and it guesses no directory beside its clone.
 
     Returns ``None`` when no directory exists. The caller then leaves the
     variable unset, and compose refuses every lane file with the mount's own
@@ -1978,12 +1964,9 @@ def resolve_lane_overlay_dir(
     configured = env.get(LANE_OVERLAY_DIR_ENV, "").strip()
     if configured:
         return str(Path(configured).resolve()) if Path(configured).is_dir() else None
-    candidate = (
-        _workspace_config_root(Path(repo_dir).parent) / LANE_OVERLAY_RELATIVE_DIR
-    )
-    if candidate.is_dir():
-        return str(candidate.resolve())
-    return None
+    owner = env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
+    candidate = Path(owner).resolve() / LANE_OVERLAY_RELATIVE_DIR if owner else None
+    return str(candidate) if candidate and candidate.is_dir() else None
 
 
 def _dev_broker_policy_env(env: Mapping[str, str]) -> dict[str, str]:

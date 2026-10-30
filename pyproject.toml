@@ -775,3 +775,4 @@ node_validation_ledger_write_effect = "omnibase_infra.nodes.node_validation_ledg
 node_validation_orchestrator = "omnibase_infra.nodes.node_validation_orchestrator"
 node_vector_store_effect = "omnibase_infra.nodes.node_vector_store_effect"
 node_waste_detection_compute = "omnibase_infra.nodes.node_waste_detection_compute"
+node_workspace_config_root_resolve_effect = "omnibase_infra.nodes.node_workspace_config_root_resolve_effect"

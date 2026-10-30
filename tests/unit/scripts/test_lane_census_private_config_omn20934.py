@@ -6,9 +6,8 @@ Operator RULING 2026-10-10T21:57:38Z: no deployment or lab configuration lives
 in a shipped repository. The lane manifest and the committed census named one
 lab's hosts, lanes, addresses and people, and every automated refresh of the
 census failed the public-repo hygiene gate on them. They now live in
-``config/lab/lane-census`` under ``ONEX_WORKSPACE_CONFIG_ROOT`` (else the owner
-the runtime resolves for ``OMNI_HOME``), and every reader resolves them there or
-refuses, naming the variable.
+``config/lab/lane-census`` under ``ONEX_WORKSPACE_CONFIG_ROOT``, and every reader
+resolves them there or refuses, naming the variable.
 
 AC1 falsifier: the repository carries neither file. AC2 falsifier: each reader,
 with and without the config root.
@@ -75,20 +74,18 @@ def test_the_config_root_names_the_census_directory(
     assert plan.default_snapshot_path() == NEUTRAL_SNAPSHOT
 
 
-def test_omni_home_resolves_through_the_runtime_owner(
+def test_omni_home_alone_is_refused_naming_the_variable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """With no explicit root, the runtime's own resolver answers for OMNI_HOME."""
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
+    """The census is lab config: no directory is guessed from OMNI_HOME."""
     _unset(monkeypatch)
     registry = tmp_path / "registry"
-    registry.mkdir()
+    (registry / ".onex" / "workspace-config").mkdir(parents=True)
+    for neighbour in ("config", "neighbor", "workspace-config"):
+        (tmp_path / neighbour).mkdir()
     monkeypatch.setenv("OMNI_HOME", str(registry))
-    expected = (
-        workspace_runtime_config_root(registry) / "config" / "lab" / "lane-census"
-    )
-    assert plan.lane_census_dir() == expected
+    with pytest.raises(plan.LaneCensusConfigError, match="ONEX_WORKSPACE_CONFIG_ROOT"):
+        plan.lane_census_dir()
 
 
 def test_lane_manifest_overrides_the_manifest_only(

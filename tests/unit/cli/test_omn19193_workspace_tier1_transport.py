@@ -357,17 +357,20 @@ def test_retiring_root_config_cannot_answer_without_owning_config(
     legacy = root / "config/onex/runtime/runtime_config.yaml"
     legacy.parent.mkdir(parents=True)
     legacy.write_text(_TIER1, encoding="utf-8")
-    with pytest.raises(ProtocolConfigurationError, match="omnibase_internal"):
+    with pytest.raises(ProtocolConfigurationError, match="ONEX_WORKSPACE_CONFIG_ROOT"):
         resolve_embedded_runtime_config(workspace_root=root)
 
 
-def test_symlinked_registry_uses_its_physical_config_sibling(
+def test_symlinked_registry_uses_its_physical_developer_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     actual = tmp_path / "registry/omni_home"
     actual.mkdir(parents=True)
-    owner = actual.parent / "omnibase_internal/config/onex/runtime/runtime_config.yaml"
+    owner = (
+        actual.resolve()
+        / ".onex/workspace-config/config/onex/runtime/runtime_config.yaml"
+    )
     owner.parent.mkdir(parents=True)
     owner.write_text(_TIER1, encoding="utf-8")
     link = tmp_path / "alias/omni_home"
