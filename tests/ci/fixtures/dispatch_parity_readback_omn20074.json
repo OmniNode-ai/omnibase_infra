@@ -1,9 +1,9 @@
 {
   "_provenance": {
-    "captured_utc": "2026-10-30T00:44:38.618879+00:00",
+    "captured_utc": "2026-10-30T14:03:31.315636+00:00",
     "legacy_product_sha": "6c82d7967161a1f4bf98ec3f694d06ed989c63eb",
-    "retired_product_sha": "7dfd2eb5b74eb0541b8d9f0641f614f182bf92eb",
-    "source": "Live MessageDispatchEngine.dispatch snapshots for the declared dependency corpora"
+    "retired_product_sha": "9c79112c182ea2b504e128c7d3dbd23c2c0f16ea",
+    "source": "In-process MessageDispatchEngine.dispatch snapshots; retired corpus regenerated offline with the committed canonical harness (no broker/runtime contact); legacy capture retained"
   },
   "legacy": {
     "captured_utc": "2026-10-14T15:10:16.379544+00:00",
@@ -24,20 +24,20 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-10-30T00:44:38.618879+00:00",
+    "captured_utc": "2026-10-30T14:03:31.315636+00:00",
     "corpus": {
-      "contracts_discovered": 159,
+      "contracts_discovered": 160,
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 138
+        "omnibase_infra": 139
       },
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 96,
-      "registered_dispatchers": 128,
-      "registered_routes": 112,
-      "type_scoped_dispatchers": 75,
-      "probe_count": 1096
+      "distinct_subscribe_topics": 97,
+      "registered_dispatchers": 129,
+      "registered_routes": 113,
+      "type_scoped_dispatchers": 76,
+      "probe_count": 1099
     },
-    "snapshot_sha256": "33f518b0b1f91468b78c437a3230d61927c41f1fb831f5ac11fda17c46682f77"
+    "snapshot_sha256": "e90b776146163083dd3c88ca20b61c00bacda9b73d6e6c9a8c19f9e6e547b883"
   }
 }

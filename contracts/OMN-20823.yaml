@@ -66,12 +66,12 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20823-ac6-lane-local-refusal"
     description: >-
-      run_delegate for lane local with no stored login, the ambient SASL pair unset and ONEX_TENANT_ID set raises naming onex auth lane-login before the runtime is handed the run; with the ambient pair set the run is dispatched with no stored identity bound; with a stored login it is bound (positive control).
+      The no-login refusal and ambient-pair fallback already exist at dev merge base dee05932; the three original CLI cases remain regression checks. An offline functional journey first runs the new real make mint-local target against the recording fake broker, container and host probe, runs the real auth lane-login command with its stdin secret, and confirms that the real store holds the minted identity and delegate binds it. After real auth lane-logout, a separate case with no ambient SASL pair is refused naming onex auth lane-login before the recorded runtime handoff, and a case with the ambient pair dispatches without a stored identity bound. The two journey cases fail at dee05932 because mint-local is absent, not because this change introduces the inherited credential guard. This is not a Kafka connection or real-broker proof.
     source: "manual"
     binds_ac: ["AC6"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_delegate_lane_local_omn20823.py"
+        check_value: "uv run pytest -q --no-cov tests/unit/cli/test_delegate_lane_local_omn20823.py tests/unit/cli/test_mint_local_logout_journey_omn20823.py"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn20823-ac7-tenant"
     description: >-
