@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,7 +32,11 @@ class ModelNodePackageEntry(BaseModel):
 
     @classmethod
     def discover(
-        cls, *, filter_names: list[str] | None = None, lenient: bool = False
+        cls,
+        *,
+        filter_names: list[str] | None = None,
+        lenient: bool = False,
+        report_warning: Callable[[str], None] | None = None,
     ) -> list[ModelNodePackageEntry]:
         """Return entries for all ``onex.node_package`` entry points, sorted by name.
 
@@ -43,10 +48,14 @@ class ModelNodePackageEntry(BaseModel):
                 raises, because a broken entry point in the canonical path
                 indicates a broken environment.
 
+            report_warning: Optional diagnostic sink. CLI callers supply their
+                stderr writer so logging filters cannot hide skipped packages.
+
         Raises:
             ProtocolConfigurationError: In strict mode, when an entry point cannot
                 be loaded or its package directory does not exist.
         """
+        warn = report_warning if report_warning is not None else logger.warning
         eps = importlib.metadata.entry_points(group="onex.node_package")
         result: list[ModelNodePackageEntry] = []
         for ep in eps:
@@ -57,14 +66,14 @@ class ModelNodePackageEntry(BaseModel):
             except (ImportError, AttributeError, OSError, SyntaxError) as exc:
                 msg = f"Could not load entry point {ep.name!r}: {exc}"
                 if lenient:
-                    logger.warning("%s - skipping", msg)
+                    warn(f"{msg} - skipping")
                     continue
                 raise cls._refusal(msg) from exc
             pkg_path = Path(pkg.__path__[0])
             if not pkg_path.exists():
                 msg = f"Entry point {ep.name!r} path does not exist: {pkg_path}"
                 if lenient:
-                    logger.warning("%s - skipping", msg)
+                    warn(f"{msg} - skipping")
                     continue
                 raise cls._refusal(msg)
             result.append(cls(name=ep.name, path=pkg_path))

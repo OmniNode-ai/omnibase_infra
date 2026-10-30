@@ -56,3 +56,11 @@ dod_evidence:
         check_value: uv run pytest tests/integration/test_topic_provision_lane_auth_omn21529.py -q -k missing
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-cli-discovery-diagnostics
+    description: The real CLI returns 1 on strict discovery failure and prints lenient WARNING diagnostics to stderr even when the package logger is disabled.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_create_kafka_topics.py -q -k cli_discovery_failure_reports_to_stderr
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

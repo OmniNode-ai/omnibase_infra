@@ -11,16 +11,17 @@ refuses.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import ModuleType
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
-
-from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
 
 pytestmark = pytest.mark.unit
 
@@ -62,7 +63,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-_TOPIC = "onex.evt.k1.v1"
+_TOPIC = "onex.evt.k1.topic-provision.v1"
 
 
 def _run_live_main(
@@ -70,11 +71,9 @@ def _run_live_main(
 ) -> tuple[int, MagicMock, MagicMock]:
     """Run ``main()`` through the real spec builder against a fake broker.
 
-    Only discovery and extraction are stubbed; ``_build_specs`` and
-    ``_run_live`` run for real. ``create_topics`` lands the topic in the
-    broker's metadata, so the post-create readback sees it.
+    Install a temporary package with real entry-point metadata and a topic
+    contract. Only the broker boundary is substituted.
     """
-    from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
 
     mod = _load()
     admin_cls = MagicMock()
@@ -93,29 +92,41 @@ def _run_live_main(
     fake_admin = ModuleType("confluent_kafka.admin")
     fake_admin.AdminClient = admin_cls
     fake_admin.NewTopic = MagicMock()
-    entry = ModelContractTopicEntry(
-        topic=_TOPIC,
-        kind="evt",
-        producer="k1",
-        event_name="k1",
-        version="v1",
-        source_contracts=(Path("contract.yaml"),),
-        partitions=1,
-        replication_factor=1,
-    )
-    with (
-        patch.object(sys, "argv", ["create_kafka_topics.py", *argv]),
-        patch.dict(sys.modules, {"confluent_kafka.admin": fake_admin}),
-        patch(
-            "omnibase_infra.models.model_node_package_entry.ModelNodePackageEntry.discover",
-            return_value=[ModelNodePackageEntry(name="p", path=Path())],
-        ),
-        patch(
-            "omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor.extract",
-            return_value=[entry],
-        ),
-    ):
-        code = mod.main()
+    package_name = f"landing_topic_{uuid4().hex}"
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        package = root / package_name
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "contract.yaml").write_text(
+            f"event_bus:\n  publish_topics:\n    - topic: {_TOPIC}\n"
+            "      topic_config:\n        partitions: 1\n"
+            "        replication_factor: 1\n",
+            encoding="utf-8",
+        )
+        metadata = root / f"{package_name}-1.0.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            f"Name: {package_name}\nVersion: 1.0\n", encoding="utf-8"
+        )
+        (metadata / "entry_points.txt").write_text(
+            f"[onex.node_package]\n{package_name} = {package_name}\n",
+            encoding="utf-8",
+        )
+        try:
+            with (
+                patch.object(sys, "path", [str(root), *sys.path]),
+                patch.object(
+                    sys,
+                    "argv",
+                    ["create_kafka_topics.py", *argv, "--packages", package_name],
+                ),
+                patch.dict(sys.modules, {"confluent_kafka.admin": fake_admin}),
+            ):
+                importlib.invalidate_caches()
+                code = mod.main()
+        finally:
+            sys.modules.pop(package_name, None)
     return code, admin_cls, fake_admin.NewTopic
 
 
@@ -258,3 +269,57 @@ def test_sasl_lane_rerun_is_idempotent(
     admin_cls.assert_called_once()
     admin_cls.return_value.create_topics.assert_not_called()
     new_topic.assert_not_called()
+
+
+@pytest.mark.parametrize("protocol", ["SASL_SSL", "SSL"])
+def test_tls_lane_declares_the_admin_protocol(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, protocol: str
+) -> None:
+    declaration = workspace / "cfg" / "config" / "lab" / "ci_bus_lanes.yaml"
+    declaration.write_text(
+        "lanes:\n  dev:\n    broker: broker.invalid:19092\n"
+        f"    security_protocol: {protocol}\n"
+        + ("    sasl_mechanism: SCRAM-SHA-256\n" if protocol == "SASL_SSL" else ""),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
+    assert code == 0
+    (config,) = admin_cls.call_args.args
+    assert config["security.protocol"] == protocol
+    if protocol == "SASL_SSL":
+        assert config["sasl.password"] == _CRED
+        assert config["sasl.mechanism"] == "SCRAM-SHA-256"
+    else:
+        assert not any(key.startswith("sasl.") for key in config)
+
+
+@pytest.mark.parametrize("identity", ["stored", "environment"])
+def test_sasl_without_mechanism_refuses_before_connecting(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    identity: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from omnibase_infra.cli.store_lane_credential import StoreLaneCredential
+
+    declaration = workspace / "cfg" / "config" / "lab" / "ci_bus_lanes.yaml"
+    declaration.write_text(_OVERLAY.replace("    sasl_mechanism: SCRAM-SHA-256\n", ""))
+    if identity == "stored":
+        StoreLaneCredential(onex_home=workspace / "home" / ".onex").save(
+            lane="dev", sasl_username="stored", sasl_password=_CRED
+        )
+    else:
+        monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+        monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
+    assert code == 1
+    admin_cls.assert_not_called()
+    assert "sasl_mechanism" in capsys.readouterr().err
+
+
+def test_lane_dry_run_needs_no_identity_or_broker(workspace: Path) -> None:
+    code, admin_cls, _ = _run_live_main(["--lane", "dev", "--dry-run"])
+    assert code == 0
+    admin_cls.assert_not_called()

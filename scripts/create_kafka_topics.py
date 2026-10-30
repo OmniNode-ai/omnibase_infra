@@ -46,7 +46,6 @@
 # Design decisions:
 #   - confluent-kafka (sync): CLI tool — no async event loop needed.
 #   - list_topics() is the source of truth, not create_topics() return value.
-#   - Repo-root is discovered via Path(__file__).resolve(), not CWD.
 #   - --dry-run never attempts a broker connection, even if --bootstrap-servers given.
 #
 # OMN-15395 (D2) — why this script shares the runtime's policy seam:
@@ -76,17 +75,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
     from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
-
-# ---------------------------------------------------------------------------
-# Repo-root discovery
-# ---------------------------------------------------------------------------
-
-# This script lives at scripts/create_kafka_topics.py.
-# The repo root is one level up.
-_SCRIPT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _SCRIPT_DIR.parent
-_DEFAULT_CONTRACTS_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
-
 
 # ---------------------------------------------------------------------------
 # CLI argument parsing
@@ -249,8 +237,7 @@ def _run_dry(
         topic_sources: Optional mapping of topic -> list of package names
             that declared it.  Used in multi-package mode for diagnostics.
     """
-    bs_display = bootstrap_servers if bootstrap_servers else "<unset>"
-    print(f"Bootstrap servers: {bs_display}")
+    print(f"Bootstrap servers: {bootstrap_servers or '<unset>'}")
     if contracts_root is not None:
         print(f"Contracts root: {contracts_root}")
     if topic_sources:
@@ -552,9 +539,7 @@ def main() -> int:
     # -----------------------------------------------------------------------
     # Mode selection: single-root (legacy) vs multi-package (new default)
     # -----------------------------------------------------------------------
-    use_single_root = args.contracts_root is not None
-
-    if use_single_root:
+    if args.contracts_root is not None:
         # Legacy single-root mode (--contracts-root given)
         contracts_root = Path(args.contracts_root).resolve()
         if not contracts_root.exists():
@@ -612,7 +597,11 @@ def main() -> int:
 
     try:
         discovered = ModelNodePackageEntry.discover(
-            filter_names=filter_names, lenient=args.lenient
+            filter_names=filter_names,
+            lenient=args.lenient,
+            report_warning=lambda message: print(
+                f"WARNING: {message}", file=sys.stderr
+            ),
         )
     except ProtocolConfigurationError as exc:
         print(f"ERROR: {exc.message}", file=sys.stderr)

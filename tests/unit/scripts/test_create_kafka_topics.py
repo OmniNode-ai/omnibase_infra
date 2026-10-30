@@ -500,3 +500,32 @@ def test_build_specs_keeps_an_undeclared_replication_factor_none() -> None:
     assert len(specs) == 1
     assert specs[0].replication_factor is None
     assert specs[0].partitions == 6  # the canonical default, not the old CLI 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lenient", [False, True])
+def test_cli_discovery_failure_reports_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    lenient: bool,
+) -> None:
+    """The real CLI handles discovery errors and owns lenient diagnostics."""
+    import logging
+
+    bad_ep = MagicMock()
+    bad_ep.name = "broken_pkg"
+    bad_ep.load.side_effect = ImportError("missing module")
+    monkeypatch.setattr(ilm, "entry_points", lambda *, group: [bad_ep])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["create_kafka_topics.py", "--dry-run", *(["--lenient"] if lenient else [])],
+    )
+    logger = logging.getLogger("omnibase_infra.models.model_node_package_entry")
+    monkeypatch.setattr(logger, "disabled", True)
+    assert _mod.main() == (0 if lenient else 1)
+    stderr = capsys.readouterr().err
+    assert "broken_pkg" in stderr
+    assert ("WARNING:" if lenient else "ERROR:") in stderr
+    if lenient:
+        assert "skipping" in stderr
