@@ -16,6 +16,7 @@ root, the way ``ONEX_WORKSPACE_CONFIG_ROOT`` names it on a lane host.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -294,3 +295,164 @@ def test_stability_release_only_stage_workspace_pins_each_sibling() -> None:
     text = STAGE.read_text()
     assert 'read -r -a sibling_refs <<< "${DEPLOY_SIBLING_REFS:-}"' in text
     assert 'checkout_args+=(--repo-ref "${sibling_ref}")' in text
+
+
+# ---------------------------------------------------------------------------
+# Staging: each sibling is checked out at its pinned tag, never the fallback
+# branch, and an explicit tag is never replaced by omnimarket's newest dev tag.
+# These run the real stage_workspace.sh and deploy_source_ref.py.
+# ---------------------------------------------------------------------------
+_STAGE_DISTS = {
+    "omnibase_core": "omnibase-core",
+    "omnibase_compat": "omnibase-compat",
+    "omnimarket": "omnimarket",
+    "omnibase_infra": "omnibase-infra",
+    "omnibase_spi": "omnibase-spi",
+}
+_STAGE_VERSION = "9.9.9"
+
+
+def _stage_git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**scrub_git_location_env(), "GIT_TERMINAL_PROMPT": "0"},
+    )
+    return result.stdout.strip()
+
+
+def _stage_clones(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, str]]:
+    """Clones whose dev branch moved past each sibling's release tag.
+
+    Returns the clone root, each sibling's tag and the commit that tag names.
+    """
+    root = tmp_path / "stage_clones"
+    tags: dict[str, str] = {}
+    tagged: dict[str, str] = {}
+    for repo, dist in _STAGE_DISTS.items():
+        clone = root / repo
+        clone.mkdir(parents=True)
+        _stage_git(clone, "init", "-q", "-b", "dev")
+        _stage_git(clone, "config", "user.email", "t@t.t")
+        _stage_git(clone, "config", "user.name", "t")
+        _stage_git(clone, "config", "tag.gpgsign", "false")
+        _stage_git(clone, "config", "commit.gpgsign", "false")
+        (clone / "pyproject.toml").write_text(
+            f"[project]\nname = '{dist}'\nversion = '{_STAGE_VERSION}'\n"
+        )
+        if repo == "omnimarket":
+            ladder = clone / "src" / "omnimarket" / "configs"
+            ladder.mkdir(parents=True)
+            (ladder / "routing_tiers.yaml").write_text("tiers: []\n")
+            (clone / "uv.lock").write_text(
+                "\n".join(
+                    f'[[package]]\nname = "{d}"\nversion = "{_STAGE_VERSION}"\n'
+                    for d in _STAGE_DISTS.values()
+                )
+            )
+        _stage_git(clone, "add", "-A")
+        _stage_git(clone, "commit", "-q", "-m", "release")
+        tags[repo] = RELEASE.get(repo, "v0.23.8")
+        _stage_git(clone, "tag", tags[repo])
+        tagged[repo] = _stage_git(clone, "rev-parse", "HEAD")
+        (clone / "after-release.txt").write_text("dev moved on\n")
+        _stage_git(clone, "add", "-A")
+        _stage_git(clone, "commit", "-q", "-m", "dev after the release")
+        _stage_git(clone, "tag", DEV_TAG)
+    return root, tags, tagged
+
+
+def _run_stage(
+    root: Path, build_ctx: Path, extra_env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    (build_ctx / "workspace").mkdir(parents=True, exist_ok=True)
+    env = {
+        **scrub_git_location_env(),
+        "OMNI_HOME": str(root),
+        "CONSUMER_LOCK": str(root / "omnimarket" / "uv.lock"),
+        "DEPLOY_SOURCE_REFS_OUT": str(build_ctx.parent / "refs" / "expected.json"),
+        "DEPLOY_SOURCE_WORKTREE_ROOT": str(build_ctx.parent / "source-trees"),
+        "DEPLOY_SIBLING_FALLBACK_REF": "dev",
+        **extra_env,
+    }
+    for key in ("DEPLOY_HOTPATCH", "ALLOW_UNPINNED_DEPLOY_SOURCE"):
+        env.pop(key, None)
+    return subprocess.run(
+        ["bash", str(STAGE)],
+        cwd=build_ctx,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _sibling_refs(tags: dict[str, str]) -> str:
+    return " ".join(
+        f"{repo}={tags[repo]}"
+        for repo in ("omnibase_core", "omnibase_compat", "omnimarket")
+    )
+
+
+def test_stability_release_only_stage_checks_each_sibling_out_at_its_tag(
+    tmp_path: Path,
+) -> None:
+    root, tags, tagged = _stage_clones(tmp_path)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(
+        root,
+        build_ctx,
+        {
+            "DEPLOY_REF": tags["omnibase_infra"],
+            "DEPLOY_SIBLING_REFS": _sibling_refs(tags),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    vcs = json.loads(
+        (build_ctx / "workspace" / "sibling-vcs-provenance.json").read_text()
+    )
+    expected = json.loads((tmp_path / "refs" / "expected.json").read_text())
+    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+        assert vcs["siblings"][repo]["vcs_ref"] == tagged[repo], repo
+        row = expected["repos"][repo]
+        assert row["ref"] == tags[repo]
+        assert row["expected_sha"] == tagged[repo]
+        assert not row.get("fallback_from"), row
+
+
+def test_stability_release_only_stage_keeps_omnimarket_tag_over_dev_follow(
+    tmp_path: Path,
+) -> None:
+    """A dev-tag follow list cannot replace a pinned omnimarket release tag."""
+    root, tags, tagged = _stage_clones(tmp_path)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(
+        root,
+        build_ctx,
+        {
+            "DEPLOY_REF": tags["omnibase_infra"],
+            "DEPLOY_SIBLING_REFS": _sibling_refs(tags),
+            "DEPLOY_FOLLOW_DEV_TAG_REPOS": "omnimarket",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    vcs = json.loads(
+        (build_ctx / "workspace" / "sibling-vcs-provenance.json").read_text()
+    )
+    assert vcs["siblings"]["omnimarket"]["vcs_ref"] == tagged["omnimarket"]
+
+
+def test_stability_release_only_stage_without_sibling_refs_falls_back(
+    tmp_path: Path,
+) -> None:
+    """Control: with no sibling refs the same staging lands on the dev branch."""
+    root, tags, tagged = _stage_clones(tmp_path)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(root, build_ctx, {"DEPLOY_REF": tags["omnibase_infra"]})
+    assert result.returncode == 0, result.stderr
+    vcs = json.loads(
+        (build_ctx / "workspace" / "sibling-vcs-provenance.json").read_text()
+    )
+    assert vcs["siblings"]["omnimarket"]["vcs_ref"] != tagged["omnimarket"]

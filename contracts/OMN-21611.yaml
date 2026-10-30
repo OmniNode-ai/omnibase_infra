@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21611
 title: "The stability lane runs a pinned release independent of dev: its refresh refuses every ref that is not a release tag"
 summary: >-
-  refresh_stability_lane.sh now runs release tags only. Its tag set comes from the committed pin file (config/lab/stability-lane-pin.yaml under ONEX_WORKSPACE_CONFIG_ROOT, or --pin-file), one v<major>.<minor>.<patch> tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket, with --ref overriding the infra tag. Before it reads the lane, writes state, takes the lane lock, runs the attribution preflight, tags an image, checks a clone out, builds or restarts anything, each tag must be a release tag of its clone: a dev tag, a bare sha, a branch, a lab tag or a dev omnimarket ref is refused, exit 64, naming release-tag-only. The default ref is no longer origin/dev. Each sibling is staged at its own pinned tag through DEPLOY_SIBLING_REFS (stage_workspace.sh passes it to deploy_source_ref.py as --repo-ref), and the lane no longer follows omnimarket's newest dev-* tag. This PR covers AC2, and AC1's repository side: the refresh deploys exactly the committed pin. The pin file and the stability broker ACL declaration live in the private config repository. AC1's /health readback, AC3 and AC4 need the lane brought up on its lab host and broker logins issued, which this change does not do; they are listed so the criteria match the ticket and are left unbound here.
+  refresh_stability_lane.sh now runs release tags only. Its tag set comes from the committed pin file (config/lab/stability-lane-pin.yaml under ONEX_WORKSPACE_CONFIG_ROOT, or --pin-file), one v<major>.<minor>.<patch> tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket, with --ref overriding the infra tag. Before it reads the lane, writes state, takes the lane lock, runs the attribution preflight, tags an image, checks a clone out, builds or restarts anything, each tag must be a release tag of its clone: a dev tag, a bare sha, a branch, a lab tag or a dev omnimarket ref is refused, exit 64, naming release-tag-only. The default ref is no longer origin/dev. Each sibling is staged at its own pinned tag through DEPLOY_SIBLING_REFS (stage_workspace.sh passes it to deploy_source_ref.py as --repo-ref), and the lane no longer follows omnimarket's newest dev-* tag. This PR covers AC2, and AC1's repository side: the refresh deploys exactly the committed pin. The pin file and the stability broker ACL declaration live in the private config repository. AC1's /health readback, AC3 (per-machine broker logins on the lane broker, the cloud owner's dev logins removed) and AC4 (a deployed-lane delegation on the lane) need the lane brought up on its lab host and logins issued; this repository holds no part of them, so this contract declares AC1 and AC2 only, as the ticket's other contracts declare theirs.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -11,7 +11,7 @@ requirements:
     statement: >-
       A stability refresh runs a pinned release set and refuses any other ref before it changes anything.
     # Criterion text is the ticket's, with the lab host's name replaced by "the lab host" and the lane's
-    # environment and lab tool names described generically for this public repository; drift is judged by label.
+    # environment name described generically for this public repository; drift is judged by label.
     acceptance:
       - id: AC1
         statement: >-
@@ -19,16 +19,10 @@ requirements:
       - id: AC2
         statement: >-
           AC2: a stability refresh asked for a dev tag, a bare sha or a dev omnimarket ref is refused before it changes anything -- falsifier: uv run pytest tests/unit/scripts/ -k stability_release_only -q in omnibase_infra
-      - id: AC3
-        statement: >-
-          AC3: the cloud owner's and the dashboard owner's machines reach the lane broker with their own per-machine logins, and the cloud owner's two dev-broker logins no longer exist -- falsifier: the lab broker ACL check against the stability ACL file reports zero missing rows, and the dev broker's user list names neither of the cloud owner's dev logins
-      - id: AC4
-        statement: >-
-          AC4: OMN-21605 AC1 holds: a deployed-lane delegation on the lab host's lane returns an accepted answer -- falsifier: onex delegate with --lane naming the lab host's lane and --locus deployed-lane returns status success and quality_gate_passed true
 evidence_requirements:
   - kind: tests
     description: >-
-      The refresh, run against real fixture clones with docker, curl, jq, git and the deploy command shimmed and recorded, refuses a dev tag, a bare sha, a branch, a lab tag, a dev omnimarket ref, a missing pin and a tag absent from its clone with exit 64 and no docker, deploy or mutating git call, and plans the pinned release set.
+      The refresh, run against real fixture clones with docker, curl, jq, git and the deploy command shimmed and recorded, refuses a dev tag, a bare sha, a branch, a lab tag, a dev omnimarket ref, a missing pin and a tag absent from its clone with exit 64 and no docker, deploy or mutating git call, and plans the pinned release set; the real stage_workspace.sh and deploy_source_ref.py then check each sibling out at its pinned tag, never the fallback branch or omnimarket's newest dev tag.
     command: uv run --frozen pytest tests/unit/scripts/ -k stability_release_only -q -n 0
 emergency_bypass:
   enabled: false
