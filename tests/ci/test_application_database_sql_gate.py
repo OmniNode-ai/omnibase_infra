@@ -194,13 +194,8 @@ def test_infra_first_ownership_requires_one_exact_migration_declaration(
             role="automation_liveness_state",
         ),
     )
-    monkeypatch.setattr(gate, "STATE_IO_TABLE_DECLARATIONS", (), raising=False)
-    monkeypatch.setattr(
-        gate,
-        "LEGACY_MIGRATION_TABLE_DECLARATIONS",
-        (declaration, declaration) if duplicate else (declaration,),
-        raising=False,
-    )
+    declared = (declaration, declaration) if duplicate else (declaration,)
+    monkeypatch.setattr(gate, "supplemental_table_declarations", lambda: declared)
     head = _commit(repository, "infra-first table")
     outcome = gate.validate_changed_sql(
         repository, base, head, ownership_manifest_paths=()
