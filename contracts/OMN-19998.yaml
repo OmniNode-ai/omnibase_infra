@@ -141,10 +141,10 @@ requirements:
       - id: AC30
         statement: 'AC30: build-workspace-candidate-runtime.yml builds omnimarket''s Dockerfile.runtime from the staged omnimarket tree on the infra candidate tag, with INFRA_RUNTIME_IMAGE and OMNIMARKET_VCS_REF build args and an import omnimarket probe, after the infra build and before the Trivy scan, config-path check and push -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes fails at the merge base, where the step does not exist'
   - id: req-omn19998-verifier-override-pins
-    statement: The repo-evidence caller must pin a verifier whose dependency-pin-only classifier admits tool.uv.override-dependencies, where this repository pins omnibase-core exactly, so the OCC writer app's core bump pull requests (omnibase_infra#5453, #5458) are exempt from dod-verify instead of failing it for binding no evidence of their own.
+    statement: The repo-evidence caller must pin a verifier whose dependency-pin-only classifier admits tool.uv.override-dependencies, so the OCC writer app's core bump pull requests (omnibase_infra#5453, #5458) are exempt from dod-verify instead of failing it for binding no evidence of their own.
     acceptance:
       - id: AC31
-        statement: 'AC31: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml still pins omnibase-core in tool.uv.override-dependencies -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
+        statement: 'AC31: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml pins omnibase-core by its dev-merge tag alone in tool.uv.sources -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -216,7 +216,7 @@ evidence_requirements:
     description: The candidate-build tests read build-workspace-candidate-runtime.yml and locate the compose step relative to the infra build, the Trivy steps, the config-path check and the push.
     command: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0
   - kind: tests
-    description: The override-pin tests read the repo-evidence caller's verifier-version and pyproject.toml's tool.uv.override-dependencies.
+    description: The override-pin tests read the repo-evidence caller's verifier-version and pyproject.toml's omnibase-core tag source.
     command: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
@@ -583,7 +583,7 @@ dod_evidence:
     binds_ac:
       - AC30
   - id: dod-omn19998-ac31-verifier-override-pins
-    description: AC31 tests read the caller's verifier-version against the 0.4.310 floor and the omnibase-core entry in tool.uv.override-dependencies.
+    description: AC31 tests read the caller's verifier-version against the 0.4.310 floor and the omnibase-core dev-merge tag source in tool.uv.sources.
     source: manual
     checks:
       - check_type: test_passes
