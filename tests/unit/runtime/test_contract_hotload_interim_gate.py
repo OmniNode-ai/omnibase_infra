@@ -34,6 +34,7 @@ from omnibase_infra.models.handlers import ModelHandlerDescriptor
 from omnibase_infra.models.model_contract_hotload_config import (
     ModelContractHotloadConfig,
 )
+from omnibase_infra.runtime.models.model_runtime_config import ModelRuntimeConfig
 from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
 from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
@@ -193,6 +194,35 @@ class TestModelContractHotloadConfig:
 
     def test_model_is_frozen(self) -> None:
         assert ModelContractHotloadConfig.model_config["frozen"] is True
+
+
+class TestRuntimeConfigFileCarriesTheSwitch:
+    """The kernel hands the host ``ModelRuntimeConfig.model_dump``, which drops
+    undeclared keys, so the switch must be a declared field to be settable."""
+
+    @staticmethod
+    def _host_config(file_content: dict[str, object]) -> dict[str, object]:
+        config = ModelRuntimeConfig.model_validate(
+            {
+                "name": "hotload_gate",
+                "event_bus": {"type": "inmemory", "profile": "local"},
+            }
+            | file_content
+        )
+        return config.model_dump(mode="json")
+
+    def test_file_without_the_block_is_off(self) -> None:
+        host = _host(self._host_config({}))
+        assert host._resolve_contract_hotload_gate().enabled is False
+
+    def test_file_with_the_block_reaches_the_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ONEX_ENVIRONMENT", raising=False)
+        config = self._host_config(
+            {"contract_hotload": {"enabled": True, "mode": "full_load"}}
+        )
+        assert _host(config)._resolve_contract_hotload_gate().mode == "full_load"
 
 
 # ---------------------------------------------------------------------------
