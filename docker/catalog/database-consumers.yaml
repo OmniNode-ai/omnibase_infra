@@ -16,6 +16,14 @@ consumers:
   omnimarket-projection-llm-cost:
     bindings:
       - tenant_projection
+  # OMN-19972: the run-trace writer writes run_trace (a TENANT-domain relation)
+  # through `tenant_projection`, and reads tenant_registry_mirror and its
+  # projection_watermarks (omninode_internal) through `omninode_runtime_service`.
+  # Two bindings, two login roles; dropping either leaves one DSN missing.
+  omnimarket-projection-run-trace:
+    bindings:
+      - tenant_projection
+      - omninode_runtime_service
   omnimarket-projection-savings:
     bindings:
       - tenant_projection

@@ -591,11 +591,11 @@ def _config_overrides_receipt_block(
 
 
 def _budget_outcome_receipt_block(result: ModelDelegateTerminal) -> dict[str, object]:
-    """Copy only budget facts the terminal actually declared."""
-    if result.budget_evidence is not None:
-        return {"budget_evidence": result.budget_evidence.model_dump(mode="json")}
-    if result.budget_refusal is not None:
-        return {"budget_refusal": result.budget_refusal.model_dump(mode="json")}
+    """Copy only budget facts the terminal declared, and their source (OMN-21604)."""
+    named = {"budget_source": result.budget_source} if result.budget_source else {}
+    for key in ("budget_evidence", "budget_refusal"):
+        if (declared := getattr(result, key)) is not None:
+            return {key: declared.model_dump(mode="json"), **named}
     return {}
 
 
