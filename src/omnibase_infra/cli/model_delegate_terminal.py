@@ -32,12 +32,11 @@ __all__ = ["ModelDelegateTerminal"]
 class ModelDelegateTerminal(BaseModel):
     """One delegation's terminal state: what it answered and which rungs it tried.
 
-    ``attempts`` is the only REQUIRED field, and deliberately so: it is what
-    identifies this object as a delegation terminal rather than some other
-    node's terminal payload, and it is what the run files' route attribution is
-    resolved from. Everything else is optional for the same reason the attempt
-    record's fields are -- this reads a recording, and a recording missing a
-    field must still be reportable.
+    ``attempts`` is the only REQUIRED field, deliberately: it identifies this
+    object as a delegation terminal rather than another node's payload, and the
+    run files' route attribution is resolved from it. Everything else is
+    optional, as on the attempt record: this reads a recording, and a recording
+    missing a field must still be reportable.
     """
 
     model_config = ConfigDict(frozen=True, extra="ignore", protected_namespaces=())
@@ -58,6 +57,8 @@ class ModelDelegateTerminal(BaseModel):
     metrics: ModelDelegateTerminalMetrics | None = Field(default=None)
     budget_evidence: ModelDelegationBudgetEvidence | None = Field(default=None)
     budget_refusal: ModelDelegationBudgetRefusal | None = Field(default=None)
+    # OMN-21604: where the budget came from (contract entry or site overlay file).
+    budget_source: str | None = Field(default=None)
     response_contract_evidence: ModelDelegationContractEvidence | None = Field(
         default=None
     )

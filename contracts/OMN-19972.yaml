@@ -16,6 +16,11 @@ requirements:
     acceptance:
       - id: AC11
         statement: 'AC11: every container_name in docker/docker-compose.prepr.yml passes the slot-marker check for slots 1 and 2, and slot 10 style names do not pass for slot 1 -- falsifier: require a trailing dash after the slot number again and the gateway case fails'
+  - id: req-omn19972-run-trace-local-market
+    statement: The local-market catalog includes the standalone run-trace writer on the market image, with its database bindings, readiness probe and startup dependencies.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: local-market renders omnimarket-projection-run-trace on the market image with its executable writer module, tenant_projection and omninode_runtime_service DSNs targeting postgres:5432/omnidash_analytics, migration and SASL dependencies, and a Python readiness probe that accepts HTTP 200 and refuses HTTP 503 or a stopped server; local excludes it -- falsifier: remove the service from local-market, misroute either DSN or make the probe accept HTTP 503 and the focused tests fail'
 evidence_requirements:
   - kind: tests
     description: The local render carries the carrier under its own profile, group id and capabilities with the tenant principal; the CLI render writes it; the boot job's health step and stopped-service control include it, and the control holds on a recorded real engine answer for the stopped carrier.
@@ -49,3 +54,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC11
+  - id: dod-omn-19972-run-trace-local-market
+    description: AC12 catalog rendering, database targets, startup ordering and readiness success and failure responses. This binds the run-trace service added by this PR, preserving the earlier carrier and slot-marker evidence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/infra/test_catalog_local_market_run_trace_omn19972.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
+  - id: dod-omn-19972-run-trace-deploy-probe
+    description: Hosted-runner deploy check executes the rendered readiness probe against a real loopback HTTP server returning 200 and 503 and a stopped server. It also requires the local-market service, market image and complete database targets. This checks the catalog deployment definition without claiming a running market image or access to a private lane.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/infra/test_catalog_local_market_run_trace_omn19972.py -q --no-cov -k "readiness_probe or runs_the_run_trace_writer or both_bindings"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
