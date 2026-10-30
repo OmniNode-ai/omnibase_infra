@@ -60,18 +60,47 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _run_live_main(argv: list[str]) -> tuple[int, MagicMock]:
+_TOPIC = "onex.evt.k1.v1"
+
+
+def _run_live_main(
+    argv: list[str], *, existing: tuple[str, ...] = ()
+) -> tuple[int, MagicMock, MagicMock]:
+    """Run ``main()`` through the real spec builder against a fake broker.
+
+    Only discovery and extraction are stubbed; ``_build_specs`` and
+    ``_run_live`` run for real. ``create_topics`` lands the topic in the
+    broker's metadata, so the post-create readback sees it.
+    """
+    from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
+
     mod = _load()
     admin_cls = MagicMock()
-    metadata = MagicMock()
-    metadata.topics = {}
-    metadata.brokers = {1: MagicMock()}
-    admin_cls.return_value.list_topics.return_value = metadata
+    brokers = {1: MagicMock()}
+    before = MagicMock()
+    before.topics = dict.fromkeys(existing)
+    before.brokers = brokers
+    after = MagicMock()
+    after.topics = dict.fromkeys((*existing, _TOPIC))
+    after.brokers = brokers
+    admin = admin_cls.return_value
+    admin.list_topics.side_effect = [before, after]
+    done = MagicMock()
+    done.exception.return_value = None
+    admin.create_topics.return_value = {_TOPIC: done}
     fake_admin = ModuleType("confluent_kafka.admin")
     fake_admin.AdminClient = admin_cls
     fake_admin.NewTopic = MagicMock()
-    entry = MagicMock()
-    entry.topic = "onex.evt.k1.v1"
+    entry = ModelContractTopicEntry(
+        topic=_TOPIC,
+        kind="evt",
+        producer="k1",
+        event_name="k1",
+        version="v1",
+        source_contracts=(Path("contract.yaml"),),
+        partitions=1,
+        replication_factor=1,
+    )
     with (
         patch.object(sys, "argv", ["create_kafka_topics.py", *argv]),
         patch.dict(sys.modules, {"confluent_kafka.admin": fake_admin}),
@@ -83,10 +112,9 @@ def _run_live_main(argv: list[str]) -> tuple[int, MagicMock]:
             "omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor.extract",
             return_value=[entry],
         ),
-        patch.object(mod, "_build_specs", return_value=[]),
     ):
         code = mod.main()
-    return code, admin_cls
+    return code, admin_cls, fake_admin.NewTopic
 
 
 def test_lane_with_env_identity_builds_a_sasl_admin_client(
@@ -94,7 +122,7 @@ def test_lane_with_env_identity_builds_a_sasl_admin_client(
 ) -> None:
     monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
     monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
-    code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
     assert code == 0
     admin_cls.assert_called_once_with(
         {
@@ -117,7 +145,7 @@ def test_lane_with_stored_identity_builds_a_sasl_admin_client(
         sasl_username="stored",
         sasl_password=_CRED,
     )
-    code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
     assert code == 0
     (config,) = admin_cls.call_args.args
     assert config["sasl.username"] == "stored"
@@ -129,7 +157,7 @@ def test_lane_with_stored_identity_builds_a_sasl_admin_client(
 def test_missing_identity_refuses_naming_the_overlay_key(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
     assert code == 1
     admin_cls.assert_not_called()
     err = capsys.readouterr().err
@@ -138,7 +166,7 @@ def test_missing_identity_refuses_naming_the_overlay_key(
 
 
 def test_plaintext_lane_needs_no_identity(workspace: Path) -> None:
-    code, admin_cls = _run_live_main(["--lane", "plain"])
+    code, admin_cls, _ = _run_live_main(["--lane", "plain"])
     assert code == 0
     admin_cls.assert_called_once_with(
         {
@@ -158,7 +186,7 @@ def test_lane_and_bootstrap_servers_are_mutually_exclusive(
 
 
 def test_bootstrap_servers_alone_is_unchanged(workspace: Path) -> None:
-    code, admin_cls = _run_live_main(["--bootstrap-servers", "x.invalid:1"])
+    code, admin_cls, _ = _run_live_main(["--bootstrap-servers", "x.invalid:1"])
     assert code == 0
     admin_cls.assert_called_once_with({"bootstrap.servers": "x.invalid:1"})
 
@@ -166,7 +194,7 @@ def test_bootstrap_servers_alone_is_unchanged(workspace: Path) -> None:
 def test_undeclared_lane_refuses_naming_the_overlay_key(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, admin_cls = _run_live_main(["--lane", "nope"])
+    code, admin_cls, _ = _run_live_main(["--lane", "nope"])
     assert code == 1
     admin_cls.assert_not_called()
     assert "lanes.nope" in capsys.readouterr().err
@@ -178,7 +206,7 @@ def test_half_a_credential_pair_refuses(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
-    code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls, _ = _run_live_main(["--lane", "dev"])
     assert code == 1
     admin_cls.assert_not_called()
     assert "lanes.dev" in capsys.readouterr().err
@@ -202,3 +230,29 @@ def test_resolved_config_never_exposes_the_password(
     ):
         assert _CRED not in rendered
     assert config.librdkafka_config()["sasl.password"] == _CRED
+
+
+def test_sasl_lane_creates_the_missing_topic_through_the_authenticated_client(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
+    code, admin_cls, new_topic = _run_live_main(["--lane", "dev"])
+    assert code == 0
+    admin_cls.return_value.create_topics.assert_called_once()
+    new_topic.assert_called_once()
+    assert new_topic.call_args.args == (_TOPIC,)
+    assert new_topic.call_args.kwargs["num_partitions"] == 1
+    assert new_topic.call_args.kwargs["replication_factor"] == 1
+
+
+def test_sasl_lane_rerun_is_idempotent(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
+    code, admin_cls, new_topic = _run_live_main(["--lane", "dev"], existing=(_TOPIC,))
+    assert code == 0
+    admin_cls.assert_called_once()
+    admin_cls.return_value.create_topics.assert_not_called()
+    new_topic.assert_not_called()
