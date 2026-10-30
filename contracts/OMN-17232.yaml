@@ -99,3 +99,46 @@ dod_evidence:
         check_value: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/cli/test_omn20700_developer_workspace_config_owner.py -q -p no:randomly -k "existing_shared_sibling_resolver or ignores_developer_config or captured_environment or fresh_developer or registry_workspace or variable_still"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2]
+  - id: dod-prepush-process-integration
+    description: Real Bash and Python processes share the committed explicit or registry-sibling table, refuse working-tree drift, and return to the neutral row when the table is absent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/integration/scripts/test_prepush_private_table_omn17232.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2, AC4, AC5]
+  - id: dod-prepush-container-cli-deploy
+    description: >-
+      Hosted-runner deployment artifact probe executes this checkout's Python guard in a disposable Python container without network access or private configuration. A synthetic explicit root must return absence code 2, then the exact declared table, then an unreadable-table refusal. The merge-base CLI lacks --private-table and fails the absence-code assertion. This checks the deployed CLI artifact, not the parent ticket's runtime rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          docker run --rm --network none \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD:/app:ro" -w /app \
+            python:3.12-bookworm python -c '
+          import os, pathlib, subprocess, sys, tempfile
+          with tempfile.TemporaryDirectory() as directory:
+              root = pathlib.Path(directory)
+              relative = "config/onex/overlays/prepush_hosts/prepush_hosts.omnibase_infra.tsv"
+              table = root / relative
+              table.parent.mkdir(parents=True)
+              environment = {**os.environ, "ONEX_WORKSPACE_CONFIG_ROOT": str(root)}
+              command = [sys.executable, "-m", "scripts.hooks.pytest_full_suite_host_guard", "--private-table", relative]
+              def probe():
+                  return subprocess.run(command, env=environment, text=True, capture_output=True, timeout=30)
+              absent = probe()
+              assert absent.returncode == 2 and not absent.stdout, absent
+              row = "probe\tcapacity\tprobe.invalid\t-\t1\t-\t-\t-\tnone\t1\t-\tauthorizing\tallowed\tdefault\tSynthetic deployment probe\n"
+              table.write_text(row)
+              present = probe()
+              assert present.returncode == 0 and present.stdout == row, present
+              table.unlink()
+              table.mkdir()
+              unreadable = probe()
+              assert unreadable.returncode == 1 and not unreadable.stdout and "unreadable" in unreadable.stderr, unreadable
+              print("prepush-container-cli: absent=2 present=exact unreadable=1")
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4, AC6]
