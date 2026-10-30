@@ -85,6 +85,8 @@ EXPECTED_RENDERED_SERVICES = {
     "cloud-migration",
     "onex-api",
     "projection-tenant-registry-writer",
+    # OMN-21587: build-only (scale 0), the infra half of the composed image.
+    "lakshman-infra-runtime-image",
 }
 #: Services that must never appear on this lane. ``keycloak`` and ``infisical``
 #: are the OMN-13581 cross-lane displacement risk (they carry no profile in the
@@ -119,6 +121,7 @@ EXPECTED_PUBLISHED_PORTS = {
     "cloud-migration": set(),
     "onex-api": set(),
     "projection-tenant-registry-writer": set(),
+    "lakshman-infra-runtime-image": set(),
 }
 #: Ports belonging to the four lanes that predate this one. Publishing any of
 #: them here would displace a live lane on the shared .201 host (OMN-13581).
@@ -291,6 +294,8 @@ def test_lakshman_lane_render_is_isolated_from_every_other_lane() -> None:
         assert set(service.get("networks", {})) == {LAKSHMAN_NETWORK}, (
             f"service {name!r} is attached to a network other than the lane's own"
         )
+        if service.get("scale") == 0:
+            continue  # build-only, no container (OMN-21587)
         assert "lakshman" in service["container_name"], (
             f"service {name!r} renders container_name "
             f"{service['container_name']!r}, which does not name this lane and "
@@ -347,6 +352,38 @@ def test_lakshman_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["runtime-effects"]["environment"]["ONEX_GROUP_ID"] == (
         "onex-lakshman-runtime-effects"
     )
+
+
+#: OMN-21587: the services built on omnimarket's composed image. Since OMN-21279
+#: the infra image installs no omnimarket and sets no BIFROST_BASE_CONTRACT_PATH,
+#: so each of these failed to boot on it.
+COMPOSED_RUNTIME_SERVICES = frozenset(
+    {
+        "omninode-runtime",
+        "runtime-effects",
+        "projection-api",
+        "projection-delegation-writer",
+        "projection-tenant-registry-writer",
+    }
+)
+
+
+@pytest.mark.integration
+def test_lakshman_runtime_services_build_on_the_composed_market_image() -> None:
+    """The rendered build of every market workload is omnimarket's recipe on infra."""
+    services = _compose_config_json()["services"]
+    market_context = (REPO_ROOT / "workspace/sibling-repos/omnimarket").resolve()
+    for name in sorted(COMPOSED_RUNTIME_SERVICES):
+        build = services[name]["build"]
+        assert Path(build["context"]).resolve() == market_context, name
+        assert build["dockerfile"] == "Dockerfile.runtime", name
+        assert build["args"]["INFRA_RUNTIME_IMAGE"] == "infra-runtime", name
+        assert build["additional_contexts"]["infra-runtime"] == (
+            "service:lakshman-infra-runtime-image"
+        ), name
+    infra_build = services["lakshman-infra-runtime-image"]["build"]
+    assert Path(infra_build["context"]).resolve() == REPO_ROOT.resolve()
+    assert infra_build["dockerfile"] == "docker/Dockerfile.runtime"
 
 
 @pytest.mark.integration
