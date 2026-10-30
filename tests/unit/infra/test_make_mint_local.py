@@ -155,9 +155,14 @@ if cmd[:2] == ["onex", "node"] and cmd[2] == "node_developer_principal_mint_orch
             if os.environ.get("STUB_LEAK_TO_STATE") == "1":
                 (state_root / "leak.txt").write_text(secret)
     (state_root / "result.json").write_text(json.dumps(result))
-    # The shape `onex node --output receipt` prints, read from a real run 2026-10-30.
-    print(json.dumps({"status": "success" if result["status"] == "success" else "failed",
-                      "result": {"handler_result": result, "terminal_payload": result}}))
+    # The two shapes `onex node --output receipt` prints, read from real runs
+    # 2026-10-30: a completed run's .result is the handler result; a failed
+    # run's .result is the runtime summary carrying it as .handler_result.
+    if result["status"] == "success":
+        receipt = {"status": "success", "result": result}
+    else:
+        receipt = {"status": "failed", "result": {"workflow_result": "failed", "handler_result": result, "terminal_payload": result}}
+    print(json.dumps(receipt))
     sys.exit(0 if result["status"] == "success" else 1)
 print(f"stub docker: unexpected exec {cmd}", file=sys.stderr)
 sys.exit(2)

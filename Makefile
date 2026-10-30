@@ -205,7 +205,9 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 # reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
 # an argument), reaches lane-login only on its stdin, and is never printed. The
 # state-root search reads it from its own environment and fails on any directory
-# or file it cannot read: exit 0 clean, 10 found, anything else fails closed. `onex node --output receipt` prints one JSON whose
+# or file it cannot read: exit 0 clean, 10 found, anything else fails closed.
+# `onex node --output receipt` prints one JSON: for a completed run .result is
+# the orchestrator's result; for a failed run .result is the runtime summary and
 # .result.handler_result is the orchestrator's result.
 mint-local: _check-docker ## Laptop profile: mint this machine's login on the local broker and prove it with one delegation (OMN-20823)
 	@lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.lock"; guard="$$lock.recover"; \
@@ -256,9 +258,9 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	      esac; \
 	    fi; \
 	    docker exec -u omniinfra "$$container" rm -rf "$$in_dir" || return 1; \
-	    [ "$$(jq -r '.result.handler_result.status // empty' "$$work/receipt.json" 2>/dev/null)" = success ] && return 0; \
-	    echo "mint-local: the mint stopped at $$(jq -r '.result.handler_result.failed_step // "the node"' "$$work/receipt.json" 2>/dev/null): $$(jq -r '.result.handler_result.reason // "no receipt"' "$$work/receipt.json" 2>/dev/null)" >&2; \
-	    jq -r '.result.handler_result.extra_acls[]? | "mint-local: ACL outside the plan: " + .' "$$work/receipt.json" >&2 2>/dev/null; \
+	    [ "$$(jq -r '(.result | .handler_result // .).status // empty' "$$work/receipt.json" 2>/dev/null)" = success ] && return 0; \
+	    echo "mint-local: the mint stopped at $$(jq -r '(.result | .handler_result // .).failed_step // "the node"' "$$work/receipt.json" 2>/dev/null): $$(jq -r '(.result | .handler_result // .).reason // "no receipt"' "$$work/receipt.json" 2>/dev/null)" >&2; \
+	    jq -r '(.result | .handler_result // .).extra_acls[]? | "mint-local: ACL outside the plan: " + .' "$$work/receipt.json" >&2 2>/dev/null; \
 	    return 1; \
 	  }; \
 	  probe() { \
@@ -277,17 +279,17 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	        "$$work/probe/runs/$$run/workflow_result.json" > /dev/null 2>&1; \
 	  }; \
 	  run_node audit "" || exit 1; \
-	  principal=$$(jq -r '.result.handler_result.principal // empty' "$$work/receipt.json"); \
-	  if [ "$$(jq -r '.result.handler_result | (.exists == true) and (.extra_acls | length) == 0 and (.missing_acls | length) == 0' "$$work/receipt.json")" = true ] \
+	  principal=$$(jq -r '(.result | .handler_result // .).principal // empty' "$$work/receipt.json"); \
+	  if [ "$$(jq -r '.result | (.handler_result // .) | (.exists == true) and (.extra_acls | length) == 0 and (.missing_acls | length) == 0' "$$work/receipt.json")" = true ] \
 	      && probe; then \
 	    echo "mint-local: $$principal unchanged"; exit 0; \
 	  fi; \
 	  ONEX_MINT_PASSWORD=$$(openssl rand -hex 32) && [ -n "$$ONEX_MINT_PASSWORD" ] || exit 1; \
 	  export ONEX_MINT_PASSWORD; \
 	  run_node converge ONEX_MINT_PASSWORD || exit 1; \
-	  principal=$$(jq -r '.result.handler_result.principal // empty' "$$work/receipt.json"); \
+	  principal=$$(jq -r '(.result | .handler_result // .).principal // empty' "$$work/receipt.json"); \
 	  echo "mint-local: principal $$principal"; \
-	  echo "mint-local: $$(jq -r '.result.handler_result.action' "$$work/receipt.json")"; \
+	  echo "mint-local: $$(jq -r '(.result | .handler_result // .).action' "$$work/receipt.json")"; \
 	  printf '%s\n' "$$ONEX_MINT_PASSWORD" \
 	    | onex auth lane-login --lane local --sasl-username "$$principal" --sasl-password-stdin || exit 1; \
 	  unset ONEX_MINT_PASSWORD; \
