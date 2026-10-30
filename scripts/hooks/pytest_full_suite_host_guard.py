@@ -345,7 +345,7 @@ def main() -> None:
     if args.status:
         if table is None:
             print(
-                f"deployment host table NOT CONFIGURED: {root}/{args.private_table} is absent -- "
+                f"deployment host table NOT CONFIGURED: {args.private_table} under {root or 'no config root'} is absent -- "
                 "set ONEX_WORKSPACE_CONFIG_ROOT to a root holding the declared table"
             )
         else:
