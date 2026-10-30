@@ -9,7 +9,8 @@ required_env:
   # The writer writes run_trace through the `tenant_projection` binding and
   # reads tenant_registry_mirror and projection_watermarks through
   # `omninode_runtime_service` (omninode_internal); the local bundle injects
-  # all three DSNs.
+  # all three DSNs. OMNIDASH_ANALYTICS_DB_URL is not a declared binding here;
+  # it is the dashboard-facing settings fallback the sibling writers retain.
   - OMNIDASH_ANALYTICS_DB_URL
   - ONEX_TENANT_DB_URL
   - OMNINODE_INTERNAL_DB_URL

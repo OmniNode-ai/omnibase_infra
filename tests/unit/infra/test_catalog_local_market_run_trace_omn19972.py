@@ -16,6 +16,7 @@ Failure modes guarded:
 
 from __future__ import annotations
 
+import socket
 import subprocess
 import sys
 import threading
@@ -116,27 +117,30 @@ def test_run_trace_readiness_probe_observes_http_status(status: int) -> None:
 
 
 def test_run_trace_readiness_probe_refuses_a_stopped_server() -> None:
-    # Reserve a port without listening so no other test can take the address.
-    with HTTPServer(
-        ("127.0.0.1", 0), BaseHTTPRequestHandler, bind_and_activate=False
-    ) as server:
-        server.server_bind()
-        code = _readiness_probe_code(server.server_port)
-        # A dedicated exit code distinguishes a transport failure from syntax
-        # errors or other failures, without inspecting exception formatting.
-        transport_check = (
-            "import urllib.error\n"
-            "try:\n"
-            f"    exec({code!r})\n"
-            "except (urllib.error.URLError, ConnectionError, TimeoutError):\n"
-            "    raise SystemExit(42)\n"
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", transport_check],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
+    # Take an ephemeral port from a listening socket, then close it: nothing
+    # listens there, and every platform answers connection refused.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        port = sock.getsockname()[1]
+    code = _readiness_probe_code(port)
+    # A dedicated exit code distinguishes a refused connection from syntax
+    # errors, timeouts or other failures, without inspecting message text.
+    transport_check = (
+        "import urllib.error\n"
+        "try:\n"
+        f"    exec({code!r})\n"
+        "except urllib.error.URLError as exc:\n"
+        "    if isinstance(exc.reason, ConnectionRefusedError):\n"
+        "        raise SystemExit(42)\n"
+        "    raise\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", transport_check],
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
     assert result.returncode == 42, result.stderr.decode()
 
 
@@ -145,6 +149,8 @@ def test_run_trace_writer_waits_for_migrations_and_sasl() -> None:
     writer = services[_WRITER]
     depends_on = writer["depends_on"]
     assert depends_on["migration-gate"] == {"condition": "service_healthy"}
+    assert depends_on["redpanda"] == {"condition": "service_healthy"}
+    assert depends_on["postgres"] == {"condition": "service_healthy"}
     assert depends_on["redpanda-local-sasl"] == {
         "condition": "service_completed_successfully"
     }
@@ -169,6 +175,11 @@ def test_run_trace_writer_declares_both_bindings_and_gets_both_dsns() -> None:
     assert env["OMNINODE_INTERNAL_DB_URL"] == (
         "postgresql://omninode_runtime:"
         "${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD required}"
+        "@postgres:5432/omnidash_analytics"
+    )
+    # Retained dashboard-facing settings fallback, same as the sibling writers;
+    # it is not a declared binding of this service.
+    assert env["OMNIDASH_ANALYTICS_DB_URL"].endswith(
         "@postgres:5432/omnidash_analytics"
     )
     assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
