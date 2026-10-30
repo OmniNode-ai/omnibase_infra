@@ -122,7 +122,9 @@ def test_run_trace_readiness_probe_refuses_a_stopped_server() -> None:
             check=False,
         )
     assert result.returncode != 0
-    assert b"Connection refused" in result.stderr
+    # An unlistening port can refuse or time out depending on the platform.
+    # urllib wraps either transport failure without a stable OS error message.
+    assert b"urllib.error.URLError:" in result.stderr
 
 
 def test_run_trace_writer_waits_for_migrations_and_sasl() -> None:
