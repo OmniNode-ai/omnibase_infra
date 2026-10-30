@@ -69,7 +69,7 @@ Pipeline
    (renamed/deleted workflow state) — never guessed, never substituted.
 5. DONE-WRITE RECEIPT GATE (OMN-20368). A re-flip writes a Done state, and a
    Done state needs a PASS dod_verify receipt that binds every acceptance
-   criterion (``omnibase_core.handlers.handler_done_write_receipt_gate``). Without one the
+   criterion (``node_done_write_receipt_gate_compute``). Without one the
    ticket is left as it is and the outcome records why
    (``SKIPPED_NO_BOUND_RECEIPT``): restoring a human's Done is not the same as
    the Done having been earned.

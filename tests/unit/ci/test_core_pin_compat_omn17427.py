@@ -13,7 +13,7 @@ The check is a pure function over recorded requirement text. It is run on:
 
 * the real recorded pair (omnimarket v0.4.316 requirement, this repository's
   pin at 44542e2a0), where it must refuse, as the positive control;
-* this repository's current ``pyproject.toml`` pin and ``uv.lock`` entry,
+* this repository's current floor range, tag source and ``uv.lock`` entry,
   against every downstream requirement recorded under
   ``tests/fixtures/pin_compat/``.
 
@@ -29,6 +29,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
+
+from scripts.ci.check_sibling_compatible_range import violations
 
 pytestmark = pytest.mark.unit
 
@@ -131,10 +133,13 @@ def test_equal_or_older_downstream_floor_is_accepted() -> None:
 
 def test_repo_pin_is_not_older_than_any_recorded_downstream_floor() -> None:
     """The current pyproject pin satisfies every recorded downstream requirement."""
-    overrides = _load(PYPROJECT)["tool"]["uv"]["override-dependencies"]
+    manifest = _load(PYPROJECT)
+    assert violations(manifest, _CORE) == []
     floors = _downstream_floors()
     assert floors, "no recorded downstream requirement was loaded"
-    assert refusals(pinned_version(overrides), floors) == []
+    assert (
+        refusals(_lock_core_version(UV_LOCK.read_text(encoding="utf-8")), floors) == []
+    )
 
 
 def test_resolved_lock_is_not_older_than_any_recorded_downstream_floor() -> None:
@@ -143,9 +148,6 @@ def test_resolved_lock_is_not_older_than_any_recorded_downstream_floor() -> None
     assert refusals(locked, _downstream_floors()) == []
 
 
-def test_lock_resolves_the_version_pyproject_pins() -> None:
-    """uv.lock and the [tool.uv] pin agree, so the pin is what the image installs."""
-    overrides = _load(PYPROJECT)["tool"]["uv"]["override-dependencies"]
-    assert _lock_core_version(UV_LOCK.read_text(encoding="utf-8")) == pinned_version(
-        overrides
-    )
+def test_repo_publishes_the_compatible_core_range() -> None:
+    """The published requirement retains the OMN-19655 floor/next-minor shape."""
+    assert violations(_load(PYPROJECT), _CORE) == []
