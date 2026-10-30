@@ -39,4 +39,4 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -qF 'named = {\"budget_source\": result.budget_source} if result.budget_source else {}'"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'named = {\"budget_source\": result.budget_source} if result.budget_source else {}' | grep -qx 1"
