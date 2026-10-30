@@ -1103,15 +1103,22 @@ repos:
         files: ^pyproject\.toml$
         pass_filenames: false
         stages: [pre-commit]
-      # OMN-19655: omnibase-core is published as >=FLOOR,<NEXT_MINOR and pinned
-      # exactly only in [tool.uv] override-dependencies; the range must admit
-      # the override. CI holds the same invariant through
+      # OMN-19655: core publishes exactly one >=FLOOR,<NEXT_MINOR requirement.
+      # Core's dev_tag_lineage owns tag, override and lock rules, run by CI.
+      # The published shape is also held by
       # tests/scripts/test_check_sibling_compatible_range.py.
       - id: check-core-compatible-range
-        name: omnibase-core compatible range admits the override pin (OMN-19655)
+        name: omnibase-core publishes a compatible range (OMN-19655)
         entry: uv run --frozen python scripts/ci/check_sibling_compatible_range.py --pyproject pyproject.toml --package omnibase-core
         language: system
         files: ^pyproject\.toml$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: check-dep-provenance-dev-tags
+        name: Dev-merge tag lineage and core pin regressions (OMN-17427)
+        entry: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427.py tests/ci/test_core_dev_tag_pin_omn17427.py tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov
+        language: system
+        files: ^(scripts/check_dep_provenance\.py|tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427\.py|tests/ci/test_dep_provenance_core_lineage_live_contact_omn17427\.py|tests/fixtures/dep_provenance_core_lineage_recorded_omn17427\.json|\.github/workflows/(dependency-cascade|ci)\.yml|tests/ci/test_core_dev_tag_pin_omn17427\.py|tests/unit/handlers/test_done_write_receipt_gate_contract\.py|src/omnibase_infra/(handlers/done_write_receipt_guard|protocols/protocol_done_write_receipt_gate)\.py|pyproject\.toml|uv\.lock)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-11069: Block new os.environ/os.getenv reads outside approved overlay modules
@@ -2198,7 +2205,7 @@ repos:
       - id: no-untracked-todos
         name: No untracked TODO/FIXME/HACK comments
         language: system
-        entry: uv run --frozen python -m omnibase_core.handlers.handler_todo_format
+        entry: uv run --frozen python -m omnibase_core.nodes.node_todo_format_check_effect.runtime_todo_format
         require_serial: true
         types: [python]
         stages: [pre-commit]

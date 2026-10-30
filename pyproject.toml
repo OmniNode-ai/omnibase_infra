@@ -33,22 +33,17 @@ dependencies = [
     # (terminal delegation classes) and core #1440 (runtime_fanout_resolver,
     # OMN-14403). No git-rev override is active for merge.
     #
-    # OMN-19655 (operator ruling 2026-09-25): the PUBLISHED requirement on
-    # omnibase-core is a compatible range, not an exact pin. An exact pin here
-    # stranded every downstream core floor raise until infra was re-released
-    # (omnimarket, 2026-09-24 and 2026-09-25). The exact version this repo is
-    # built, tested and imaged against lives ONLY in [tool.uv]
-    # override-dependencies below, which is what uv.lock resolves. Invariant,
-    # held by tests/unit/test_core_compatible_range_omn19655.py: the range is
-    # `>=FLOOR,<NEXT_MINOR_OF_FLOOR` and admits the override's exact version.
-    # A dependency cascade moves only the override on a patch release; a
-    # change that starts to need a newer core raises FLOOR by hand.
-    # OMN-20368: FLOOR raised 0.47.24 -> 0.47.31. The Done-write guard,
-    # `omnibase_infra.handlers.done_write_receipt_guard`, imports
-    # `omnibase_core.handlers.handler_done_write_receipt_gate` and
-    # `omnibase_core.models.ticket.model_done_write_decision`, first released in
-    # omnibase-core 0.47.31 (core#1852). A resolve below it fails at import.
-    "omnibase-core>=0.47.31,<0.48.0",
+    # OMN-19655: publish a compatible range so downstream core floor raises
+    # inside the minor can resolve without an infra release.
+    # RULING 2026-10-29T01:50:26Z (OMN-17427): iterate with tags, not releases.
+    # Core resolves solely from its dev-merge tag in [tool.uv.sources]; uv.lock
+    # records the tag and commit, and the locked version must fit this range.
+    # OMN-17427: FLOOR raised to 0.47.58 for the moved core node APIs. The Done-write guard,
+    # `omnibase_infra.handlers.done_write_receipt_guard`, resolves
+    # `node_done_write_receipt_gate_compute` through its packaged contract and
+    # imports its public request and decision models. A resolve below this
+    # floor lacks that contract-backed gate surface.
+    "omnibase-core>=0.47.58,<0.48.0",
     "omnibase-spi==0.23.7",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
@@ -268,41 +263,15 @@ dev = [
 
 [tool.uv]
 override-dependencies = [
-    # OMN-19655: the one exact omnibase-core pin. uv.lock and the runtime image
-    # resolve from here; [project.dependencies] publishes the compatible range.
-    # OMN-19749: released omnibase-core 0.47.24 (PyPI, OMN-18595) carries
-    # omnibase_core#1786's runtime lane declaration types this draft needs; the
-    # temporary git-rev override below is removed in the same change.
-    # OMN-17427: 0.47.44 -> 0.47.46, the floor omnimarket dev declares; its
-    # claude_code_binding models import omnibase_core.enums.enum_binding_kind,
-    # first released in 0.47.46 (core#2019).
-    "omnibase-core==0.47.57",
     "omnibase-spi==0.23.7",
     "omnibase-compat==0.5.7",
 ]
 
 [tool.uv.sources]
-# OMN-19749: the temporary git-rev override to omnibase_core#1786's squash
-# (be874b620) is REMOVED. omnibase-core 0.47.24 is published on PyPI (OMN-18595)
-# and contains that squash as an ancestor; the override-dependencies pin above
-# resolves the released wheel.
-# OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
-# omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
-# omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
-# the released exact versions, restoring a fully PyPI-sourced reproducible lock.
-#
-# OMN-14628 (2026-08-01): the omnibase-core git-rev override is DELETED. Its own
-# exit condition ("REMOVE WHEN RELEASED: once core publishes a version containing
-# S1/S2/S4") is met — omnibase-core 0.46.8 is published on PyPI and is a content
-# SUPERSET of the last override rev (3d51b047): it carries every module that rev
-# carried, plus enum_delegation_terminal_failure_cause and
-# enum_quality_score_comparison, plus the typed execution_scope field. Verified by
-# tree diff of the published wheel against `git archive 3d51b047 -- src/omnibase_core`
-# (nothing existed only in the rev). The lock is once again fully PyPI-sourced.
-# The seam is now held mechanically, not by this comment:
-# tests/unit/runtime/test_seam_released_core_pin.py asserts the frozen symbol and
-# field-TYPE surface in tests/fixtures/seams/core_release/.
-# Do NOT reintroduce a git-rev or branch pin here.
+# RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
+# core dev_tag_lineage; rev and branch pins remain refused.
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261029143607-342000ec5702" }
+
 
 [tool.ruff]
 target-version = "py312"
