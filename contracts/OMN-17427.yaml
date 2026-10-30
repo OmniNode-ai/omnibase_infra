@@ -6,6 +6,15 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn17427-create-topics-responses
+    statement: Topic provisioning classifies returned Kafka CreateTopics errors before recording creation and confirms only broker-present topics.
+    acceptance:
+      - id: AC17427545601
+        statement: A partition-ceiling response aborts the pass, names the held partitions and leaves refused topics absent from the creation cache and readiness result.
+      - id: AC17427545602
+        statement: A broker with capacity creates and confirms every contract topic in its physical namespace, and a second pass sends no CreateTopics requests.
+      - id: AC17427545603
+        statement: Returned already-exists responses count as existing, invalid replication factors fail closed and other returned errors count as failed rather than created.
   - id: req-omn17427-reconcile-staging-lock
     statement: Dispatch venv staging excludes concurrent writers and releases its lock when the reconciler exits.
     acceptance:
@@ -920,6 +929,38 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-topic-ceiling-wire
+    description: Real aiokafka admin methods and encoded then decoded Kafka responses exercise contract discovery, capacity refusal, cache contents, cleanup and readiness. The network boundary is synthetic; no live broker is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k ceiling
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545601]
+  - id: dod-omn17427-topic-capacity-control
+    description: The capacity control provisions three contract topics, confirms them through metadata and reads the second pass without another creation request. Paired with the ceiling refusal, it proves successful creation is conditional on broker capacity and fails against the provisioner that records refused topics as created.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k "capacity_control or ceiling"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545602]
+  - id: dod-omn17427-topic-error-classification
+    description: Real aiokafka returned wire errors exercise the existing already-exists, replication-policy and best-effort failure paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k returned_wire_errors
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545603]
+  - id: dod-omn17427-topic-responses-deploy
+    description: Hosted-runner deploy check of the committed provisioner and real aiokafka response path using synthetic network replies. Requires no Docker daemon, credentials or live lane and does not claim a deployed broker readback.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545601, AC17427545602, AC17427545603]
   - id: dod-omn17427-pr5263-staging-lock
     description: The real reconciler runs against temporary workspace shims with live, foreign and dead lock holders; the tests inspect staging contents, lock ownership and release.
     source: manual
