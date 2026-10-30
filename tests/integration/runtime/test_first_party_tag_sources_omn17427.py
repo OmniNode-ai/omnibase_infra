@@ -22,8 +22,8 @@ from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_locat
 ROOT = Path(__file__).resolve().parents[3]
 BUILD = ROOT / "scripts" / "runtime_build"
 CHECKER = ROOT / "src/omnibase_infra/validation/checker_first_party_sources.py"
-SIBLINGS = ("omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket")
-INSTALLED = (*SIBLINGS[:3], "omnibase_infra")
+SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket")
+INSTALLED = (*SIBLINGS[:2], "omnibase_infra")
 pytestmark = pytest.mark.integration
 
 
@@ -218,7 +218,7 @@ def test_staged_wheels_have_tag_identity_and_content_parity(tmp_path: Path) -> N
     assert {row["repo"]: row["tag"] for row in written["first_party_sources"]} == {
         repo: tags[repo] for repo in INSTALLED
     }
-    assert {row["repo"] for row in written["proofs"]} == set(SIBLINGS[:3])
+    assert {row["repo"] for row in written["proofs"]} == set(SIBLINGS[:2])
 
     # A running environment is re-audited from the folded manifest alone.
     assert _audit(site, manifest).returncode == 0

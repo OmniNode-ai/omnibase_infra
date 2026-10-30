@@ -238,9 +238,7 @@ class TestCheckoutFollowsTheNewestDevTag:
 class TestEveryVendoredSiblingFollowsItsDevTag:
     """The lab paths follow the tags themselves; nobody has to remember a list."""
 
-    @pytest.mark.parametrize(
-        "repo", ["omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket"]
-    )
+    @pytest.mark.parametrize("repo", ["omnibase_core", "omnibase_spi", "omnimarket"])
     def test_checkout_follows_each_vendored_sibling(
         self, tmp_path: Path, repo: str
     ) -> None:
