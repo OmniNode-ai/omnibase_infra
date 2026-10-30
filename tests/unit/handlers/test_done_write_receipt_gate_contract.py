@@ -138,6 +138,9 @@ def test_planted_contract_is_checked_before_binding(
     shutil.copytree(
         Path(core.__file__).parent, node, ignore=shutil.ignore_patterns("__pycache__")
     )
+    # The installed package may be read-only (shared CI env); the copy must not be.
+    for path in [node, *node.rglob("*")]:
+        path.chmod(path.stat().st_mode | 0o700)
     contract_path = node / "contract.yaml"
     contract = yaml.safe_load(contract_path.read_text())
     module = node / "handler_done_write_receipt_gate.py"
