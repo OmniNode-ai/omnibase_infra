@@ -31,6 +31,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -516,14 +517,37 @@ def test_lock_a_live_lock_is_not_removed(tmp_path: Path) -> None:
         holder.wait()
 
 
-def test_lock_a_fresh_lock_without_a_pid_is_busy(tmp_path: Path) -> None:
-    """A holder between its mkdir and its pid write is live, not stale."""
+def test_lock_a_lock_without_a_pid_is_busy_whatever_its_age(tmp_path: Path) -> None:
+    """A lock that names no holder is never freed by age: the run names its path."""
     stack = _Stack(tmp_path)
     stack.lock().mkdir()
+    old = time.time() - 600
+    os.utime(stack.lock(), (old, old))
     result = stack.run()
     assert result.returncode != 0
     assert "mint-local: busy, lock held by pid unknown" in result.stderr
+    assert "names no holder" in result.stderr
     assert stack.lock().is_dir()
+    assert stack.mutations() == []
+
+
+def test_lock_an_old_recovery_guard_is_never_evicted(tmp_path: Path) -> None:
+    """A recoverer paused past any age bound keeps its guard: the run is busy."""
+    stack = _Stack(tmp_path)
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    stack.lock().mkdir()
+    (stack.lock() / "pid").write_text(f"{dead.pid}\n")
+    guard = stack.lock().parent / ".mint-local.lock.recover"
+    guard.mkdir()
+    old = time.time() - 600
+    os.utime(guard, (old, old))
+    result = stack.run()
+    assert result.returncode != 0
+    assert "another run is recovering the stale lock" in result.stderr
+    assert guard.is_dir(), "a run evicted a recovery guard by its age"
+    assert (stack.lock() / "pid").read_text().strip() == str(dead.pid)
+    assert stack.mutations() == []
 
 
 def test_lock_is_released_after_a_failed_run(tmp_path: Path) -> None:

@@ -201,7 +201,8 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 # OMN-20823 (plan D6). The lock directory beside the env file is taken before
 # anything else and released by the trap only while it still holds our pid; a
 # lock whose recorded process is gone is removed and said, under a second guard
-# directory so two runs cannot both recover it. The password is generated here,
+# directory so two runs cannot both recover it. Age alone never frees a lock or
+# the guard: one that names no live owner is reported with its path instead. The password is generated here,
 # reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
 # an argument), reaches lane-login only on its stdin, and is never printed. The
 # state-root search reads it from its own environment and fails on any directory
@@ -216,13 +217,15 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	  if ! mkdir "$$lock" 2>/dev/null; then \
 	    holder=$$(cat "$$lock/pid" 2>/dev/null); \
 	    if [ -n "$$holder" ] && kill -0 "$$holder" 2>/dev/null; then busy "$$holder"; fi; \
-	    if [ -z "$$holder" ] && [ -n "$$(find "$$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then busy unknown; fi; \
+	    if [ -z "$$holder" ]; then \
+	      echo "mint-local: $$lock names no holder; if no mint-local is running, remove it" >&2; busy unknown; \
+	    fi; \
 	    if ! mkdir "$$guard" 2>/dev/null; then \
-	      [ -n "$$(find "$$guard" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$$guard" 2>/dev/null; \
-	      busy "$${holder:-unknown}"; \
+	      echo "mint-local: another run is recovering the stale lock; if none is, remove $$guard" >&2; \
+	      busy "$$holder"; \
 	    fi; \
 	    now=$$(cat "$$lock/pid" 2>/dev/null); \
-	    if [ "$$now" = "$$holder" ] && ! { [ -n "$$now" ] && kill -0 "$$now" 2>/dev/null; }; then \
+	    if [ "$$now" = "$$holder" ] && ! kill -0 "$$now" 2>/dev/null; then \
 	      echo "mint-local: removing a stale lock left by pid $${holder:-unknown}, which is not running"; \
 	      rm -rf "$$lock"; \
 	    fi; \
