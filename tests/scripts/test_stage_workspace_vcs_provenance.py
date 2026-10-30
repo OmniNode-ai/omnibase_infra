@@ -35,7 +35,6 @@ SCHEMA_FILE = REPO_ROOT / "scripts" / "runtime_build" / "build-provenance-schema
 SIBLING_REPOS = (
     "omnibase_core",
     "omnibase_spi",
-    "omnibase_compat",
     "omnimarket",
 )
 
@@ -236,7 +235,6 @@ def test_manifest_uses_infra_vcs_ref_and_folds_vcs_provenance(tmp_path: Path) ->
     for repo in (
         "omnibase_core",
         "omnibase_spi",
-        "omnibase_compat",
         "omnimarket",
     ):
         (sib_dir / repo).mkdir(parents=True)

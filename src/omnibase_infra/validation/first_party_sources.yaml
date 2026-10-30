@@ -17,6 +17,10 @@
 #   vendored       staged by stage_workspace.sh at the repository's newest
 #                  dev-merge tag and installed from that staged tree.
 #   build-context  the repository whose Docker build context is the image.
+#
+# omnibase_compat is not a first-party package of the dev lane (OMN-21284): it is
+# being retired, it has no dev-merge tags and gets none, and until its last
+# consumer drops it the image takes it from the lock like any other dependency.
 schema_version: 1.0.0
 policy: dev-merge-tag
 # The name a dev-merge tag carries. The same pattern the tag workflows
@@ -29,9 +33,6 @@ packages:
     install: vendored
   - distribution: omnibase-spi
     repo: omnibase_spi
-    install: vendored
-  - distribution: omnibase-compat
-    repo: omnibase_compat
     install: vendored
   - distribution: omnimarket
     repo: omnimarket

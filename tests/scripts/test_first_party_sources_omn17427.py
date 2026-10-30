@@ -58,21 +58,18 @@ CONTRACT = fps.load_contract()
 COMMITS = {
     "omnibase_core": "66d35d2283c3" + "a" * 28,
     "omnibase_spi": "f79fd4dce71e" + "b" * 28,
-    "omnibase_compat": "0123456789ab" + "c" * 28,
     "omnimarket": "2b214bdc0c13" + "d" * 28,
     "omnibase_infra": "62fb83e4bd0c" + "e" * 28,
 }
 TAGS = {
     "omnibase_core": "dev-20261030152335-66d35d2283c3",
     "omnibase_spi": "dev-20261030141310-f79fd4dce71e",
-    "omnibase_compat": "dev-20261030153000-0123456789ab",
     "omnimarket": "dev-20261030152625-2b214bdc0c13",
     "omnibase_infra": "dev-20261030140409-62fb83e4bd0c",
 }
 DISTRIBUTIONS = {
     "omnibase_core": "omnibase-core",
     "omnibase_spi": "omnibase-spi",
-    "omnibase_compat": "omnibase-compat",
     "omnimarket": "omnimarket",
     "omnibase_infra": "omnibase-infra",
 }
@@ -91,8 +88,7 @@ def _record(repo: str, **override: Any) -> dict[str, Any]:
 
 def _provenance(**records: dict[str, Any]) -> dict[str, Any]:
     siblings = {
-        repo: _record(repo)
-        for repo in ("omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket")
+        repo: _record(repo) for repo in ("omnibase_core", "omnibase_spi", "omnimarket")
     }
     context = {"omnibase_infra": _record("omnibase_infra")}
     for repo, record in records.items():
@@ -120,7 +116,6 @@ def _clean_environment() -> dict[str, dict[str, Any] | None]:
     return {
         "omnibase_core": _local("omnibase_core"),
         "omnibase_spi": _local("omnibase_spi"),
-        "omnibase_compat": _local("omnibase_compat"),
         "omnimarket": {"url": "file:///opt/omnimarket", "dir_info": {}},
         "omnibase_infra": {"url": "file:///app", "dir_info": {"editable": True}},
     }
@@ -229,21 +224,21 @@ PLANTED = [
         id="spi-git-branch",
     ),
     pytest.param(
-        "omnibase_compat",
-        _vcs("omnibase_compat", "v0.5.7"),
+        "omnibase_core",
+        _vcs("omnibase_core", "v0.47.58"),
         None,
         "release",
-        id="compat-release-tag",
+        id="core-release-tag",
     ),
     pytest.param(
-        "omnibase_compat",
+        "omnibase_spi",
         {
-            "url": "https://github.com/x/omnibase_compat/archive/v0.5.5.tar.gz",
+            "url": "https://github.com/x/omnibase_spi/archive/v0.23.7.tar.gz",
             "archive_info": {"hashes": {}},
         },
         None,
         "release",
-        id="compat-release-archive",
+        id="spi-release-archive",
     ),
     pytest.param(
         "omnibase_spi",
@@ -274,11 +269,11 @@ PLANTED = [
         id="omnimarket-staged-on-a-branch",
     ),
     pytest.param(
-        "omnibase_compat",
-        _local("omnibase_compat"),
-        _record("omnibase_compat", vcs_dirty=True),
+        "omnibase_spi",
+        _local("omnibase_spi"),
+        _record("omnibase_spi", vcs_dirty=True),
         "branch",
-        id="compat-staged-from-a-dirty-tree",
+        id="spi-staged-from-a-dirty-tree",
     ),
     pytest.param(
         "omnibase_core",
@@ -341,6 +336,37 @@ def test_a_package_the_build_does_not_require_may_be_absent(tmp_path: Path) -> N
     urls = _clean_environment()
     del urls["omnimarket"]
     assert fps.violations(_audit(tmp_path, urls, required=("omnibase-core",))) == []
+
+
+def test_omnibase_compat_is_not_a_first_party_package(tmp_path: Path) -> None:
+    """OMN-21284: compat is being retired and has no dev-merge tag.
+
+    The contract names no compat package and no set in the clone manifest names
+    the repository, so an image that installs compat from the index at an exact
+    version (as the lock pins it) passes the audit and gets no classification.
+    """
+    assert "omnibase-compat" not in {p.distribution for p in CONTRACT.packages}
+    for name in (
+        "SIBLING_CLONE_MANIFEST",
+        "SIBLING_CLONE_MANIFEST_DIST_NAMES",
+        "SIBLING_VENDORED_REPOS",
+        "SIBLING_LAB_TAG_REPOS",
+    ):
+        assert not {"omnibase_compat", "omnibase-compat"} & set(_manifest_array(name))
+    site = tmp_path / "site-packages"
+    site.mkdir()
+    _install(site, _clean_environment())
+    compat = site / "omnibase_compat-0.5.7.dist-info"
+    compat.mkdir()
+    (compat / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: omnibase-compat\nVersion: 0.5.7\n",
+        encoding="utf-8",
+    )
+    sources = fps.audit_environment(
+        CONTRACT, _provenance(), search_paths=[str(site)], required=()
+    )
+    assert fps.violations(sources) == []
+    assert "omnibase_compat" not in {s.repo for s in sources}
 
 
 def _run_audit(

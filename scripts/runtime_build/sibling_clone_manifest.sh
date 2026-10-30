@@ -46,7 +46,6 @@ SIBLING_CLONE_MANIFEST=(
     "omnibase_infra"
     "omnibase_core"
     "omnibase_spi"
-    "omnibase_compat"
     "omnimarket"
 )
 
@@ -55,7 +54,6 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
     "omnibase-infra"
     "omnibase-core"
     "omnibase-spi"
-    "omnibase-compat"
     "omnimarket"
 )
 
@@ -84,8 +82,10 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
 # key set of compute_workspace_provenance.py's WORKSPACE_PACKAGES (less
 # omnimarket, which the infra image does not install), which runs inside the
 # image and cannot source this file; the parity test holds the two equal.
+# omnibase_compat left every set in this file under OMN-21284: it is being
+# retired, and the image installs it from the lock until no consumer remains.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnibase_compat" "omnimarket")
+SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnimarket")
 
 # The lab scripts track no extra repository now that onex_change_control is
 # retired. This array stays as the place to add an extra tracked repository.

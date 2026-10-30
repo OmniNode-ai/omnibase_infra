@@ -39,7 +39,6 @@ DEPLOY_SOURCE_REF = REPO_ROOT / "scripts" / "runtime_build" / "deploy_source_ref
 
 SIBLING_REPOS = (
     "omnibase_core",
-    "omnibase_compat",
     "onex_change_control",
     "omnimarket",
 )
@@ -407,7 +406,7 @@ def test_build_context_git_clone_stays_untracked_clean(tmp_path: Path) -> None:
     assert porcelain == "", porcelain
 
 
-PINNED_SIBLINGS = ("omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket")
+PINNED_SIBLINGS = ("omnibase_core", "omnibase_spi", "omnimarket")
 
 
 def _current_repo_refs(omni_home: Path) -> list[str]:
@@ -433,10 +432,8 @@ def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
     _git(market, "checkout", "-q", "-b", "unmerged-change")
     target_market = _advance_dev_keep_version(market)
     _git(market, "checkout", "-q", "dev")
-    target_compat = _git(clones / "omnibase_compat", "rev-parse", "HEAD")
     targets = {
         "omnibase_core": target_core,
-        "omnibase_compat": target_compat,
         "omnimarket": target_market,
     }
     for ref in _current_repo_refs(clones):
@@ -472,7 +469,7 @@ def test_per_repo_pin_errors_preserve_every_clone(tmp_path: Path, invalid: str) 
     before_core, target_core = _behind_core(omni_home)
     refs = [
         f"omnibase_core={target_core}",
-        f"omnibase_compat={'b' * 40}",
+        f"omnibase_spi={'b' * 40}",
         f"omnimarket={'c' * 40}",
     ]
     if invalid == "missing":
@@ -551,7 +548,7 @@ def test_two_clone_sets_share_declared_deploy_source(
     assert first.returncode == 0, first.stderr
     second = _run_stage(other, build_ctx, deploy_ref="dev")
     assert second.returncode == 0, second.stderr
-    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+    for repo in ("omnibase_core", "omnimarket"):
         common = _git(
             _staged_tree(build_ctx, repo),
             "rev-parse",
@@ -597,7 +594,7 @@ def test_stage_workspace_tree_keyed_by_source_clone(
     assert result.returncode == 0, result.stderr
     second_rows = json.loads(_refs_out(context).read_text())["repos"]
     assert sentinel.read_text() == "preserve the other clone's work\n"
-    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+    for repo in ("omnibase_core", "omnimarket"):
         tree = Path(second_rows[repo]["path"])
         assert tree != Path(first_rows[repo]["path"])
         assert (
