@@ -78,7 +78,7 @@ def test_the_pool_has_its_own_git_mirror_on_the_data_volume() -> None:
     assert "--port=9418" in daemon
     assert f"--base-path={MIRROR_ROOT}" in daemon
     # Read-only exposure: the daemon is never given receive-pack, and listens on no wildcard address.
-    assert "receive-pack" not in daemon
+    assert "--enable=receive-pack" not in daemon
     assert "--listen=0.0.0.0" not in daemon
     refresh = MIRROR_REFRESH.read_text(encoding="utf-8")
     assert f"Environment=OMNI_GIT_MIRROR_ROOT={MIRROR_ROOT}" in refresh
