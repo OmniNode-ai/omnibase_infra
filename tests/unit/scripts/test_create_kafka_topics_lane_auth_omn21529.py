@@ -12,6 +12,7 @@ refuses.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -62,7 +63,10 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _run_live_main(argv: list[str]) -> tuple[int, MagicMock]:
     mod = _load()
     admin_cls = MagicMock()
-    admin_cls.return_value.list_topics.side_effect = RuntimeError("stop after config")
+    metadata = MagicMock()
+    metadata.topics = {}
+    metadata.brokers = {1: MagicMock()}
+    admin_cls.return_value.list_topics.return_value = metadata
     fake_admin = ModuleType("confluent_kafka.admin")
     fake_admin.AdminClient = admin_cls
     fake_admin.NewTopic = MagicMock()
@@ -90,7 +94,8 @@ def test_lane_with_env_identity_builds_a_sasl_admin_client(
 ) -> None:
     monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
     monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
-    _code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls = _run_live_main(["--lane", "dev"])
+    assert code == 0
     admin_cls.assert_called_once_with(
         {
             "bootstrap.servers": "broker.invalid:19092",
@@ -112,7 +117,8 @@ def test_lane_with_stored_identity_builds_a_sasl_admin_client(
         sasl_username="stored",
         sasl_password=_CRED,
     )
-    _code, admin_cls = _run_live_main(["--lane", "dev"])
+    code, admin_cls = _run_live_main(["--lane", "dev"])
+    assert code == 0
     (config,) = admin_cls.call_args.args
     assert config["sasl.username"] == "stored"
     assert config["sasl.mechanism"] == "SCRAM-SHA-256"
@@ -131,7 +137,8 @@ def test_missing_identity_refuses_naming_the_overlay_key(
 
 
 def test_plaintext_lane_needs_no_identity(workspace: Path) -> None:
-    _code, admin_cls = _run_live_main(["--lane", "plain"])
+    code, admin_cls = _run_live_main(["--lane", "plain"])
+    assert code == 0
     admin_cls.assert_called_once_with(
         {
             "bootstrap.servers": "plain.invalid:19092",
@@ -150,5 +157,47 @@ def test_lane_and_bootstrap_servers_are_mutually_exclusive(
 
 
 def test_bootstrap_servers_alone_is_unchanged(workspace: Path) -> None:
-    _code, admin_cls = _run_live_main(["--bootstrap-servers", "x.invalid:1"])
+    code, admin_cls = _run_live_main(["--bootstrap-servers", "x.invalid:1"])
+    assert code == 0
     admin_cls.assert_called_once_with({"bootstrap.servers": "x.invalid:1"})
+
+
+def test_undeclared_lane_refuses_naming_the_overlay_key(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, admin_cls = _run_live_main(["--lane", "nope"])
+    assert code == 1
+    admin_cls.assert_not_called()
+    assert "lanes.nope" in capsys.readouterr().err
+
+
+def test_half_a_credential_pair_refuses(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+    code, admin_cls = _run_live_main(["--lane", "dev"])
+    assert code == 1
+    admin_cls.assert_not_called()
+    assert "lanes.dev" in capsys.readouterr().err
+
+
+def test_resolved_config_never_exposes_the_password(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omnibase_infra.models.model_lane_admin_client_config import (
+        ModelLaneAdminClientConfig,
+    )
+
+    monkeypatch.setenv("KAFKA_SASL_USERNAME", "svc")
+    monkeypatch.setenv("KAFKA_SASL_PASSWORD", _CRED)
+    config = ModelLaneAdminClientConfig.resolve("dev", dict(os.environ))
+    for rendered in (
+        repr(config),
+        str(config),
+        str(config.model_dump()),
+        config.model_dump_json(),
+    ):
+        assert _CRED not in rendered
+    assert config.librdkafka_config()["sasl.password"] == _CRED
