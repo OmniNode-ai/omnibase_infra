@@ -123,6 +123,9 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
             resolve_embedded_runtime_config(workspace_root=workspace)
         assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in str(exc.value)
         assert "a config root (none is declared)" in str(exc.value)
+        # Nothing was read: the decoys beside the workspace and under HOME all
+        # hold loadable configs, so a kernel that read one would have answered.
+        assert exc.value.model.context["config_path"] == ""
     else:
         expected_file = expected.resolve() / "config/onex/runtime/runtime_config.yaml"
         with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:

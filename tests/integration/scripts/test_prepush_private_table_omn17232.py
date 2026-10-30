@@ -119,8 +119,9 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
     rows = shell("prepush_table_rows")
     assert rows.returncode == 0, rows.stderr
     shipped = (REPO_ROOT / "scripts/hooks/prepush_hosts.tsv").read_text().splitlines()
-    neutral_row = next(row for row in shipped if row and not row.startswith("#"))
-    assert rows.stdout.splitlines()[0] == neutral_row
+    shipped_rows = [row for row in shipped if row and not row.startswith("#")]
+    assert len(shipped_rows) == 1
+    assert rows.stdout.splitlines()[0] == shipped_rows[0]
     assert rows.stdout.splitlines()[1:] == SYNTHETIC_TABLE.splitlines()[1:]
 
     target.write_text(
