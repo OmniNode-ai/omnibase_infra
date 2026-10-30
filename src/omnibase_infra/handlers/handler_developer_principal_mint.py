@@ -299,16 +299,30 @@ class HandlerDeveloperPrincipalMint:
                 extra_acls=_labels(frozenset(applied.extra_acls)),
                 reason=applied.refusal,
             )
-        verified = _run(
-            "verify",
-            lambda: self._verify(
-                ModelBrokerPrincipalVerifyRequest(
-                    plan=plan,
-                    admin_url=request.admin_url,
-                    password_env=request.password_env,
-                )
-            ),
-        )
+        try:
+            verified = _run(
+                "verify",
+                lambda: self._verify(
+                    ModelBrokerPrincipalVerifyRequest(
+                        plan=plan,
+                        admin_url=request.admin_url,
+                        password_env=request.password_env,
+                    )
+                ),
+            )
+        except MintStepFailedError as failed:
+            # OMN-20823: apply already mutated the broker,
+            # so its outcome is kept when verify raises.
+            return _result(
+                known,
+                status="failure",
+                action=applied.action,
+                verified=False,
+                acls_applied=applied.acls_applied,
+                password_set=applied.password_set,
+                failed_step="verify",
+                reason=str(failed.error),
+            )
         return _result(
             known,
             status="success" if verified.verified else "failure",

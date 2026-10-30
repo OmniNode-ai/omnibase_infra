@@ -305,7 +305,20 @@ def test_order_a_failed_step_ends_the_run_and_is_named(
     assert result.status == "failure"
     assert result.failed_step == fail_at
     assert f"{fail_at} failed" in result.reason
-    assert result.acls_applied is (fail_at == "apply")
+    assert result.acls_applied is (fail_at in ("apply", "verify"))
+
+
+def test_verify_error_keeps_apply_outcome() -> None:
+    """A verify that raises after apply keeps apply's outcome (OMN-20823)."""
+    steps = _Steps(fail_at="verify")
+    result = _mint(steps)
+    assert steps.calls == ["list", "plan", "apply", "verify"]
+    assert result.status == "failure"
+    assert result.failed_step == "verify"
+    assert "verify failed" in result.reason
+    assert result.acls_applied is True
+    assert result.password_set is True
+    assert result.verified is False
 
 
 def test_order_a_verify_that_does_not_pass_is_a_failure_after_the_password() -> None:
