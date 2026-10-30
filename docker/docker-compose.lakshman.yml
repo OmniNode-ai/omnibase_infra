@@ -511,7 +511,9 @@ services:
       args:
         BUILD_SOURCE: "${BUILD_SOURCE:-release}"
         EXPECTED_BUILD_SOURCE: "${EXPECTED_BUILD_SOURCE:-release}"
-    container_name: omnibase-infra-lakshman-infra-runtime-image
+    # No container_name: scale 0 means no container ever starts.
+    # As with the dev lane's build-only service, the lab's lane manifest
+    # has nothing to declare. (OMN-21587)
     scale: 0
   omninode-runtime:
     !!merge <<: *runtime-base

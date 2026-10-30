@@ -294,6 +294,8 @@ def test_lakshman_lane_render_is_isolated_from_every_other_lane() -> None:
         assert set(service.get("networks", {})) == {LAKSHMAN_NETWORK}, (
             f"service {name!r} is attached to a network other than the lane's own"
         )
+        if service.get("scale") == 0:
+            continue  # build-only, no container (OMN-21587)
         assert "lakshman" in service["container_name"], (
             f"service {name!r} renders container_name "
             f"{service['container_name']!r}, which does not name this lane and "

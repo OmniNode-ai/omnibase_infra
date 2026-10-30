@@ -50,7 +50,7 @@ dod_evidence:
     binds_ac: [AC1]
   - id: dod-omn21587-ac3-render-selection
     description: >-
-      Hosted stand-in for the lane criteria (owner's choice of the OMN-21371 pattern, 2026-10-30): the rendered build of every market workload is omnimarket's recipe on the infra image. Hosted CI has no lane container, so the lane probe below is the runtime proof. AC2 is bound here and below by the owner's explicit exception to TK-31: AC2 is superseded by AC3 and is reported as superseded, not as separately met.
+      Hosted stand-in for the lane criteria (owner's choice of the OMN-21371 pattern, 2026-10-30): the rendered build of every market workload is omnimarket's recipe on the infra image. Hosted CI has no lane container; the lane probe below is the local Done gate's runtime proof and, as in OMN-21371, binds no criterion so the hosted verifier does not require its control. AC2 is bound here by the owner's explicit exception to TK-31: AC2 is superseded by AC3 and is reported as superseded, not as separately met.
     source: manual
     checks:
       - check_type: test_passes
@@ -59,7 +59,7 @@ dod_evidence:
     binds_ac: [AC2, AC3]
   - id: dod-omn21587-lane-probe
     description: >-
-      Post-deploy point read on the lab host's collaborator lane: each of the five services is live running, healthy and at 0 restarts; /health answers on 58085, 58086 and 53002 and every curl's own exit status is checked; each runtime's dimensions list names all ten expected dimensions, has no duplicate name, and no row but projection_attachment is non-HEALTHY. It does not prove the 5-minute hold, which is the lane verify receipt. Hosted CI has no lane container, so only the local Done gate runs it.
+      Post-deploy point read on the lab host's collaborator lane: each of the five services is live running, healthy and at 0 restarts; /health answers on 58085, 58086 and 53002 and every curl's own exit status is checked; each runtime's dimensions list names all ten expected dimensions, has no duplicate name, and no row but projection_attachment is non-HEALTHY. It does not prove the 5-minute hold, which is the lane verify receipt. Hosted CI has no lane container, so only the local Done gate runs it; as in OMN-21371 it binds no criterion.
     source: manual
     execution_scope: local_done_gate
     checks:
@@ -67,4 +67,4 @@ dod_evidence:
         check_value: >-
           bash -c 'set -euo pipefail; for c in omninode-lakshman-runtime omninode-lakshman-runtime-effects omnimarket-lakshman-projection-api omnimarket-lakshman-projection-delegation-writer omnimarket-lakshman-projection-tenant-registry-writer; do state="$(docker inspect -f "{{.State.Status}} {{.State.Running}} {{.State.Health.Status}} {{.RestartCount}}" "$c")"; test "$state" = "running true healthy 0"; done; for p in 58085 58086 53002; do curl -sf -o /dev/null --max-time 10 "http://localhost:$p/health"; done; for p in 58085 58086; do body="$(curl -sf --max-time 10 "http://localhost:$p/health")"; printf "%s" "$body" | python3 -c "import json,sys; d=json.load(sys.stdin); rows=d[\"details\"][\"runtime_health\"][\"dimensions\"]; names=[x[\"name\"] for x in rows]; need={\"discovery_errors\",\"empty_consumer_groups\",\"topic_coverage\",\"projection_attachment\",\"projection_dlq_saturation\",\"projection_write_path\",\"consumer_sync\",\"dispatch_deadline\",\"projection_apply_divergence\",\"projection_delta_dropped\"}; bad=[x[\"name\"] for x in rows if x[\"status\"] != \"HEALTHY\" and x[\"name\"] != \"projection_attachment\"]; sys.exit(0 if need <= set(names) and len(names) == len(set(names)) and not bad else 1)"; done'
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2, AC3]
+    binds_ac: []
