@@ -1,0 +1,28 @@
+schema_version: '1.0.0'
+ticket_id: OMN-21529
+title: 'Topic provisioning authenticates to a SASL broker from the lane'
+summary: 'create_kafka_topics.py --lane reads address, protocol and mechanism from the lane declaration and the identity from the lane store or the SASL environment.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: Lane SASL provisioning tests pass
+    command: uv run pytest tests/unit/scripts/test_create_kafka_topics_lane_auth_omn21529.py tests/unit/scripts/test_create_kafka_topics.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: With only the lane declaration and an identity the admin client is built with SASL SCRAM settings; with the identity missing the run refuses naming lanes.<lane>
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_create_kafka_topics_lane_auth_omn21529.py -q'
+  - id: dod-002
+    description: Existing provisioning script tests still pass after discovery moved to a model
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_create_kafka_topics.py -q'
