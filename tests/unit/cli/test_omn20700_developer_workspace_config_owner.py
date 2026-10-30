@@ -90,8 +90,7 @@ def test_a_fresh_developer_workspace_resolves_the_config_onboarding_wrote(
     written = _write(workspace / ".onex" / "workspace-config", _DEVELOPER_TIER1)
     config, source = resolve_embedded_runtime_config(workspace_root=workspace)
     assert config.event_bus.type is EnumEventBusType.INMEMORY
-    assert str(written) in source
-    assert source.endswith(str(written) + ")") or str(written) in source
+    assert source == f"workspace tier-1 runtime config at {written.resolve()}"
 
 
 def test_a_registry_workspace_takes_its_declared_owner(

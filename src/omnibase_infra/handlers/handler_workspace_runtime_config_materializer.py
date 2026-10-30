@@ -134,7 +134,7 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
         request = ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
         resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
         if (
-            sidecar.source_repository != str(resolution.config_root)
+            Path(sidecar.source_repository) != resolution.config_root
             or sidecar.source_ref != SOURCE_REF
             or sidecar.source_path != SOURCE_PATH_IN_REPO
         ):

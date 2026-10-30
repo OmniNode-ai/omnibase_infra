@@ -84,3 +84,15 @@ def test_compose_env_leaves_the_directory_unset_when_none_exists(
     monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(tmp_path / "missing"))
     monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "none"))
     assert "ONEX_LANE_OVERLAY_DIR" not in executor._compose_env()
+
+
+def test_the_instance_env_template_names_the_config_root_the_agent_reads() -> None:
+    """The agent takes the overlay directory from ONEX_WORKSPACE_CONFIG_ROOT in the
+    environment it hands to compose, so each instance's env file must define it."""
+    template = Path(executor.__file__).resolve().parents[1] / "deploy"
+    names = {
+        line.partition("=")[0]
+        for line in (template / "dev-instance.env.template").read_text().splitlines()
+        if line and not line.startswith("#")
+    }
+    assert {"ONEX_WORKSPACE_CONFIG_ROOT", "ONEX_LANE_OVERLAY_DIR"} <= names

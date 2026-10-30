@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import importlib
-import os
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -24,6 +23,14 @@ from omnibase_infra.runtime.service_kernel import (
 from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
 pytestmark = pytest.mark.integration
+
+_NEIGHBOUR_CONFIG = """
+description: "a neighbouring directory's runtime config (must never be read)"
+event_bus:
+  type: "kafka"
+  profile: "local"
+  lane: "dev"
+"""
 
 CONTRACT = (
     Path(__file__).resolve().parents[3]
@@ -63,21 +70,30 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
 
     workspace = tmp_path / "registry"
     workspace.mkdir()
+    # Beside the workspace sit directories that hold a real, loadable runtime
+    # config: a resolver that guessed one would answer from it instead of
+    # refusing or taking the developer directory.
     for neighbour in ("config", "neighbor", "workspace-config"):
-        (tmp_path / neighbour).mkdir()
+        planted = tmp_path / neighbour / "config/onex/runtime/runtime_config.yaml"
+        planted.parent.mkdir(parents=True)
+        planted.write_text(_NEIGHBOUR_CONFIG, encoding="utf-8")
     developer = workspace / ".onex/workspace-config"
     explicit = tmp_path / "explicit"
     if winner != "unset":
         developer.mkdir(parents=True)
+    env: dict[str, str] = {}
     if winner == "environment":
         explicit.mkdir()
+        env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(explicit)
         monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(explicit))
     else:
         monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setenv("OMNI_HOME", str(workspace))
     handler = cast("_Resolver", handler_class())
-    request = request_class.model_validate({"workspace_root": workspace})
+    request = request_class.model_validate(
+        {"workspace_root": workspace, "environment": env}
+    )
     assert isinstance(request, ModelWorkspaceConfigRootRequest)
     result = handler.handle(request)
     assert isinstance(result, output_class)
@@ -99,13 +115,11 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
         )
     # The pre-push guard honours the explicit variable only, never the
     # developer directory, and agrees with the handler under that policy.
-    guard_root = _workspace_config_root(dict(os.environ))
+    guard_root = _workspace_config_root(env)
     assert guard_root == (explicit.resolve() if winner == "environment" else None)
     guard_policy = handler.handle(
         ModelWorkspaceConfigRootRequest(
-            workspace_root=workspace,
-            environment=dict(os.environ),
-            allow_developer_config=False,
+            workspace_root=workspace, environment=env, allow_developer_config=False
         )
     )
     assert guard_policy.config_root == guard_root
