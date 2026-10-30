@@ -123,3 +123,8 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
         )
     )
     assert guard_policy.config_root == guard_root
+    # The flag, not the tree, is what rejects the developer directory: the same
+    # request with the default policy took it above.
+    assert guard_policy.source == (
+        "environment" if winner == "environment" else "unset"
+    )

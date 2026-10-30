@@ -56,6 +56,8 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
             "user.email=test@example.invalid",
             "-c",
             "user.name=Test",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "-qm",
             "Synthetic deployment table",
@@ -64,7 +66,11 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
         subprocess.run(
             ["git", *args],
             cwd=root,
-            env=scrub_git_location_env(env),
+            env={
+                **scrub_git_location_env(env),
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
+            },
             check=True,
             capture_output=True,
             timeout=30,
@@ -122,6 +128,7 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
     for result in (guard(), shell("prepush_private_table_text")):
         assert result.returncode == PRIVATE_TABLE_ABSENT_RC
         assert result.stdout == ""
+        assert "Traceback" not in result.stderr, result.stderr
     neutral = shell("prepush_table_rows")
     assert neutral.returncode == 0, neutral.stderr
     assert [row.split("\t")[0] for row in neutral.stdout.splitlines()] == ["local"]

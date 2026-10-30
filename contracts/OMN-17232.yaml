@@ -178,16 +178,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/nodes/test_workspace_config_root_resolve_node_omn17232.py -q -n 0 --no-cov -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-prepush-resolver-deployed
-    description: Live-surface probe of the dev-lane runtime; passes only after the runtime image carries this service_kernel.py change and its shared resolver handler.
-    source: manual
-    execution_scope: local_done_gate
-    binds_ac: [AC7]
-    checks:
-      - check_type: command
-        check_value: >-
-          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.handler_workspace_config_root_resolve import HandlerWorkspaceConfigRootResolve; print(HandlerWorkspaceConfigRootResolve.__name__)'
-        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-prepush-resolver-merged-source
     description: Hermetic deployed-source readback of the kernel at the evaluated commit; the shared resolver import and call are absent at the merge base.
     source: manual

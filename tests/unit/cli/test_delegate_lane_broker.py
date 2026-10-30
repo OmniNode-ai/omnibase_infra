@@ -145,9 +145,13 @@ class TestLaneDeclarationLookup:
     ) -> None:
         owner = tmp_path / "owner"
         owner.mkdir()
+        for neighbour in ("config", "neighbor", "workspace-config"):
+            planted = tmp_path / neighbour / LANE_DECLARATION_RELATIVE_PATH
+            planted.parent.mkdir(parents=True)
+            planted.write_text(_DECLARATION, encoding="utf-8")
         monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(owner))
         with pytest.raises(DelegateLaneSelectionError) as exc:
-            resolve_lane_declaration_path(tmp_path)
+            resolve_lane_declaration_path(tmp_path / "workspace")
         assert str(owner.resolve() / LANE_DECLARATION_RELATIVE_PATH) in str(exc.value)
 
     def test_an_undeclared_config_root_is_refused_naming_the_variable(
