@@ -1,0 +1,40 @@
+# OMN-17232 -- the git mirror daemon of the h051 pool (OMN-14027 C2, one copy per runner host).
+#
+# Same shape as docker/runners/systemd/omninode-git-mirror-daemon.service with the mirror root on the data volume
+# (/data/scratch/git-mirror) instead of the boot volume. Bound to the docker bridge gateway of the pool's compose
+# project, never the LAN or the tailnet: git:// is unauthenticated and the private mirrors must stay reachable only
+# from containers that already hold an authenticated checkout of the same code. The address is host configuration,
+# read from the required file /etc/default/omninode-git-mirror (OMNI_GIT_MIRROR_LISTEN=<the gateway>, which is the
+# address the runners' pre-seed already defaults to), so this public file names no address and the unit refuses to
+# start without it. Read-only: the daemon is never given receive-pack.
+[Unit]
+Description=OmniNode h051 runner pool git mirror daemon (OMN-17232)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/runners/systemd/pools/hp051-ci-runner
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jonah
+Group=jonah
+Environment=HOME=/home/jonah
+EnvironmentFile=/etc/default/omninode-git-mirror
+ExecStart=/usr/lib/git-core/git-daemon \
+    --verbose \
+    --reuseaddr \
+    --export-all \
+    --base-path=/data/scratch/git-mirror \
+    --listen=${OMNI_GIT_MIRROR_LISTEN} \
+    --port=9418 \
+    --timeout=60 \
+    --max-connections=24 \
+    /data/scratch/git-mirror
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/data/scratch/git-mirror
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

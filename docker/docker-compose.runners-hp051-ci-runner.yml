@@ -1,17 +1,21 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-17232 -- the canary CI pool on the HP ProLiant DL560 Gen8 (h051).
+# OMN-17232 -- the arch-neutral CI pool on the HP ProLiant DL560 Gen8 (h051).
 #
-# WHY IT EXISTS. The offload plan (task T2a) moves CI capacity off the primary host one measured step at a time. Operator RULING 2026-10-29T14:00:26Z: make before
-# break, so nothing on the primary host is stopped until its copy on the HP runs and validates. This is the first step: four
-# runners that no existing workflow can select, so a real job reaches them only when a branch workflow names the
-# label on purpose. the primary host keeps every one of its runners.
+# WHY IT EXISTS. The primary-host offload plan (task T2) moves CI capacity off the primary host one measured step at a time.
+# Operator RULING 2026-10-29T14:00:26Z: make before break, so nothing on the primary host is stopped until its copy on
+# the HP runs and validates. The primary host keeps every one of its runners.
+#
+# THE LABEL. RUNNER_LABELS carry the opt-in `omnibase-ci-multiarch` (config/runner_fleet.yaml, class `action-multiarch`)
+# and NEVER `omnibase-ci`. Only a job that moved to `runs-on: [self-hosted, omnibase-ci-multiarch]` -- arch-neutral
+# pytest, mypy, lint, node scripts -- can land here. The opt-in is the guard: this CPU has no AVX2, and a job that imports
+# a wheel built for it died here with SIGILL (exit 132 on the `pedalboard` import in a private repository's unit tests, measured
+# 2026-10-29), so every such job stays on `[self-hosted, omnibase-ci]`. `hp-canary` stays as the pool's own pin label
+# (the relabel roll is additive); it is not a production label and no workflow names it.
 #
 # SAME RUNNER, OTHER HOST. The anchors below are docker-compose.runners-omnipc2-ci-runner.yml's, with these changes,
 # each deliberate:
-#   - RUNNER_LABELS carry `hp-canary` and NOT `omnibase-ci` or `omnibase-ci-multiarch`, so no `runs-on: [self-hosted,
-#     omnibase-ci, ...]` job in any repository can land here. T2b adds the production labels in its own change.
 #   - ONEX_LANE_HOST is h051 (the host's row of the lab host table), the docker GID is 988 (read on the host), and
 #     the per-runner caches, job workspaces and TMPDIR sit under /data/scratch on the data logical volume (ext4
 #     on the Smart Array RAID 5, mounted /data), so job IO stays off the boot volume.
@@ -20,12 +24,24 @@
 #     apart by prefix.
 #   - the pool sits in omnirunners.slice, installed from docker/runners/systemd/pools/hp051-ci-runner/, sized from
 #     the T0 reads (80 threads, 377 GiB, no AVX2) so CI yields to the OS and to the lanes that follow.
+#   - the pool has its own git mirror (OMN-14027 C2 on this host). The runners' checkout pre-seed reads its default
+#     mirror address, which is this compose project's bridge gateway on h051 (read 2026-10-30), so no env
+#     changes; the daemon, the refresh service and its timer are the three units beside the slice, with the bare
+#     mirrors under /data/scratch/git-mirror (off the boot volume) and the daemon's listen address in the host file
+#     /etc/default/omninode-git-mirror. The pre-seed is fail-open: without the mirror a
+#     job cold-clones from github.com and passes.
 #
 # DEPLOYING. From a machine with ssh to the host (ssh alias h051) and org-admin gh:
 #   scripts/deploy-runners.sh --host=h051 [--limit=N]
-# The slice unit is not installed by that script for a host row (only for a `pools:` entry), so install it once
-# by hand and read it back: sudo install -m 0644 docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice
-# /etc/systemd/system/omnirunners.slice && sudo systemctl daemon-reload && sudo systemctl start omnirunners.slice
+# Runners already registered move to the label above with:
+#   scripts/deploy-runners.sh --host=h051 --relabel
+# The slice and mirror units are not installed by that script for a host row (only for a `pools:` entry), so install
+# them once by hand and read them back:
+#   sudo install -m 0644 docker/runners/systemd/pools/hp051-ci-runner/{omnirunners.slice,omninode-git-mirror-daemon.service,omninode-git-mirror-refresh.service,omninode-git-mirror-refresh.timer} /etc/systemd/system/
+#   sudo install -d -o jonah -g jonah /data/scratch/git-mirror
+#   echo "OMNI_GIT_MIRROR_LISTEN=$(docker network inspect hp051-ci-runner_default -f '{{(index .IPAM.Config 0).Gateway}}')" | sudo tee /etc/default/omninode-git-mirror
+#   sudo systemctl daemon-reload && sudo systemctl enable --now omnirunners.slice omninode-git-mirror-refresh.timer omninode-git-mirror-daemon.service
+# (the refresh script is rsynced by deploy-runners.sh to ~/.omnibase/runners/docker/runners/git-mirror-refresh.sh).
 # Before the first recreate, on the host: create /data/scratch/runners/<N>/{work,tmp} and
 # /data/scratch/cache/runners/<N>/{pip,pre-commit,pnpm,ms-playwright,ci-envs,npm}, owned by uid 1001 (tmp mode 1777),
 # and put LOCAL_LLM_SHARED_SECRET, LLM_ENDPOINT_CIDR_ALLOWLIST and RUNNER_LAB_HOST_TABLE in ~/.omnibase/runners/docker/.env (mode 600).
@@ -50,7 +66,7 @@ x-runner-base: &runner-base
     # OMN-18829: the host row, not the container install identity, owns lab delegations.
     ONEX_LANE_HOST: h051
     ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
-    RUNNER_LABELS: self-hosted,hp-canary,linux,x64,arch-amd64
+    RUNNER_LABELS: self-hosted,omnibase-ci-multiarch,hp-canary,linux,x64,arch-amd64
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
     LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}

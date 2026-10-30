@@ -34,10 +34,20 @@ requirements:
         statement: The kernel resolves the workspace config owner through the one contract-declared resolver and holds no resolver of its own; the resolver names no directory beside the workspace root, so an unset ONEX_WORKSPACE_CONFIG_ROOT with no developer config yields no root and each caller uses its neutral default or refuses naming the variable.
       - id: AC8
         statement: The resolver node runs from its contract and the contract-routed handler, kernel and pre-push guard agree on a real directory tree for the variable, the developer directory and the unset case, including the guard's developer-config opt-out and its refusal to adopt a neighbouring directory.
+  - id: req-hp051-multiarch-pool
+    statement: The HP DL560 (h051) takes arch-neutral CI on the opt-in label only, with its own slice and git mirror.
+    acceptance:
+      - id: AC10
+        statement: Every h051 runner carries omnibase-ci-multiarch and arch-amd64 and neither omnibase-ci nor omnibase-verify, the fleet row declares only the action-multiarch class, and the pool runs in its own omnirunners.slice with declared limits.
+      - id: AC11
+        statement: The pool's git mirror is three units beside the slice (daemon on the pool's bridge gateway, oneshot refresh, timer) whose root is on the data volume, and no runner overrides the mirror address.
 evidence_requirements:
   - kind: tests
     description: Synthetic fixtures cover public-table leakage, missing configuration, concurrent slots, committed authority, and remote transport without live lab dependencies.
     command: uv run pytest tests/unit/scripts/test_prepush_host_table.py tests/unit/scripts/test_prepush_actor_fallback.py tests/unit/scripts/test_prepush_remote_leg_policy.py tests/unit/scripts/test_prepush_smart_tests_seam.py tests/ci/test_prepush_hook_host_identity_guard.py tests/ci/test_pytest_full_suite_host_guard.py -q -p no:randomly
+  - kind: tests
+    description: The h051 pool declaration, label and mirror tests pass
+    command: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -186,4 +196,20 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/service_kernel.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "HandlerWorkspaceConfigRootResolve" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-pool-declared
+    description: The pool carries the opt-in label only, a class no omnibase-ci probe counts, its own slice, and its own git mirror units.
+    source: manual
+    binds_ac: [AC10, AC11]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-pool-deploy
+    description: The four runners run healthy on the host in their own cgroup slice, and the pool's git mirror daemon is active.
+    source: manual
+    binds_ac: [AC10, AC11]
+    checks:
+      - check_type: command
+        check_value: "ssh h051 'test \"$(docker ps --filter name=hp051-ci-runner --filter health=healthy -q | wc -l)\" = 4 && systemctl is-active omninode-git-mirror-daemon.service && systemctl show omnirunners.slice -p MemoryMax | grep -q MemoryMax='"
         cwd: ${OMNI_HOME}/omnibase_infra
