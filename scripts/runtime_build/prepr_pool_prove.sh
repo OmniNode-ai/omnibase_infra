@@ -25,7 +25,7 @@
 #               takes a lane argument; the project is derived from the slot.
 #
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
-#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF COMPAT_REF
+#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
@@ -464,12 +464,11 @@ clone)
   elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD" "${MARKET_TAG:-}"
     git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "${MARKET_TAG:+refs/tags/}${MARKET_TAG:-pull/$MARKET_PR/head}"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnimarket.git "$R/omnimarket"; fi
-  git clone -q --branch main https://github.com/OmniNode-ai/omnibase_compat.git "$R/omnibase_compat"
   git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_core.git "$R/omnibase_core"
   git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_spi.git "$R/omnibase_spi"
   # The workspace build vendors each sibling from these clones, not from the PR's
   # pin, so a PR that moves a sibling pin names the ref here (CORE_REF=v0.47.24).
-  for pair in "omnibase_core:${CORE_REF:-}" "omnibase_spi:${SPI_REF:-}" "omnibase_compat:${COMPAT_REF:-}"; do
+  for pair in "omnibase_core:${CORE_REF:-}" "omnibase_spi:${SPI_REF:-}"; do
     repo=${pair%%:*}; ref=${pair#*:}; [ -n "$ref" ] || continue
     git -C "$R/$repo" fetch -q --tags origin "$ref" && git -C "$R/$repo" switch -q --detach FETCH_HEAD
     echo "$repo pinned to $ref = $(git -C "$R/$repo" rev-parse HEAD)"
@@ -517,7 +516,7 @@ build)
   echo "stage start $(ts)"
   OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" bash scripts/runtime_build/stage_workspace.sh \
     --repo-ref omnibase_core="$(git -C "$R/omnibase_core" rev-parse HEAD)" \
-    --repo-ref omnibase_compat="$(git -C "$R/omnibase_compat" rev-parse HEAD)" \
+    --repo-ref omnibase_spi="$(git -C "$R/omnibase_spi" rev-parse HEAD)" \
     --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)" 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
   make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2
