@@ -158,11 +158,14 @@ See Also
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -196,7 +199,7 @@ def _get_package_source_path(package_name: str) -> Path | None:
 
     Uses importlib to find the package spec and extract the source path.
     For editable installs, prefers the ``src/`` directory over site-packages
-    to limit scan scope and prevent OOM on CI runners (OMN-5969).
+    to limit scan scope (OMN-5969).
 
     Args:
         package_name: The name of the package to locate.
@@ -846,11 +849,81 @@ def _scan_file_for_imports(
     return violations
 
 
+def _editable_package_root(
+    dist: importlib.metadata.Distribution, package_name: str
+) -> Path | None:
+    """The package root an editable install of ``dist`` points at, or None.
+
+    An editable install records no ``<package>/__init__.py`` in its RECORD. The
+    distribution's own ``direct_url.json`` names the source tree instead, so the
+    root is the ``<package>`` directory inside it (flat or under ``src/``).
+    """
+    raw = dist.read_text("direct_url.json")
+    if not raw:
+        return None
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(info, dict):
+        return None
+    dir_info = info.get("dir_info")
+    url = info.get("url")
+    if not (
+        isinstance(dir_info, dict) and dir_info.get("editable") and isinstance(url, str)
+    ):
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    source_tree = Path(unquote(parsed.path))
+    for candidate in (source_tree / package_name, source_tree / "src" / package_name):
+        if (candidate / "__init__.py").is_file():
+            return candidate
+    return None
+
+
+def _assert_root_matches_distribution(
+    dist: importlib.metadata.Distribution,
+    package_name: str,
+    package_path: Path,
+) -> None:
+    """Refuse a scan root that is not the installed package root of ``dist``.
+
+    The installed distribution records its own files. A regular install lists
+    ``<package>/__init__.py`` in RECORD, and the root is the directory that file
+    sits in; an editable install names its source tree in ``direct_url.json``.
+    A resolved path that differs from that root is a mis-resolved path, for
+    example site-packages or a parent of the package, and is refused whatever
+    the package's size. The number of files in the package plays no part.
+
+    Raises:
+        ValueError: If the path is not the distribution's recorded package root.
+    """
+    init_entry = f"{package_name}/__init__.py"
+    recorded = {f.as_posix() for f in (dist.files or ())}
+    if init_entry in recorded:
+        expected: Path | None = Path(str(dist.locate_file(init_entry))).parent
+    else:
+        expected = _editable_package_root(dist, package_name)
+    if expected is None:
+        raise ValueError(
+            f"Distribution {dist.metadata['Name']} records no {init_entry} and is "
+            f"not an editable install, so {package_path} cannot be matched to its "
+            "installed package root."
+        )
+    if package_path.resolve() != expected.resolve():
+        raise ValueError(
+            f"Package {package_name} resolved to {package_path}, but the "
+            f"distribution {dist.metadata['Name']} records its package root at "
+            f"{expected}. The package path resolved to the wrong directory."
+        )
+
+
 def _scan_package_for_forbidden_imports(
     package_name: str,
     forbidden_patterns: list[str],
     skip_requirements: bool = True,
-    max_files: int = 5000,
 ) -> list[ArchitectureViolation]:
     """Scan an entire package for forbidden import patterns.
 
@@ -858,33 +931,32 @@ def _scan_package_for_forbidden_imports(
         package_name: Name of the package to scan.
         forbidden_patterns: List of import patterns to detect.
         skip_requirements: If True, skip requirements/config files.
-        max_files: Maximum number of Python files to scan. Prevents OOM on
-            CI runners when scanning large installed packages (OMN-5969).
-            Default 5000 covers omnibase_core's ~2500 files with headroom.
 
     Returns:
         List of all violations found in the package.
 
     Raises:
-        ValueError: If the package cannot be located or file count exceeds max_files.
+        ValueError: If the package cannot be located, or the located path is not
+            the installed package root its distribution records.
     """
     package_path = _get_package_source_path(package_name)
     if package_path is None:
         raise ValueError(f"Could not locate package: {package_name}")
 
-    python_files = _find_python_files(package_path)
-
-    # OMN-5969: Guard against scanning excessively large package trees that
-    # could OOM CI runners. If file count exceeds the limit, this indicates
-    # the package path resolved to an unexpectedly broad directory (e.g.,
-    # all of site-packages rather than a single package).
-    if len(python_files) > max_files:
+    # OMN-5969 guarded against scanning a mis-resolved, far too broad tree (all
+    # of site-packages rather than one package) with a hard-coded file count.
+    # That count capped the package's size, not the path's correctness, and
+    # failed once omnibase_core grew past it. The path is checked directly
+    # against the distribution's own record instead.
+    try:
+        dist = importlib.metadata.distribution(package_name)
+    except importlib.metadata.PackageNotFoundError as exc:
         raise ValueError(
-            f"Package {package_name} at {package_path} contains "
-            f"{len(python_files)} Python files (limit: {max_files}). "
-            f"This likely indicates the package path resolved too broadly. "
-            f"Verify the package is installed as an editable install."
-        )
+            f"No installed distribution records package {package_name}"
+        ) from exc
+    _assert_root_matches_distribution(dist, package_name, package_path)
+
+    python_files = _find_python_files(package_path)
 
     all_violations: list[ArchitectureViolation] = []
 
@@ -3388,4 +3460,126 @@ if   TYPE_CHECKING  :
         violations = _scan_file_for_imports(test_file, ["kafka"])
         assert len(violations) == 0, (
             f"String with prefix '{prefix}' should not trigger violation"
+        )
+
+
+def _install_fake_distribution(
+    site: Path,
+    package_name: str,
+    *,
+    editable_source: Path | None = None,
+    extra_files: int = 0,
+) -> tuple[importlib.metadata.Distribution, Path]:
+    """Plant a distribution record under ``site`` and return it with its package root.
+
+    A regular install writes ``<package>/__init__.py`` and lists it in RECORD.
+    With ``editable_source`` the package lives in that tree and the record
+    carries only ``direct_url.json``, as an editable install does.
+    """
+    dist_info = site / f"{package_name}-1.0.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {package_name.replace('_', '-')}\nVersion: 1.0\n"
+    )
+    if editable_source is None:
+        root = site / package_name
+        root.mkdir()
+        (root / "__init__.py").write_text("")
+        for index in range(extra_files):
+            (root / f"module_{index}.py").write_text("")
+        record = [f"{package_name}/__init__.py,,"]
+    else:
+        root = editable_source / "src" / package_name
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("")
+        (dist_info / "direct_url.json").write_text(
+            json.dumps(
+                {"url": editable_source.as_uri(), "dir_info": {"editable": True}}
+            )
+        )
+        record = [f"{package_name}-1.0.dist-info/direct_url.json,,"]
+    (dist_info / "RECORD").write_text("\n".join(record) + "\n")
+    return importlib.metadata.PathDistribution(dist_info), root
+
+
+class TestResolvedRootMatchesDistribution:
+    """The scan root is checked against the distribution's record, not a file count."""
+
+    def test_correct_root_is_accepted(self, tmp_path: Path) -> None:
+        dist, root = _install_fake_distribution(tmp_path, "omnibase_core")
+
+        _assert_root_matches_distribution(dist, "omnibase_core", root)
+
+    def test_correct_root_with_more_files_than_the_old_cap_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """A large package is not a mis-resolved one: no file count decides."""
+        dist, root = _install_fake_distribution(
+            tmp_path, "omnibase_core", extra_files=5100
+        )
+
+        assert len(_find_python_files(root)) > 5000
+        _assert_root_matches_distribution(dist, "omnibase_core", root)
+
+    def test_too_broad_root_is_refused(self, tmp_path: Path) -> None:
+        """The directory holding the package (site-packages) is not the package root."""
+        dist, _root = _install_fake_distribution(tmp_path, "omnibase_core")
+
+        with pytest.raises(ValueError, match="resolved to the wrong directory"):
+            _assert_root_matches_distribution(dist, "omnibase_core", tmp_path)
+
+    def test_too_broad_root_is_refused_when_it_holds_few_files(
+        self, tmp_path: Path
+    ) -> None:
+        """Refusal does not depend on the wrong tree being large."""
+        dist, root = _install_fake_distribution(tmp_path, "omnibase_core")
+
+        with pytest.raises(ValueError, match="resolved to the wrong directory"):
+            _assert_root_matches_distribution(dist, "omnibase_core", root.parent)
+
+    def test_sibling_directory_is_refused(self, tmp_path: Path) -> None:
+        dist, _root = _install_fake_distribution(tmp_path, "omnibase_core")
+        other = tmp_path / "other_package"
+        other.mkdir()
+        (other / "__init__.py").write_text("")
+
+        with pytest.raises(ValueError, match="resolved to the wrong directory"):
+            _assert_root_matches_distribution(dist, "omnibase_core", other)
+
+    def test_editable_root_is_accepted(self, tmp_path: Path) -> None:
+        site = tmp_path / "site"
+        site.mkdir()
+        dist, root = _install_fake_distribution(
+            site, "omnibase_core", editable_source=tmp_path / "checkout"
+        )
+
+        _assert_root_matches_distribution(dist, "omnibase_core", root)
+
+    def test_editable_too_broad_root_is_refused(self, tmp_path: Path) -> None:
+        site = tmp_path / "site"
+        site.mkdir()
+        checkout = tmp_path / "checkout"
+        dist, _root = _install_fake_distribution(
+            site, "omnibase_core", editable_source=checkout
+        )
+
+        with pytest.raises(ValueError, match="resolved to the wrong directory"):
+            _assert_root_matches_distribution(dist, "omnibase_core", checkout)
+
+    def test_distribution_that_records_no_root_is_refused(self, tmp_path: Path) -> None:
+        dist, root = _install_fake_distribution(tmp_path, "omnibase_core")
+        (tmp_path / "omnibase_core-1.0.dist-info" / "RECORD").write_text("")
+
+        with pytest.raises(ValueError, match=r"records no omnibase_core/__init__\.py"):
+            _assert_root_matches_distribution(dist, "omnibase_core", root)
+
+    def test_installed_core_resolves_to_its_recorded_root(self) -> None:
+        """The core this environment installed passes the same check the scan runs."""
+        package_path = _get_package_source_path("omnibase_core")
+        assert package_path is not None
+
+        _assert_root_matches_distribution(
+            importlib.metadata.distribution("omnibase_core"),
+            "omnibase_core",
+            package_path,
         )

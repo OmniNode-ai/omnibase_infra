@@ -433,7 +433,7 @@ async def test_a_surrogate_check_binds_exactly_as_it_did() -> None:
     ],
 )
 def test_state_markers_are_recognised(criterion: str) -> None:
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -456,7 +456,7 @@ def test_state_markers_are_recognised(criterion: str) -> None:
     ],
 )
 def test_anything_else_falls_to_behaviour_and_holds(criterion: str) -> None:
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -556,10 +556,10 @@ def test_the_worked_example_reads_as_state_shaped_end_to_end() -> None:
     This is the assertion that would have caught the first cut shipping a
     predicate too tight to admit the ticket the ruling names.
     """
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         acceptance_criteria_items as _acceptance_criteria_items,
     )
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
     from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
@@ -588,7 +588,7 @@ def test_the_widened_vocabulary_did_not_drag_behaviour_along(criterion: str) -> 
     The veto still wins, which is the property that keeps the widening from
     becoming a general loosening.
     """
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -624,7 +624,7 @@ def test_the_widened_vocabulary_did_not_drag_behaviour_along(criterion: str) -> 
 )
 def test_each_state_marker_fires_on_its_own(marker: str, criterion: str) -> None:
     """One marker, one criterion, no sibling to carry it."""
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -637,7 +637,7 @@ def test_a_criterion_carrying_none_of_the_markers_does_not_fire() -> None:
     Without it, a predicate that returned True unconditionally would pass
     every case above.
     """
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -659,7 +659,7 @@ def test_a_criterion_carrying_none_of_the_markers_does_not_fire() -> None:
 )
 def test_each_marker_refuses_its_near_miss(marker: str, near_miss: str) -> None:
     """A marker that accepts its near miss is too loose to be evidence."""
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -697,7 +697,7 @@ def _vocabulary_without(marker_source: str) -> re.Pattern[str]:
     a regex that is broken or silently means something else. A mutation
     control built on a mangled pattern proves nothing.
     """
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         STATE_MARKER_RE as _STATE_MARKER_RE,
     )
 
@@ -763,7 +763,7 @@ def test_each_added_marker_recognises_its_own_criterion(
     marker: str, criterion: str
 ) -> None:
     """Each added phrase carries a criterion on its own, with no neighbour."""
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -785,8 +785,8 @@ def test_each_added_marker_is_the_only_thing_carrying_its_criterion(
     an empty or inverted pattern would satisfy the first assertion for every
     row at once.
     """
-    import omnibase_core.handlers.handler_done_write_receipt_gate as _module
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    import omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate as _module
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 
@@ -811,7 +811,7 @@ def test_no_added_marker_overrides_the_behaviour_veto(
     every added marker individually, not just against the four combinations
     the earlier control happens to spell.
     """
-    from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
         criterion_is_state_shaped as _criterion_is_state_shaped,
     )
 

@@ -74,6 +74,34 @@ def test_non_pins_do_not_count(path: str, line: str) -> None:
     assert not is_pin_line(path, line)
 
 
+TAG = "dev-20261029143607-342000ec5702"
+
+
+def test_uv_lock_line_resolved_from_a_tag_is_not_a_sha_pin() -> None:
+    """The lock records the commit a tag resolved to; the dependency is the tag."""
+    line = f'source = {{ git = "https://github.com/OmniNode-ai/omnibase_core.git?tag={TAG}#{SHA}" }}'
+    assert not is_pin_line("uv.lock", line)
+    assert count_pins([("uv.lock", line)]) == {}
+
+
+@pytest.mark.parametrize(
+    "query",
+    [f"?rev={SHA}", "?rev=dev", "?branch=dev", ""],
+)
+def test_uv_lock_line_resolved_from_a_rev_branch_or_bare_sha_still_counts(
+    query: str,
+) -> None:
+    """Only a tag source is exempt: every other lock source is a commit pin."""
+    line = f'source = {{ git = "https://github.com/OmniNode-ai/omnibase_core.git{query}#{SHA}" }}'
+    assert is_pin_line("uv.lock", line)
+
+
+def test_a_tag_source_does_not_hide_another_sibling_pinned_to_a_rev() -> None:
+    tag_line = f'source = {{ git = "https://github.com/OmniNode-ai/omnibase_core.git?tag={TAG}#{SHA}" }}'
+    rev_line = f'source = {{ git = "https://github.com/OmniNode-ai/omnimarket.git?rev={OTHER}#{OTHER}" }}'
+    assert count_pins([("uv.lock", tag_line), ("uv.lock", rev_line)]) == {"uv.lock": 1}
+
+
 def test_tests_docs_and_ticket_contracts_are_out_of_scope() -> None:
     lines = [("tests/ci/x.yml", PIN), ("docs/a.md", PIN), ("contracts/OMN-1.yaml", PIN)]
     assert count_pins(lines) == {}

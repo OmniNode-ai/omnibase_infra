@@ -1263,7 +1263,7 @@ services:
       # Vertex, Gemini key path unaffected).
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
     tmpfs:
-      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
+      - &runtime-ingress-tmpfs /run/onex-runtime:uid=1000,gid=1000,mode=0770
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
@@ -1704,6 +1704,11 @@ services:
     volumes:
       - ../contracts:/app/contracts:ro
       - *lane-overlay-mount
+    # Share only the ingress mount with the main runtime. Its directory is
+    # declared by contracts/runtime/runtime_config.yaml; the regression test
+    # checks ownership against Dockerfile.runtime and entrypoint-runtime.sh.
+    tmpfs:
+      - *runtime-ingress-tmpfs
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s

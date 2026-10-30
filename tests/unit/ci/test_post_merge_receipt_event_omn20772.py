@@ -502,3 +502,38 @@ def test_post_merge_receipt_event_publisher_takes_every_event_and_never_fails(
     # With no overlay each document is reported on its own, so a skipped first
     # document does not hide the second.
     assert warnings.count("no CI bus overlay") == 2
+
+
+def test_read_uv_pins_attests_the_core_dev_tag_source(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.uv]\n"
+        'override-dependencies = ["omnibase-spi==0.23.7"]\n'
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        'tag = "dev-20261029143607-342000ec5702" }\n',
+        encoding="utf-8",
+    )
+
+    pins = receipts.read_uv_pins(pyproject)
+
+    assert pins == {
+        "omnibase-spi": "omnibase-spi==0.23.7",
+        "omnibase-core": (
+            "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git"
+            "@dev-20261029143607-342000ec5702"
+        ),
+    }
+
+
+def test_read_uv_pins_does_not_attest_a_rev_or_branch_source(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.uv.sources]\n"
+        'omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", '
+        'branch = "dev" }\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="declares no"):
+        receipts.read_uv_pins(pyproject)

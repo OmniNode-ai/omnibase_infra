@@ -10,7 +10,7 @@ contract_version:
 node_version: "1.0.0"
 node_type: "COMPUTE_GENERIC"
 description: >
-  Shrink-only ratchet on commit-sha pins of internal siblings (OMN-18594, RULING 2026-10-23T12:01:59Z no commit-sha pins, RULING 2026-10-23T17:13:55Z no pins). Counts, per tracked file, the lines that pin an OmniNode sibling to a 40-hex commit: a git URL or reusable-workflow ref OmniNode-ai/<repo>...@<sha> or #<sha>, a workflow checkout ref: <sha>, a pre-commit rev: <sha>, a pin-map entry <sibling>: <sha>, and a uv source rev = "<sha>". The baseline is the base ref itself: a file that holds more pin lines than it held at the base fails, so today's pins are the baseline and the count can only fall, with no baseline file to raise. Pure: the candidate lines of both trees arrive on the request.
+  Shrink-only ratchet on commit-sha pins of internal siblings (OMN-18594, RULING 2026-10-23T12:01:59Z no commit-sha pins, RULING 2026-10-23T17:13:55Z no pins). Counts, per tracked file, the lines that pin an OmniNode sibling to a 40-hex commit: a git URL or reusable-workflow ref OmniNode-ai/<repo>...@<sha> or #<sha>, a workflow checkout ref: <sha>, a pre-commit rev: <sha>, a pin-map entry <sibling>: <sha>, and a uv source rev = "<sha>". A uv.lock source resolved from a git tag (?tag=<tag>#<sha>) is a tag pin, not a commit pin, and does not count (RULING 2026-10-29T01:50:26Z, OMN-17427). The baseline is the base ref itself: a file that holds more pin lines than it held at the base fails, so today's pins are the baseline and the count can only fall, with no baseline file to raise. Pure: the candidate lines of both trees arrive on the request.
 
 input_model:
   name: "ModelSiblingShaPinRatchetInput"

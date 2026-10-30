@@ -40,10 +40,10 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
+from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     acceptance_criteria_items as _acceptance_criteria_items,
 )
-from omnibase_core.handlers.handler_done_write_receipt_gate import (
+from omnibase_core.nodes.node_done_write_receipt_gate_compute.handler_done_write_receipt_gate import (
     is_ac_heading as _is_ac_heading,
 )
 
