@@ -237,11 +237,14 @@ class TestTheLabCallersNameOmnimarket:
         assert "${DEPLOY_FOLLOW_DEV_TAG_REPOS:-}" in text
         assert "--follow-dev-tag" in text
 
-    def test_the_stability_refresh_follows_omnimarket(self) -> None:
+    def test_the_stability_refresh_no_longer_follows_omnimarket(self) -> None:
+        # OMN-21611: the stability lane runs release tags only, so its refresh
+        # stages omnimarket at the pinned tag instead of its newest dev-* tag.
         text = (
             REPO_ROOT / "scripts/runtime_build/refresh_stability_lane.sh"
         ).read_text()
-        assert 'export DEPLOY_FOLLOW_DEV_TAG_REPOS="omnimarket"' in text
+        assert 'export DEPLOY_FOLLOW_DEV_TAG_REPOS="omnimarket"' not in text
+        assert "export DEPLOY_SIBLING_REFS" in text
 
     def test_the_deploy_agent_follows_omnimarket(self) -> None:
         tracking = (
