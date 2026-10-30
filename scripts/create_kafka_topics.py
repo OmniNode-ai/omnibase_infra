@@ -607,11 +607,17 @@ def main() -> int:
     if args.packages:
         filter_names = [n.strip() for n in args.packages.split(",") if n.strip()]
 
+    from omnibase_infra.errors import ProtocolConfigurationError
     from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
 
-    packages = ModelNodePackageEntry.discover_pairs(
-        filter_names=filter_names, lenient=args.lenient
-    )
+    try:
+        discovered = ModelNodePackageEntry.discover(
+            filter_names=filter_names, lenient=args.lenient
+        )
+    except ProtocolConfigurationError as exc:
+        print(f"ERROR: {exc.message}", file=sys.stderr)
+        return 1
+    packages = [(entry.name, entry.path) for entry in discovered]
 
     if not packages:
         print(
@@ -647,10 +653,7 @@ def main() -> int:
                 topic_sources.setdefault(entry.topic, []).append(pkg_name)
             all_entries.extend(pkg_entries)
     except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
-        print(
-            f"ERROR: Failed to extract topics: {exc}",
-            file=sys.stderr,
-        )
+        print(f"ERROR: Failed to extract topics: {exc}", file=sys.stderr)
         return 1
 
     # Deduplicate topics across packages
@@ -664,10 +667,7 @@ def main() -> int:
         if skill_manifests_root is not None:
             print(f"Skills root: {skill_manifests_root}")
         return _run_dry(
-            unique_topics,
-            args.bootstrap_servers,
-            None,
-            topic_sources=topic_sources,
+            unique_topics, args.bootstrap_servers, None, topic_sources=topic_sources
         )
 
     return _run_live(

@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
+
 pytestmark = pytest.mark.unit
 
 _SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "create_kafka_topics.py"
@@ -105,8 +107,8 @@ def _run_live_main(
         patch.object(sys, "argv", ["create_kafka_topics.py", *argv]),
         patch.dict(sys.modules, {"confluent_kafka.admin": fake_admin}),
         patch(
-            "omnibase_infra.models.model_node_package_entry.ModelNodePackageEntry.discover_pairs",
-            return_value=[("p", Path())],
+            "omnibase_infra.models.model_node_package_entry.ModelNodePackageEntry.discover",
+            return_value=[ModelNodePackageEntry(name="p", path=Path())],
         ),
         patch(
             "omnibase_infra.tools.contract_topic_extractor.ContractTopicExtractor.extract",

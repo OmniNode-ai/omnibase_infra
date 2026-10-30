@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
 
@@ -41,7 +42,17 @@ def _load_script() -> ModuleType:
 
 
 _mod = _load_script()
-_discover_all_packages = ModelNodePackageEntry.discover_pairs
+
+
+def _discover_all_packages(
+    *, filter_names: list[str] | None = None, lenient: bool = False
+) -> list[tuple[str, Path]]:
+    return [
+        (e.name, e.path)
+        for e in ModelNodePackageEntry.discover(
+            filter_names=filter_names, lenient=lenient
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +63,7 @@ _discover_all_packages = ModelNodePackageEntry.discover_pairs
 @pytest.mark.unit
 def test_discover_skips_unimportable_entry_point(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entry point that raises on load() is skipped with a warning in lenient mode."""
     bad_ep = MagicMock()
@@ -62,14 +73,14 @@ def test_discover_skips_unimportable_entry_point(
 
     result = _discover_all_packages(lenient=True)
     assert result == []
-    assert "WARNING" in capsys.readouterr().err
+    assert "skipping" in caplog.text
 
 
 @pytest.mark.unit
 def test_discover_skips_nonexistent_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entry point whose __path__ does not exist is skipped with a warning."""
     ep = MagicMock()
@@ -81,7 +92,7 @@ def test_discover_skips_nonexistent_path(
 
     result = _discover_all_packages(lenient=True)
     assert result == []
-    assert "WARNING" in capsys.readouterr().err
+    assert "skipping" in caplog.text
 
 
 @pytest.mark.unit
@@ -148,15 +159,14 @@ def test_discover_filters_by_name(
 def test_discover_exits_on_error_in_strict_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """In strict mode (lenient=False), unloadable entry points cause sys.exit."""
+    """In strict mode (lenient=False), unloadable entry points raise."""
     bad_ep = MagicMock()
     bad_ep.name = "broken_pkg"
     bad_ep.load.side_effect = ImportError("missing")
     monkeypatch.setattr(ilm, "entry_points", lambda *, group: [bad_ep])
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(ProtocolConfigurationError, match="broken_pkg"):
         _discover_all_packages(lenient=False)
-    assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------
