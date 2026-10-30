@@ -32,8 +32,10 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -54,15 +56,27 @@ def _load(name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    import sys
-
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-policy = _load("prepr_slot_policy")
-verifier = _load("prepr_verify_rendered_slot")
+def _load_modules() -> tuple[Any, Any]:
+    # Dataclasses need their module registered while it executes. The verifier
+    # also prepends its directory to sys.path; neither change may escape here.
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path.copy()):
+        return _load("prepr_slot_policy"), _load("prepr_verify_rendered_slot")
+
+
+policy, verifier = _load_modules()
+
+
+def test_loading_the_verifier_restores_module_and_path_state() -> None:
+    before_modules = sys.modules.copy()
+    before_path = sys.path
+    _load_modules()
+    assert sys.modules == before_modules
+    assert sys.path is before_path
 
 
 @pytest.fixture(scope="module")
@@ -113,13 +127,27 @@ def real_build_only_service(tmp_path_factory: pytest.TempPathFactory) -> dict[st
     return service
 
 
+def _slot_render() -> dict[str, Any]:
+    """Supply the runtime services required alongside a build-only image."""
+    slot = policy.resolve_slot(1)
+    return {
+        "services": {
+            name: {
+                "container_name": f"omninode-prepr-{slot.slot}-{name}",
+                "environment": {
+                    "KAFKA_TOPIC_NAMESPACE": slot.topic_namespace,
+                    "KAFKA_ENVIRONMENT": slot.kafka_environment,
+                    "VALKEY_DB": str(slot.valkey_db_index),
+                },
+            }
+            for name in verifier.SLOT_SERVICES
+        }
+    }
+
+
 def _render_with(service: dict[str, Any]) -> list[str]:
     """Verify a good slot render that carries ``service`` as the build-only image."""
-    from tests.unit.scripts.test_prepr_verify_lane_entrypoint_omn18893 import (
-        _good_render,
-    )
-
-    rendered = _good_render()
+    rendered = _slot_render()
     rendered["services"][BUILD_ONLY_IMAGE] = copy.deepcopy(service)
     problems: list[str] = verifier.check(rendered, policy.resolve_slot(1), False)
     return problems
@@ -203,8 +231,12 @@ def test_a_command_or_entrypoint_with_a_value_is_refused(
 def test_every_other_attribute_stays_refused_beside_a_build(
     extra: dict[str, Any],
 ) -> None:
+    assert _render_with(RENDERED_SHAPE) == []
     problems = _render_with({**RENDERED_SHAPE, **extra})
-    assert any(BUILD_ONLY_IMAGE in p for p in problems)
+    assert problems == [
+        f"build-only service '{BUILD_ONLY_IMAGE}' renders "
+        f"attribute(s) {sorted(extra)} beyond the kind's shape."
+    ]
 
 
 def test_scale_other_than_zero_is_refused_beside_a_build() -> None:
@@ -214,11 +246,7 @@ def test_scale_other_than_zero_is_refused_beside_a_build() -> None:
 
 def test_the_kind_entry_does_not_admit_a_second_build_service() -> None:
     """The entry is by kind, and the kind has one named member."""
-    from tests.unit.scripts.test_prepr_verify_lane_entrypoint_omn18893 import (
-        _good_render,
-    )
-
-    rendered = _good_render()
+    rendered = _slot_render()
     rendered["services"][BUILD_ONLY_IMAGE] = copy.deepcopy(RENDERED_SHAPE)
     rendered["services"]["another-image"] = copy.deepcopy(RENDERED_SHAPE)
     problems = verifier.check(rendered, policy.resolve_slot(1), False)
