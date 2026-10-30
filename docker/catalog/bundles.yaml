@@ -186,6 +186,10 @@ local-market:
     - omnimarket-projection-delegation
     - omnimarket-projection-tenant-credentials
     - omnimarket-projection-llm-cost
+    # OMN-19972 (T2.8): the run-trace writer is a standalone runner under runtime
+    # profile projection-writer-run-trace (omnimarket#4542), so no kernel carries
+    # it; it needs the omnimarket image, so it lives here, not in `local`.
+    - omnimarket-projection-run-trace
   includes: [local]
   # OMN-21279: these kernels run the omnimarket-runtime image.
   env_default_overrides:
@@ -208,6 +212,8 @@ local-market:
     omnimarket-projection-tenant-credentials:
       redpanda-local-sasl: service_completed_successfully
     omnimarket-projection-llm-cost:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-run-trace:
       redpanda-local-sasl: service_completed_successfully
   inject_env:
     BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
