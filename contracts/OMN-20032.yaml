@@ -10,7 +10,7 @@ requirements:
     statement: omnibase_infra's Repo Evidence Gate caller and the required-checks manifest pin the omnibase_core receipt-gate reusable at omnibase_core#1932's squash commit, whose verifier install step refuses a verifier-version below the floor, and the caller passes a verifier-version at or above that floor, with job ids and inputs otherwise unchanged.
     acceptance:
       - id: AC5
-        statement: 'AC5: .github/workflows/call-repo-evidence-gate.yml and the repo-evidence / dod-verify entry of .github/required-checks.yaml pin receipt-gate.yml at 4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa (omnibase_core#1932) -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_verifier_floor_omn20032.py -q -k "carries_the_verifier_floor or required_checks_manifest" fails at the merge base'
+        statement: 'AC5: .github/workflows/call-repo-evidence-gate.yml and the repo-evidence / dod-verify entry of .github/required-checks.yaml pin receipt-gate.yml at 1088a7b0303059c035ecc0e3ea33580f9556fe41 (dev-merge tag dev-20261030004553-1088a7b03030, omnibase_core#2102, a descendant of #1932) -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_verifier_floor_omn20032.py -q -k "carries_the_verifier_floor or required_checks_manifest" fails at the merge base'
       - id: AC6
         statement: 'AC6: the caller''s verifier-version is at or above the reusable''s VERIFIER_FLOOR 0.4.303, the comparison refuses 0.4.280 and 0.4.302 and admits 0.4.303 and 0.4.305 -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_verifier_floor_omn20032.py -q -k "at_or_above_the_floor or floor_comparison" fails at the merge base'
 evidence_requirements:
