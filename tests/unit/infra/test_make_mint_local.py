@@ -13,8 +13,8 @@ What the tests read:
 * AC2/AC3: create, then unchanged with no mutation, the drift refusal with the
   extra ACL named and the password untouched, and rotate after a logout;
 * AC4 (``-k lock``): two runs started together make one mutation and one prints
-  ``mint-local: busy`` naming the holder with a non-zero status; a lock whose
-  recorded process is dead is removed and said; a live one is not;
+  ``mint-local: busy`` naming the holder with a non-zero status; an unlocked file whose
+  recorded process is dead is reused and said; a live lock is not displaced;
 * AC5: the password is in no argument of any stub call, in no output, and not
   in the input file, which is gone from the container after the run;
 * AC7 (``-k tenant``): the probe carries the stack's tenant from an overridden
@@ -26,12 +26,16 @@ What the tests read:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +139,12 @@ if cmd[:2] == ["onex", "node"] and cmd[2] == "node_developer_principal_mint_orch
               "extra_acls": extras, "missing_acls": [] if exists else ["planned"],
               "status": "success", "action": "audited", "failed_step": "", "reason": ""}
     if request["mode"] == "converge":
+        if os.environ.get("STUB_LOCK_PAUSE") == "child":
+            (root / "paused.json").write_text(json.dumps({"shell_pid": os.getppid(), "child_pid": os.getpid(), "tool": "docker"}))
+            deadline = time.monotonic() + 20
+            while not (root / "resume").exists():
+                if time.monotonic() >= deadline: sys.exit(98)
+                time.sleep(0.01)
         secret = inner.get(request["password_env"], "")
         if not secret:
             result.update(status="failure", failed_step="apply", reason="password variable unset", action="")
@@ -207,38 +217,41 @@ sys.exit(2)
 """
 
 
-# `cat` with a barrier: when STUB_LOCK_BARRIER is set, the first two reads of the
-# lock's pid file wait for each other, so two runs both read the same dead holder
-# before either acts on it (the stale-lock race). Every other read is plain cat.
-_STUB_CAT = r"""#!__PYTHON__
-import os, sys, time
+# The wrappers pause the real target at equivalent kill points before/after the
+# fix. Perl itself takes the real OS lock on inherited FD 9; the wrapper retains
+# that same description while paused. mkdir/rm instrument the old directory lock
+# so each new recovery assertion can also expose the original defect.
+_STUB_LOCK_TOOL = r"""#!__PYTHON__
+import json, os, subprocess, sys, time
 from pathlib import Path
 
+tool, real = "__TOOL__", "__REAL__"
 args = sys.argv[1:]
-if os.environ.get("STUB_LOCK_BARRIER") == "1" and len(args) == 1 and args[0].endswith(".mint-local.lock/pid"):
-    gate = Path(os.environ["STUB_ROOT"]) / "barrier"
-    gate.mkdir(exist_ok=True)
-    index = 0
-    while True:
-        try:
-            (gate / str(index)).mkdir()
-            break
-        except FileExistsError:
-            index += 1
-    if index < 2:
-        deadline = time.monotonic() + 10
-        while not (gate / "1").exists() and time.monotonic() < deadline:
-            time.sleep(0.02)
-swap = os.environ.get("STUB_LOCK_SWAP_PID")
-if swap and len(args) == 1 and args[0].endswith(".mint-local.lock/pid"):
-    marker = Path(os.environ["STUB_ROOT"]) / "swapped"
-    if not marker.exists():
-        # Answer with the dead holder, then let another run take the lock over.
-        sys.stdout.write(Path(args[0]).read_text())
-        Path(args[0]).write_text(swap + "\n")
-        marker.write_text("")
-        sys.exit(0)
-os.execv("/bin/cat", ["cat", *args])
+root = Path(os.environ["STUB_ROOT"])
+mode = os.environ.get("STUB_LOCK_PAUSE")
+legacy = os.environ.get("STUB_LEGACY_LOCK")
+
+def pause():
+    (root / "paused.json").write_text(json.dumps({"shell_pid": os.getppid(), "child_pid": os.getpid(), "tool": tool}))
+    deadline = time.monotonic() + 20
+    while not (root / "resume").exists():
+        if time.monotonic() >= deadline: sys.exit(98)
+        time.sleep(0.01)
+
+if tool == "mkdir" and mode == "acquire" and args == [legacy]:
+    rc = subprocess.run([real, *args], close_fds=False).returncode
+    if rc == 0: pause()
+    sys.exit(rc)
+if tool == "rm" and mode == "recover" and args == ["-rf", legacy]:
+    pause()
+if tool == "perl" and any("flock(" in arg for arg in args):
+    if os.environ.get("STUB_FLOCK_ERROR") == "1":
+        os.close(9)  # genuine EBADF in the target's own Perl acquisition code
+    if mode in ("acquire", "recover"):
+        rc = subprocess.run([real, *args], close_fds=False).returncode
+        if rc == 0: pause()
+        sys.exit(rc)
+os.execv(real, [real, *args])
 """
 
 
@@ -257,11 +270,21 @@ class _Stack:
         for name, body in (
             ("docker", _STUB_DOCKER),
             ("onex", _STUB_ONEX),
-            ("cat", _STUB_CAT),
         ):
             stub = self.bin / name
             stub.write_text(
                 body.replace("__PYTHON__", sys.executable), encoding="utf-8"
+            )
+            stub.chmod(0o755)
+        for name in ("mkdir", "rm", "perl"):
+            real = shutil.which(name)
+            assert real, f"test prerequisite missing: {name}"
+            stub = self.bin / name
+            stub.write_text(
+                _STUB_LOCK_TOOL.replace("__PYTHON__", sys.executable)
+                .replace("__TOOL__", name)
+                .replace("__REAL__", real),
+                encoding="utf-8",
             )
             stub.chmod(0o755)
         self.home = tmp_path / "home"
@@ -327,7 +350,7 @@ class _Stack:
         (self.root / "store.json").unlink()
 
     def lock(self, env_file: Path | None = None) -> Path:
-        return (env_file or self.env_file).parent / ".mint-local.lock"
+        return (env_file or self.env_file).parent / ".mint-local.flock"
 
 
 def _out(result: subprocess.CompletedProcess[str]) -> str:
@@ -408,6 +431,72 @@ def test_an_unsecured_broker_is_refused_before_any_node_call(tmp_path: Path) -> 
 # --- AC4: the lock ----------------------------------------------------------------
 
 
+def _lock_available(path: Path) -> bool:
+    """A competing descriptor must acquire the actual Perl-compatible OS lock."""
+    with path.open("a+") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(stream, fcntl.LOCK_UN)
+    return True
+
+
+@contextmanager
+def _held_lock(stack: _Stack) -> Iterator[None]:
+    with stack.lock().open("a+") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        stream.seek(0)
+        stream.truncate()
+        stream.write(f"{os.getpid()}\n")
+        stream.flush()
+        yield
+
+
+@contextmanager
+def _paused_run(
+    stack: _Stack, stage: str
+) -> Iterator[tuple[subprocess.Popen[str], dict[str, Any]]]:
+    """A bounded barrier in a real child of the real Makefile's recipe shell."""
+    env = stack.env(
+        STUB_LOCK_PAUSE=stage,
+        STUB_LEGACY_LOCK=str(stack.env_file.parent / ".mint-local.lock"),
+    )
+    with (
+        (stack.root / "paused.out").open("w") as out,
+        (stack.root / "paused.err").open("w") as err,
+    ):
+        process = subprocess.Popen(
+            stack.command(),
+            cwd=_REPO,
+            env=env,
+            stdout=out,
+            stderr=err,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            marker = stack.root / "paused.json"
+            while not marker.exists() and time.monotonic() < deadline:
+                assert process.poll() is None, (stack.root / "paused.err").read_text()
+                time.sleep(0.01)
+            assert marker.exists(), "the target never reached the kill point"
+            yield process, json.loads(marker.read_text())
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+
+
+def _dead_pid() -> int:
+    child = subprocess.Popen(["true"])
+    child.wait(timeout=5)
+    return child.pid
+
+
 def test_lock_two_runs_started_together_make_one_mutation(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     env = stack.env(STUB_NODE_DELAY="1.5")
@@ -426,36 +515,30 @@ def test_lock_two_runs_started_together_make_one_mutation(tmp_path: Path) -> Non
     assert len(stack.mutations()) == 1, outcomes
     busy = [o for o in outcomes if "mint-local: busy, lock held by pid " in o[2]]
     assert len(busy) == 1, outcomes
-    status = busy[0][0]
-    assert status != 0
+    assert busy[0][0] != 0
     winner = next(o for o in outcomes if o is not busy[0])
     assert winner[0] == 0, winner
     assert "mint-local: verified" in winner[1]
-    assert not stack.lock().exists(), "the winner released the lock"
+    assert _lock_available(stack.lock()), "the winner released the OS lock"
 
 
 def test_lock_a_stale_lock_is_removed_and_said(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    dead = subprocess.Popen(["true"])
-    dead.wait()
-    lock = stack.lock()
-    lock.mkdir()
-    (lock / "pid").write_text(f"{dead.pid}\n")
+    dead = _dead_pid()
+    stack.lock().write_text(f"{dead}\n")
+    inode = stack.lock().stat().st_ino
     result = stack.run()
     assert result.returncode == 0, _out(result)
-    assert f"removing a stale lock left by pid {dead.pid}" in result.stdout
+    assert f"removing a stale lock left by pid {dead}" in result.stdout
     assert len(stack.mutations()) == 1
-    assert not lock.exists()
+    assert stack.lock().stat().st_ino == inode, "release replaced the lock inode"
+    assert _lock_available(stack.lock())
 
 
 def test_lock_two_runs_on_one_stale_lock_make_one_mutation(tmp_path: Path) -> None:
-    """Both runs read the same dead holder before either recovers the lock."""
     stack = _Stack(tmp_path)
-    dead = subprocess.Popen(["true"])
-    dead.wait()
-    stack.lock().mkdir()
-    (stack.lock() / "pid").write_text(f"{dead.pid}\n")
-    env = stack.env(STUB_NODE_DELAY="1.5", STUB_LOCK_BARRIER="1")
+    stack.lock().write_text(f"{_dead_pid()}\n")
+    env = stack.env(STUB_NODE_DELAY="1.5")
     runs = [
         subprocess.Popen(
             stack.command(),
@@ -468,92 +551,179 @@ def test_lock_two_runs_on_one_stale_lock_make_one_mutation(tmp_path: Path) -> No
         for _ in range(2)
     ]
     outcomes = [(run.wait(timeout=120), *run.communicate()) for run in runs]
-    assert (stack.root / "barrier" / "1").exists(), "the barrier did not hold both runs"
     assert len(stack.mutations()) == 1, outcomes
     assert sorted(o[0] == 0 for o in outcomes) == [False, True], outcomes
     loser = next(o for o in outcomes if o[0] != 0)
     assert "mint-local: busy" in loser[2], loser
 
 
-def test_lock_a_lock_taken_over_after_the_stale_read_is_not_removed(
-    tmp_path: Path,
-) -> None:
-    """The run read a dead holder, but by recovery time a live run holds the lock."""
-    stack = _Stack(tmp_path)
-    dead = subprocess.Popen(["true"])
-    dead.wait()
-    live = subprocess.Popen(["sleep", "60"])
-    try:
-        stack.lock().mkdir()
-        (stack.lock() / "pid").write_text(f"{dead.pid}\n")
-        result = stack.run(STUB_LOCK_SWAP_PID=str(live.pid))
-        assert (stack.root / "swapped").exists(), "the takeover was not staged"
-        assert result.returncode != 0, _out(result)
-        assert f"mint-local: busy, lock held by pid {live.pid}" in result.stderr
-        assert "removing a stale lock" not in result.stdout
-        assert (stack.lock() / "pid").read_text().strip() == str(live.pid)
-        assert stack.mutations() == []
-    finally:
-        live.kill()
-        live.wait()
-
-
 def test_lock_a_live_lock_is_not_removed(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    holder = subprocess.Popen(["sleep", "60"])
-    try:
-        lock = stack.lock()
-        lock.mkdir()
-        (lock / "pid").write_text(f"{holder.pid}\n")
+    with _held_lock(stack):
+        inode = stack.lock().stat().st_ino
+        before = stack.lock().read_text()
         result = stack.run()
         assert result.returncode != 0
-        assert f"mint-local: busy, lock held by pid {holder.pid}" in result.stderr
-        assert lock.is_dir(), "a busy run removed the live holder's lock"
-        assert (lock / "pid").read_text().strip() == str(holder.pid)
+        assert f"mint-local: busy, lock held by pid {os.getpid()}" in result.stderr
+        assert "Error 75" in result.stderr
+        assert stack.lock().stat().st_ino == inode
+        assert stack.lock().read_text() == before, "a contender truncated the PID"
         assert stack.mutations() == []
         assert not any(call[:2] == ["docker", "exec"] for call in stack.calls())
-    finally:
-        holder.kill()
-        holder.wait()
 
 
-def test_lock_a_lock_without_a_pid_is_busy_whatever_its_age(tmp_path: Path) -> None:
-    """A lock that names no holder is never freed by age: the run names its path."""
+def test_lock_reuse_after_release_keeps_the_same_inode(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    stack.lock().mkdir()
-    old = time.time() - 600
-    os.utime(stack.lock(), (old, old))
+    with _held_lock(stack):
+        inode = stack.lock().stat().st_ino
+        assert stack.run().returncode != 0
     result = stack.run()
-    assert result.returncode != 0
-    assert "mint-local: busy, lock held by pid unknown" in result.stderr
-    assert "names no holder" in result.stderr
-    assert stack.lock().is_dir()
-    assert stack.mutations() == []
+    assert result.returncode == 0, _out(result)
+    assert len(stack.mutations()) == 1
+    assert stack.lock().stat().st_ino == inode
+    assert _lock_available(stack.lock())
 
 
-def test_lock_an_old_recovery_guard_is_never_evicted(tmp_path: Path) -> None:
-    """A recoverer paused past any age bound keeps its guard: the run is busy."""
+def test_lock_an_empty_file_does_not_block_another_run(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
-    dead = subprocess.Popen(["true"])
-    dead.wait()
-    stack.lock().mkdir()
-    (stack.lock() / "pid").write_text(f"{dead.pid}\n")
-    guard = stack.lock().parent / ".mint-local.lock.recover"
+    stack.lock().touch()
+    inode = stack.lock().stat().st_ino
+    result = stack.run()
+    assert result.returncode == 0, _out(result)
+    assert len(stack.mutations()) == 1
+    assert stack.lock().stat().st_ino == inode
+
+
+def test_lock_legacy_directories_are_untouched(tmp_path: Path) -> None:
+    """After the approved old-runner drain, artifacts neither lock nor migrate."""
+    stack = _Stack(tmp_path)
+    legacy = stack.env_file.parent / ".mint-local.lock"
+    guard = stack.env_file.parent / ".mint-local.lock.recover"
+    legacy.mkdir()
+    (legacy / "pid").write_text(f"{_dead_pid()}\n")
     guard.mkdir()
-    old = time.time() - 600
-    os.utime(guard, (old, old))
+    before = (legacy / "pid").read_text()
     result = stack.run()
-    assert result.returncode != 0
-    assert "another run is recovering the stale lock" in result.stderr
-    assert guard.is_dir(), "a run evicted a recovery guard by its age"
-    assert (stack.lock() / "pid").read_text().strip() == str(dead.pid)
-    assert stack.mutations() == []
+    assert result.returncode == 0, _out(result)
+    assert (legacy / "pid").read_text() == before
+    assert guard.is_dir()
+    assert len(stack.mutations()) == 1
+    assert _lock_available(stack.lock())
 
 
 def test_lock_is_released_after_a_failed_run(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     assert stack.run(STUB_NO_TERMINAL="1").returncode != 0
+    assert stack.lock().is_file(), "release must never unlink the shared inode"
+    assert _lock_available(stack.lock())
+
+
+def test_lock_killed_between_acquire_and_pid_record_recovers(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    with _paused_run(stack, "acquire") as (process, info):
+        assert info["tool"] in {"mkdir", "perl"}
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        result = stack.run()
+        assert result.returncode == 0, _out(result)
+        assert len(stack.mutations()) == 1
+        assert _lock_available(stack.lock())
+
+
+def test_lock_killed_recoverer_does_not_block_next_run(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    dead = _dead_pid()
+    stack.lock().write_text(f"{dead}\n")
+    legacy = stack.env_file.parent / ".mint-local.lock"
+    legacy.mkdir()
+    (legacy / "pid").write_text(f"{dead}\n")
+    with _paused_run(stack, "recover") as (process, info):
+        assert info["tool"] in {"rm", "perl"}
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        result = stack.run()
+        assert result.returncode == 0, _out(result)
+        assert f"removing a stale lock left by pid {dead}" in result.stdout
+        assert len(stack.mutations()) == 1
+        assert _lock_available(stack.lock())
+
+
+def test_lock_held_while_killed_runs_child_still_alive(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    with _paused_run(stack, "child") as (process, info):
+        assert info["tool"] == "docker"
+        os.kill(info["shell_pid"], signal.SIGKILL)
+        process.wait(timeout=5)
+        os.kill(info["child_pid"], 0)
+        contender = stack.run()
+        assert contender.returncode != 0, "a contender minted while the child lived"
+        assert "mint-local: busy" in contender.stderr, _out(contender)
+        assert stack.mutations() == []
+        assert not _lock_available(stack.lock())
+        (stack.root / "resume").touch()
+        deadline = time.monotonic() + 5
+        while not _lock_available(stack.lock()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert _lock_available(stack.lock()), "the ended child retained the lock"
+        result = stack.run()
+        assert result.returncode == 0, _out(result)
+        assert len(stack.mutations()) == 2, "the old child and successor each minted"
+
+
+def test_lock_missing_perl_fails_closed(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    # Keep every host tool the old target needs so RED demonstrates minting
+    # without Perl, rather than failing early because another command is absent.
+    without_perl = tmp_path / "without-perl"
+    without_perl.mkdir()
+    for name in (
+        "make",
+        "dirname",
+        "mkdir",
+        "cat",
+        "rm",
+        "rmdir",
+        "mktemp",
+        "sed",
+        "tail",
+        "id",
+        "hostname",
+        "openssl",
+        "jq",
+        "grep",
+        "chmod",
+        "true",
+        "docker",
+        "onex",
+    ):
+        source = stack.bin / name
+        if not source.exists():
+            source = Path(shutil.which(name) or "")
+        assert source.is_file(), f"test prerequisite missing: {name}"
+        (without_perl / name).symlink_to(source)
+    env = stack.env(PATH=str(without_perl))
+    result = subprocess.run(
+        stack.command(),
+        cwd=_REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode != 0, "the target minted without the prerequisite"
+    assert "mint-local: perl with Fcntl is required for the lock" in result.stderr
+    assert stack.mutations() == []
     assert not stack.lock().exists()
+
+
+def test_lock_perl_error_fails_closed(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    result = stack.run(STUB_FLOCK_ERROR="1")
+    assert result.returncode != 0, "a descriptor error allowed minting"
+    assert "mint-local: could not take the lock:" in result.stderr
+    assert "mint-local: busy" not in result.stderr
+    assert stack.mutations() == []
 
 
 # --- AC5: the password ---------------------------------------------------------------

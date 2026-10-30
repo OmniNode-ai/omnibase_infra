@@ -198,11 +198,13 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 	    echo "FAIL: the local superuser $(LOCAL_SASL_USER) was refused" >&2; exit 1; }; \
 	  echo "==> OK: the local broker refuses anonymous clients and accepts $(LOCAL_SASL_USER)"
 
-# OMN-20823 (plan D6). The lock directory beside the env file is taken before
-# anything else and released by the trap only while it still holds our pid; a
-# lock whose recorded process is gone is removed and said, under a second guard
-# directory so two runs cannot both recover it. Age alone never frees a lock or
-# the guard: one that names no live owner is reported with its path instead. The password is generated here,
+# OMN-20823 (plan D6, amended): .mint-local.flock is a stable file beside the
+# env file. Before first use, every old-version runner for that env file and
+# all its children must have ended; legacy .lock/.lock.recover artifacts stay.
+# Perl takes an OS lock on inherited FD 9. The shell and its children retain it
+# until the last descriptor closes, including after the shell is SIGKILLed.
+# The file is never unlinked, and the PID is written only after acquisition.
+# The password is generated here,
 # reaches the node only as the variable ONEX_MINT_PASSWORD of docker exec (never
 # an argument), reaches lane-login only on its stdin, and is never printed. The
 # state-root search reads it from its own environment and fails on any directory
@@ -211,30 +213,30 @@ check-sasl-local: _check-docker ## Laptop profile: prove the broker refuses anon
 # the orchestrator's result; for a failed run .result is the runtime summary and
 # .result.handler_result is the orchestrator's result.
 mint-local: _check-docker ## Laptop profile: mint this machine's login on the local broker and prove it with one delegation (OMN-20823)
-	@lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.lock"; guard="$$lock.recover"; \
+	@if ! command -v perl >/dev/null 2>&1 || ! perl -MFcntl=:flock -e 1 >/dev/null 2>&1; then \
+	    echo "mint-local: perl with Fcntl is required for the lock" >&2; exit 1; \
+	  fi; \
+	  lock="$$(dirname "$(LOCAL_ENV_FILE)")/.mint-local.flock"; \
 	  mkdir -p "$$(dirname "$$lock")" || exit 1; \
 	  busy() { echo "mint-local: busy, lock held by pid $$1 (exit 75)" >&2; exit 75; }; \
-	  if ! mkdir "$$lock" 2>/dev/null; then \
-	    holder=$$(cat "$$lock/pid" 2>/dev/null); \
-	    if [ -n "$$holder" ] && kill -0 "$$holder" 2>/dev/null; then busy "$$holder"; fi; \
-	    if [ -z "$$holder" ]; then \
-	      echo "mint-local: $$lock names no holder; if no mint-local is running, remove it" >&2; busy unknown; \
-	    fi; \
-	    if ! mkdir "$$guard" 2>/dev/null; then \
-	      echo "mint-local: another run is recovering the stale lock; if none is, remove $$guard" >&2; \
-	      busy "$$holder"; \
-	    fi; \
-	    now=$$(cat "$$lock/pid" 2>/dev/null); \
-	    if [ "$$now" = "$$holder" ] && ! kill -0 "$$now" 2>/dev/null; then \
-	      echo "mint-local: removing a stale lock left by pid $${holder:-unknown}, which is not running"; \
-	      rm -rf "$$lock"; \
-	    fi; \
-	    mkdir "$$lock" 2>/dev/null && echo "$$$$" > "$$lock/pid"; got=$$?; rmdir "$$guard"; \
-	    [ "$$got" -eq 0 ] || busy "$$(cat "$$lock/pid" 2>/dev/null || echo unknown)"; \
-	  fi; \
-	  echo "$$$$" > "$$lock/pid"; \
+	  exec 9<>"$$lock" || { echo "mint-local: could not take the lock: could not open the file" >&2; exit 1; }; \
+	  perl -MFcntl=:flock -Mstrict -Mwarnings -e 'open(my $$fh, "+<&=9") or do { print STDERR "mint-local: could not take the lock: $$!\n"; exit 1; }; if (!flock($$fh, LOCK_EX|LOCK_NB)) { exit 75 if $$!{EWOULDBLOCK} || $$!{EAGAIN}; print STDERR "mint-local: could not take the lock: $$!\n"; exit 1; }'; \
+	  acquired=$$?; \
+	  case $$acquired in \
+	    0) ;; \
+	    75) holder=$$(cat "$$lock" 2>/dev/null); case "$$holder" in ""|*[!0-9]*) holder=unknown ;; esac; busy "$$holder" ;; \
+	    *) exit 1 ;; \
+	  esac; \
+	  holder=$$(cat "$$lock") || exit 1; \
+	  case "$$holder" in \
+	    ""|*[!0-9]*) ;; \
+	    *) if ! kill -0 "$$holder" 2>/dev/null; then \
+	      echo "mint-local: removing a stale lock left by pid $$holder, which is not running"; \
+	    fi ;; \
+	  esac; \
+	  perl -Mstrict -Mwarnings -e 'open(my $$fh, "+<&=9") or do { print STDERR "mint-local: could not record the lock pid: $$!\n"; exit 1; }; seek($$fh, 0, 0) && truncate($$fh, 0) && print($$fh "$$ARGV[0]\n") && close($$fh) or do { print STDERR "mint-local: could not record the lock pid: $$!\n"; exit 1; };' "$$$$" || exit 1; \
 	  work=""; container="$(LOCAL_PROJECT)-runtime-effects"; in_dir="/tmp/onex-mint-$$$$"; \
-	  trap 'docker exec -u omniinfra "$$container" rm -rf "$$in_dir" >/dev/null 2>&1; [ "$$(cat "$$lock/pid" 2>/dev/null)" = "$$$$" ] && rm -rf "$$lock"; rm -rf $${work:+"$$work"}' EXIT; \
+	  trap 'docker exec -u omniinfra "$$container" rm -rf "$$in_dir" >/dev/null 2>&1; rm -rf $${work:+"$$work"}' EXIT; \
 	  trap 'exit 130' INT; trap 'exit 143' TERM; \
 	  work=$$(mktemp -d) || exit 1; \
 	  $(MAKE) --no-print-directory check-sasl-local || { \
