@@ -710,6 +710,11 @@ requirements:
     acceptance:
       - id: AC17427630004
         statement: 'Contract validation refuses incompatible models, missing handlers and unexported protocol functions; the sweep uses the injected binding and its verdict format matches core at the pin -- falsifier: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov fails at the merge base because this test path and resolver are absent'
+  - id: req-omn17427-hook-writer-ingress
+    statement: The hook-events writer can bind the main-role kernel's local ingress socket as the runtime image's non-root user.
+    acceptance:
+      - id: AC17427546801
+        statement: The base compose writer and rendered catalog each mount the socket directory declared in contracts/runtime/runtime_config.yaml with the UID and GID created by Dockerfile.runtime and used by entrypoint-runtime.sh, with mode 0770; unrelated main-runtime mounts do not determine the writer's mounts.
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -3248,3 +3253,19 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630004]
+  - id: dod-omn17427-hook-writer-ingress
+    description: Both compose and catalog mounts are checked against the kernel socket contract and image user, independently of other main-runtime tmpfs entries. Removing the writer mount at the merge base fails these cases.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_omn19513_hook_events_writer.py -q -k mounts_the_ingress_socket_directory --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427546801]
+  - id: dod-omn17427-hook-writer-ingress-deploy
+    description: Hosted-runner deploy check renders the writer catalog and reads the base compose, socket contract, image UID/GID and privilege drop. Requires no Docker daemon, credentials, broker or live lane; the separate lab readback exercises socket binding in the writer image.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_omn19513_hook_events_writer.py -q -k mounts_the_ingress_socket_directory --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427546801]
