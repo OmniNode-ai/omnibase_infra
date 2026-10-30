@@ -6,6 +6,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn17427-scm-pr-create-acl-whole
+    statement: A principal addition that grants any onex scm pr-create topic grants all six topic rows, so a pr-create caller never fails on the first topic it lacks.
+    acceptance:
+      - id: AC17427575701
+        statement: Every principal in principal_grants_from that holds a github-repo-write topic holds WRITE and DESCRIBE on the command topic and READ and DESCRIBE on the completed and failed terminals, and removing any one of the six rows from the h105 source is found by name.
   - id: req-omn17427-create-topics-responses
     statement: Topic provisioning classifies returned Kafka CreateTopics errors before recording creation and confirms only broker-present topics.
     acceptance:
@@ -929,6 +934,14 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-scm-pr-create-acl-whole
+    description: The declaration test walks every principal addition for the six pr-create topic rows and plants each missing row in a copy of the h105 source. Unit tests read repository files only; the live broker is not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "pr_create"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427575701]
   - id: dod-omn17427-topic-ceiling-wire
     description: Real aiokafka admin methods and encoded then decoded Kafka responses exercise contract discovery, capacity refusal, cache contents, cleanup and readiness. The network boundary is synthetic; no live broker is claimed.
     source: manual
