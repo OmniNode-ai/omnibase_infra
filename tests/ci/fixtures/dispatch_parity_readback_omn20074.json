@@ -1,8 +1,8 @@
 {
   "_provenance": {
-    "captured_utc": "2026-10-30T00:44:38.618879+00:00",
+    "captured_utc": "2026-10-30T14:08:48.047140+00:00",
     "legacy_product_sha": "6c82d7967161a1f4bf98ec3f694d06ed989c63eb",
-    "retired_product_sha": "7dfd2eb5b74eb0541b8d9f0641f614f182bf92eb",
+    "retired_product_sha": "f5e25fdb1ef1ba949962cb58191eef65c653cfef",
     "source": "Live MessageDispatchEngine.dispatch snapshots for the declared dependency corpora"
   },
   "legacy": {
@@ -24,7 +24,7 @@
     "snapshot_sha256": "5509645535394bcd5e81e23c4c5dbc9712cf7b71c26d4f6b3c8b759638ef627f"
   },
   "retired": {
-    "captured_utc": "2026-10-30T00:44:38.618879+00:00",
+    "captured_utc": "2026-10-30T14:08:48.047140+00:00",
     "corpus": {
       "contracts_discovered": 162,
       "contracts_by_package": {
@@ -38,6 +38,6 @@
       "type_scoped_dispatchers": 76,
       "probe_count": 1114
     },
-    "snapshot_sha256": "33f518b0b1f91468b78c437a3230d61927c41f1fb831f5ac11fda17c46682f77"
+    "snapshot_sha256": "86b5517e92f54b7f5e5cf817e89c6ddc65638c10660a2022469852488385e501"
   }
 }

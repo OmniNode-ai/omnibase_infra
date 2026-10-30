@@ -23,6 +23,7 @@ import httpx
 from omnibase_infra.handlers.lease import LeaseStore
 from omnibase_infra.handlers.lease.lease_etcd_gateway import LeaseEtcdGateway
 from omnibase_infra.handlers.placement import (
+    HandlerPlacementEtcd,
     HandlerPlacementRuntime,
     ModelPlacementPolicy,
 )
@@ -95,14 +96,14 @@ async def main() -> None:
     parser.add_argument("--replies", type=Path, required=True)
     parser.add_argument("--ready", type=Path, required=True)
     args = parser.parse_args()
-    adapter = LeaseEtcdGateway(args.endpoint, httpx.AsyncClient(timeout=2.0))
+    gateway = LeaseEtcdGateway(args.endpoint, httpx.AsyncClient(timeout=2.0))
     store = LeaseStore(
-        adapter, [ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=3)]
+        gateway, [ModelLeaseKindPolicy(kind="exclusive", capacity=1, ttl_s=3)]
     )
     node = LeasePrimaryNode(args.runtime_id, store, args.requests, args.replies)
     runtime = HandlerPlacementRuntime(
         runtime_id=args.runtime_id,
-        adapter=adapter,
+        adapter=HandlerPlacementEtcd(args.endpoint, timeout_s=2.0),
         nodes={
             NODE: (ModelPlacementPolicy(mode="primary", failover_target_s=10.0), node)
         },
