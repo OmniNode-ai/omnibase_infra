@@ -396,12 +396,11 @@ uses `--drop-dev-tag-override` to remove only the single-line source before
 locking the release, preserving unrelated bytes.
 
 1. Update `pyproject.toml` bounds, then `uv sync`. `omnibase-core` is published as
-   `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` and pinned exactly only in
-   `[tool.uv] override-dependencies` (OMN-19655); the range must admit the override
-   (`scripts/ci/check_sibling_compatible_range.py`, pre-commit and
-   `tests/scripts/test_check_sibling_compatible_range.py`). A patch bump moves the
-   override; a change that needs a newer core raises FLOOR; a new core minor moves the
-   whole range.
+   `>=FLOOR,<NEXT_MINOR` in `[project.dependencies]` (OMN-19655); the range must admit
+   the version `uv.lock` resolves (`scripts/ci/check_sibling_compatible_range.py` holds
+   the shape, `tests/ci/test_core_dev_tag_pin_omn17427.py` holds the admission, both in
+   pre-commit and CI). A patch bump moves the dev-merge tag and the lock; a change that
+   needs a newer core raises FLOOR; a new core minor moves the whole range.
 2. `uv run pytest tests/unit/runtime/test_version_compatibility.py` — `test_matrix_matches_pyproject` catches drift.
 3. The release workflow runs `scripts/update_version_matrix.py --check` as a pre-build gate (run without `--check` to update the fallback in-place).
 
