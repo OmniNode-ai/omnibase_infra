@@ -115,6 +115,11 @@ local:
     # A laptop is the dogfood shape (the lab's dogfood lane runs on laptops), a
     # registered non-lab lane: the lab-scoped nodes are excluded without error.
     ONEX_RUNTIME_LANE: dogfood
+    # OMN-19988: the laptop's main kernel publishes the runtime tick, so tick
+    # subscribers (the local environment observer among them) run here as they
+    # do on the dev lane. Every runtime entry receives it; only the main role
+    # reads it (runtime_scheduler.start_lane_runtime_scheduler).
+    ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
     # OMN-20820: the broker requires SASL/SCRAM; every client authenticates as
     # the superuser redpanda-local-sasl creates. The password is the operator's,
