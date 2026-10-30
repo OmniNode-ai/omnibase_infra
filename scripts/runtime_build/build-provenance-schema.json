@@ -42,9 +42,42 @@
               "vcs_branch": {
                 "type": "string",
                 "description": "The sibling clone's checked-out branch (git rev-parse --abbrev-ref HEAD); 'HEAD' for a detached checkout."
+              },
+              "dev_merge_tag": {
+                "type": "string",
+                "description": "The dev-merge tag (dev-<UTC YYYYMMDDHHMMSS>-<sha12>) that names the vendored commit; empty when none does, which the first-party source audit refuses (OMN-17427)."
               }
             }
           }
+        },
+        "build_context": {
+          "type": "object",
+          "description": "The VCS record of the build context itself (omnibase_infra), with the same fields as a sibling (OMN-17427).",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["vcs_ref", "vcs_dirty", "vcs_branch"]
+          }
+        }
+      }
+    },
+    "first_party_sources": {
+      "type": "array",
+      "description": "Where each first-party package of the image was installed from, as checker_first_party_sources classifies it (OMN-17427 stage 0). Every entry's kind must be dev-merge-tag or the build fails.",
+      "items": {
+        "type": "object",
+        "required": ["distribution", "repo", "kind"],
+        "properties": {
+          "distribution": { "type": "string" },
+          "repo": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": ["dev-merge-tag", "sha", "branch", "release", "exact-version", "unbound", "tag-mismatch", "absent"]
+          },
+          "version": { "type": "string" },
+          "tag": { "type": "string" },
+          "commit": { "type": "string" },
+          "install_url": { "type": "string" },
+          "detail": { "type": "string" }
         }
       }
     },

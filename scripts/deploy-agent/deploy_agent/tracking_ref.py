@@ -64,8 +64,6 @@ ENV_TRACKING_REF = "DEPLOY_AGENT_TRACKING_REF"
 #: deploys what dev merged without waiting for a PyPI release. A lab-only
 #: setting: prod never rebuilds from a ref (it deploys a pinned digest).
 DEV_TAG_FOLLOWED_REPOSITORIES: Final = ("omnimarket",)
-#: The staging variable ``stage_workspace.sh`` reads the list from.
-ENV_FOLLOW_DEV_TAG_REPOS: Final = "DEPLOY_FOLLOW_DEV_TAG_REPOS"
 
 
 def load_tracking_ref_from_env() -> str:

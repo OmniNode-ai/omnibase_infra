@@ -270,7 +270,8 @@ def test_provenance_script_passes_with_valid_local_installs(
 ) -> None:
     """Provenance script writes manifest and exits 0 when all packages are local installs."""
     sibling_dir = tmp_path / "workspace" / "sibling-repos"
-    for repo in ("omnibase_compat",):
+    staged = ("omnibase_core", "omnibase_spi")
+    for repo in staged:
         repo_dir = sibling_dir / repo
         repo_dir.mkdir(parents=True)
         (repo_dir / "pyproject.toml").write_text(
@@ -306,7 +307,7 @@ def test_provenance_script_passes_with_valid_local_installs(
     (tmp_path / "direct_url.json").write_text(
         json.dumps(
             {
-                "url": f"file://{sibling_dir}/omnibase_compat",
+                "url": f"file://{sibling_dir}/omnibase_core",
                 "dir_info": {"editable": False},
             }
         ),
@@ -331,7 +332,7 @@ def test_provenance_script_passes_with_valid_local_installs(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["build_source"] == "workspace"
     assert "proofs" in manifest
-    assert len(manifest["proofs"]) == len(["omnibase_compat"])
+    assert len(manifest["proofs"]) == len(staged)
     for proof in manifest["proofs"]:
         assert "workspace_digest" in proof
         assert len(proof["workspace_digest"]) == 64  # SHA-256 hex
@@ -474,9 +475,8 @@ source = { editable = "." }
 
 
 def _stage_siblings(sibling_dir: Path) -> None:
-    """Create the three workspace siblings (compat, occ, omnimarket) at lock pin."""
+    """Create the two workspace siblings (occ, omnimarket) at lock pin."""
     for repo, version in (
-        ("omnibase_compat", "0.5.1"),
         ("onex_change_control", "0.9.0"),
         ("omnimarket", "0.4.3"),
     ):
@@ -510,9 +510,9 @@ def test_provenance_emits_pin_comparison_block(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert "pin_comparison" in manifest
     by_pkg = {e["package"]: e for e in manifest["pin_comparison"]}
-    # omnibase-compat staged at exactly the lock pin.
-    assert by_pkg["omnibase-compat"]["status"] == "exact"
-    assert by_pkg["omnibase-compat"]["match"] is True
+    # omnibase_compat is not staged any more (OMN-21284): it comes from the lock
+    # like any other dependency, so no staged-sibling comparison names it.
+    assert "omnibase-compat" not in by_pkg
     # The host infra self-check appears only when omnibase-infra is installed in
     # the running venv (always true in the build image; not in the deploy-agent
     # venv). When present it must carry the lock-pinned expected version.
