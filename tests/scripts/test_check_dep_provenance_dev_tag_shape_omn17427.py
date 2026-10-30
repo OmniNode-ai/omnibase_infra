@@ -31,7 +31,6 @@ def _project(source: str) -> str:
     return (
         '[project]\nname = "downstream"\nversion = "0.0.0"\n'
         'dependencies = ["omnibase-core>=0.47.31,<0.48.0"]\n'
-        '[tool.uv]\noverride-dependencies = ["omnibase-core==0.47.58"]\n'
         f"[tool.uv.sources]\n{source}"
     )
 
@@ -84,6 +83,13 @@ def test_other_refs_are_still_refused(mod: ModuleType, refs: str) -> None:
 
     assert mod.find_violations(text)
     assert mod.find_lineage_violations(text, resolve=different_trees)
+    # A range has no exact released tree to compare. Keep the release-tree
+    # resolver check on a separate exact-release declaration, without a uv override.
+    assert calls == []
+    release_text = text.replace(
+        "omnibase-core>=0.47.31,<0.48.0", "omnibase-core==0.47.58"
+    )
+    assert mod.find_lineage_violations(release_text, resolve=different_trees)
     assert calls
     assert mod.find_unmovable_cascade_targets(text, "omnibase-core")
 

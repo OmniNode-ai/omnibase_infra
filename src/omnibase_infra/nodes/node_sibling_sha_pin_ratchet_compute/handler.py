@@ -31,8 +31,14 @@ _SHA: Final[str] = r"[0-9a-f]{40}"
 SHA_TOKEN: Final[str] = _SHA
 
 # One pin per line at most; any of these shapes makes the line a pin.
+# A uv.lock source resolved from a git TAG reads `<url>?tag=<tag>#<sha>`: the
+# lock writes the commit the tag resolved to beside the tag, but the dependency
+# is declared by the tag (RULING 2026-10-29T01:50:26Z, OMN-17427), so that
+# line is not a commit-sha pin. `?rev=`, `?branch=` and bare `#<sha>` or
+# `@<sha>` URLs still are.
 _URL_PIN: Final = re.compile(
-    rf"OmniNode-ai/{_SIBLING}[^\s\"'@#]*[@#]{_SHA}(?![0-9a-f])", re.IGNORECASE
+    rf"OmniNode-ai/{_SIBLING}(?![^\s\"'@#]*\?tag=)[^\s\"'@#]*[@#]{_SHA}(?![0-9a-f])",
+    re.IGNORECASE,
 )
 _MAP_PIN: Final = re.compile(
     rf"^\s*[\"']?{_SIBLING}[\w-]*[\"']?\s*:\s*[\"']?{_SHA}(?![0-9a-f])",

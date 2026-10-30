@@ -21,6 +21,17 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_ac_bi
 MESSAGE_EXCERPT_MAX_CHARS = 200
 
 
+# Verdict format read by this node and its bounded uncovered-criteria display.
+CHECK_STATUS_VERIFIED = "verified"
+MAX_UNCOVERED_LISTED = 20
+dod_verify_verdict_key = "terminal_payload"
+dod_verify_checks_key = "checks"
+check_id_key = "evidence_id"
+check_status_key = "status"
+check_proof_class_key = "proof_class"
+check_binds_ac_key = "binds_ac"
+
+
 class ModelCheckResultRow(BaseModel):
     """One evidence check's verdict, recorded per outcome rather than counted.
 

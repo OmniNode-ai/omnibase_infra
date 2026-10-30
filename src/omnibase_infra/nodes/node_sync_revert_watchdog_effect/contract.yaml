@@ -43,6 +43,10 @@
 #     timeout, no JSON, no declared arm, no verdict) refuses alike. The request
 #     and result model fields are unchanged; the decision enum gains one value.
 #
+#   - OMN-17427 (node_version unchanged): the Done-write rule is named by its
+#     omnibase_core node, `node_done_write_receipt_gate_compute`, rather than the
+#     moved core handler module path. Behaviour and models are unchanged.
+#
 name: "node_sync_revert_watchdog_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
