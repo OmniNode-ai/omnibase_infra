@@ -143,12 +143,10 @@ def test_plaintext_lane_needs_no_identity(workspace: Path) -> None:
 def test_lane_and_bootstrap_servers_are_mutually_exclusive(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, admin_cls = _run_live_main(
-        ["--lane", "dev", "--bootstrap-servers", "x.invalid:1"]
-    )
-    assert code == 2
-    admin_cls.assert_not_called()
-    assert "mutually exclusive" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as raised:
+        _run_live_main(["--lane", "dev", "--bootstrap-servers", "x.invalid:1"])
+    assert raised.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_bootstrap_servers_alone_is_unchanged(workspace: Path) -> None:
