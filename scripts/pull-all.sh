@@ -15,7 +15,6 @@ REPOS=(
   knowledge_base
   knowledge-base-internal
   omniclaude
-  omnibase_compat
   omnibase_core
   omnibase_infra
   omnibase_spi
