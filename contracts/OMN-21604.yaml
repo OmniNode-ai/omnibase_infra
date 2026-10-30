@@ -16,6 +16,8 @@ requirements:
           AC2: a run's receipt.json records the limit it ran under and a budget_source naming the contract or overlay it came from -- falsifier: uv run pytest asserting the receipt's budget_source names the overlay path when one is set and the contract otherwise
 evidence_requirements:
   - kind: tests
+    description: >-
+      The receipt budget block keeps the terminal's budget_source beside the budget evidence or refusal, and adds none when the terminal names none.
     command: uv run --frozen pytest tests/unit/cli/test_delegate_terminal_budget_contract.py -q -n 0
 emergency_bypass:
   enabled: false
