@@ -928,11 +928,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427545601]
   - id: dod-omn17427-topic-capacity-control
-    description: The capacity control provisions three contract topics, confirms them through metadata and reads the second pass without another creation request.
+    description: The capacity control provisions three contract topics, confirms them through metadata and reads the second pass without another creation request. Paired with the ceiling refusal, it proves successful creation is conditional on broker capacity and fails against the provisioner that records refused topics as created.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k capacity_control
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k "capacity_control or ceiling"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427545602]
   - id: dod-omn17427-topic-error-classification
