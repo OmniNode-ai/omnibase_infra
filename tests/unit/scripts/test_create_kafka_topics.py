@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
 
 # ---------------------------------------------------------------------------
@@ -40,7 +41,7 @@ def _load_script() -> ModuleType:
 
 
 _mod = _load_script()
-_discover_all_packages = _mod._discover_all_packages
+_discover_all_packages = ModelNodePackageEntry.discover_pairs
 
 
 # ---------------------------------------------------------------------------
