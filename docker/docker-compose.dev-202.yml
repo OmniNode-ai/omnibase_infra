@@ -212,6 +212,10 @@ services:
   omninode-runtime:
     container_name: omninode-dev-202-runtime
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
@@ -234,6 +238,10 @@ services:
   runtime-effects:
     container_name: omninode-dev-202-runtime-effects
     environment:
+      # OMN-21551: docker-compose.dev-lane.yml names the dev lane's own tenant
+      # (the house tenant) as this runtime's ONEX_TENANT_ID. This lane is not
+      # that lane, so it keeps none: blank is unset to omnimarket.
+      ONEX_TENANT_ID: ""
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "compose-dev-202"
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"

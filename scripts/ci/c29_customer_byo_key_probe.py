@@ -4,22 +4,17 @@
 """OMN-19200 -- the C29 producer: a customer's own provider key, no OmniNode cloud.
 
 WHAT THIS IS
-    The producer for beta criterion C29: "Customer-local delegation to a
-    provider with the customer's own key: clean machine, one provider key the
-    customer supplies, the receipt names that provider and model, and no
-    OmniNode cloud endpoint is contacted." It drives one real customer session
-    -- install, key registration, delegation -- on a machine that holds no
-    OmniNode repository, observes it from outside the process, and grades four
-    clauses against expectations declared HERE. Its EXIT CODE is the
-    criterion's verdict, the C11 / C13 / C15 shape.
+    Beta criterion C29: customer-local delegation on a clean machine with the
+    customer's provider key, a receipt naming that provider and model, and no
+    OmniNode cloud contact. This producer externally observes one real session
+    -- install, key registration, delegation -- without an OmniNode repository.
+    It grades four clauses declared HERE; its EXIT CODE is the verdict, using
+    the C11 / C13 / C15 shape.
 
     ``0``  all four clauses proven, and every control behaved
-    ``1``  at least one clause unproven or one control misbehaved; the record
-           names which and why
-    ``2``  the probe could not run at all (no ``onex`` on the customer PATH, no
-           strace, no key supplied to the probe). Deliberately distinct from
-           ``1``: "I could not run" is not "the product failed", and it is
-           never ``0``.
+    ``1``  a clause is unproven or a control misbehaved; the record explains why
+    ``2``  could not run: no ``onex`` on PATH, strace, or supplied key. This is
+           distinct from a product failure and never a pass.
 
 THE FOUR CLAUSES
     clean_machine    every OmniNode distribution the run imported came from the
@@ -48,23 +43,18 @@ THE FOUR CLAUSES
                      included.
 
 AN UNPROVEN ZERO IS A FAILURE, NOT A PASS
-    "No OmniNode host was contacted" means nothing unless the instrument could
-    see a contact. Two positive controls make that falsifiable in the same
-    invocation:
+    Two positive controls in the same invocation prove the instrument can see
+    the contacts it grades:
 
-    1. the keyed delegation MUST show a connect() to an address the session's
-       own DNS answer gave for the provider host. Zero such connects means the
-       tracer was blind to the process that did the work, or the DNS decoder
-       could not read the answer, and either way the zero is unproven.
-    2. a deliberate lookup of an OmniNode host (``api.omninode.ai``), traced by
-       the SAME wrapper and read by the SAME decoder, MUST be classified as
-       OmniNode cloud. If it is not, the grader cannot see the thing it grades
-       for.
+    1. the keyed delegation MUST connect to an address its own DNS answer gave
+       for the provider host. Otherwise the tracer missed the process or the
+       decoder missed the answer, leaving zero OmniNode contacts unproven.
+    2. a deliberate lookup of ``api.omninode.ai``, traced by the SAME wrapper
+       and read by the SAME decoder, MUST be classified as OmniNode cloud.
 
-    And one negative control: the same prompt, on the same configured machine
-    BEFORE any key is registered, must be a typed refusal that reaches no
-    provider. That is what shows the delegation's key came from the
-    registration this probe performed and not from anything ambient.
+    A negative control repeats the prompt on the same machine BEFORE key
+    registration: a typed refusal reaching no provider proves the keyed run
+    used this session's registration rather than an ambient key.
 
 THE KEY IS REGISTERED THE WAY THE PRODUCT SAYS
     ``onex secret set llm.<provider>.api_key``: the example in ``onex secret``'s
@@ -80,11 +70,9 @@ THE KEY IS REGISTERED THE WAY THE PRODUCT SAYS
     it, and changes nothing else).
 
 THE CUSTOMER WRITES NO CONFIGURATION
-    Since omnimarket 0.4.203 a clean install resolves its routing contracts
-    from the packaged defaults. The customer environment is HOME, PATH, LANG and
-    TERM and nothing else, and this customer declares no local model: C29 is the
-    provider-only case. The only act is ``onex local init`` and handing over the
-    key.
+    Since omnimarket 0.4.203 routing contracts use packaged defaults. C29 is
+    provider-only: no local model, only HOME, PATH, LANG and TERM in the
+    environment, and only ``onex local init`` and handing over the key.
 
 WHY STRACE, AND WHY DNS
     connect() is where an attempt becomes visible whether or not it succeeds,
@@ -97,15 +85,13 @@ WHY STRACE, AND WHY DNS
     HTTPS) leaves every connect unattributed, which grades FAIL, never PASS.
 
 THE KEY NEVER LEAVES MEMORY
-    It reaches this process in one environment variable, which is popped before
-    anything is spawned, and is written only to ``onex secret set``'s stdin. It
-    is compared against every captured output and, if found, redacted before
-    anything is written and graded as a failure. It is never printed.
+    The key's environment variable is popped before spawning any child; only
+    ``onex secret set``'s stdin receives it. Every captured output is checked,
+    with leaks redacted before writing and graded as failures; it is never printed.
 
 STANDARD LIBRARY ONLY
-    Same reason as the C11 and C13 producers: a probe whose job is to be
-    readable should not acquire a dependency resolution step that can fail for
-    reasons unrelated to the thing it probes.
+    Like C11 and C13, stay readable and avoid dependency resolution failures
+    unrelated to the thing being probed.
 """
 
 from __future__ import annotations
@@ -119,6 +105,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -188,6 +175,18 @@ ALLOWED_CUSTOMER_ENV_KEYS: Final[frozenset[str]] = frozenset(
 
 #: The customer session's steps, every one traced, in order.
 SESSION_STEPS: Final[tuple[str, ...]] = ("init", "keyless", "secret_set", "keyed")
+
+# OMN-17427: the provider's own limit is not the criterion. OpenRouter answers
+# 429 for a shared-pool model ("temporarily rate-limited upstream. Please retry
+# shortly") on a few percent of hourly runs, and each answer cleared by the next
+# run. A keyed delegation whose every attempt was a provider 429 is repeated
+# after a pause, up to this many more times. The run that is graded is the last
+# one, and every clause still needs a real accepted answer from the provider.
+# Earlier throttled runs stay in the record under this prefix and their network
+# traces are graded by no_omninode like any other step.
+KEYED_THROTTLE_RETRIES: Final[int] = 2
+KEYED_THROTTLE_BACKOFF_S: Final[tuple[int, ...]] = (45, 90)
+KEYED_THROTTLED_PREFIX: Final[str] = "keyed_throttled_"
 
 #: The five distributions a delegation imports.
 ONEX_DISTRIBUTIONS: Final[tuple[str, ...]] = (
@@ -313,14 +312,9 @@ def parse_dns(buf: bytes) -> DnsMessage | None:
         rdata_at = offset + 10
         if rdata_at + rdlength > len(buf):
             break
-        if rtype == 1 and rdlength == 4:
-            addresses.append(
-                (owner[0], str(ipaddress.IPv4Address(buf[rdata_at : rdata_at + 4])))
-            )
-        elif rtype == 28 and rdlength == 16:
-            addresses.append(
-                (owner[0], str(ipaddress.IPv6Address(buf[rdata_at : rdata_at + 16])))
-            )
+        if (rtype, rdlength) in ((1, 4), (28, 16)):
+            address = ipaddress.ip_address(buf[rdata_at : rdata_at + rdlength])
+            addresses.append((owner[0], str(address)))
         elif rtype == 5:
             target = _read_name(buf, rdata_at)
             if target is not None:
@@ -370,23 +364,19 @@ def parse_trace(strace_text: str) -> Trace:
         if call == "connect":
             text = _unescape(line)
             if "sa_family=AF_INET6" in text:
-                inet6 = _INET6_RE.search(text)
-                trace.connects.append(
-                    Connect(
-                        "AF_INET6",
-                        inet6.group("host") if inet6 else None,
-                        int(inet6.group("port")) if inet6 else None,
-                    )
-                )
+                family, pattern = "AF_INET6", _INET6_RE
             elif "sa_family=AF_INET," in text:
-                inet = _INET_RE.search(text)
-                trace.connects.append(
-                    Connect(
-                        "AF_INET",
-                        inet.group("host") if inet else None,
-                        int(inet.group("port")) if inet else None,
-                    )
+                family, pattern = "AF_INET", _INET_RE
+            else:
+                continue
+            inet = pattern.search(text)
+            trace.connects.append(
+                Connect(
+                    family,
+                    inet.group("host") if inet else None,
+                    int(inet.group("port")) if inet else None,
                 )
+            )
             continue
         if call not in _DNS_CALLS:
             continue
@@ -496,20 +486,17 @@ def _provider(obs: Mapping[str, Any]) -> ProviderSpec | None:
     return PROVIDERS.get(str(obs.get("provider") or ""))
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Keep dictionary payloads; treat other JSON values as missing."""
+    return value if isinstance(value, dict) else {}
+
+
 def _receipt_result(receipt: Any) -> dict[str, Any]:
     """Failed-run receipts wrap the orchestrator payload in terminal_payload."""
-    if not isinstance(receipt, dict):
-        return {}
-    inner = receipt.get("receipt")
-    if not isinstance(inner, dict):
-        return {}
-    result = inner.get("result")
-    if not isinstance(result, dict):
-        return {}
-    if "secret_source" not in result and isinstance(
-        result.get("terminal_payload"), dict
-    ):
-        return result["terminal_payload"]
+    result = _as_dict(_as_dict(_as_dict(receipt).get("receipt")).get("result"))
+    terminal = result.get("terminal_payload")
+    if "secret_source" not in result and isinstance(terminal, dict):
+        return terminal
     return result
 
 
@@ -522,13 +509,26 @@ def _ref_names_provider(ref: str, slug: str) -> bool:
     return len(parts) == 3 and parts[0] == "llm" and parts[1] == slug
 
 
+def _receipt_attempts(receipt: Any) -> list[dict[str, Any]]:
+    receipt = _as_dict(receipt)
+    result = _receipt_result(receipt)
+    attempts = result.get("attempts") or receipt.get("attempts") or []
+    return [a for a in attempts if isinstance(a, dict)]
+
+
+def receipt_provider_throttled(receipt: Any) -> bool:
+    """True when the run failed and every routing attempt was a provider 429."""
+    if not isinstance(receipt, dict) or receipt.get("status") == "success":
+        return False
+    attempts = _receipt_attempts(receipt)
+    return bool(attempts) and all(
+        a.get("failure_class") == "rate_limited" for a in attempts
+    )
+
+
 def grade_clean_machine(obs: Mapping[str, Any], receipt: Any) -> Clause:
     clause = Clause("clean_machine")
-    identity = (
-        receipt.get("receipt", {}).get("runtime_identity")
-        if isinstance(receipt, dict)
-        else None
-    )
+    identity = _as_dict(receipt).get("receipt", {}).get("runtime_identity")
     if not isinstance(identity, dict):
         clause.reasons.append(
             "the keyed receipt carries no runtime_identity, so where the code came from is unproven"
@@ -650,6 +650,7 @@ def grade_names_provider(
     keyed = steps.get("keyed") or {}
     files = obs.get("run_files") or {}
     clause.evidence["keyed_returncode"] = keyed.get("returncode")
+    clause.evidence["keyed_throttled_runs"] = obs.get("keyed_throttled_runs", 0)
     clause.evidence["provider_throttled"] = False
     if keyed.get("returncode") != 0:
         clause.reasons.append(
@@ -664,14 +665,10 @@ def grade_names_provider(
             clause.reasons.append(f"the keyed delegation was refused: {refusal}")
         return clause
     result = _receipt_result(receipt)
-    attempts = result.get("attempts") or receipt.get("attempts") or []
+    attempts = _receipt_attempts(receipt)
     # A provider 429 on every attempt is the provider's limit: say so first, so
     # the record does not read as a key or routing regression. It still fails.
-    if (
-        receipt.get("status") != "success"
-        and attempts
-        and all(a.get("failure_class") == "rate_limited" for a in attempts)
-    ):
+    if receipt_provider_throttled(receipt):
         backends = ", ".join(sorted({str(a.get("backend_id")) for a in attempts}))
         clause.reasons.insert(
             0,
@@ -771,12 +768,8 @@ def _find_refusal(doc: Any) -> str | None:
         message = doc.get("error_message")
         if isinstance(message, str) and message:
             return message[:400]
-        for value in doc.values():
-            found = _find_refusal(value)
-            if found:
-                return found
-    elif isinstance(doc, list):
-        for value in doc:
+    if isinstance(doc, (dict, list)):
+        for value in doc.values() if isinstance(doc, dict) else doc:
             found = _find_refusal(value)
             if found:
                 return found
@@ -790,7 +783,8 @@ def grade_no_omninode(obs: Mapping[str, Any], spec: ProviderSpec | None) -> Clau
     provider_host = spec.host if spec else ""
     clause.evidence["nameservers"] = nameservers
     per_step: dict[str, Any] = {}
-    for step in SESSION_STEPS:
+    throttled_steps = sorted(s for s in steps if s.startswith(KEYED_THROTTLED_PREFIX))
+    for step in (*SESSION_STEPS, *throttled_steps):
         if step not in steps:
             clause.reasons.append(f"customer step {step!r} was not traced")
             continue
@@ -1038,19 +1032,27 @@ def redact_key(value: Any, key: str, path: str, leaks: list[str]) -> Any:
 
 
 def delegate_runs_root(env: Mapping[str, str]) -> Path:
-    """Return the directory ``onex delegate`` writes its run directories under.
+    """Return the CLI's runs directory (omnibase_infra 0.38.64, OMN-19232).
 
-    Since omnibase_infra 0.38.64 (OMN-19232) the CLI's state root is the
-    ``--state-root`` flag, then an absolute ``ONEX_STATE_DIR``, then
-    ``$HOME/.onex_state``, and never the working directory. The probe passes no
-    flag and the customer's environment binds no ``ONEX_STATE_DIR``, so this is
-    the customer's own ``$HOME/.onex_state/runs``: the default every customer
-    gets (OMN-20505).
+    State-root precedence: ``--state-root``, absolute ``ONEX_STATE_DIR``, then
+    ``$HOME/.onex_state``; never cwd. The probe supplies neither override, so
+    customers use ``$HOME/.onex_state/runs`` (OMN-20505).
     """
     state_dir = env.get("ONEX_STATE_DIR", "")
     if state_dir and Path(state_dir).is_absolute():
         return Path(state_dir) / "runs"
     return Path(env["HOME"]) / ".onex_state" / "runs"
+
+
+def _keyed_receipt(step: Mapping[str, Any], runs_root: Path) -> dict[str, Any]:
+    """The receipt of one keyed delegation run, read from its run directory."""
+    run_id = _as_dict(_load_json(step.get("stdout"))).get("run_id")
+    if not run_id:
+        return {}
+    path = runs_root / str(run_id) / "receipt.json"
+    if not path.is_file():
+        return {}
+    return _as_dict(_load_json(path.read_text(errors="replace")))
 
 
 def observe_live(args: argparse.Namespace) -> dict[str, Any]:
@@ -1091,7 +1093,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     timeout = int(args.step_timeout)
 
     def run(
-        name: str, argv: Sequence[str], stdin_text: str | None = None
+        name: str,
+        argv: Sequence[str],
+        stdin_text: str | None = None,
+        *,
+        step_timeout: int = timeout,
     ) -> dict[str, Any]:
         """One traced customer step, in the customer's environment."""
         return _run_step(
@@ -1101,7 +1107,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
             cwd=workdir,
             strace=strace,
             trace_dir=trace_dir,
-            timeout=timeout,
+            timeout=step_timeout,
             stdin_text=stdin_text,
         )
 
@@ -1121,6 +1127,14 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         stdin_text=key,
     )
     steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
+    throttled_runs = 0
+    while throttled_runs < KEYED_THROTTLE_RETRIES and receipt_provider_throttled(
+        _keyed_receipt(steps["keyed"], runs_root)
+    ):
+        throttled_runs += 1
+        steps[f"{KEYED_THROTTLED_PREFIX}{throttled_runs}"] = steps.pop("keyed")
+        time.sleep(KEYED_THROTTLE_BACKOFF_S[throttled_runs - 1])
+        steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
     listing = subprocess.run(
         [str(onex), "secret", "list"],
         env=customer_env,
@@ -1135,7 +1149,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         for line in listing.stdout.splitlines()
         if line.startswith("  ") and line.split()
     ]
-    steps["omninode_control"] = _run_step(
+    steps["omninode_control"] = run(
         "omninode_control",
         [
             sys.executable,
@@ -1143,11 +1157,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
             "import socket\ntry:\n    socket.getaddrinfo("
             f"{OMNINODE_CONTROL_HOST!r}, 443)\nexcept OSError:\n    pass\n",
         ],
-        env=base_env,
-        cwd=workdir,
-        strace=strace,
-        trace_dir=trace_dir,
-        timeout=60,
+        step_timeout=60,
     )
 
     stdout_doc = _load_json(steps["keyed"]["stdout"]) or {}
@@ -1164,7 +1174,8 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     installed = {
         dist: entry.get("version")
         for dist, entry in (
-            (receipt.get("receipt", {}) if isinstance(receipt, dict) else {})
+            _as_dict(receipt)
+            .get("receipt", {})
             .get("runtime_identity", {})
             .get("packages")
             or {}
@@ -1183,6 +1194,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         "customer_env_keys": sorted(customer_env),
         "nameservers": read_nameservers(),
         "steps": steps,
+        "keyed_throttled_runs": throttled_runs,
         "registered_refs": registered_refs,
         "secret_list": listing.stdout,
         "run_dir": str(run_dir) if run_dir else None,
@@ -1266,10 +1278,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--key-env", required=True, help="NAME of the variable holding the key"
     )
-    run.add_argument("--customer-home", required=True)
-    run.add_argument("--customer-bin", required=True)
-    run.add_argument("--workdir", required=True)
-    run.add_argument("--trace-dir", required=True)
+    for flag in ("--customer-home", "--customer-bin", "--workdir", "--trace-dir"):
+        run.add_argument(flag, required=True)
     run.add_argument("--prompt", default="explain what a calendar app needs")
     run.add_argument("--step-timeout", default="600")
     run.add_argument("--observations-out", required=True)
