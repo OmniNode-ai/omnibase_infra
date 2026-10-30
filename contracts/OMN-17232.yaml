@@ -206,10 +206,10 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_hp051_pool_omn17232.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-hp051-pool-deploy
-    description: The four runners run healthy on the host in their own cgroup slice, and the pool's git mirror daemon is active.
+    description: The shipped deploy artifacts declare four runner containers in the omnirunners cgroup slice, the slice's memory cap, and the pool's git mirror daemon unit. The live-host readback runs on the host, not on the hosted runner.
     source: manual
     binds_ac: [AC10, AC11]
     checks:
       - check_type: command
-        check_value: "ssh h051 'test \"$(docker ps --filter name=hp051-ci-runner --filter health=healthy -q | wc -l)\" = 4 && systemctl is-active omninode-git-mirror-daemon.service && systemctl show omnirunners.slice -p MemoryMax | grep -q MemoryMax='"
+        check_value: "test \"$(grep -c 'container_name: hp051-ci-runner-' docker/docker-compose.runners-hp051-ci-runner.yml)\" = 4 && grep -q 'cgroup_parent: omnirunners.slice' docker/docker-compose.runners-hp051-ci-runner.yml && grep -q 'MemoryMax=' docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice && grep -q 'ExecStart=' docker/runners/systemd/pools/hp051-ci-runner/omninode-git-mirror-daemon.service"
         cwd: ${OMNI_HOME}/omnibase_infra
