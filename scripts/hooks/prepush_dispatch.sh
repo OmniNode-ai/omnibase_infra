@@ -58,7 +58,7 @@ prepush_table_text() {
     fi
   fi
   private_copy="$(prepush_private_table_text)" || private_rc=$?
-  if [ "$private_rc" -ne 0 ] && [ "$private_rc" -ne 2 ]; then
+  if [ "$private_rc" -ne 0 ] && [ "$private_rc" -ne "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ]; then
     return 1
   fi
   printf '%s\n' "$head_copy"
@@ -71,32 +71,39 @@ prepush_table_text() {
 # -----------------------------------------------------------------------------
 # The shipped table above carries the schema and a neutral disabled row. The
 # deployment's hosts live in a private table with the same fifteen columns,
-# found through the workspace-config resolver: ONEX_WORKSPACE_CONFIG_ROOT, else
-# the private workspace repository beside OMNI_HOME. There is no built-in path and no
-# lab value in this file (CLAUDE.md rule 8).
+# found through ONEX_WORKSPACE_CONFIG_ROOT, which the deployment's own overlay or
+# host installer sets. Unset means no deployment table: the shipped neutral row
+# alone, said so on stderr. There is no built-in path and no lab value in this
+# file (CLAUDE.md rule 8).
 # The caller names the file (a repo-relative-to-the-config-root path); the shared
 # library carries no repo name. Unset means no deployment table is declared.
 PREPUSH_PRIVATE_TABLE_REL="${PREPUSH_PRIVATE_TABLE_REL:-}"
 
 # Python owns private-table resolution and HEAD parity for both entry points.
-prepush_private_table_read() {
-  local library_root
+# The reader's exit status is a closed vocabulary: 0 table printed, 78 no table
+# declared (the neutral default), 1 present but untrusted. 78 is not a status
+# argparse (2), uv (2), a shell lookup failure (126, 127) or an uncaught Python
+# exception (1) can produce, so every failure of the reader itself, a missing uv
+# included, lands on the refusal side with its own diagnostic on stderr, and only
+# the reader's declaration reads as absent. PREPUSH_PRIVATE_TABLE_ABSENT_RC
+# carries the 78.
+PREPUSH_PRIVATE_TABLE_ABSENT_RC=78
+
+prepush_private_table_text() {
+  local library_root rc=0
   library_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || return 1
   (
     cd "$library_root" || exit 1
-    ONEX_WORKSPACE_CONFIG_ROOT="${ONEX_WORKSPACE_CONFIG_ROOT:-}" OMNI_HOME="${OMNI_HOME:-}" UV_FROZEN=1 \
+    ONEX_WORKSPACE_CONFIG_ROOT="${ONEX_WORKSPACE_CONFIG_ROOT:-}" UV_FROZEN=1 \
       uv run python -m scripts.hooks.pytest_full_suite_host_guard \
       --private-table "$PREPUSH_PRIVATE_TABLE_REL" "$@"
-  )
-}
-
-# rc=2 is absent/undeclared; rc=1 is present but untrusted, with its reason.
-prepush_private_table_text() {
-  prepush_private_table_read
+  ) || rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ] || rc=1
+  return "$rc"
 }
 
 prepush_private_table_status() {
-  prepush_private_table_read --status
+  prepush_private_table_text --status
 }
 
 # prepush_table_rows -- data rows only (comments and blanks dropped).
@@ -1675,7 +1682,7 @@ prepush_remote_run() {
   privfile="${localdir}/host_table_private.tsv"
   private_rc=0
   prepush_private_table_text > "$privfile" || private_rc=$?
-  if [ "$private_rc" -eq 2 ]; then
+  if [ "$private_rc" -eq "$PREPUSH_PRIVATE_TABLE_ABSENT_RC" ]; then
     rm -f "$privfile"
     privfile=""
   elif [ "$private_rc" -ne 0 ]; then

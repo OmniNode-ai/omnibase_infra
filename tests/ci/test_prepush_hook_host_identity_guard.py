@@ -649,6 +649,7 @@ def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> No
         stub.chmod(0o755)
 
     env = dict(os.environ)
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(tmp_path / "unconfigured-config-owner")
     for leaky in (
         "PREPUSH_FULL_SUITE",
         "PREPUSH_ALLOW_LOCAL_FULL_SUITE",

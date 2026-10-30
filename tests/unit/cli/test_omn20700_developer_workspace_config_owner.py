@@ -3,22 +3,20 @@
 """A fresh developer workspace finds its config owner without a private repo (OMN-20700).
 
 THE DEFECT. OMN-19743 moved the workspace config owner out of the registry root:
-``ONEX_WORKSPACE_CONFIG_ROOT`` names it, and with the variable unset the owner is
-the sibling ``../omnibase_internal`` -- a private repository the public
-onboarding never clones. The onboarding script (omniclaude
+``ONEX_WORKSPACE_CONFIG_ROOT`` names it. A fresh public developer workspace has no
+such deployment, and the onboarding script (omniclaude
 ``plugins/onex/skills/_bin/lab-onboarding.sh``, phase 2) writes the developer
 workspace's tier-1 config under ``<workspace>/.onex/workspace-config`` and exports
 the variable, but only in its own process and in the shell profile it writes. A
 shell that did not read that profile still binds the workspace root (the ``onex``
-wrapper derives ``OMNIBASE_PATH`` itself), so ``onex delegate`` looked for
-``../omnibase_internal``, found nothing, and refused with a remedy that pointed at
-the private repository.
+wrapper derives ``OMNIBASE_PATH`` itself).
 
-THE FIX. With the variable unset, a workspace whose sibling operator repository
-is absent takes the developer config directory the onboarding writes. A registry
-workspace -- one whose sibling exists -- is unchanged, and a bound root with no
-config anywhere is still refused (OMN-19193), now with a typed error naming the
-variable, the developer location and the onboarding step that writes it.
+THE RULE. The deployment declares its config root through the variable (its overlay
+or host installer sets it). With the variable unset, the developer config directory
+the onboarding writes is taken; no directory beside the workspace is ever guessed,
+and a bound root with no config anywhere is still refused (OMN-19193), with a typed
+error naming the variable, the developer location and the onboarding step that
+writes it.
 """
 
 from __future__ import annotations
@@ -33,7 +31,6 @@ from omnibase_infra.runtime import service_kernel
 from omnibase_infra.runtime.service_kernel import (
     WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH,
     resolve_embedded_runtime_config,
-    workspace_runtime_config_root,
 )
 
 pytestmark = pytest.mark.unit
@@ -81,7 +78,7 @@ def _unset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """A developer workspace: public clones only, no sibling operator repository."""
+    """A developer workspace: public clones only, no declared deployment config."""
     root = tmp_path / "code" / "omni"
     root.mkdir(parents=True)
     return root
@@ -94,38 +91,38 @@ def test_a_fresh_developer_workspace_resolves_the_config_onboarding_wrote(
     config, source = resolve_embedded_runtime_config(workspace_root=workspace)
     assert config.event_bus.type is EnumEventBusType.INMEMORY
     assert str(written) in source
-    assert "omnibase_internal" not in source
+    assert source.endswith(str(written) + ")") or str(written) in source
 
 
-def test_a_registry_workspace_still_takes_its_sibling_owner(workspace: Path) -> None:
-    sibling = workspace.parent / "omnibase_internal"
-    owner_config = _write(sibling, _REGISTRY_TIER1)
-    _write(workspace / ".onex" / "workspace-config", _DEVELOPER_TIER1)
-    assert workspace_runtime_config_root(workspace) == sibling.resolve()
-    config, source = resolve_embedded_runtime_config(workspace_root=workspace)
-    assert config.event_bus.lane == "dev"
-    assert str(owner_config) in source
-
-
-def test_a_registry_sibling_without_config_is_still_refused(workspace: Path) -> None:
-    """OMN-19193 is not weakened: a developer file never answers for a registry."""
-    (workspace.parent / "omnibase_internal").mkdir()
-    _write(workspace / ".onex" / "workspace-config", _DEVELOPER_TIER1)
-    with pytest.raises(ProtocolConfigurationError):
-        resolve_embedded_runtime_config(workspace_root=workspace)
-
-
-def test_the_variable_still_outranks_both(
+def test_a_registry_workspace_takes_its_declared_owner(
     workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     named = tmp_path / "named-owner"
     owner_config = _write(named, _REGISTRY_TIER1)
-    _write(workspace.parent / "omnibase_internal", _DEVELOPER_TIER1)
     _write(workspace / ".onex" / "workspace-config", _DEVELOPER_TIER1)
     monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(named))
     config, source = resolve_embedded_runtime_config(workspace_root=workspace)
     assert config.event_bus.lane == "dev"
     assert str(owner_config) in source
+
+
+def test_a_declared_owner_without_config_is_still_refused(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19193 is not weakened: a developer file never answers for a registry."""
+    (tmp_path / "named-owner").mkdir()
+    _write(workspace / ".onex" / "workspace-config", _DEVELOPER_TIER1)
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "named-owner"))
+    with pytest.raises(ProtocolConfigurationError):
+        resolve_embedded_runtime_config(workspace_root=workspace)
+
+
+def test_a_directory_beside_the_workspace_is_never_adopted(workspace: Path) -> None:
+    for neighbour in ("config", "neighbor", "workspace-config"):
+        _write(workspace.parent / neighbour, _REGISTRY_TIER1)
+    with pytest.raises(ProtocolConfigurationError) as exc:
+        resolve_embedded_runtime_config(workspace_root=workspace)
+    assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in str(exc.value)
 
 
 def test_no_owner_anywhere_is_a_typed_refusal_that_names_the_public_fix(

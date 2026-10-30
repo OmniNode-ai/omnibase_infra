@@ -17,10 +17,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+import omnibase_infra.handlers.handler_workspace_config_root_resolve as resolver
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.models.workspace import (
     ModelMaterializedWorkspaceRuntimeConfig,
+    ModelWorkspaceConfigRootRequest,
     ModelWorkspaceRuntimeConfigMaterialization,
     ModelWorkspaceRuntimeConfigSidecar,
 )
@@ -57,12 +59,11 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
         preserving an earlier successful materialization. Each file is replaced
         atomically, YAML first and provenance last, even if the SHA is unchanged.
         """
-        from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
         action = "locate runtime config repository"
         try:
             root = workspace_root.resolve()
-            source_root = workspace_runtime_config_root(root)
+            request = ModelWorkspaceConfigRootRequest(workspace_root=root)
+            source_root = resolver.HandlerWorkspaceConfigRootResolve().require(request)
             toplevel = self._git(source_root, "rev-parse", "--show-toplevel")
             if Path(os.fsdecode(toplevel).strip()).resolve() != source_root:
                 return ModelWorkspaceRuntimeConfigMaterialization(
@@ -70,13 +71,10 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
                     detail=f"Runtime config root {source_root} is not the repository root",
                 )
             action = f"resolve {SOURCE_REF}"
-            sha = (
-                self._git(
-                    source_root, "rev-parse", "--verify", f"{SOURCE_REF}^{{commit}}"
-                )
-                .decode("ascii")
-                .strip()
+            sha_bytes = self._git(
+                source_root, "rev-parse", "--verify", f"{SOURCE_REF}^{{commit}}"
             )
+            sha = sha_bytes.decode("ascii").strip()
             action = f"read {SOURCE_REF}:{SOURCE_PATH_IN_REPO}"
             config_bytes = self._git(
                 source_root, "show", f"{sha}:{SOURCE_PATH_IN_REPO}"
@@ -119,8 +117,6 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
         An unreadable sidecar is warned about and treated as an absent copy.
         Stale copies remain available, with freshness recorded in the outcome.
         """
-        from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
         contracts_dir = workspace_root / MATERIALIZED_CONTRACTS_RELATIVE_PATH
         config_path = contracts_dir / "runtime" / "runtime_config.yaml"
         sidecar_path = config_path.parent / MATERIALIZED_SIDECAR_NAME
@@ -135,9 +131,10 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
                 "Unreadable workspace runtime config sidecar %s: %s", sidecar_path, exc
             )
             return None
+        request = ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
+        resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
         if (
-            sidecar.source_repository
-            != str(workspace_runtime_config_root(workspace_root))
+            sidecar.source_repository != str(resolution.config_root)
             or sidecar.source_ref != SOURCE_REF
             or sidecar.source_path != SOURCE_PATH_IN_REPO
         ):

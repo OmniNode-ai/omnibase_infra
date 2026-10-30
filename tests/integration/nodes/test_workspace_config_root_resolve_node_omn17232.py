@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""The contract-routed resolver, kernel and pre-push guard agree on real trees."""
+
+from __future__ import annotations
+
+import importlib
+import os
+from pathlib import Path
+from typing import Protocol, cast
+
+import pytest
+import yaml
+from pydantic import BaseModel
+
+from omnibase_infra.models.workspace import (
+    ModelWorkspaceConfigRootRequest,
+    ModelWorkspaceConfigRootResolution,
+)
+from omnibase_infra.runtime.service_kernel import (
+    WorkspaceRuntimeConfigMissingError,
+    resolve_embedded_runtime_config,
+)
+from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
+
+pytestmark = pytest.mark.integration
+
+CONTRACT = (
+    Path(__file__).resolve().parents[3]
+    / "src/omnibase_infra/nodes/node_workspace_config_root_resolve_effect/contract.yaml"
+)
+
+
+class _Resolver(Protocol):
+    def handle(
+        self, request: ModelWorkspaceConfigRootRequest
+    ) -> ModelWorkspaceConfigRootResolution: ...
+
+
+def _load(module: str, name: str) -> object:
+    return getattr(importlib.import_module(module), name)
+
+
+@pytest.mark.parametrize("winner", ["environment", "developer", "unset"])
+def test_contract_kernel_and_guard_resolve_real_directory_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winner: str
+) -> None:
+    contract = yaml.safe_load(CONTRACT.read_text())
+    (route,) = contract["handler_routing"]["handlers"]
+    assert route["operation"] == "workspace_config_root.resolve"
+    handler_class = _load(route["handler"]["module"], route["handler"]["name"])
+    request_class = _load(
+        contract["input_model"]["module"], contract["input_model"]["name"]
+    )
+    output_class = _load(
+        contract["output_model"]["module"], contract["output_model"]["name"]
+    )
+    assert isinstance(handler_class, type)
+    assert isinstance(request_class, type) and issubclass(request_class, BaseModel)
+    assert request_class is ModelWorkspaceConfigRootRequest
+    assert isinstance(output_class, type)
+    assert output_class is ModelWorkspaceConfigRootResolution
+
+    workspace = tmp_path / "registry"
+    workspace.mkdir()
+    for neighbour in ("config", "neighbor", "workspace-config"):
+        (tmp_path / neighbour).mkdir()
+    developer = workspace / ".onex/workspace-config"
+    explicit = tmp_path / "explicit"
+    if winner != "unset":
+        developer.mkdir(parents=True)
+    if winner == "environment":
+        explicit.mkdir()
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(explicit))
+    else:
+        monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
+    monkeypatch.setenv("OMNI_HOME", str(workspace))
+    handler = cast("_Resolver", handler_class())
+    request = request_class.model_validate({"workspace_root": workspace})
+    assert isinstance(request, ModelWorkspaceConfigRootRequest)
+    result = handler.handle(request)
+    assert isinstance(result, output_class)
+    expected = {"environment": explicit, "developer": developer, "unset": None}[winner]
+    assert result.source == winner
+    assert result.config_root == (None if expected is None else expected.resolve())
+
+    # Real kernel refusal identifies exactly the selected owner's runtime file,
+    # or says that no config root is declared.
+    with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:
+        resolve_embedded_runtime_config(workspace_root=workspace)
+    if expected is None:
+        assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in str(exc.value)
+        assert "a config root (none is declared)" in str(exc.value)
+    else:
+        expected_file = expected.resolve() / "config/onex/runtime/runtime_config.yaml"
+        assert f"declares no working-tree runtime config at {expected_file}." in str(
+            exc.value
+        )
+    # The pre-push guard honours the explicit variable only, never the
+    # developer directory, and agrees with the handler under that policy.
+    guard_root = _workspace_config_root(dict(os.environ))
+    assert guard_root == (explicit.resolve() if winner == "environment" else None)
+    guard_policy = handler.handle(
+        ModelWorkspaceConfigRootRequest(
+            workspace_root=workspace,
+            environment=dict(os.environ),
+            allow_developer_config=False,
+        )
+    )
+    assert guard_policy.config_root == guard_root

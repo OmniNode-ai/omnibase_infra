@@ -10,12 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
-from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+from scripts.hooks.pytest_full_suite_host_guard import PRIVATE_TABLE_ABSENT_RC
 from tests.ci._prepush_private_table import (
     PRIVATE_TABLE_REL,
     SYNTHETIC_TABLE,
@@ -26,9 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LIBRARY = REPO_ROOT / "scripts/hooks/prepush_dispatch.sh"
 
 
-@pytest.mark.parametrize("root_source", ["explicit", "registry-sibling"])
 def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
-    tmp_path: Path, root_source: str
+    tmp_path: Path,
 ) -> None:
     """Real subprocesses resolve one authority, then refuse a forged identity."""
     hook_repo = write_hook_repo(tmp_path, REPO_ROOT)
@@ -40,16 +37,13 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
         if not key.startswith("PREPUSH_")
         and key not in {"ONEX_WORKSPACE_CONFIG_ROOT", "OMNI_HOME"}
     }
+    root = (tmp_path / "declared-config").resolve()
     env.update(
         OMNI_HOME=str(registry),
+        ONEX_WORKSPACE_CONFIG_ROOT=str(root),
         REPO_ROOT=str(hook_repo),
         PREPUSH_PRIVATE_TABLE_REL=PRIVATE_TABLE_REL,
         PYTHONDONTWRITEBYTECODE="1",
-    )
-    if root_source == "explicit":
-        env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(tmp_path / "declared-config")
-    root = workspace_runtime_config_root(
-        registry, environment=env, allow_developer_config=False
     )
     target = root / PRIVATE_TABLE_REL
     target.parent.mkdir(parents=True)
@@ -126,7 +120,7 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
 
     target.unlink()
     for result in (guard(), shell("prepush_private_table_text")):
-        assert result.returncode == 2
+        assert result.returncode == PRIVATE_TABLE_ABSENT_RC
         assert result.stdout == ""
     neutral = shell("prepush_table_rows")
     assert neutral.returncode == 0, neutral.stderr

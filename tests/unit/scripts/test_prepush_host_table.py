@@ -40,6 +40,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from scripts.hooks.pytest_full_suite_host_guard import PRIVATE_TABLE_ABSENT_RC
 from tests.ci._prepush_private_table import (
     HOST_A,
     HOST_B,
@@ -4000,27 +4001,19 @@ def test_remote_wrapper_without_transferred_table_clears_inherited_config_root(
     assert result.returncode == 0, result.stderr
 
 
-def test_shell_and_python_use_the_existing_shared_sibling_resolver(
-    tmp_path: Path,
-) -> None:
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+def test_shell_and_python_read_the_declared_root(tmp_path: Path) -> None:
     from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
-    registry = tmp_path / "registry"
-    registry.mkdir()
-    env = {"OMNI_HOME": str(registry)}
-    owner = workspace_runtime_config_root(
-        registry, environment=env, allow_developer_config=False
-    )
+    owner = tmp_path / "declared-root"
     table = owner / PRIVATE_TABLE_REL
     table.parent.mkdir(parents=True)
     table.write_text(SYNTHETIC_TABLE, encoding="utf-8")
-    assert _workspace_config_root(env) == owner
+    env = {"ONEX_WORKSPACE_CONFIG_ROOT": str(owner)}
+    assert _workspace_config_root(env) == owner.resolve()
     repo = _repo_with_table(tmp_path, TABLE.read_text(encoding="utf-8"))
     result = _run_driver(
         repo,
-        f'unset ONEX_WORKSPACE_CONFIG_ROOT\nOMNI_HOME="{registry}"\n'
-        "prepush_table_rows | cut -f1\n",
+        f'ONEX_WORKSPACE_CONFIG_ROOT="{owner}"\nprepush_table_rows | cut -f1\n',
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == [
@@ -4034,29 +4027,23 @@ def test_shell_and_python_use_the_existing_shared_sibling_resolver(
     ]
 
 
-def test_prepush_ignores_developer_config_while_runtime_keeps_its_default(
+def test_prepush_adopts_neither_developer_config_nor_a_neighbouring_directory(
     tmp_path: Path,
 ) -> None:
-    from omnibase_infra.runtime.service_kernel import (
-        DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH,
-        workspace_runtime_config_root,
-    )
     from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
     registry = tmp_path / "registry"
-    sibling = workspace_runtime_config_root(
-        registry, environment={"OMNI_HOME": str(registry)}, allow_developer_config=False
-    )
-    developer = registry / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
-    table = developer / PRIVATE_TABLE_REL
-    table.parent.mkdir(parents=True)
-    table.write_text(SYNTHETIC_TABLE, encoding="utf-8")
+    registry.mkdir()
+    for root in (
+        registry / ".onex" / "workspace-config",
+        tmp_path / "config",
+        tmp_path / "neighbor",
+    ):
+        table = root / PRIVATE_TABLE_REL
+        table.parent.mkdir(parents=True)
+        table.write_text(SYNTHETIC_TABLE, encoding="utf-8")
     env = {"OMNI_HOME": str(registry)}
-    assert (
-        workspace_runtime_config_root(registry, environment=env) == developer.resolve()
-    )
-    assert sibling != developer.resolve()
-    assert _workspace_config_root(env) == sibling
+    assert _workspace_config_root(env) is None
     repo = _repo_with_table(tmp_path, TABLE.read_text(encoding="utf-8"))
     result = _run_driver(
         repo,
@@ -4065,43 +4052,81 @@ def test_prepush_ignores_developer_config_while_runtime_keeps_its_default(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["local"]
+    assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in result.stderr
 
 
-def test_shared_resolver_uses_captured_environment_instead_of_process_settings(
+def test_the_guard_reads_the_captured_environment_not_the_process_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
     from scripts.hooks.pytest_full_suite_host_guard import _workspace_config_root
 
     registry = tmp_path / "registry"
     explicit = tmp_path / "explicit-config"
-    expected = workspace_runtime_config_root(
-        registry, environment={}, allow_developer_config=False
-    )
     monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "ambient-config"))
     assert (
         _workspace_config_root({"ONEX_WORKSPACE_CONFIG_ROOT": str(explicit)})
         == explicit.resolve()
     )
-    assert _workspace_config_root({"OMNI_HOME": str(registry)}) == expected
+    assert _workspace_config_root({"OMNI_HOME": str(registry)}) is None
+
+
+def _reader_with_stub_uv(tmp_path: Path, uv_body: str | None) -> str:
+    """Call the shell reader with a stub `uv` that exits as the body says.
+
+    With no body the reader runs on a PATH that holds only ``dirname``, so there
+    is no uv on any host, whatever is installed where.
+    """
+    stubs = tmp_path / "stub-bin"
+    stubs.mkdir()
+    if uv_body is not None:
+        uv = stubs / "uv"
+        uv.write_text(f"#!/bin/sh\n{uv_body}\n", encoding="utf-8")
+        uv.chmod(0o755)
+    else:
+        (stubs / "dirname").symlink_to(shutil.which("dirname") or "/usr/bin/dirname")
+    repo = _repo_with_table(tmp_path, TABLE.read_text(encoding="utf-8"))
+    body = (
+        f'( PATH="{stubs}"; prepush_private_table_text; echo RC=$? )\n'
+        if uv_body is None
+        else f'( PATH="{stubs}:$PATH"; prepush_private_table_text; echo RC=$? )\n'
+        f'( PATH="{stubs}:$PATH"; prepush_table_text > /dev/null; echo TABLE_RC=$? )\n'
+    )
+    result = _run_driver(repo, body)
+    return result.stdout + "\n--- stderr ---\n" + result.stderr
 
 
 @pytest.mark.parametrize(
-    "state", ["absent", "committed", "divergent", "uncommitted", "unreadable"]
+    ("uv_body", "reader_rc", "table_rc", "stderr_has"),
+    [
+        # The reader declares "no table": the neutral default, not an error.
+        ("exit 78", "78", "0", ""),
+        # Every failure of the reader itself is a refusal, never an absent table.
+        ("echo usage >&2; exit 2", "1", "1", "usage"),
+        ("echo boom >&2; exit 1", "1", "1", "boom"),
+        ("exit 127", "1", "1", ""),
+        ("kill -9 $$", "1", "1", ""),
+        # No uv at all cannot read as an absent table either; the shell says why.
+        (None, "1", None, "uv: command not found"),
+    ],
+    ids=["absent", "usage-error", "crash", "not-found", "killed", "no-uv"],
 )
-def test_private_table_cli_preserves_trust_refusals(tmp_path: Path, state: str) -> None:
-    """The deployed CLI owns the same trust decision used by both guards."""
+def test_only_the_readers_own_absent_status_reads_as_a_neutral_table(
+    tmp_path: Path,
+    uv_body: str | None,
+    reader_rc: str,
+    table_rc: str | None,
+    stderr_has: str,
+) -> None:
+    out = _reader_with_stub_uv(tmp_path, uv_body)
+    assert f"RC={reader_rc}\n" in out, out
+    if table_rc is not None:
+        assert f"TABLE_RC={table_rc}" in out, out
+    assert stderr_has in out.split("--- stderr ---", 1)[1], out
+
+
+def test_private_table_cli_with_no_declared_root_is_absent_and_says_so() -> None:
     import sys
 
-    root = _git_root_with_table(tmp_path, commit=state != "uncommitted")
-    table = root / PRIVATE_TABLE_REL
-    if state == "absent":
-        table.unlink()
-    elif state == "divergent":
-        table.write_text(table.read_text() + "# divergent\n")
-    elif state == "unreadable":
-        table.unlink()
-        table.mkdir()
     result = subprocess.run(
         [
             sys.executable,
@@ -4111,23 +4136,16 @@ def test_private_table_cli_preserves_trust_refusals(tmp_path: Path, state: str) 
             PRIVATE_TABLE_REL,
         ],
         cwd=REPO_ROOT,
-        env={**scrub_git_location_env(), "ONEX_WORKSPACE_CONFIG_ROOT": str(root)},
+        env={
+            k: v
+            for k, v in scrub_git_location_env().items()
+            if k not in {"ONEX_WORKSPACE_CONFIG_ROOT", "OMNI_HOME"}
+        },
         capture_output=True,
         text=True,
         check=False,
     )
-    if state == "committed":
-        assert result.returncode == 0, result.stderr
-        assert result.stdout == SYNTHETIC_TABLE
-    elif state == "absent":
-        assert result.returncode == 2, result.stderr
-        assert result.stdout == ""
-    else:
-        reason = {
-            "divergent": "differs between the working tree and HEAD",
-            "uncommitted": "no committed copy at HEAD",
-            "unreadable": "unreadable",
-        }[state]
-        assert result.returncode == 1
-        assert reason in result.stderr
-        assert result.stdout == ""
+    assert result.returncode == PRIVATE_TABLE_ABSENT_RC
+    assert result.stdout == ""
+    assert "ONEX_WORKSPACE_CONFIG_ROOT is unset" in result.stderr
+    assert "neutral host table" in result.stderr

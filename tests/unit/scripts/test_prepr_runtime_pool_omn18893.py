@@ -266,19 +266,25 @@ def test_the_pool_resolves_under_the_workspace_config_root(
         == (owner / "config" / "lab" / "prepr_runtime_pool.yaml").resolve()
     )
     assert pool.load_pool_config() == CFG
-    # with the override unset, the runtime's config owner of $OMNI_HOME owns it
-    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
+    # with the override unset, the developer config of $OMNI_HOME owns it
     monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT")
     home = tmp_path / "home"
-    home.mkdir()
+    developer = home / ".onex" / "workspace-config"
+    developer.mkdir(parents=True)
     monkeypatch.setenv("OMNI_HOME", str(home))
-    expected = workspace_runtime_config_root(home) / pool.POOL_CONFIG_RELATIVE
+    expected = developer.resolve() / pool.POOL_CONFIG_RELATIVE
     with pytest.raises(ValueError, match=re.escape(str(expected))):
         pool.load_pool_config()
     expected.parent.mkdir(parents=True)
     shutil.copyfile(POOL_FIXTURE, expected)
     assert pool.load_pool_config() == CFG
+    # with neither, nothing beside the workspace is adopted and the refusal names the variable
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (tmp_path / "neighbor").mkdir()
+    monkeypatch.setenv("OMNI_HOME", str(bare))
+    with pytest.raises(ValueError, match="ONEX_WORKSPACE_CONFIG_ROOT"):
+        pool.load_pool_config()
 
 
 def test_201_takes_part_only_through_its_pre_pr_slots() -> None:

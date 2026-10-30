@@ -36,6 +36,11 @@ PRIVATE_TABLE_REL = (
     "config/onex/overlays/prepush_hosts/prepush_hosts.omnibase_infra.tsv"
 )
 _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+# Exit status of the private-table CLI when no table is declared. It is not 2
+# (argparse usage errors and uv's own failures exit 2) and not 1 (a trust
+# refusal or an uncaught exception): the shell reads only this status as the
+# neutral default and refuses every other nonzero status.
+PRIVATE_TABLE_ABSENT_RC = 78
 
 # Legacy env override -> host-table row label. An override REPLACES the row it
 # names; it never ADDS a hostname to the designated set. That distinction is
@@ -60,17 +65,15 @@ class HostTableError(ValueError):
     """A present host table cannot be trusted."""
 
 
+# Pre-push honours the environment variable only, with the same rule as
+# HandlerWorkspaceConfigRootResolve (non-blank value, resolved); a test holds the
+# two readers equal. It is read directly here because the CLI also runs where the
+# package is not installed: the hosted-runner artifact probe and a remote leg's
+# target before sync.
 def _workspace_config_root(env: dict[str, str] | os._Environ[str]) -> Path | None:
-    """Pre-push permits explicit config or the registry sibling only."""
-    if configured := env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip():
-        return Path(configured).resolve()
-    if registry := env.get("OMNI_HOME", "").strip():
-        from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
-
-        return workspace_runtime_config_root(
-            Path(registry), environment=env, allow_developer_config=False
-        )
-    return None
+    """The explicit config root, or None when the deployment declares none."""
+    configured = env.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
+    return Path(configured).resolve() if configured else None
 
 
 def _table_text(root: Path, relative: str, *, private: bool) -> str | None:
@@ -295,15 +298,13 @@ def enforce(config: object, full_suite_target: str) -> None:
         pytest.exit(f"direct full-suite pytest invocation refused: {exc}", returncode=1)
     target_hostname = all_designated[0] if all_designated else ""
     additional_hostnames = tuple(all_designated[1:])
-    if (
-        full_suite_host_violation_message(
-            host=host,
-            target_hostname=target_hostname,
-            additional_target_hostnames=additional_hostnames,
-            override_authorized=False,
-        )
-        is None
-    ):
+    message = full_suite_host_violation_message(
+        host=host,
+        target_hostname=target_hostname,
+        additional_target_hostnames=additional_hostnames,
+        override_authorized=False,
+    )
+    if message is None:
         return
     # Host mismatch. Only NOW look for an override -- resolving one has side
     # effects (it spends a grant and writes a receipt), so it must never run on
@@ -312,14 +313,6 @@ def enforce(config: object, full_suite_target: str) -> None:
         context=f"direct full-suite pytest invocation on host '{host}'"
     ):
         return
-    message = full_suite_host_violation_message(
-        host=host,
-        target_hostname=target_hostname,
-        additional_target_hostnames=additional_hostnames,
-        override_authorized=False,
-    )
-    assert message is not None
-
     pytest.exit(message, returncode=1)
 
 
@@ -337,6 +330,13 @@ def main() -> None:
             raise SystemExit(1)
         print(root)
         return
+    if root is None:
+        print(
+            "ONEX_WORKSPACE_CONFIG_ROOT is unset: using the shipped neutral host "
+            "table (one disabled local row); the deployment supplies its table "
+            "through that variable",
+            file=sys.stderr,
+        )
     try:
         table = _private_table_text(os.environ, args.private_table)
     except HostTableError as exc:
@@ -351,7 +351,7 @@ def main() -> None:
         else:
             print(f"deployment host table: {root}/{args.private_table}")
     elif table is None:
-        raise SystemExit(2)
+        raise SystemExit(PRIVATE_TABLE_ABSENT_RC)
     else:
         print(table, end="")
 

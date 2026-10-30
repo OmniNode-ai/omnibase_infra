@@ -218,30 +218,29 @@ def default_pool_config() -> Path:
     """The pool table under the workspace config root, or a loud refusal.
 
     The root is the runtime's workspace config owner for ``$OMNI_HOME``
-    (``workspace_runtime_config_root``: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when set).
+    (``HandlerWorkspaceConfigRootResolve``: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when
+    set, else the developer workspace config).
     There is no in-repo fallback: a fork with no overlay is told how to supply
     one instead of being pointed at our lab.
     """
-    from omnibase_infra.runtime.service_kernel import (
-        ENV_WORKSPACE_CONFIG_ROOT,
-        workspace_runtime_config_root,
-    )
+    import omnibase_infra.handlers.handler_workspace_config_root_resolve as resolver
+    from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 
-    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
-    registry_root = os.environ.get("OMNI_HOME", "").strip()
-    if not configured and not registry_root:
+    registry = os.environ.get("OMNI_HOME", "").strip()
+    request = ModelWorkspaceConfigRootRequest(workspace_root=Path(registry or "."))
+    resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
+    if resolution.config_root is None:
         raise ValueError(
             f"the pre-merge runtime pool is not configured: set "
-            f"{ENV_WORKSPACE_CONFIG_ROOT} to the directory that holds "
+            f"{resolver.ENV_WORKSPACE_CONFIG_ROOT} to the directory that holds "
             f"{POOL_CONFIG_RELATIVE}, or pass --config <path>"
         )
-    root = workspace_runtime_config_root(Path(registry_root or "."))
-    path = root / POOL_CONFIG_RELATIVE
+    path = resolution.config_root / POOL_CONFIG_RELATIVE
     if not path.is_file():
         raise ValueError(
             f"the pre-merge runtime pool is not configured: {path} does not exist; "
             f"write your lab's pool table there (schema: this script's "
-            f"load_pool_config), set {ENV_WORKSPACE_CONFIG_ROOT} to the directory "
+            f"load_pool_config), set {resolver.ENV_WORKSPACE_CONFIG_ROOT} to the directory "
             f"that holds {POOL_CONFIG_RELATIVE}, or pass --config <path>"
         )
     return path

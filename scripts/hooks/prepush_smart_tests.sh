@@ -805,7 +805,7 @@ prepush_wait_for_lab_capacity() {
 }
 
 guard_full_suite_host() {
-  local host lc_host label heavy_what designated policy
+  local host lc_host label heavy_what designated policy table_reason
   # OMN-15408: the caller names WHICH heavyweight run is being guarded, so the
   # refusal names the real cause. Default preserves the OMN-15059 wording for
   # the flag-driven escalation call sites, which pass no argument.
@@ -833,8 +833,8 @@ guard_full_suite_host() {
   # An UNREADABLE table fails CLOSED, on the same reasoning as the unresolvable
   # hostname above: heavy runs are routed by host identity, and identity that
   # cannot be resolved cannot be routed.
-  if ! prepush_table_text > /dev/null 2>&1; then
-    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so no host can be identified as a designated gate host for ${heavy_what}" \
+  if ! table_reason="$(prepush_table_text 2>&1 > /dev/null)"; then
+    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so no host can be identified as a designated gate host for ${heavy_what}: ${table_reason}" \
         "the table is read from the COMMITTED tree so an uncommitted row cannot self-designate this machine as an authorizing gate host. Commit ${PREPUSH_HOST_TABLE_REL} (or, if you have edited it, commit the edit so HEAD and the working tree agree), then re-push"
   fi
   log "$(prepush_private_table_status)"
@@ -1319,15 +1319,15 @@ assert_no_integration_path_runs_locally() {
 }
 
 place_integration_selection_offbox() {
-  local heavy_what="$1" host
+  local heavy_what="$1" host table_reason
   host="$(hostname -s 2> /dev/null || true)"
   if [ -z "$host" ]; then
     die "could not determine the local hostname while placing ${heavy_what}" \
         "placement is decided by host identity (OMN-15059) and an unidentifiable host cannot be routed. Fix 'hostname -s' (macOS: 'sudo scutil --set HostName <name>'; Linux: 'hostnamectl set-hostname <name>')"
   fi
   PREPUSH_LC_HOST="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
-  if ! prepush_table_text > /dev/null 2>&1; then
-    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so ${heavy_what} cannot be placed" \
+  if ! table_reason="$(prepush_table_text 2>&1 > /dev/null)"; then
+    die "the pre-push host table (${PREPUSH_HOST_TABLE_REL}) could not be read from HEAD, so ${heavy_what} cannot be placed: ${table_reason}" \
         "the table is read from the COMMITTED tree so an uncommitted row cannot self-designate a placement target. Commit ${PREPUSH_HOST_TABLE_REL}, then re-push"
   fi
   # A service-dependent integration suite needs a container runtime on the
