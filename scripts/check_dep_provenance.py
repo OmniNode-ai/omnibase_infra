@@ -2,172 +2,37 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Dep-provenance gate — forbid first-party git-source overrides on dev/main.
+"""Dependency provenance checks for first-party uv sources on dev/main.
 
-Root cause this closes (OMN-13873): omnibase_infra PR #2184 merged to dev
-carrying ``[tool.uv.sources]`` git-rev overrides pinning ``omnibase-core`` /
-``omnibase-spi`` to UNRELEASED commits. Every CI check passed because CI
-resolved those exact commits and ran green against them — the breakage is
-dependency *provenance*, not runtime behavior, so no test catches it. This is a
-pure static provenance gate: it FAILS closed if any PyPI-published first-party
-dependency is sourced from git instead of PyPI.
+The default offline mode (``find_violations``) refuses first-party git overrides
+unless their line has a nonempty ``# raw-override-ok: <ticket>`` token or their
+only ref is a dev-merge tag, ``dev-YYYYMMDDHHMMSS-<sha12>`` (OMN-17427).
+It exits 0 for admitted sources and 1 for violations or missing/invalid input.
 
-Forbidden first-party deps (both hyphen and underscore spellings):
+``--check-lineage`` additionally compares a git pin's ``src/`` tree with its
+exact declared release, regardless of escape tokens; ranges fail. Dev-merge
+tags are skipped because core's ``dev_tag_lineage`` validator owns their tag
+identity, dev ancestry, version and adjacent lock verification. CLI resolution
+tries the runner's git mirror, then GitHub REST; unresolved facts fail closed.
+It exits 0 on success and 1 on violations. ``--allow-undetermined-lineage``
+warns locally on unresolved facts but is refused under CI with exit 2.
 
-    omnibase-core   omnibase-spi   omnibase-compat
+``--check-token-expiry`` additionally refuses expired ``until=YYYY-MM-DD``
+escape tokens and tokens citing closed Linear tickets. Without LINEAR_API_KEY,
+ticket lookup is skipped only when an until date already enforces expiry;
+a token with neither is a violation. It exits 0 on success and 1 on violations.
 
-A ``[tool.uv.sources]`` entry for any of the above with a ``git`` / ``rev`` /
-``branch`` / ``tag`` key is a forbidden override and fails the gate.
+``--check-movable PACKAGE`` runs alone: active git overrides prevent a release
+cascade except for dev-merge tags, which the cascade verifies with core before
+removal. With ``--target-version VERSION``, declared constraints must also
+admit that version. It exits 0 if movable and 1 on violations or invalid input.
 
-Escape hatch (Rule-10 style): a forbidden source line may carry an inline
-comment ``# raw-override-ok: <ticket>`` with a NON-EMPTY token. This exempts the
-single line. An empty token (``# raw-override-ok:`` with nothing after) does NOT
-exempt — the gate still fails. Because the TOML parser drops comments, the token
-is detected by reading the raw source line for each flagged package.
-
-Exit codes:
-    0  — no forbidden first-party git-source override present
-    1  — a forbidden override was found (or a hard error, e.g. missing file)
-
-The override-forbid check above (``find_violations`` / the default CLI
-invocation with no flags) is deterministic and offline — it makes no network
-calls. It is unchanged and remains what pre-commit and
-``dep-provenance-gate.yml`` invoke by default.
-
-Content-lineage check (OMN-15604, opt-in via ``--check-lineage``)
--------------------------------------------------------------------
-The gate above is SHAPE-only: it forbids a git source unconditionally, but a
-line carrying a well-formed ``# raw-override-ok: <ticket>`` token is exempt
-from it *unconditionally and forever* — the token is validated only for
-non-emptiness, never against whether the pinned rev's content actually matches
-the PyPI version declared alongside it. Live incident this reproduces:
-``omnibase_infra@dev`` declared ``omnibase-core==0.46.8`` while
-``[tool.uv.sources]`` pinned git rev ``3d51b047`` (escaped via
-``# raw-override-ok: OMN-15414``) whose ``src/`` tree measurably DIFFERED from
-released tag ``v0.46.8`` (9 files, +381/-27 lines) — a version string that was a
-label on a tree it did not describe, invisible to every existing gate.
-
-``find_lineage_violations`` closes that gap: for every forbidden package that
-has BOTH a ``==X.Y.Z`` version constraint (in ``project.dependencies`` or
-``[tool.uv] override-dependencies``) AND a ``[tool.uv.sources]`` git override,
-it resolves the ``src/`` git tree object of the pinned ref and of released tag
-``vX.Y.Z`` via the GitHub REST API (no local clone required — same technique as
-``scripts/ci/check_pin_reachability.py``) and fails if the two tree SHAs
-differ. This runs **regardless of a ``# raw-override-ok:`` token** — the token
-exempts a line from the "forbid git source" rule only; it was never designed to
-(and must not) exempt a pin from matching the content it claims to build.
-
-Because tree resolution requires network access, this is opt-in
-(``--check-lineage``) and never runs from pre-commit (offline hook) or the
-default no-args CLI invocation. It fails closed on network failure — an
-unresolved rev/tag is reported as a lineage violation, not silently skipped —
-unless ``--allow-undetermined-lineage`` is passed, which is refused when ``CI``
-is set (same posture as ``check_pin_reachability.py``).
-
-**Merge-path resolution is hermetic (OMN-16096).** ``--check-lineage`` resolves
-through ``resolve_src_tree_sha_hermetic``, which tries the OMN-16053
-host-level git mirror first (``git://172.18.0.1:9418/<repo>.git``, reachable
-over the self-hosted runner's own docker bridge, never leaving the runner
-host) and falls back to the live GitHub REST API (``resolve_src_tree_sha``)
-only when the mirror itself has no route or does not carry the requested
-repo/ref. This closes the defect that produced two burned canary attempts on
-PR #2758 (`transport error: The read operation timed out` resolving a commit
-via the live API during an egress-degraded window): the merge-required gate
-no longer needs github.com to be reachable on the fleet where the mirror is
-served. The pure live-API half of this check (proving the REST resolver
-against real known commits) still exists, unchanged, as
-``tests/integration/ci/test_dep_provenance_lineage_live_omn15604.py`` — it now
-runs on a scheduled, non-required canary
-(``.github/workflows/dep-provenance-lineage-live-canary.yml``) that alerts on
-failure instead of gating merges.
-
-A non-exact declared constraint (a range like ``>=0.46.8,<0.47.0``, or no
-declared constraint at all) sitting next to a git override is ALSO a lineage
-violation, not a free pass: an earlier, single-operator-only version lookup
-recognized only ``pkg==X.Y.Z``, so loosening the constraint from ``==`` to a
-range was enough to make ``find_lineage_violations`` skip the package entirely
-while ``find_violations`` still exempted the same line via its escape token —
-a complete bypass of both checks. ``_declared_version_specs`` closes that gap
-by capturing every requirement shape (see below), so a range/unversioned
-constraint is now itself flagged rather than silently skipped. There is no
-released tree that a range constraint unambiguously names, so it cannot be
-lineage-verified; the constraint must be tightened to an exact pin (or the
-override deleted) before this check can prove anything about it.
-
-Escape-token reconciliation (OMN-15604 AC3, opt-in via ``--check-token-expiry``)
----------------------------------------------------------------------------------
-The ``# raw-override-ok: <ticket>`` escape token in ``find_violations`` never
-expires and never checks whether ``<ticket>`` is still open. ``
-find_escape_token_violations`` closes that gap two ways, either of which fails
-the line:
-
-1. an explicit ``until=YYYY-MM-DD`` suffix on the token
-   (``# raw-override-ok: OMN-15414 until=2026-09-01``) that has passed, or
-2. the cited ticket resolves (via the Linear API, ``LINEAR_API_KEY``) to a
-   Done/Cancelled/Duplicate status — a closed ticket is no longer a live
-   justification for an unconditional override.
-
-Like the escape-token check itself, LINEAR_API_KEY is optional infrastructure
-(same graceful-degradation posture as ``scripts/validation/check_stale_todos.py``
-/ ``.github/workflows/stale-todo-gate.yml``): when it is unset, ticket-status
-resolution is skipped (not failed) so a repo that has never provisioned the
-secret is not permanently red. The ``until=`` date check requires no network
-and always runs.
-
-**Mandatory-``until=`` residual (closed here).** ``LINEAR_API_KEY`` is not
-provisioned as a repo *or* org secret anywhere in OmniNode-ai as of this
-writing (verified via ``gh secret list`` / ``gh api orgs/.../actions/secrets``)
--- so condition 2 above never actually fires in any live enforcing
-environment; it is dead code in production, not merely optional. Left as
-originally shipped, a token with no ``until=`` suffix (e.g. the literal
-``# raw-override-ok: OMN-15414`` from the live incident this ticket names)
-would fall straight through both conditions and pass unconditionally and
-forever -- the exact defect AC3 exists to close, reproduced under the exact
-live incident token. A token that supplies neither a live ``until=`` date nor
-a resolvable ticket status is therefore *itself* a violation: graceful
-degradation on a missing ``LINEAR_API_KEY`` only applies when the ``until=``
-date is present and did the enforcing (see ``find_escape_token_violations``).
-
-Cascade-movability check (OMN-15604 AC4, ``--check-movable <PACKAGE>``)
---------------------------------------------------------------------------
-``uv lock --upgrade-package <pkg>==<version>`` cannot move a
-``[tool.uv.sources]`` git-source override — uv always prefers an explicit
-source override over registry resolution, so re-locking against the SAME
-override typically re-resolves to a byte-identical ``uv.lock``. The automated
-cascade in ``.github/workflows/dependency-cascade.yml`` reads that as
-"no lockfile changes — already on latest", which is a false-positive SKIP:
-the repo is not on latest, it is still stuck on the git pin.
-``find_unmovable_cascade_targets`` gives that workflow (or any caller) an
-explicit, actionable failure instead of a silent no-op: it fails when
-``PACKAGE`` currently has an active ``[tool.uv.sources]`` git override,
-regardless of a ``raw-override-ok`` token (the token was never designed to
-exempt a cascade's ability to move the pin either).
-
-**Range-cap detection (OMN-16926, opt-in via ``--target-version``).** The
-git-override channel above was the ONLY immovability channel this check
-detected — it did not detect a range cap in ``[project.dependencies]`` (e.g.
-``omnibase-core>=0.46.13,<0.47.0``). ``uv lock --upgrade-package`` cannot
-cross that cap either: it re-resolves within the declared constraint and
-silently produces the same "no lockfile changes — already on latest"
-false-positive SKIP. Live blast radius: on the omnibase_core v0.47.0
-cascade, 5 of 6 downstream legs were capped below the release and all
-misreported as already-on-latest. When ``target_version`` is supplied,
-``find_unmovable_cascade_targets`` additionally resolves ``PACKAGE``'s
-declared requirement in ``[project.dependencies]`` (any shape — an exact
-pin, a range, or a PEP 440 exclusion) via ``packaging.specifiers.SpecifierSet``
-and fails, naming the cap and the target version, when the constraint does
-not admit it. A caller that omits ``target_version`` gets the pre-OMN-16926
-behavior unchanged — git-override detection only, since the range-cap
-comparison has nothing to compare against without a target.
-
-Usage::
-
-    uv run python scripts/check_dep_provenance.py
-    uv run python scripts/check_dep_provenance.py --pyproject pyproject.toml
-    uv run python scripts/check_dep_provenance.py --check-lineage
-    uv run python scripts/check_dep_provenance.py --check-token-expiry
-    uv run python scripts/check_dep_provenance.py --check-movable omnibase-core
-    uv run python scripts/check_dep_provenance.py --check-movable omnibase-core --target-version 0.47.0
+``--drop-dev-tag-override PACKAGE`` runs alone after the caller verifies the
+package with core. It removes only a single-line dev-merge tag source, preserving
+all other bytes and requiring the parsed result to equal the original TOML
+minus that source. It exits 0 for removal or absence, and 1 for any other shape
+or invalid input, without changing the file on refusal. No verification or
+network access occurs in this mode. Argument errors exit 2 in every mode.
 """
 
 from __future__ import annotations
@@ -271,6 +136,17 @@ def _normalize(pkg: str) -> str:
     return pkg.strip().strip('"').strip("'").replace("_", "-").lower()
 
 
+def _is_dev_merge_tag(attrs: dict[str, object]) -> bool:
+    """Recognize the sanctioned ref shape; core verifies its identity."""
+    tag = attrs.get("tag")
+    return (
+        isinstance(attrs.get("git"), str)
+        and isinstance(tag, str)
+        and re.fullmatch(r"dev-\d{14}-[0-9a-f]{12}", tag) is not None
+        and not ({"rev", "branch"} & attrs.keys())
+    )
+
+
 def _uv_sources_block(text: str) -> str | None:
     """Return the raw text of the [tool.uv.sources] block, or None if absent."""
     block_m = _UVS_BLOCK_RE.search(text)
@@ -327,7 +203,7 @@ def find_violations(text: str) -> list[str]:
 
     An empty list means the file is clean (exit 0). A non-empty list means the
     gate fails (exit 1). Lines carrying a valid `# raw-override-ok: <token>`
-    escape are excluded.
+    escape or a dev-merge tag ref are excluded; core verifies tag identity.
     """
     block = _uv_sources_block(text) or text
 
@@ -341,8 +217,8 @@ def find_violations(text: str) -> list[str]:
         if pkg not in _FORBIDDEN_PACKAGES:
             continue
         git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
-        if not git_keys:
-            # A non-git source (unusual, but not a provenance violation).
+        if not git_keys or _is_dev_merge_tag(attrs):
+            # Registry sources and core-verified dev-merge tag shapes are admitted.
             continue
 
         raw_line = _line_for_package(block, pkg)
@@ -644,6 +520,7 @@ def find_lineage_violations(
     that let a `>=0.46.8,<0.47.0`-style loosening evade this check entirely
     while `find_violations` still exempted the same line via its token.
 
+    Dev-merge tag refs are skipped; core's dev_tag_lineage owns their identity.
     `resolve` is injectable for hermetic unit tests; it defaults to the live
     `resolve_src_tree_sha`, which calls the GitHub REST API.
     """
@@ -660,6 +537,8 @@ def find_lineage_violations(
     violations: list[str] = []
     for pkg, attrs in sources.items():
         if pkg not in _FORBIDDEN_PACKAGES:
+            continue
+        if _is_dev_merge_tag(attrs):
             continue
         git_url = attrs.get("git")
         if not isinstance(git_url, str):
@@ -987,6 +866,7 @@ def find_unmovable_cascade_targets(
     """Return a violation message if `package` cannot be moved by a
     dependency cascade (OMN-15604 AC4, extended OMN-16926).
 
+    Dev-merge tag refs yield to core verification and removal in the cascade.
     Two independent immovability channels, checked in this order:
 
     1. **Git-source override** (OMN-15604 AC4): `uv lock --upgrade-package
@@ -1025,7 +905,7 @@ def find_unmovable_cascade_targets(
     attrs = sources.get(pkg)
     if attrs is not None:
         git_keys = sorted(_GIT_SOURCE_KEYS & set(attrs))
-        if git_keys:
+        if git_keys and not _is_dev_merge_tag(attrs):
             keys_desc = ", ".join(f"{k}={attrs[k]!r}" for k in git_keys)
             return [
                 f"{pkg}: pinned via [tool.uv.sources] git override "
@@ -1051,6 +931,40 @@ def find_unmovable_cascade_targets(
 
     violation = _range_cap_violation(pkg, spec_str, target_version)
     return [violation] if violation else []
+
+
+def drop_dev_tag_override(text: str, package: str) -> str:
+    """Remove one single-line source without touching any neighbouring bytes."""
+    pkg = _normalize(package)
+    entries = _parse_uv_source_entries(text)
+    parsed = tomllib.loads(text)
+    sources = parsed
+    for part in ("tool", "uv", "sources"):
+        sources = sources.get(part, {}) if isinstance(sources, dict) else {}
+    if not isinstance(sources, dict):
+        raise ValueError("tool.uv.sources must be a table")
+    keys = [key for key in sources if _normalize(key) == pkg]
+    if not keys:
+        return text
+    attrs = entries.get(pkg, {})
+    block = _uv_sources_block(text)
+    raw_line = _line_for_package(block, pkg) if block is not None else None
+    if len(keys) != 1 or not _is_dev_merge_tag(attrs) or raw_line is None:
+        raise ValueError(f"{pkg}: expected one single-line dev-merge tag source")
+    if _parse_uv_source_entries("[tool.uv.sources]\n" + raw_line) != {pkg: attrs}:
+        raise ValueError(f"{pkg}: source is not a self-contained single-line entry")
+    match = _UVS_BLOCK_RE.search(text)
+    assert match is not None and block is not None
+    line = next(
+        line
+        for line in block.splitlines(keepends=True)
+        if line.rstrip("\r\n") == raw_line
+    )
+    result = text[: match.start(1)] + block.replace(line, "", 1) + text[match.end(1) :]
+    del sources[keys[0]]
+    if tomllib.loads(result) != parsed:
+        raise ValueError(f"{pkg}: removing source would change other TOML values")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1133,6 +1047,11 @@ def main(argv: list[str] | None = None) -> int:
             "OMN-16926 behavior). Has no effect without --check-movable."
         ),
     )
+    parser.add_argument(
+        "--drop-dev-tag-override",
+        metavar="PACKAGE",
+        help="Remove a single-line dev-merge tag source after caller verification.",
+    )
     args = parser.parse_args(argv)
 
     in_ci = bool(os.environ.get("CI"))
@@ -1151,6 +1070,19 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.drop_dev_tag_override:
+        try:
+            original = pyproject_path.read_bytes()
+            result = drop_dev_tag_override(
+                original.decode("utf-8"), args.drop_dev_tag_override
+            )
+            if result.encode("utf-8") != original:
+                pyproject_path.write_bytes(result.encode("utf-8"))
+        except (ValueError, OSError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        return 0
 
     if args.check_movable:
         text = pyproject_path.read_text()
@@ -1171,9 +1103,9 @@ def main(argv: list[str] | None = None) -> int:
             else ""
         )
         print(
-            f"OK: {args.check_movable} has no [tool.uv.sources] git override "
+            f"OK: {args.check_movable} has no blocking [tool.uv.sources] git override "
             f"and no excluding pyproject.toml range cap{target_desc} -- "
-            "movable by a dependency cascade."
+            "movable after core verifies and the cascade drops any dev-merge tag source."
         )
         return 0
 

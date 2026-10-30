@@ -6,6 +6,15 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn17427-create-topics-responses
+    statement: Topic provisioning classifies returned Kafka CreateTopics errors before recording creation and confirms only broker-present topics.
+    acceptance:
+      - id: AC17427545601
+        statement: A partition-ceiling response aborts the pass, names the held partitions and leaves refused topics absent from the creation cache and readiness result.
+      - id: AC17427545602
+        statement: A broker with capacity creates and confirms every contract topic in its physical namespace, and a second pass sends no CreateTopics requests.
+      - id: AC17427545603
+        statement: Returned already-exists responses count as existing, invalid replication factors fail closed and other returned errors count as failed rather than created.
   - id: req-omn17427-reconcile-staging-lock
     statement: Dispatch venv staging excludes concurrent writers and releases its lock when the reconciler exits.
     acceptance:
@@ -674,6 +683,23 @@ requirements:
         statement: A throttled keyed run is retried after 45 seconds and then 90 seconds at most; the final run is graded, non-throttle failures are not retried, and three throttled runs still fail.
       - id: AC17427544203
         statement: Earlier throttled runs remain in the observation record and their traces are graded by no_omninode; the key value never appears in the record after a retry, and a captured throttled receipt is recognized as retryable.
+  - id: req-omn17427-dev-tag-lineage
+    statement: Core's dev_tag_lineage validator verifies dev-merge tag identity, dev ancestry, declared version and adjacent lock identity in CI and per package in the cascade, refusing unresolved facts; infra admits only the sanctioned tag-only ref shape and skips it in release-tree lineage.
+    acceptance:
+      - id: AC17427630001
+        statement: 'Dev-merge tag sources pass the offline shape check and never call the release-tree resolver; rev, branch and non-dev tag sources retain the existing checks -- falsifier: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov; fails at the merge base'
+  - id: req-omn17427-movable-dev-tag
+    statement: Infra admits the dev-merge tag shape for cascade movability; the cascade calls core dev_tag_lineage for the package immediately before dropping its single-line source and resolving a release lock, preserving every unrelated byte.
+    acceptance:
+      - id: AC17427630003
+        statement: 'The sanctioned shape is movable, release range caps still apply, and dropping a source preserves neighbours, comments, other tables and line endings; absence is a no-op and every other shape is refused without changing the file -- falsifier: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov; fails at the merge base'
+  - id: req-omn17427-slot-build-kind
+    statement: The rendered-slot verifier admits the image-build service the way compose renders it, and only that kind.
+    acceptance:
+      - id: AC17427004001
+        statement: 'AC17427004001: the verifier accepts the build-only dev-lane-infra-runtime-image as docker compose config renders it for slot 1 (a build section of context, dockerfile and args, a null command and a null entrypoint, scale 0, the dev network, the prepr profile) -- falsifier: uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q fails at the merge base'
+      - id: AC17427004002
+        statement: 'AC17427004002: the verifier still refuses a build section with a network, ssh, secrets, additional_contexts or target key, a command or an entrypoint with a value, any other attribute, a scale other than 0, and a second build-only service -- falsifier: the same file, each case planted'
 evidence_requirements:
   - kind: tests
     description: The check_dev_broker function is extracted from the deployed reporter and driven through its inspect and clock seams with the measured 2026-10-23 incident line; nothing reaches Docker or the host.
@@ -893,6 +919,38 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn17427-topic-ceiling-wire
+    description: Real aiokafka admin methods and encoded then decoded Kafka responses exercise contract discovery, capacity refusal, cache contents, cleanup and readiness. The network boundary is synthetic; no live broker is claimed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k ceiling
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545601]
+  - id: dod-omn17427-topic-capacity-control
+    description: The capacity control provisions three contract topics, confirms them through metadata and reads the second pass without another creation request. Paired with the ceiling refusal, it proves successful creation is conditional on broker capacity and fails against the provisioner that records refused topics as created.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k "capacity_control or ceiling"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545602]
+  - id: dod-omn17427-topic-error-classification
+    description: Real aiokafka returned wire errors exercise the existing already-exists, replication-policy and best-effort failure paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q -k returned_wire_errors
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545603]
+  - id: dod-omn17427-topic-responses-deploy
+    description: Hosted-runner deploy check of the committed provisioner and real aiokafka response path using synthetic network replies. Requires no Docker daemon, credentials or live lane and does not claim a deployed broker readback.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/event_bus/test_topic_provisioner_refusal_integration_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427545601, AC17427545602, AC17427545603]
   - id: dod-omn17427-pr5263-staging-lock
     description: The real reconciler runs against temporary workspace shims with live, foreign and dead lock holders; the tests inspect staging contents, lock ownership and release.
     source: manual
@@ -3112,3 +3170,47 @@ dod_evidence:
       - AC17427544201
       - AC17427544202
       - AC17427544203
+  - id: dod-omn17427-dev-tag-lineage
+    description: Pure shape admission and release-tree resolver exclusion tests; identity verification is owned by core dev_tag_lineage invoked by CI and the cascade. The new test file fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630001]
+  - id: dod-omn17427-movable-dev-tag
+    description: Pure cascade movability and byte-preserving removal tests, including refusal controls. Core verifies the package before the cascade removes its source and locks the release. The new test file fails at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_check_dep_provenance_dev_tag_shape_omn17427.py -n 0 -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427630003]
+  - id: dod-omn17427-slot-build-kind-render
+    description: Renders the infra, dev-lane and prepr compose chain for slot 1 with synthetic inputs and feeds the build-only service to the verifier. Fails at the merge base, whose allowed keys exclude build. Needs no daemon, credential or lane manifest.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'real_render or lab_host_refused'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004001
+  - id: dod-omn17427-slot-build-kind-bounds
+    description: Plants each build-time escape, each valued command or entrypoint, each extra attribute, a nonzero scale and a second build service. Each extra-attribute case requires a passing control and exactly the diagnostic naming that key. Runs independently of sibling test modules and Docker; fails at the merge base for the build-section and exact extra-attribute diagnostics.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'not real_render'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004002
+  - id: dod-omn17427-slot-build-kind-deploy
+    description: Hosted-runner deploy check exercises the rendered build-only shape and its refusal bounds against the verifier with synthetic service data. Requires no Docker client, daemon, lane manifest or credentials; does not claim a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/scripts/test_prepr_verify_rendered_build_kind_omn17427.py -q -k 'not real_render'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427004001
+      - AC17427004002

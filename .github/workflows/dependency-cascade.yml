@@ -292,6 +292,9 @@ jobs:
 
       - name: Create branch and upgrade lockfile
         if: steps.token_check.outputs.has_token == 'true'
+        env:
+          CORE_LINEAGE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dev-20261030041443-a5b07b5aeafc"
+          CORE_LINEAGE_RULES: "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved"
         run: |
           git checkout -b "${{ steps.vars.outputs.branch }}"
 
@@ -310,6 +313,20 @@ jobs:
             --pyproject pyproject.toml \
             --check-movable "$PKG_HYPHEN"; then
             echo "::error::Dependency cascade cannot move ${PKG_HYPHEN} in ${{ matrix.repo }} -- it is pinned via a [tool.uv.sources] git override. 'uv lock --upgrade-package' will silently re-resolve against the SAME override and report no lockfile change, masking a no-op cascade (OMN-15604). Remove the [tool.uv.sources] override for ${PKG_HYPHEN} in ${{ matrix.repo }}'s pyproject.toml first, then re-run this cascade."
+            exit 1
+          fi
+
+          # OMN-17427: core verifies the dev tag before its source yields to PyPI.
+          if ! uv run --no-project --with "$CORE_LINEAGE" \
+            python -m omnibase_core.nodes.node_dev_tag_lineage_effect.runtime_dev_tag_lineage \
+            pyproject.toml --rules "$CORE_LINEAGE_RULES" --package "$PKG_HYPHEN"; then
+            echo "::error::Dev-merge tag lineage verification failed for ${PKG_HYPHEN}"
+            exit 1
+          fi
+          if ! uv run --no-project --with packaging python "${GITHUB_WORKSPACE}/_dep_provenance_gate/scripts/check_dep_provenance.py" \
+            --pyproject pyproject.toml \
+            --drop-dev-tag-override "$PKG_HYPHEN"; then
+            echo "::error::Could not remove verified dev-tag override for ${PKG_HYPHEN}"
             exit 1
           fi
 

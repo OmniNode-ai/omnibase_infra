@@ -104,7 +104,20 @@ BUILD_ONLY_SERVICES: tuple[str, ...] = ("dev-lane-infra-runtime-image",)
 #: The only attributes a build-only service may render with, the only network
 #: it may join and the only profile it may carry. Anything else (``deploy``,
 #: ``ports``, ``volumes``, ``privileged``) escapes the ``scale`` check.
-BUILD_ONLY_ALLOWED_KEYS: frozenset[str] = frozenset({"profiles", "scale", "networks"})
+#:
+#: ``build`` is the kind's own attribute: a service that exists to be built
+#: renders its build section, and a policy that refused it refused the kind
+#: (measured 2026-10-30 on the dev head, exit 12, slot 1). It is bounded below
+#: to the three sub-keys the dev overlay declares, so a build-time escape
+#: (``network``, ``ssh``, ``secrets``, ``additional_contexts``, ``target``)
+#: is still refused.
+BUILD_ONLY_ALLOWED_KEYS = frozenset({"profiles", "scale", "networks", "build"})
+BUILD_ONLY_BUILD_KEYS = frozenset({"context", "dockerfile", "args"})
+#: ``docker compose config --format json`` renders an unset ``command`` and
+#: ``entrypoint`` as an explicit ``null`` on a build service. A null is the
+#: absence of the attribute and starts nothing; any value is not, and is
+#: refused like every other attribute outside the allowed set.
+BUILD_ONLY_NULL_ONLY_KEYS = frozenset({"command", "entrypoint"})
 BUILD_ONLY_NETWORK = "omnibase-infra-network"
 BUILD_ONLY_PROFILE = "prepr"
 
@@ -160,36 +173,35 @@ def check(
     for name in BUILD_ONLY_SERVICES:
         if name not in services:
             continue
-        build_only = services[name] or {}
-        scale = build_only.get("scale")
-        if scale != 0:
-            problems.append(
-                f"build-only service '{name}' renders with scale "
-                f"{'absent' if 'scale' not in build_only else repr(scale)}, "
-                f"not 0. It exists to be built, and a container for it would "
-                f"run under the dev lane's image name."
-            )
-        extra = sorted(set(build_only) - BUILD_ONLY_ALLOWED_KEYS)
-        if extra:
-            problems.append(
-                f"build-only service '{name}' renders with attribute(s) "
-                f"{extra} beyond {sorted(BUILD_ONLY_ALLOWED_KEYS)}. A "
-                f"deploy.replicas, port, volume, privilege or extra profile "
-                f"is not examined by the scale check and must not ride along."
-            )
-        nets = build_only.get("networks")
+        svc = services[name] or {}
+        scale, profiles, nets = (
+            svc.get("scale"),
+            svc.get("profiles"),
+            svc.get("networks"),
+        )
+        build = svc.get("build", {})
+        bad_build = not isinstance(build, dict) or set(build) - BUILD_ONLY_BUILD_KEYS
+        extra = sorted(
+            key
+            for key in svc
+            if key not in BUILD_ONLY_ALLOWED_KEYS
+            and not (key in BUILD_ONLY_NULL_ONLY_KEYS and svc[key] is None)
+        )
         net_names = sorted(nets) if isinstance(nets, dict | list) else []
-        if net_names != [BUILD_ONLY_NETWORK]:
-            problems.append(
-                f"build-only service '{name}' renders with networks "
-                f"{net_names}, expected only '{BUILD_ONLY_NETWORK}'."
-            )
-        if build_only.get("profiles") != [BUILD_ONLY_PROFILE]:
-            problems.append(
-                f"build-only service '{name}' renders with profiles "
-                f"{build_only.get('profiles')!r}, expected "
-                f"['{BUILD_ONLY_PROFILE}']."
-            )
+        # Each tuple is (violated, what the render shows). A scale other than 0
+        # runs a container under the dev lane's image name; an attribute outside
+        # the kind's shape, a build-time escape in the build section, a network
+        # or a profile beyond the slot's is not examined by the scale check.
+        rules = (
+            (scale != 0, f"scale {scale!r}, not 0"),
+            (extra, f"attribute(s) {extra} beyond the kind's shape"),
+            (bad_build, f"a build section beyond {sorted(BUILD_ONLY_BUILD_KEYS)}"),
+            (net_names != [BUILD_ONLY_NETWORK], f"networks {net_names}"),
+            (profiles != [BUILD_ONLY_PROFILE], f"profiles {profiles!r}"),
+        )
+        problems += [
+            f"build-only service '{name}' renders {w}." for bad, w in rules if bad
+        ]
     unexpected = sorted(set(services) - expected - set(BUILD_ONLY_SERVICES))
     if unexpected:
         problems.append(
