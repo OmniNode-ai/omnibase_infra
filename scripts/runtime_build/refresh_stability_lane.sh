@@ -89,7 +89,8 @@
 #   The stability lane runs a pinned release set and never a dev ref. The
 #   set is the committed pin file, config/lab/lane-overlays/<lane>.release-pin.yaml
 #   under ONEX_WORKSPACE_CONFIG_ROOT (or --pin-file), naming one v<major>.<minor>.<patch>
-#   tag each for omnibase_infra, omnibase_core, omnibase_compat and omnimarket
+#   tag each for omnibase_infra, omnibase_core and omnimarket (omnibase_compat is
+#   retired and no longer staged, OMN-14108; a pin file line for it is ignored)
 #   (lines `  <repo>: <tag>` under `pin:`); --ref overrides the omnibase_infra tag.
 #   Before anything is read from the lane, tagged, checked out, built or
 #   restarted, each tag must be a release tag of its clone under OMNI_HOME: a dev
@@ -497,13 +498,13 @@ git_clone() {
 }
 
 # --- release-only guard (OMN-21611) -------------------------------------------
-# Before any live read, tag, checkout, build or restart. Each of the four tags
+# Before any live read, tag, checkout, build or restart. Each of the three tags
 # (the pin file's, --ref winning for omnibase_infra) must match
 # v<major>.<minor>.<patch> and be a tag of its clone: a dev tag, a bare sha, a
 # branch, a lab tag or a dev omnimarket ref is refused here, by name.
 [[ -z "${PIN_FILE}" || -f "${PIN_FILE}" ]] || { err "release-tag-only: pin file ${PIN_FILE} does not exist (OMN-21611)"; exit 64; }
-PIN_ENTRIES="$(sed -nE 's/^  (omnibase_infra|omnibase_core|omnibase_compat|omnimarket): *([^ #]+).*/\1=\2/p' "${PIN_FILE:-/dev/null}")"
-for repo in omnibase_infra omnibase_core omnibase_compat omnimarket; do
+PIN_ENTRIES="$(sed -nE 's/^  (omnibase_infra|omnibase_core|omnimarket): *([^ #]+).*/\1=\2/p' "${PIN_FILE:-/dev/null}")"
+for repo in omnibase_infra omnibase_core omnimarket; do
     tag="$(printf '%s\n%s\n' "${PIN_ENTRIES}" "${REF:+omnibase_infra=${REF}}" | sed -n "s/^${repo}=//p" | tail -n 1)"
     if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! git_clone "${OMNI_HOME}/${repo}" rev-parse -q --verify "refs/tags/${tag}^{commit}" >/dev/null; then err "release-tag-only: ${repo} ref '${tag:-<none>}' is not a v<major>.<minor>.<patch> release tag of ${OMNI_HOME}/${repo}; a dev tag, bare sha, branch or dev omnimarket ref is refused. Nothing was read from the lane, tagged, checked out, built or restarted (OMN-21611)."; exit 64; fi
     # omnibase_infra comes first, so the sibling list starts empty, never inherited.

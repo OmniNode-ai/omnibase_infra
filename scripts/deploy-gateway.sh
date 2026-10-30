@@ -596,7 +596,6 @@ check_sibling_lock_pins() {
         --repo "omnibase-infra=${omni_home}/omnibase_infra"
         --repo "omnibase-core=${omni_home}/omnibase_core"
         --repo "omnibase-spi=${omni_home}/omnibase_spi"
-        --repo "omnibase-compat=${omni_home}/omnibase_compat"
         # OMN-16296 (#2822) removed onex_change_control from the sibling clone
         # manifest -- it is no longer installed into the runtime image, so
         # check_sibling_lock_pins.py's DEFAULT_PACKAGE_REPO_DIRS no longer
