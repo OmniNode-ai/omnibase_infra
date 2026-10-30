@@ -55,6 +55,9 @@
 # scripts/ci/check_pin_reachability.py (OMN-15538) accepts it because dev
 # contains it.
 
+# check-timeout-seconds (OMN-21433) is the per-check ceiling the pinned reusable passes to the
+# verifier; its 30 s default kills a cold hosted `uv run pytest` before it reports.
+
 name: Repo Evidence Gate
 
 on:
@@ -72,9 +75,10 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa # OMN-20032: the squash commit of omnibase_core#1932 on dev; descends from #1914 (carries omnibase_core#1912's caller-mode verify success no-op and the pin-only exemption derived in the job, and the writer app's release-cut exemption), adds the VERIFIER_FLOOR 0.4.303 refusal to the verifier install step, and carries the writer app's workflow-pin (#1927) and plugin version bump (#1931) classification (the plugin one needs a verifier release newer than 0.4.309)
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@abc2cb3e85b962bb8dc5a12a308d8a723b3f42a4 # OMN-21433: omnibase_core#2102 squash on dev; descends from #1932 (the VERIFIER_FLOOR 0.4.303 refusal) and carries #2085, the check-timeout-seconds input, and #2079, which verifies only the evidence a pull request adds or changes
     with:
       evidence-source: caller
       verifier-version: 0.4.305
       compare-with-occ: "false"
       shadow: "false"
+      check-timeout-seconds: "180"

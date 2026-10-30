@@ -475,7 +475,7 @@ The readers configured by this repository are:
 
 | Caller or reader | Owning implementation | Boundary requiring a change |
 | --- | --- | --- |
-| `.github/workflows/call-repo-evidence-gate.yml` | `omnibase_core/.github/workflows/receipt-gate.yml` at `4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa` | Reads the root at PR head, overlays only that root into the control tree, and compares root evidence against the original merge base for carried evidence. |
+| `.github/workflows/call-repo-evidence-gate.yml` | `omnibase_core/.github/workflows/receipt-gate.yml` at `abc2cb3e85b962bb8dc5a12a308d8a723b3f42a4` | Reads the root at PR head, overlays only that root into the control tree, and compares root evidence against the original merge base for carried evidence. |
 | That reusable's verifier | Released `omnimarket==0.4.305`, `node_dod_verify` | Reads the explicit contract path as one YAML document. It can consume composed ordinary YAML; it does not discover fragments. |
 | `.github/workflows/deploy-gate.yml` | `omniclaude/.github/workflows/deploy-gate-reusable.yml` and `.github/actions/deploy-gate/validate_pr_deploy_required.py`, caller pin `ed4300f8a427ead7f099daf69cedc012907cdbd3` | Sparse-checks out the caller's contracts and tests only `<ticket>.yaml` for deploy evidence. |
 | `scripts/ci/check_deploy_scope_dod.py` | This repository | Mirrors both hosted readers; must change in the same adoption to keep parity. |

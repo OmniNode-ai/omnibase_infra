@@ -23,10 +23,20 @@ requirements:
       - id: "AC8"
         statement: |-
           AC8: the command check of dod-omn17427-documentation-surface exits 0 from the repository root, and the same command exits nonzero on an oversized README, a README without the knowledge-base link, and each unused documentation path -- falsifier: uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q
+  - id: "req-omn21433-check-ceiling-named"
+    statement: |-
+      The repo-evidence caller names the per-check ceiling the receipt-gate reusable takes as an input, so a test-passing check on a hosted runner is judged by what it asserts and not killed at the verifier's 30 s default.
+    acceptance:
+      - id: "AC9"
+        statement: |-
+          AC9: the caller pins a receipt-gate reusable that declares check-timeout-seconds and passes a whole number of seconds above 30 and at most 900 -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q fails at the merge base, whose caller passes no ceiling
 evidence_requirements:
   - kind: "tests"
     description: "The test runs the item's own command from the repository root and in a temporary root with each violation planted."
     command: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
+  - kind: "tests"
+    description: "The caller's pinned reusable declares the input and the caller passes a ceiling in range."
+    command: "uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -67,3 +77,11 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_contract_command_items_hold_omn21433.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC8"]
+  - id: "dod-omn21433-ac9-check-ceiling-named"
+    description: "The test reads the caller workflow and expects the pinned reusable to be one that declares check-timeout-seconds and the passed value to be a whole number from 31 to 900. At the merge base the caller passes no ceiling, so the second test fails there."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_repo_evidence_caller_check_timeout_omn21433.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC9"]
