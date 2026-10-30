@@ -295,7 +295,8 @@ def test_profile_ownership_the_local_dev_profile_owns_the_node() -> None:
     ]
 
 
-def test_the_contract_routes_the_three_operations_to_their_handlers() -> None:
+def test_the_contract_routes_the_four_operations_to_their_handlers() -> None:
+    """OMN-20823 added the read-only describe the mint audit uses."""
     contract = yaml.safe_load((NODE_DIR / "contract.yaml").read_text())
     routes = {
         h["operation"]: h["handler"]["name"]
@@ -305,6 +306,7 @@ def test_the_contract_routes_the_three_operations_to_their_handlers() -> None:
         "broker.principal.list": "HandlerBrokerPrincipalList",
         "broker.principal.apply": "HandlerBrokerPrincipalApply",
         "broker.principal.verify": "HandlerBrokerPrincipalVerify",
+        "broker.principal.describe": "HandlerBrokerPrincipalDescribe",
     }
     assert contract["node_type"] == "EFFECT_GENERIC"
     assert contract["runtime_profiles"] == ["local-dev"]

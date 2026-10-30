@@ -35,3 +35,7 @@ topics:
   # OMN-17427: the generic node CLI publishes the composition request on its
   # local runtime bus; the packaged-contract regression reads its terminal result.
   - onex.cmd.platform.ticket-contract-compose.v1
+  # OMN-20823: make mint-local runs `onex node node_developer_principal_mint_orchestrator`
+  # inside runtime-effects; the generic node CLI publishes the mint request on its
+  # local runtime bus before waiting for the mint-completed terminal.
+  - onex.cmd.omnibase-infra.developer-principal-mint-requested.v1
