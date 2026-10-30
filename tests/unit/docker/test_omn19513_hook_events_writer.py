@@ -143,6 +143,26 @@ def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None
     assert rendered["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
 
 
+def test_writer_mounts_the_ingress_socket_directory_like_the_main_runtime() -> None:
+    """The main-role kernel binds its local ingress socket under /run/onex-runtime.
+
+    Measured 2026-10-30 on the compose dev lane at b1731fa31: without this tmpfs
+    the non-root process raised ``PermissionError: '/run/onex-runtime'`` on every
+    boot and the container stopped after its declared 5 boot failures.
+    """
+    main = _service("docker-compose.infra.yml", MAIN)["tmpfs"]
+    assert main, "the main runtime lost its ingress socket tmpfs"
+    assert _service("docker-compose.infra.yml", WRITER)["tmpfs"] == main
+
+    resolver = CatalogResolver(catalog_dir=str(DOCKER / "catalog"))
+    manifest = resolver._manifests[WRITER]
+    services = generate_compose(
+        ResolvedStack(manifests={WRITER: manifest}, required_env=set(), injected_env={})
+    )["services"]
+    assert isinstance(services, dict)
+    assert services[WRITER]["tmpfs"] == main
+
+
 def test_catalog_writer_declares_its_application_database_bindings() -> None:
     catalog = yaml.safe_load((DOCKER / "catalog/database-consumers.yaml").read_text())
     assert set(catalog["consumers"][WRITER]["bindings"]) == {

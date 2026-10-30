@@ -1704,6 +1704,12 @@ services:
     volumes:
       - ../contracts:/app/contracts:ro
       - *lane-overlay-mount
+    # The kernel runs in the main role, so it binds the local command ingress
+    # socket under /run/onex-runtime like omninode-runtime does. Without this
+    # tmpfs the non-root process cannot create the directory and every boot
+    # dies on PermissionError after the declared 5 boot failures.
+    tmpfs:
+      - /run/onex-runtime:uid=1000,gid=1000,mode=0770
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
       interval: 30s
