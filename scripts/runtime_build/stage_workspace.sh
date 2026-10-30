@@ -260,12 +260,16 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
         # resolves everywhere (origin/dev) behaves exactly as before.
         checkout_args+=(--fallback-ref "${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}")
         # OMN-19998: a lab caller names the siblings that build their newest
-        # dev-* tag in place of the branch (the deploy agent and the stability
-        # refresh name omnimarket). Unset, every sibling builds its branch.
+        # dev-* tag in place of the branch (the dev deploy agent names
+        # omnimarket). Unset, every sibling builds its branch.
+        # OMN-21611: a release lane names each sibling's own tag as NAME=TAG
+        # (the stability refresh, from its pin); deploy_source_ref.py's
+        # --repo-ref wins over DEPLOY_REF for that sibling, so no sibling of a
+        # release set is staged at the fallback branch.
         read -r -a follow_dev_tag_repos <<< "${DEPLOY_FOLLOW_DEV_TAG_REPOS:-}"
-        for repo in ${follow_dev_tag_repos[@]+"${follow_dev_tag_repos[@]}"}; do
-            checkout_args+=(--follow-dev-tag "${repo}")
-        done
+        read -r -a sibling_refs <<< "${DEPLOY_SIBLING_REFS:-}"
+        for repo in ${follow_dev_tag_repos[@]+"${follow_dev_tag_repos[@]}"}; do checkout_args+=(--follow-dev-tag "${repo}"); done
+        for sibling_ref in ${sibling_refs[@]+"${sibling_refs[@]}"}; do checkout_args+=(--repo-ref "${sibling_ref}"); done
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
