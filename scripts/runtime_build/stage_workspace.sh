@@ -263,9 +263,11 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
         # dev-merge tag in place of the branch, with no caller opt-in. A first-party
         # package built from a branch, a sha or a release is what the dev lane
         # forbids; a sibling with no dev-merge tag on origin refuses the build.
-        for repo in "${SIBLING_REPOS[@]}"; do
-            checkout_args+=(--follow-dev-tag "${repo}")
-        done
+        for repo in "${SIBLING_REPOS[@]}"; do checkout_args+=(--follow-dev-tag "${repo}"); done
+        # OMN-21611: explicit sibling release tags retain precedence over the
+        # dev-tag follow set in deploy_source_ref.py.
+        read -r -a sibling_refs <<< "${DEPLOY_SIBLING_REFS:-}"
+        for sibling_ref in ${sibling_refs[@]+"${sibling_refs[@]}"}; do checkout_args+=(--repo-ref "${sibling_ref}"); done
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)

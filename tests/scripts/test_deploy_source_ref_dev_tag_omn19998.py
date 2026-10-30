@@ -266,6 +266,7 @@ class TestEveryVendoredSiblingFollowsItsDevTag:
             REPO_ROOT / "scripts/runtime_build/refresh_stability_lane.sh"
         ).read_text()
         assert "DEPLOY_FOLLOW_DEV_TAG_REPOS" not in text
+        assert "export DEPLOY_SIBLING_REFS" in text
 
     def test_the_deploy_agent_no_longer_hands_the_build_a_follow_list(self) -> None:
         tracking = (
