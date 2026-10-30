@@ -75,7 +75,7 @@ io_operations:
       - login
       - device
       - admin_url
-      - password_env
+      - password_env_ref
     output_fields:
       - status
       - principal

@@ -224,7 +224,7 @@ def _request(mode: Mode = "converge") -> ModelDeveloperPrincipalMintRequest:
         login="person",
         device="mac",
         admin_url=ADMIN_URL,
-        password_env=PASSWORD_ENV if mode == "converge" else "",
+        password_env_ref=PASSWORD_ENV if mode == "converge" else "",
     )
 
 
@@ -376,9 +376,9 @@ def test_audit_takes_no_password_and_converge_needs_one() -> None:
             login="person",
             device="mac",
             admin_url=ADMIN_URL,
-            password_env=PASSWORD_ENV,
+            password_env_ref=PASSWORD_ENV,
         )
-    with pytest.raises(ValidationError, match="converge needs password_env"):
+    with pytest.raises(ValidationError, match="converge needs password_env_ref"):
         ModelDeveloperPrincipalMintRequest(
             mode="converge",
             declaration_yaml=DECLARATION,

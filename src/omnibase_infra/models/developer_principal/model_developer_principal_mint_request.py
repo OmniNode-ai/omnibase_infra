@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ModelDeveloperPrincipalMintRequest(BaseModel):
     """Mint (``converge``) or read (``audit``) one machine's broker principal.
 
-    ``password_env`` is the NAME of an environment variable of the process that
+    ``password_env_ref`` is the NAME of an environment variable of the process that
     runs the node, never a value (plan D5): the request, the input file it is read
     from and the state root ``onex node`` writes carry no secret. ``converge``
     needs it; ``audit`` reads only and refuses one, so an audit can never set a
@@ -33,7 +33,7 @@ class ModelDeveloperPrincipalMintRequest(BaseModel):
     login: str = Field(..., min_length=1, description="The machine's OS user.")
     device: str = Field(..., min_length=1, description="The machine's short host name.")
     admin_url: str = Field(..., min_length=1, description="The Redpanda Admin API URL.")
-    password_env: str = Field(
+    password_env_ref: str = Field(
         default="",
         pattern=r"^([A-Z][A-Z0-9_]*)?$",
         description="Name of the variable holding the new password (converge only).",
@@ -43,14 +43,14 @@ class ModelDeveloperPrincipalMintRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _password_env_matches_mode(self) -> ModelDeveloperPrincipalMintRequest:
-        if self.mode == "converge" and not self.password_env:
+    def _password_env_ref_matches_mode(self) -> ModelDeveloperPrincipalMintRequest:
+        if self.mode == "converge" and not self.password_env_ref:
             raise ValueError(
-                "converge needs password_env, the name of the variable holding "
+                "converge needs password_env_ref, the name of the variable holding "
                 "the new password"
             )
-        if self.mode == "audit" and self.password_env:
-            raise ValueError("audit reads only and takes no password_env")
+        if self.mode == "audit" and self.password_env_ref:
+            raise ValueError("audit reads only and takes no password_env_ref")
         return self
 
 

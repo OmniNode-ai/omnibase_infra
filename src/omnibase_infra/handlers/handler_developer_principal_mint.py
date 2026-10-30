@@ -286,7 +286,7 @@ class HandlerDeveloperPrincipalMint:
                 ModelBrokerPrincipalApplyRequest(
                     plan=plan,
                     admin_url=request.admin_url,
-                    password_env=request.password_env,
+                    password_env=request.password_env_ref,
                 )
             ),
         )
@@ -306,7 +306,7 @@ class HandlerDeveloperPrincipalMint:
                     ModelBrokerPrincipalVerifyRequest(
                         plan=plan,
                         admin_url=request.admin_url,
-                        password_env=request.password_env,
+                        password_env=request.password_env_ref,
                     )
                 ),
             )

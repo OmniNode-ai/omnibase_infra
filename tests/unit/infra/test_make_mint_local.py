@@ -145,7 +145,7 @@ if cmd[:2] == ["onex", "node"] and cmd[2] == "node_developer_principal_mint_orch
             while not (root / "resume").exists():
                 if time.monotonic() >= deadline: sys.exit(98)
                 time.sleep(0.01)
-        secret = inner.get(request["password_env"], "")
+        secret = inner.get(request["password_env_ref"], "")
         if not secret:
             result.update(status="failure", failed_step="apply", reason="password variable unset", action="")
         elif extras:
@@ -453,6 +453,17 @@ def _held_lock(stack: _Stack) -> Iterator[None]:
         yield
 
 
+def _reap(*processes: subprocess.Popen[str]) -> None:
+    """Kill each saved process group, including children of an exited leader."""
+    for process in processes:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    for process in processes:
+        process.wait(timeout=5)
+
+
 @contextmanager
 def _paused_run(
     stack: _Stack, stage: str
@@ -484,42 +495,49 @@ def _paused_run(
             assert marker.exists(), "the target never reached the kill point"
             yield process, json.loads(marker.read_text())
         finally:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=5)
+            _reap(process)
 
 
 def _dead_pid() -> int:
-    child = subprocess.Popen(["true"])
-    child.wait(timeout=5)
-    return child.pid
+    child = subprocess.Popen(["true"], text=True, start_new_session=True)
+    try:
+        child.wait(timeout=5)
+        return child.pid
+    finally:
+        _reap(child)
 
 
 def test_lock_two_runs_started_together_make_one_mutation(tmp_path: Path) -> None:
     stack = _Stack(tmp_path)
     env = stack.env(STUB_NODE_DELAY="1.5")
-    runs = [
-        subprocess.Popen(
-            stack.command(),
-            cwd=_REPO,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for _ in range(2)
-    ]
-    outcomes = [(run.wait(timeout=120), *run.communicate()) for run in runs]
-    assert len(stack.mutations()) == 1, outcomes
-    busy = [o for o in outcomes if "mint-local: busy, lock held by " in o[2]]
-    assert len(busy) == 1, outcomes
-    assert busy[0][0] != 0
-    winner = next(o for o in outcomes if o is not busy[0])
-    assert winner[0] == 0, winner
-    assert "mint-local: verified" in winner[1]
-    assert _lock_available(stack.lock()), "the winner released the OS lock"
+    runs: list[subprocess.Popen[str]] = []
+    try:
+        for _ in range(2):
+            runs.append(
+                subprocess.Popen(
+                    stack.command(),
+                    cwd=_REPO,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                )
+            )
+        outcomes = []
+        for run in runs:
+            stdout, stderr = run.communicate(timeout=120)
+            outcomes.append((run.returncode, stdout, stderr))
+        assert len(stack.mutations()) == 1, outcomes
+        busy = [o for o in outcomes if "mint-local: busy, lock held by " in o[2]]
+        assert len(busy) == 1, outcomes
+        assert busy[0][0] != 0
+        winner = next(o for o in outcomes if o is not busy[0])
+        assert winner[0] == 0, winner
+        assert "mint-local: verified" in winner[1]
+        assert _lock_available(stack.lock()), "the winner released the OS lock"
+    finally:
+        _reap(*runs)
 
 
 def test_lock_a_stale_lock_is_removed_and_said(tmp_path: Path) -> None:
@@ -539,22 +557,30 @@ def test_lock_two_runs_on_one_stale_lock_make_one_mutation(tmp_path: Path) -> No
     stack = _Stack(tmp_path)
     stack.lock().write_text(f"{_dead_pid()}\n")
     env = stack.env(STUB_NODE_DELAY="1.5")
-    runs = [
-        subprocess.Popen(
-            stack.command(),
-            cwd=_REPO,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        for _ in range(2)
-    ]
-    outcomes = [(run.wait(timeout=120), *run.communicate()) for run in runs]
-    assert len(stack.mutations()) == 1, outcomes
-    assert sorted(o[0] == 0 for o in outcomes) == [False, True], outcomes
-    loser = next(o for o in outcomes if o[0] != 0)
-    assert "mint-local: busy" in loser[2], loser
+    runs: list[subprocess.Popen[str]] = []
+    try:
+        for _ in range(2):
+            runs.append(
+                subprocess.Popen(
+                    stack.command(),
+                    cwd=_REPO,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                )
+            )
+        outcomes = []
+        for run in runs:
+            stdout, stderr = run.communicate(timeout=120)
+            outcomes.append((run.returncode, stdout, stderr))
+        assert len(stack.mutations()) == 1, outcomes
+        assert sorted(o[0] == 0 for o in outcomes) == [False, True], outcomes
+        loser = next(o for o in outcomes if o[0] != 0)
+        assert "mint-local: busy" in loser[2], loser
+    finally:
+        _reap(*runs)
 
 
 def test_lock_a_live_lock_is_not_removed(tmp_path: Path) -> None:

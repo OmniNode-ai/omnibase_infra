@@ -252,7 +252,7 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	  run_node() { \
 	    jq -n --arg mode "$$1" --rawfile decl "$(MINT_DECLARATION)" --arg login "$$user" \
 	      --arg device "$$host" --arg url "$(LOCAL_ADMIN_URL)" --arg pwenv "$$2" \
-	      '{mode: $$mode, declaration_yaml: $$decl, login: $$login, device: $$device, admin_url: $$url, password_env: $$pwenv}' \
+	      '{mode: $$mode, declaration_yaml: $$decl, login: $$login, device: $$device, admin_url: $$url, password_env_ref: $$pwenv}' \
 	      > "$$work/input.json" && chmod 644 "$$work/input.json" || return 1; \
 	    docker exec -u omniinfra "$$container" mkdir -p "$$in_dir" \
 	      && docker cp "$$work/input.json" "$$container:$$in_dir/input.json" > /dev/null || return 1; \
