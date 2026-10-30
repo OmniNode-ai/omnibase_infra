@@ -78,6 +78,10 @@ healthcheck:
   start_period_s: 600
 volumes:
   - ../contracts:/app/contracts:ro
+# The kernel runs in the main role and binds the local command ingress socket
+# under /run/onex-runtime, as omninode-runtime does.
+tmpfs:
+  - /run/onex-runtime:uid=1000,gid=1000,mode=0770
 depends_on:
   - service: migration-gate
     condition: service_healthy

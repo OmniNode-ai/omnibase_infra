@@ -38,6 +38,14 @@ dod_evidence:
         check_value: uv run pytest tests/unit/infra/test_catalog_runtime_observer_omn19988.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn19988-ac1-local-runtime-tick
+    description: Infra half only. The local bundle's main kernel renders with ONEX_RUNTIME_SCHEDULER_ENABLED true, so the runtime tick that drives the mode-2 observer is published with nobody running a status command; exactly one kernel owns the tick in each laptop render, and no other bundle gains the switch. It fails at the merge base, whose local render has no switch. It does not prove the verdicts, the store or the panel.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_runtime_tick_omn19988.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
   - id: dod-omn19988-deploy-runtime-catalog
     description: Deploy half of the runtime-image catalog copy. It reads the runtime-effects container after a dev-tag image carrying this change is deployed, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion. Fails while the image lacks the catalog (read 2026-10-18 18:2xZ, exit 1; the same probe on /app/contracts exits 0).
     source: manual

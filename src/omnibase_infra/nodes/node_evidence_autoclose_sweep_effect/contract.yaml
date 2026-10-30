@@ -489,6 +489,12 @@
 #     restate every standing gap comment once (it is part of the gap
 #     fingerprint) for a refactor that says nothing new to a ticket's reader.
 #
+#   - OMN-17427 (node_version unchanged): the handler reaches the shared
+#     Done-write rule through `resolve_done_write_receipt_gate`, which loads
+#     omnibase_core's `node_done_write_receipt_gate_compute` from its packaged
+#     contract, instead of importing the moved core handler module. The rule and
+#     the verdict are unchanged, so no version moves.
+#
 # OMN-18490 AC1–AC4 (contract 1.11.0): a started candidate with at least
 # one task-list checkbox and none unticked records GAP_TICKED_OPEN, before
 # dod_verify and every Done path. The existing exclusion, label, terminal-state

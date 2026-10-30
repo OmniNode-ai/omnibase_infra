@@ -18,6 +18,7 @@ These tests render YAML and start no container.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,55 @@ def test_catalog_writer_preserves_dev_lane_placement_and_broker_policy() -> None
     assert "OMNINODE_INTERNAL_DB_URL" in manifest.required_env
     assert env["OMNINODE_INTERNAL_DB_URL"].startswith("${OMNINODE_INTERNAL_DB_URL:?")
     assert rendered["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
+
+
+@pytest.mark.parametrize("source", ["compose", "catalog"])
+def test_writer_mounts_the_ingress_socket_directory_for_its_runtime_user(
+    source: str,
+) -> None:
+    """Bind the mount to the kernel contract and the image's privilege drop."""
+    if source == "compose":
+        writer = _service("docker-compose.infra.yml", WRITER)
+    else:
+        resolver = CatalogResolver(catalog_dir=str(DOCKER / "catalog"))
+        manifest = resolver._manifests[WRITER]
+        services = generate_compose(
+            ResolvedStack(
+                manifests={WRITER: manifest}, required_env=set(), injected_env={}
+            )
+        )["services"]
+        assert isinstance(services, dict)
+        writer = services[WRITER]
+
+    config = yaml.safe_load(
+        (REPO_ROOT / "contracts/runtime/runtime_config.yaml").read_text()
+    )
+    ingress = config["local_ingress"]
+    assert ingress["enabled"] is True
+    assert "main" in ingress["enabled_profiles"]
+    socket_dir = str(Path(ingress["socket_path"]).parent)
+
+    dockerfile = (DOCKER / "Dockerfile.runtime").read_text()
+    group = re.search(r"groupadd --gid (\d+) (\w+)", dockerfile)
+    user = re.search(
+        r"useradd --uid (\d+) --gid (\w+).*--create-home (\w+)", dockerfile
+    )
+    assert group is not None and user is not None
+    assert user[2] == group[2]
+    entrypoint = (DOCKER / "entrypoint-runtime.sh").read_text()
+    assert f'exec gosu {user[3]} "$0" "$@"' in entrypoint
+    assert "user" not in writer and not writer.get("entrypoint")
+
+    mounts = [
+        mount.partition(":")[2]
+        for mount in writer["tmpfs"]
+        if mount.partition(":")[0] == socket_dir
+    ]
+    assert len(mounts) == 1, f"expected one writable mount for {socket_dir}"
+    options = dict(option.split("=", 1) for option in mounts[0].split(","))
+    assert options["uid"] == user[1]
+    assert options["gid"] == group[1]
+    assert int(options["mode"], 8) == 0o770
 
 
 def test_catalog_writer_declares_its_application_database_bindings() -> None:
