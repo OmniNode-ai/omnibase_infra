@@ -407,7 +407,7 @@ def test_build_context_git_clone_stays_untracked_clean(tmp_path: Path) -> None:
     assert porcelain == "", porcelain
 
 
-PINNED_SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
+PINNED_SIBLINGS = ("omnibase_core", "omnibase_spi", "omnibase_compat", "omnimarket")
 
 
 def _current_repo_refs(omni_home: Path) -> list[str]:
@@ -427,20 +427,23 @@ def _make_pinned_clones(tmp_path: Path) -> Path:
 
 @pytest.mark.unit
 def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
-    omni_home = _make_omni_home(tmp_path)
-    old_core, target_core = _behind_core(omni_home)
-    market = omni_home / "omnimarket"
+    clones = _make_omni_home(tmp_path)
+    old_core, target_core = _behind_core(clones)
+    market = clones / "omnimarket"
     _git(market, "checkout", "-q", "-b", "unmerged-change")
     target_market = _advance_dev_keep_version(market)
     _git(market, "checkout", "-q", "dev")
-    target_compat = _git(omni_home / "omnibase_compat", "rev-parse", "HEAD")
+    target_compat = _git(clones / "omnibase_compat", "rev-parse", "HEAD")
     targets = {
         "omnibase_core": target_core,
         "omnibase_compat": target_compat,
         "omnimarket": target_market,
     }
+    for ref in _current_repo_refs(clones):
+        repo, _, sha = ref.partition("=")
+        targets.setdefault(repo, sha)
     result = _run_stage(
-        omni_home,
+        clones,
         tmp_path / "ctx",
         repo_refs=[f"{repo}={sha}" for repo, sha in targets.items()],
     )
@@ -450,7 +453,7 @@ def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
     expected = json.loads(_refs_out(build_ctx).read_text())
     vcs = json.loads((build_ctx / "workspace/sibling-vcs-provenance.json").read_text())
     assert expected["ref_pinned"] is True
-    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == old_core
+    assert _git(clones / "omnibase_core", "rev-parse", "HEAD") == old_core
     for repo, sha in targets.items():
         assert _git(_staged_tree(build_ctx, repo), "rev-parse", "HEAD") == sha
         assert expected["repos"][repo]["expected_sha"] == sha

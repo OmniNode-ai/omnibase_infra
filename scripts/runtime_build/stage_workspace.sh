@@ -565,7 +565,7 @@ echo "delegation routing ladder staged to ${ROUTING_TIERS_OUT}"
 # ---------------------------------------------------------------------------
 if [[ "${RT1_ENGAGED}" == true ]]; then
     # OMN-17427: record the dev-merge tag each tree sits at; the image audit refuses a tree with none.
-    python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("c", sys.argv[1]); m = u.module_from_spec(s); sys.modules["c"] = m; s.loader.exec_module(m); m.stamp(*map(__import__("pathlib").Path, sys.argv[2:]))' src/omnibase_infra/validation/checker_first_party_sources.py "${VCS_PROVENANCE_OUT}" "${EXPECTED_REFS_OUT}" . || exit 4
+    python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("c", sys.argv[1]); m = u.module_from_spec(s); sys.modules["c"] = m; s.loader.exec_module(m); m.stamp(*map(__import__("pathlib").Path, sys.argv[2:]))' "${SCRIPT_DIR}/../../src/omnibase_infra/validation/checker_first_party_sources.py" "${VCS_PROVENANCE_OUT}" "${EXPECTED_REFS_OUT}" . || exit 4
     echo "RT-1: asserting vendored SHAs == intended ref for every sibling (OMN-14438)" >&2
     if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" assert \
         --vcs-provenance "${VCS_PROVENANCE_OUT}" \
