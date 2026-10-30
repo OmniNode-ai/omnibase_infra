@@ -4,7 +4,7 @@
 
 # install-infra-watchdog.sh — Install the ONEX infra watchdog systemd timer on .201
 #
-# Run this script once on 192.168.86.201 after pulling the latest main.
+# Run this script once on <configured-host> after pulling the latest main.
 #
 # Usage:
 #   bash deploy/install-infra-watchdog.sh          # Install and enable

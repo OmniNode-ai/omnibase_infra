@@ -7,7 +7,7 @@
 # WHAT THIS IS
 #   This is the producer behind the Slack messages "*OmniNode system alert*",
 #   "*OmniNode morning system digest*" and "*[OmniNode alert resolved]*".
-#   It is executed as root on the `.201` host (omninode-pc) by
+#   It is executed as root on the configured host by
 #   the omninode-system-slack-report-digest and -alert systemd timers (OMN-20805
 #   replaced the /etc/cron.d line, which recorded a start and no end):
 #       08:05 daily       <this script> --mode digest
