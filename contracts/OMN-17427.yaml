@@ -3304,3 +3304,11 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py tests/integration/topology/test_delegation_budget_readings_binding_omn17427.py -q -p no:randomly --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427640001]
+  - id: dod-omn17427-delegation-budget-readings-live-constraints
+    description: Apply both delivered SQL migrations to an isolated PostgreSQL cluster. Required values, status check, primary key and defaults are restored on empty drifted tables; populated rows and cursor sequences survive reapplication; missing producer values refuse atomically. Runtime upsert succeeds with only the declared privileges and DELETE is refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_delegation_budget_readings_omn17427.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640001]
