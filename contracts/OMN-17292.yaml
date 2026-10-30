@@ -117,3 +117,46 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
+  # Architecture acceptance criteria from OMN-17292, preserved during the
+  # landing-base rebase. Existing refresh/deployment evidence above is retained.
+  - id: dod-omn17292-rebase-architecture-ac1
+    description: The chosen committed snapshot plus explicit atomic refresh remains the grants gate input after the rebase; the architecture alternatives were decided on OMN-17292.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -n 0 --no-cov -k 'derivation_input_is_a_committed_pin or scheduled_bot_advances'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn17292-rebase-architecture-ac2
+    description: Replays the OMN-17290 upstream contract addition against pinned and moving inputs; requires the pinned omnimarket checkout provided by the enforcement job.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "test -d .proof-dependencies/omnimarket/src/omnimarket/nodes && uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -n 0 --no-cov -k upstream_contract_addition"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn17292-rebase-architecture-ac3
+    description: The real forward-only guard refuses the OMN-15701 stale-pin incident and backwards advances; refresh remains atomic with regeneration.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -n 0 --no-cov -k 'stale_pin or backwards_pin or scheduled_bot_advances'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn17292-rebase-architecture-ac4
+    description: Internal consistency against the committed pin remains the primary infra gate; OMN-17156 upstream ordering remains complementary and required, as recorded in the architecture decision.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -n 0 --no-cov -k 'does_not_resolve_a_foreign or derivation_input_is_a_committed_pin'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+  - id: dod-omn17292-rebase-deploy-lease-topology
+    description: Hosted-runner check rejects a missing lease migration ownership declaration or a rendered catalog that differs from the rebased topology; requires no service or secret.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --frozen pytest tests/ci/test_lease_projection_application_gate_omn21279.py -q -n 0 --no-cov && uv run --frozen python scripts/render_application_database_topology.py --environment local --check docker/catalog/database-topology/local.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

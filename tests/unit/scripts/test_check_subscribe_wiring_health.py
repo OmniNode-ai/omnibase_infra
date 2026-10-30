@@ -230,6 +230,39 @@ class TestCurrentContractWiring:
         )
 
 
+class TestLeaseCommandsHaveTheirProducer:
+    """OMN-21424: the lease commands are produced by the verb, not allowlisted."""
+
+    COMMANDS = (
+        "onex.cmd.omnibase-infra.lease-acquire-requested.v1",
+        "onex.cmd.omnibase-infra.lease-renew-requested.v1",
+        "onex.cmd.omnibase-infra.lease-release-requested.v1",
+    )
+
+    def test_no_allowlist_names_a_lease_command(self) -> None:
+        for topic in self.COMMANDS:
+            assert topic not in _EXTERNAL_PUBLISHER_ALLOWLIST
+            assert topic not in _BASELINE_DEAD_LETTER_ALLOWLIST
+
+    def test_the_orchestrators_commands_are_not_dead_letters(self) -> None:
+        if not NODES_DIR.exists():
+            pytest.skip("Nodes directory not found")
+
+        errors, _warnings = check_wiring_health([NODES_DIR])
+        assert [e for e in errors if "lease-" in e] == []
+
+    def test_without_the_cli_inventory_they_would_be_dead_letters(self) -> None:
+        if not NODES_DIR.exists():
+            pytest.skip("Nodes directory not found")
+
+        runtime_only = NODES_DIR.parent / "runtime"
+        errors, _warnings = check_wiring_health(
+            [NODES_DIR], publisher_manifest_roots=[runtime_only]
+        )
+        dead = {topic for topic in self.COMMANDS if any(topic in e for e in errors)}
+        assert dead == set(self.COMMANDS)
+
+
 # ---------------------------------------------------------------------------
 # OMN-16795: allowlist hygiene enforcement.
 #

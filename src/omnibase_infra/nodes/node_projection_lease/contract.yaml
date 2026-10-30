@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_projection_lease
+contract_name: node_projection_lease
+node_name: node_projection_lease
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+description: >
+  Upsert the lease projection on (kind, resource); the upsert never replaces a row with a lower fence. The table is created by docker/migrations/forward/112_create_lease_projection.sql. Its input arrives as the reducer's projection; its wiring is a later change.
+
+input_model:
+  name: ModelPayloadLeaseProjectionUpsert
+  module: omnibase_infra.models.lease.model_payload_lease_projection_upsert
+  description: One row to upsert.
+output_model:
+  name: ModelPayloadLeaseProjectionUpsert
+  module: omnibase_infra.models.lease.model_payload_lease_projection_upsert
+  description: The applied row.
+capabilities:
+  - name: lease.projection.upsert
+    description: Write one lease projection row.
+# The table is owned and granted here, not in a hand-kept table: the grant
+# derivation reads this repository's own node contracts as well as the pinned
+# omnimarket contracts.
+db_io:
+  db_tables:
+    - name: lease_projection
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/112_create_lease_projection.sql
+      access: read_write
+      role: lease_projection
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - event_model:
+        name: ModelPayloadLeaseProjectionUpsert
+        module: omnibase_infra.models.lease.model_payload_lease_projection_upsert
+      handler:
+        name: HandlerLeaseProjection
+        module: omnibase_infra.handlers.lease.handler_lease_projection
+      output_events: []
+metadata:
+  description: Generic lease projection writer.
+  author: OmniNode Team
+  license: MIT
+  tags: [effect, lease, projection, postgres]
+  related_tickets: [OMN-21424]

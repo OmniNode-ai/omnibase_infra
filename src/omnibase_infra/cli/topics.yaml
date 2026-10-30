@@ -6,3 +6,8 @@
 topics:
   - onex.evt.git.hook.v1
   - onex.evt.linear.snapshot.v1
+  # OMN-21424: `onex lease acquire|renew|release` publishes these to the
+  # orchestrator that subscribes to them (node_lease_orchestrator).
+  - onex.cmd.omnibase-infra.lease-acquire-requested.v1
+  - onex.cmd.omnibase-infra.lease-renew-requested.v1
+  - onex.cmd.omnibase-infra.lease-release-requested.v1

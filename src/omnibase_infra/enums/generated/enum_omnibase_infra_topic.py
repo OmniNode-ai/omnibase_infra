@@ -33,6 +33,9 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_GATEWAY_DETACH_REQUEST_V1 = "onex.cmd.omnibase-infra.gateway-detach-request.v1"  # onex.cmd.omnibase-infra.gateway-detach-request.v1
     CMD_GATEWAY_HEARTBEAT_REQUEST_V1 = "onex.cmd.omnibase-infra.gateway-heartbeat-request.v1"  # onex.cmd.omnibase-infra.gateway-heartbeat-request.v1
     CMD_GATEWAY_LINK_HEALTH_UPSERT_V1 = "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"  # onex.cmd.omnibase-infra.gateway-link-health-upsert.v1
+    CMD_LEASE_ACQUIRE_REQUESTED_V1 = "onex.cmd.omnibase-infra.lease-acquire-requested.v1"  # onex.cmd.omnibase-infra.lease-acquire-requested.v1
+    CMD_LEASE_RELEASE_REQUESTED_V1 = "onex.cmd.omnibase-infra.lease-release-requested.v1"  # onex.cmd.omnibase-infra.lease-release-requested.v1
+    CMD_LEASE_RENEW_REQUESTED_V1 = "onex.cmd.omnibase-infra.lease-renew-requested.v1"  # onex.cmd.omnibase-infra.lease-renew-requested.v1
     CMD_LLM_COMPLETION_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-completion-request.v1"  # onex.cmd.omnibase-infra.llm-completion-request.v1
     CMD_LLM_EMBEDDING_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-embedding-request.v1"  # onex.cmd.omnibase-infra.llm-embedding-request.v1
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
@@ -80,6 +83,11 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_GATEWAY_SESSION_V1 = "onex.evt.omnibase-infra.gateway-session.v1"  # onex.evt.omnibase-infra.gateway-session.v1
     EVT_GMAIL_INTENT_RECEIVED_V1 = "onex.evt.omnibase-infra.gmail-intent-received.v1"  # onex.evt.omnibase-infra.gmail-intent-received.v1
     EVT_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.inference-response.v1"  # onex.evt.omnibase-infra.inference-response.v1
+    EVT_LEASE_EXPIRED_V1 = "onex.evt.omnibase-infra.lease-expired.v1"  # onex.evt.omnibase-infra.lease-expired.v1
+    EVT_LEASE_GRANTED_V1 = "onex.evt.omnibase-infra.lease-granted.v1"  # onex.evt.omnibase-infra.lease-granted.v1
+    EVT_LEASE_REFUSED_V1 = "onex.evt.omnibase-infra.lease-refused.v1"  # onex.evt.omnibase-infra.lease-refused.v1
+    EVT_LEASE_RELEASED_V1 = "onex.evt.omnibase-infra.lease-released.v1"  # onex.evt.omnibase-infra.lease-released.v1
+    EVT_LEASE_RENEWED_V1 = "onex.evt.omnibase-infra.lease-renewed.v1"  # onex.evt.omnibase-infra.lease-renewed.v1
     EVT_LLM_CALL_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-call-completed.v1"  # onex.evt.omnibase-infra.llm-call-completed.v1
     EVT_LLM_COMPLETION_COMPLETED_V1 = "onex.evt.omnibase-infra.llm-completion-completed.v1"  # onex.evt.omnibase-infra.llm-completion-completed.v1
     EVT_LLM_INFERENCE_RESPONSE_V1 = "onex.evt.omnibase-infra.llm-inference-response.v1"  # onex.evt.omnibase-infra.llm-inference-response.v1

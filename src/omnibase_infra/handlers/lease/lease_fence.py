@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""The ``check_fence`` port (the ticket's runtime/placement/fence.py; the canonical-file-shape ratchet keeps new code under handlers/): does a fence still name its resource's live grant (OMN-21424)?
+
+An effect target calls it before it acts on a fenced effect. It answers ``ok``
+only when a live slot of the resource carries exactly that fence; never ``ok``
+for a lower fence (``stale``), an absent key (``expired``) or an unreachable
+etcd (``unknown``).
+"""
+
+from __future__ import annotations
+
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.handlers.lease.lease_etcd_gateway import (
+    LeaseEtcdGateway,
+)
+from omnibase_infra.handlers.lease.lease_store import (
+    LEASE_PREFIX,
+    resource_prefix,
+)
+from omnibase_infra.models.lease import EnumLeaseFenceStatus
+
+
+async def check_fence(
+    adapter: LeaseEtcdGateway,
+    *,
+    kind: str,
+    resource: str,
+    fence: int,
+    prefix: str = LEASE_PREFIX,
+) -> EnumLeaseFenceStatus:
+    try:
+        entries = await adapter.get_prefix_entries(
+            resource_prefix(kind, resource, prefix=prefix)
+        )
+    except InfraConnectionError:
+        return EnumLeaseFenceStatus.UNKNOWN
+    live = {create_revision for _, _, create_revision, _ in entries}
+    if not live:
+        return EnumLeaseFenceStatus.EXPIRED
+    if fence in live:
+        return EnumLeaseFenceStatus.OK
+    if fence < max(live):
+        return EnumLeaseFenceStatus.STALE
+    return EnumLeaseFenceStatus.UNKNOWN
+
+
+class LeaseFence:
+    """``check_fence`` bound to one etcd adapter, for an effect target to hold."""
+
+    def __init__(
+        self, adapter: LeaseEtcdGateway, *, prefix: str = LEASE_PREFIX
+    ) -> None:
+        self._adapter = adapter
+        self._prefix = prefix
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Infrastructure transport reading lease slots from etcd."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """An etcd read: the answer depends on external state."""
+        return EnumHandlerTypeCategory.EFFECT
+
+    async def check(
+        self, *, kind: str, resource: str, fence: int
+    ) -> EnumLeaseFenceStatus:
+        return await check_fence(
+            self._adapter,
+            kind=kind,
+            resource=resource,
+            fence=fence,
+            prefix=self._prefix,
+        )
+
+
+__all__ = ["LeaseFence", "check_fence"]

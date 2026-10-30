@@ -492,10 +492,12 @@ def check_wiring_health(
     # OMN-18648: RuntimeLocal publishes the initial command on behalf of the
     # generic node CLI. Read the same runtime publisher inventory as topic
     # codegen instead of inventing a node publisher or expanding an allowlist.
+    # OMN-21424: the CLI inventory (cli/topics.yaml) declares the commands the
+    # `onex lease` verb publishes; the provisioner reads it on every lane.
     if publisher_manifest_roots is None:
         nodes_dir = (_SRC_DIR / "omnibase_infra" / "nodes").resolve()
         publisher_manifest_roots = (
-            [_SRC_DIR / "omnibase_infra" / "runtime"]
+            [_SRC_DIR / "omnibase_infra" / name for name in ("runtime", "cli")]
             if any(directory.resolve() == nodes_dir for directory in contracts_dirs)
             else []
         )

@@ -1,0 +1,120 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_lease_orchestrator
+contract_name: node_lease_orchestrator
+node_name: node_lease_orchestrator
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: ORCHESTRATOR_GENERIC
+description: >
+  Acquire, renew and release a lease on one resource of a declared kind. A grant is one etcd transaction and its fence is the etcd revision of that transaction (OMN-21418 GenericLease model). Placement as primary still waits on the core contract placement field (OMN-21421).
+
+descriptor:
+  # Lease store configuration, overlay-resolved through the ${env.VAR}
+  # convention; the handlers refuse to start a store when either resolves empty.
+  lease_etcd_endpoint: "${env.ONEX_LEASE_ETCD_ENDPOINT}"
+  lease_kinds: "${env.ONEX_LEASE_KINDS}"
+runtime_profiles:
+  - effects
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnibase-infra.lease-acquire-requested.v1
+    - onex.cmd.omnibase-infra.lease-renew-requested.v1
+    - onex.cmd.omnibase-infra.lease-release-requested.v1
+  publish_topics:
+    - onex.evt.omnibase-infra.lease-granted.v1
+    - onex.evt.omnibase-infra.lease-refused.v1
+    - onex.evt.omnibase-infra.lease-renewed.v1
+    - onex.evt.omnibase-infra.lease-released.v1
+    - onex.evt.omnibase-infra.lease-expired.v1
+# Each outcome is its own reply class; the runtime routes a returned reply to the
+# topic whose event_type is its class name without the Model prefix.
+published_events:
+  - topic: onex.evt.omnibase-infra.lease-granted.v1
+    event_type: LeaseGranted
+    message_category: EVENT
+    description: A free slot was granted at a fresh fence.
+  - topic: onex.evt.omnibase-infra.lease-refused.v1
+    event_type: LeaseRefused
+    message_category: EVENT
+    description: No free slot, or the kind is not declared.
+  - topic: onex.evt.omnibase-infra.lease-renewed.v1
+    event_type: LeaseRenewed
+    message_category: EVENT
+    description: The grant was kept alive at the same fence.
+  - topic: onex.evt.omnibase-infra.lease-released.v1
+    event_type: LeaseReleased
+    message_category: EVENT
+    description: The grant was given back.
+  - topic: onex.evt.omnibase-infra.lease-expired.v1
+    event_type: LeaseExpired
+    message_category: EVENT
+    description: The grant was already gone.
+dependencies:
+  - name: lease_etcd_endpoint
+    type: "environment"
+    env_var: ONEX_LEASE_ETCD_ENDPOINT
+    required: true
+    description: etcd v3 client URL
+  - name: lease_kinds
+    type: "environment"
+    env_var: ONEX_LEASE_KINDS
+    required: true
+    description: comma list of kind:capacity:ttl_s
+input_model:
+  name: ModelLeaseAcquireRequest
+  module: omnibase_infra.models.lease.model_lease_acquire_request
+  description: The kind, resource, holder and idempotency request_id of one acquire.
+output_model:
+  name: ModelLeaseReply
+  module: omnibase_infra.models.lease.model_lease_reply
+  description: lease-granted, lease-refused, lease-renewed, lease-released or lease-expired, with the fence.
+capabilities:
+  - name: lease.acquire
+    description: Grant a free slot of the resource in one etcd transaction.
+  - name: lease.renew
+    description: Keep a grant alive at the same fence.
+  - name: lease.release
+    description: Give a grant back.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: lease.acquire
+      topic: onex.cmd.omnibase-infra.lease-acquire-requested.v1
+      handler:
+        name: HandlerLeaseAcquire
+        module: omnibase_infra.handlers.lease.handler_lease_orchestrator
+      description: Grant a free slot of the resource in one etcd transaction, or refuse.
+      supported_operations: [lease.acquire]
+      input_model:
+        name: ModelLeaseAcquireRequest
+        module: omnibase_infra.models.lease.model_lease_acquire_request
+        description: Grant a free slot of the resource in one etcd transaction, or refuse.
+    - operation: lease.renew
+      topic: onex.cmd.omnibase-infra.lease-renew-requested.v1
+      handler:
+        name: HandlerLeaseRenew
+        module: omnibase_infra.handlers.lease.handler_lease_orchestrator
+      description: Keep a grant alive at the same fence.
+      supported_operations: [lease.renew]
+      input_model:
+        name: ModelLeaseRenewRequest
+        module: omnibase_infra.models.lease.model_lease_renew_request
+        description: Keep a grant alive at the same fence.
+    - operation: lease.release
+      topic: onex.cmd.omnibase-infra.lease-release-requested.v1
+      handler:
+        name: HandlerLeaseRelease
+        module: omnibase_infra.handlers.lease.handler_lease_orchestrator
+      description: Give a grant back.
+      supported_operations: [lease.release]
+      input_model:
+        name: ModelLeaseReleaseRequest
+        module: omnibase_infra.models.lease.model_lease_release_request
+        description: Give a grant back.
+metadata:
+  description: Generic lease orchestrator over etcd.
+  author: OmniNode Team
+  license: MIT
+  tags: [orchestrator, lease, etcd, fence]
+  related_tickets: [OMN-21424, OMN-21418, OMN-21421]

@@ -792,6 +792,85 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3": {
+      "category": "command",
+      "contract_name": "node_lease_orchestrator",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3",
+      "handler_module": "omnibase_infra.handlers.lease.handler_lease_orchestrator",
+      "handler_name": "HandlerLeaseAcquire",
+      "message_types": [
+        "omnibase-infra.lease-acquire-requested",
+        "omnibase-infra.lease-release-requested",
+        "omnibase-infra.lease-renew-requested",
+        "onex.cmd.omnibase-infra.lease-acquire-requested.v1",
+        "onex.cmd.omnibase-infra.lease-release-requested.v1",
+        "onex.cmd.omnibase-infra.lease-renew-requested.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a": {
+      "category": "command",
+      "contract_name": "node_lease_orchestrator",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a",
+      "handler_module": "omnibase_infra.handlers.lease.handler_lease_orchestrator",
+      "handler_name": "HandlerLeaseRelease",
+      "message_types": [
+        "omnibase-infra.lease-acquire-requested",
+        "omnibase-infra.lease-release-requested",
+        "omnibase-infra.lease-renew-requested",
+        "onex.cmd.omnibase-infra.lease-acquire-requested.v1",
+        "onex.cmd.omnibase-infra.lease-release-requested.v1",
+        "onex.cmd.omnibase-infra.lease-renew-requested.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35": {
+      "category": "command",
+      "contract_name": "node_lease_orchestrator",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35",
+      "handler_module": "omnibase_infra.handlers.lease.handler_lease_orchestrator",
+      "handler_name": "HandlerLeaseRenew",
+      "message_types": [
+        "omnibase-infra.lease-acquire-requested",
+        "omnibase-infra.lease-release-requested",
+        "omnibase-infra.lease-renew-requested",
+        "onex.cmd.omnibase-infra.lease-acquire-requested.v1",
+        "onex.cmd.omnibase-infra.lease-release-requested.v1",
+        "onex.cmd.omnibase-infra.lease-renew-requested.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer": {
+      "category": "event",
+      "contract_name": "node_lease_reducer",
+      "event_model_module": "omnibase_infra.models.lease.model_lease_reply",
+      "event_model_name": "ModelLeaseReply",
+      "handler_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "handler_module": "omnibase_infra.handlers.lease.handler_lease_reducer",
+      "handler_name": "HandlerLeaseReducer",
+      "message_types": [
+        "ModelLeaseReply",
+        "omnibase-infra.lease-expired",
+        "omnibase-infra.lease-granted",
+        "omnibase-infra.lease-released",
+        "omnibase-infra.lease-renewed",
+        "onex.evt.omnibase-infra.lease-expired.v1",
+        "onex.evt.omnibase-infra.lease-granted.v1",
+        "onex.evt.omnibase-infra.lease-released.v1",
+        "onex.evt.omnibase-infra.lease-renewed.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86": {
       "category": "command",
       "contract_name": "node_ledger_projection_compute",
@@ -3638,11 +3717,11 @@
       },
       "contracts_discovered": 154,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 96,
-      "probe_count": 1096,
-      "registered_dispatchers": 128,
-      "registered_routes": 112,
-      "type_scoped_dispatchers": 75
+      "distinct_subscribe_topics": 103,
+      "probe_count": 1114,
+      "registered_dispatchers": 132,
+      "registered_routes": 119,
+      "type_scoped_dispatchers": 76
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3673,24 +3752,30 @@
         "installed": false,
         "package": "omnimemory",
         "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+      },
+      {
+        "installed": false,
+        "package": "onex-change-control",
+        "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
       }
     ],
     "expected_excluded_onex_nodes_packages": [
       "omnimarket",
       "omniclaude",
       "omniintelligence",
-      "omnimemory"
+      "omnimemory",
+      "onex-change-control"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-13T15:23:59.279690+00:00",
+    "generated_at_utc": "2026-10-26T22:43:17.013679+00:00",
     "installed_package_versions": {
-      "omnibase-core": "0.47.39",
-      "omnibase-infra": "0.38.72",
+      "omnibase-core": "0.47.57",
+      "omnibase-infra": "0.38.77",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
       "omnimemory": null,
-      "onex-change-control": "0.5.1"
+      "onex-change-control": null
     },
     "p0_outcomes": {
       "P0-1_guard_tripped_orchestrators": {
@@ -3730,8 +3815,7 @@
     "required_missing_packages": [],
     "required_onex_nodes_packages": [
       "omnibase-core",
-      "omnibase-infra",
-      "onex-change-control"
+      "omnibase-infra"
     ],
     "ticket": "OMN-12548"
   },
@@ -4010,6 +4094,57 @@
         "status": "success"
       },
       "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.lease-acquire-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-acquire-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.lease-acquire-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-acquire-requested.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.lease-release-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-release-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.lease-release-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-release-requested.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.lease-renew-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-renew-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.lease-renew-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-renew-requested.v1"
     },
     "P1a::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4704,6 +4839,66 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnibase-infra.inference-response.v1"
+    },
+    "P1a::onex.evt.omnibase-infra.lease-expired.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-expired",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-expired",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-expired.v1"
+    },
+    "P1a::onex.evt.omnibase-infra.lease-granted.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-granted",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-granted",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-granted.v1"
+    },
+    "P1a::onex.evt.omnibase-infra.lease-released.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-released",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-released",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-released.v1"
+    },
+    "P1a::onex.evt.omnibase-infra.lease-renewed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.lease-renewed",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-renewed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-renewed.v1"
     },
     "P1a::onex.evt.omnibase-infra.quality-gate-result.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5495,6 +5690,51 @@
       },
       "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1"
     },
+    "P1b::onex.cmd.omnibase-infra.lease-acquire-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-acquire-requested.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.lease-release-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-release-requested.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.lease-renew-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.lease-renew-requested.v1"
+    },
     "P1b::onex.cmd.omnibase-infra.llm-completion-request.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6154,6 +6394,66 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.omnibase-infra.inference-response.v1"
+    },
+    "P1b::onex.evt.omnibase-infra.lease-expired.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-expired.v1"
+    },
+    "P1b::onex.evt.omnibase-infra.lease-granted.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-granted.v1"
+    },
+    "P1b::onex.evt.omnibase-infra.lease-released.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-released.v1"
+    },
+    "P1b::onex.evt.omnibase-infra.lease-renewed.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-renewed.v1"
     },
     "P1b::onex.evt.omnibase-infra.quality-gate-result.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7228,6 +7528,86 @@
         "status": "success"
       },
       "topic": "onex.cmd.platform.hotpatch-ledger-reconcile.v1"
+    },
+    "P4::dispatcher.auto.node_lease_reducer.HandlerLeaseReducer::onex.evt.omnibase-infra.lease-expired.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "event_model": "omnibase_infra.models.lease.model_lease_reply.ModelLeaseReply",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.lease-expired",
+        "payload": "ModelLeaseReply"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-expired",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-expired.v1"
+    },
+    "P4::dispatcher.auto.node_lease_reducer.HandlerLeaseReducer::onex.evt.omnibase-infra.lease-granted.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "event_model": "omnibase_infra.models.lease.model_lease_reply.ModelLeaseReply",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.lease-granted",
+        "payload": "ModelLeaseReply"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-granted",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-granted.v1"
+    },
+    "P4::dispatcher.auto.node_lease_reducer.HandlerLeaseReducer::onex.evt.omnibase-infra.lease-released.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "event_model": "omnibase_infra.models.lease.model_lease_reply.ModelLeaseReply",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.lease-released",
+        "payload": "ModelLeaseReply"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-released",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-released.v1"
+    },
+    "P4::dispatcher.auto.node_lease_reducer.HandlerLeaseReducer::onex.evt.omnibase-infra.lease-renewed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "event_model": "omnibase_infra.models.lease.model_lease_reply.ModelLeaseReply",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.lease-renewed",
+        "payload": "ModelLeaseReply"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "omnibase-infra.lease-renewed",
+        "status": "success"
+      },
+      "topic": "onex.evt.omnibase-infra.lease-renewed.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.cmd.omnibase-infra.build-loop-append.v1": {
       "construct_only": true,
@@ -25083,6 +25463,76 @@
       "topic": "onex.evt.artifact.change-detected.v1",
       "topic_pattern": "*.evt.artifact.change-detected.*",
       "type_scoped": false
+    },
+    {
+      "contract_name": "node_lease_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3",
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3",
+      "message_category": "command",
+      "route_id": "route.auto.node_lease_orchestrator.HandlerLeaseAcquire.lease_acquire_630d36e3.onex_cmd_omnibase_infra_lease_acquire_requested_v1",
+      "topic": "onex.cmd.omnibase-infra.lease-acquire-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.lease-acquire-requested.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_lease_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a",
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a",
+      "message_category": "command",
+      "route_id": "route.auto.node_lease_orchestrator.HandlerLeaseRelease.lease_release_b20d786a.onex_cmd_omnibase_infra_lease_release_requested_v1",
+      "topic": "onex.cmd.omnibase-infra.lease-release-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.lease-release-requested.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_lease_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35",
+      "handler_id": "dispatcher.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35",
+      "message_category": "command",
+      "route_id": "route.auto.node_lease_orchestrator.HandlerLeaseRenew.lease_renew_a0b24f35.onex_cmd_omnibase_infra_lease_renew_requested_v1",
+      "topic": "onex.cmd.omnibase-infra.lease-renew-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.lease-renew-requested.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_lease_reducer",
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "handler_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "message_category": "event",
+      "route_id": "route.auto.node_lease_reducer.HandlerLeaseReducer.onex_evt_omnibase_infra_lease_expired_v1",
+      "topic": "onex.evt.omnibase-infra.lease-expired.v1",
+      "topic_pattern": "*.evt.omnibase-infra.lease-expired.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_lease_reducer",
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "handler_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "message_category": "event",
+      "route_id": "route.auto.node_lease_reducer.HandlerLeaseReducer.onex_evt_omnibase_infra_lease_granted_v1",
+      "topic": "onex.evt.omnibase-infra.lease-granted.v1",
+      "topic_pattern": "*.evt.omnibase-infra.lease-granted.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_lease_reducer",
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "handler_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "message_category": "event",
+      "route_id": "route.auto.node_lease_reducer.HandlerLeaseReducer.onex_evt_omnibase_infra_lease_released_v1",
+      "topic": "onex.evt.omnibase-infra.lease-released.v1",
+      "topic_pattern": "*.evt.omnibase-infra.lease-released.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_lease_reducer",
+      "dispatcher_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "handler_id": "dispatcher.auto.node_lease_reducer.HandlerLeaseReducer",
+      "message_category": "event",
+      "route_id": "route.auto.node_lease_reducer.HandlerLeaseReducer.onex_evt_omnibase_infra_lease_renewed_v1",
+      "topic": "onex.evt.omnibase-infra.lease-renewed.v1",
+      "topic_pattern": "*.evt.omnibase-infra.lease-renewed.*",
+      "type_scoped": true
     },
     {
       "contract_name": "node_ledger_projection_compute",
