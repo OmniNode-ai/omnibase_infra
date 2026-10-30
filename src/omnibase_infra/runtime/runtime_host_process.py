@@ -1950,7 +1950,7 @@ class RuntimeHostProcess:
 
         assert_venv_purity()
 
-        # Step 0c: Resolve the contract hot-load gate (OMN-20079). A switch that
+        # Step 0c: Resolve the contract hot-load gate once (OMN-20079). A switch that
         # is on in an environment the declared allowlist does not name (or in an
         # unset environment), or a malformed block, fails the boot here, before
         # architecture validation, the event bus or any wiring.
@@ -5849,14 +5849,15 @@ class RuntimeHostProcess:
         return self._container
 
     def _resolve_contract_hotload_gate(self) -> ModelContractHotloadConfig:
-        """Read ``contract_hotload``; both hot-load paths run only when enabled."""
-        return ModelContractHotloadConfig.from_runtime_config(
+        """Read ``contract_hotload`` once; start() step 0c decides, later steps follow."""
+        gate = getattr(self, "_contract_hotload_gate", None)
+        gate = gate or ModelContractHotloadConfig.from_runtime_config(
             getattr(self, "_config", None),
-            environments=(
-                os.getenv("ONEX_ENVIRONMENT", ""),
-                self._get_environment_from_config(),
-            ),
+            os.getenv("ONEX_ENVIRONMENT", ""),
+            self._get_environment_from_config(),
         )
+        self._contract_hotload_gate = gate
+        return gate
 
     def _get_environment_from_config(self) -> str:
         """Extract environment setting from config with consistent fallback.
@@ -6168,9 +6169,7 @@ class RuntimeHostProcess:
         # (OMN-20079). contract-registered.v1 would otherwise cache and
         # materialize any parseable contract it carries.
         if not self._resolve_contract_hotload_gate().enabled:
-            logger.info(
-                "Baseline contract subscriptions off: contract_hotload not enabled"
-            )
+            logger.info("Baseline hot-load subscriptions off: not enabled")
             return
 
         # Guard: only wire if KafkaContractSource is active

@@ -27,7 +27,8 @@ Related:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import logging
+from collections.abc import Mapping
 from typing import Literal, Self
 
 from pydantic import (
@@ -45,6 +46,8 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 __all__: list[str] = ["ModelContractHotloadConfig"]
 
+logger = logging.getLogger(__name__)
+
 
 class ModelContractHotloadConfig(BaseModel):
     """The ``contract_hotload`` block of the runtime config file.
@@ -53,7 +56,9 @@ class ModelContractHotloadConfig(BaseModel):
         enabled: Master switch for both hot-load paths. Default ``False``.
         mode: Which load policy applies once enabled. Required when ``enabled``
             is true so that turning the paths on is always a deliberate,
-            named choice; ignored while the switch is off.
+            named choice; ignored while the switch is off. Reserved: the
+            interim gate does not branch on it (it only logs it); the load
+            policy is consumed by the hot-loading epic (OMN-21318).
         allowed_environments: The environment names where hot loading is
             permitted. Required (non-empty) when ``enabled`` is true. Names are
             matched case-insensitively after trimming. Anything not named here,
@@ -105,8 +110,7 @@ class ModelContractHotloadConfig(BaseModel):
     def from_runtime_config(
         cls,
         runtime_config: Mapping[str, object] | None,
-        *,
-        environments: Iterable[str],
+        *environments: str,
     ) -> Self:
         """Read and enforce the block from the runtime config.
 
@@ -152,4 +156,11 @@ class ModelContractHotloadConfig(BaseModel):
                 "does not name; contract hot loading is refused there (OMN-20079)",
                 context=context,
             )
+        # The interim gate does not branch on the mode; it is recorded so an
+        # operator can see what was declared.
+        logger.info(
+            "Contract hot loading enabled: mode=%s (recorded, not yet consumed "
+            "by the interim gate)",
+            gate.mode,
+        )
         return gate

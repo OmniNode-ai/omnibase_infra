@@ -414,6 +414,76 @@ class TestGateResolution:
         with pytest.raises(ProtocolConfigurationError):
             _host({"contract_hotload": block})._resolve_contract_hotload_gate()
 
+    def test_the_decision_is_made_once_and_later_calls_follow_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
+        host = _host(
+            {
+                **_hotload(
+                    enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST
+                ),
+                "event_bus": {"environment": _LAB_ENVIRONMENT},
+            }
+        )
+        first = host._resolve_contract_hotload_gate()
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "prod-eu")
+        assert host._resolve_contract_hotload_gate() is first
+
+    def test_a_refusal_is_raised_each_time_and_never_kept(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "prod-eu")
+        host = _host(
+            _hotload(enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST)
+        )
+        for _ in range(2):
+            with pytest.raises(ProtocolConfigurationError):
+                host._resolve_contract_hotload_gate()
+
+    @pytest.mark.asyncio
+    async def test_wiring_after_the_boot_check_cannot_refuse_mid_start(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RUNTIME_PROFILE", "main")
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
+        bus = _RecordingBus()
+        host = _host(
+            {
+                "handler_source": {"mode": "kafka_events"},
+                "event_bus": {"environment": _LAB_ENVIRONMENT},
+                **_hotload(
+                    enabled=True, mode="on_demand", allowed_environments=_ALLOWLIST
+                ),
+            },
+            bus,
+        )
+        await bus.start()
+        host._resolve_contract_hotload_gate()  # the boot check
+        monkeypatch.setenv("ONEX_ENVIRONMENT", "prod-eu")
+
+        await _wire_both_paths(host)
+
+        assert SUFFIX_NODE_REGISTRATION in bus.subscribed_topics
+        assert TOPIC_SUFFIX_CONTRACT_REGISTERED in bus.subscribed_topics
+        await bus.close()
+
+    def test_the_declared_mode_is_logged_as_not_consumed(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("ONEX_ENVIRONMENT", _LAB_ENVIRONMENT)
+        host = _host(
+            {
+                **_hotload(
+                    enabled=True, mode="full_load", allowed_environments=_ALLOWLIST
+                ),
+                "event_bus": {"environment": _LAB_ENVIRONMENT},
+            }
+        )
+        with caplog.at_level("INFO"):
+            host._resolve_contract_hotload_gate()
+        assert "mode=full_load (recorded, not yet consumed" in caplog.text
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("environment", ["prod-eu", "onex-production", None])
     async def test_start_refuses_before_validation_and_the_event_bus(
