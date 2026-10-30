@@ -48,6 +48,7 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
         REPO_ROOT=str(hook_repo),
         PREPUSH_PRIVATE_TABLE_REL=PRIVATE_TABLE_REL,
         PYTHONDONTWRITEBYTECODE="1",
+        HOME=str(tmp_path / "home"),
     )
     target = root / PRIVATE_TABLE_REL
     target.parent.mkdir(parents=True)
@@ -117,7 +118,9 @@ def test_dispatcher_and_guard_share_committed_table_and_refuse_drift(
     assert cli.stdout == dispatcher.stdout == SYNTHETIC_TABLE
     rows = shell("prepush_table_rows")
     assert rows.returncode == 0, rows.stderr
-    assert rows.stdout.splitlines()[0].split("\t")[0] == "local"
+    shipped = (REPO_ROOT / "scripts/hooks/prepush_hosts.tsv").read_text().splitlines()
+    neutral_row = next(row for row in shipped if row and not row.startswith("#"))
+    assert rows.stdout.splitlines()[0] == neutral_row
     assert rows.stdout.splitlines()[1:] == SYNTHETIC_TABLE.splitlines()[1:]
 
     target.write_text(

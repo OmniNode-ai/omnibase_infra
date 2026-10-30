@@ -98,6 +98,11 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
         monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # A developer directory under HOME, where a resolver reading it from the home
+    # directory instead of the workspace would find a loadable config.
+    home_decoy = tmp_path / "home/.onex/workspace-config/config/onex/runtime"
+    home_decoy.mkdir(parents=True)
+    (home_decoy / "runtime_config.yaml").write_text(_NEIGHBOUR_CONFIG, encoding="utf-8")
     monkeypatch.setenv("OMNI_HOME", str(workspace))
     handler = cast("_Resolver", handler_class())
     request = request_class.model_validate(
@@ -122,9 +127,7 @@ def test_contract_kernel_and_guard_resolve_real_directory_tree(
         expected_file = expected.resolve() / "config/onex/runtime/runtime_config.yaml"
         with pytest.raises(WorkspaceRuntimeConfigMissingError) as exc:
             resolve_embedded_runtime_config(workspace_root=workspace)
-        assert f"declares no working-tree runtime config at {expected_file}." in str(
-            exc.value
-        )
+        assert exc.value.model.context["config_path"] == str(expected_file)
         expected_file.parent.mkdir(parents=True, exist_ok=True)
         expected_file.write_text(_OWNER_CONFIG, encoding="utf-8")
         loaded, provenance = resolve_embedded_runtime_config(workspace_root=workspace)
