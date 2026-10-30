@@ -121,6 +121,7 @@ def test_lane_with_stored_identity_builds_a_sasl_admin_client(
     assert code == 0
     (config,) = admin_cls.call_args.args
     assert config["sasl.username"] == "stored"
+    assert config["sasl.password"] == _CRED
     assert config["sasl.mechanism"] == "SCRAM-SHA-256"
     assert config["bootstrap.servers"] == "broker.invalid:19092"
 
