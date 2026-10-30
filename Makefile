@@ -224,7 +224,12 @@ mint-local: _check-docker ## Laptop profile: mint this machine's login on the lo
 	  acquired=$$?; \
 	  case $$acquired in \
 	    0) ;; \
-	    75) holder=$$(cat "$$lock" 2>/dev/null); case "$$holder" in ""|*[!0-9]*) holder=unknown ;; esac; busy "$$holder" ;; \
+	    75) holder=$$(cat "$$lock" 2>/dev/null); \
+	      case "$$holder" in \
+	        ""|*[!0-9]*) ;; \
+	        *) if [ "$$holder" -gt 0 ] 2>/dev/null && kill -0 "$$holder" 2>/dev/null; then busy "$$holder"; fi ;; \
+	      esac; \
+	      echo "mint-local: busy, lock held by a run that has not yet recorded its pid (exit 75)" >&2; exit 75 ;; \
 	    *) exit 1 ;; \
 	  esac; \
 	  holder=$$(cat "$$lock") || exit 1; \

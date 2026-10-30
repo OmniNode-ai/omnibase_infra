@@ -513,7 +513,7 @@ def test_lock_two_runs_started_together_make_one_mutation(tmp_path: Path) -> Non
     ]
     outcomes = [(run.wait(timeout=120), *run.communicate()) for run in runs]
     assert len(stack.mutations()) == 1, outcomes
-    busy = [o for o in outcomes if "mint-local: busy, lock held by pid " in o[2]]
+    busy = [o for o in outcomes if "mint-local: busy, lock held by " in o[2]]
     assert len(busy) == 1, outcomes
     assert busy[0][0] != 0
     winner = next(o for o in outcomes if o is not busy[0])
@@ -616,6 +616,25 @@ def test_lock_is_released_after_a_failed_run(tmp_path: Path) -> None:
     assert stack.run(STUB_NO_TERMINAL="1").returncode != 0
     assert stack.lock().is_file(), "release must never unlink the shared inode"
     assert _lock_available(stack.lock())
+
+
+def test_lock_busy_before_pid_record_does_not_name_dead_pid(tmp_path: Path) -> None:
+    stack = _Stack(tmp_path)
+    dead = _dead_pid()
+    stack.lock().write_text(f"{dead}\n")
+    with _paused_run(stack, "acquire") as (_, info):
+        assert info["tool"] == "perl", "the real Perl flock did not acquire"
+        assert not _lock_available(stack.lock())
+        contender = stack.run()
+        assert contender.returncode != 0, _out(contender)
+        assert "Error 75" in contender.stderr, _out(contender)
+        assert stack.mutations() == []
+        assert stack.lock().read_text() == f"{dead}\n"
+        assert f"pid {dead}" not in contender.stderr, _out(contender)
+        assert (
+            "mint-local: busy, lock held by a run that has not yet recorded its pid (exit 75)"
+            in contender.stderr
+        ), _out(contender)
 
 
 def test_lock_killed_between_acquire_and_pid_record_recovers(tmp_path: Path) -> None:
