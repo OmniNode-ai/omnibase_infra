@@ -1480,7 +1480,6 @@ check_sibling_lock_pins() {
         --repo "omnibase-infra=${omni_home}/omnibase_infra"
         --repo "omnibase-core=$(sibling_source_path "${omni_home}" omnibase_core)"
         --repo "omnibase-spi=${omni_home}/omnibase_spi"
-        --repo "omnibase-compat=$(sibling_source_path "${omni_home}" omnibase_compat)"
         --output "${provenance_out}"
         --build-source workspace
     )

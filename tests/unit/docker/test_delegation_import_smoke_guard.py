@@ -42,9 +42,9 @@ def test_dockerfile_has_foundation_import_smoke_guard(dockerfile_content: str) -
 @pytest.mark.unit
 def test_smoke_guard_runs_after_wheel_installs(dockerfile_content: str) -> None:
     """The guard must run after the ONEX wheels are installed, not before."""
-    install_idx = dockerfile_content.find("--reinstall-package omnibase-compat")
+    install_idx = dockerfile_content.find("--reinstall-package omnibase-spi")
     guard_idx = dockerfile_content.find("import omnibase_compat; \\")
-    assert install_idx != -1, "compat install step missing from Dockerfile"
+    assert install_idx != -1, "spi install step missing from Dockerfile"
     assert guard_idx != -1, "foundation import smoke guard missing from Dockerfile"
     assert install_idx < guard_idx, (
         "foundation import smoke guard must run AFTER the wheel install steps"

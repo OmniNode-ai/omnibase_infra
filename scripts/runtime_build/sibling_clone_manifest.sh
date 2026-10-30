@@ -46,7 +46,6 @@ SIBLING_CLONE_MANIFEST=(
     "omnibase_infra"
     "omnibase_core"
     "omnibase_spi"
-    "omnibase_compat"
     "omnimarket"
 )
 
@@ -55,7 +54,6 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
     "omnibase-infra"
     "omnibase-core"
     "omnibase-spi"
-    "omnibase-compat"
     "omnimarket"
 )
 
@@ -74,20 +72,20 @@ SIBLING_CLONE_MANIFEST_DIST_NAMES=(
 # ---------------------------------------------------------------------------
 
 # Siblings vendored as SOURCE into the runtime image (rsync'd by
-# stage_workspace.sh, clean-checked-out to DEPLOY_REF by its RT-1 step, and
-# staged by prepr_verify_lane.sh), in install order: omnibase_core FIRST so
-# the dev-HEAD core is the resolved core for everything after it (OMN-13405).
-# A strict subset of SIBLING_CLONE_MANIFEST: omnibase_infra is the Docker build
-# context itself and omnibase_spi is installed from the published wheel. It is
-# also the key set of compute_workspace_provenance.py's WORKSPACE_PACKAGES,
-# which runs inside the image and cannot source this file; the parity test
-# holds the two equal.
+# stage_workspace.sh, clean-checked-out to their newest dev-merge tag by its RT-1
+# step, and staged by prepr_verify_lane.sh), in install order: omnibase_core
+# FIRST so the dev-HEAD core is the resolved core for everything after it
+# (OMN-13405). A strict subset of SIBLING_CLONE_MANIFEST: omnibase_infra is the
+# Docker build context itself. omnibase_spi joined the set under OMN-17427 stage
+# 0: it used to install from the package index at an exact version, and the dev
+# lane takes no first-party package from anything but a dev-merge tag. It is the
+# key set of compute_workspace_provenance.py's WORKSPACE_PACKAGES (less
+# omnimarket, which the infra image does not install), which runs inside the
+# image and cannot source this file; the parity test holds the two equal.
+# omnibase_compat left every set in this file under OMN-21284: it is being
+# retired, and the image installs it from the lock until no consumer remains.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
-SIBLING_VENDORED_REPOS=(
-    "omnibase_core"
-    "omnibase_compat"
-    "omnimarket"
-)
+SIBLING_VENDORED_REPOS=("omnibase_core" "omnibase_spi" "omnimarket")
 
 # The lab scripts track no extra repository now that onex_change_control is
 # retired. This array stays as the place to add an extra tracked repository.
@@ -106,11 +104,12 @@ SIBLING_LAB_TAG_REPOS=(
     ${SIBLING_EXTRA_TRACKED_REPOS[@]+"${SIBLING_EXTRA_TRACKED_REPOS[@]}"}
 )
 
-# Tag-set members the lane refresh scripts do NOT move. omnibase_spi is
-# installed from the wheel its lock pins, and refresh_dev_lane.sh and
-# refresh_stability_lane.sh have never checked its clone out to the deployed
-# ref. OMN-19072 records that membership as it was; changing it would change
-# what a lane refresh does, which is out of that ticket's scope.
+# Tag-set members the lane refresh scripts do NOT move. refresh_dev_lane.sh and
+# refresh_stability_lane.sh have never checked omnibase_spi's clone out to the
+# deployed ref. OMN-19072 records that membership as it was; changing it would
+# change what a lane refresh does, which is out of that ticket's scope. The
+# build itself stages spi at its dev-merge tag in its own RT-1 worktree
+# (OMN-17427), so the clone the refresh leaves alone is not what is built.
 # shellcheck disable=SC2034  # consumed by scripts that `source` this file
 SIBLING_LANE_REFRESH_EXCLUDED_REPOS=(
     "omnibase_spi"
