@@ -3243,7 +3243,7 @@ dod_evidence:
       - AC17427004001
       - AC17427004002
   - id: dod-omn17427-core-dev-tag-pin
-    description: Pin identity, moved imports, typed shape checker and compatible-version seams; the new pin test path fails at the merge base.
+    description: Pin identity at dev-20261030152335-66d35d2283c3, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
     source: manual
     checks:
       - check_type: test_passes
@@ -3251,7 +3251,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630002]
   - id: dod-omn17427-core-dev-tag-deploy
-    description: Hosted-runner check of tag identity and moved imports without services, containers or credentials; runtime boot proof is separate.
+    description: Hosted-runner check of tag identity at dev-20261030152335-66d35d2283c3 and moved imports without services, containers or credentials; runtime boot proof is separate.
     source: manual
     checks:
       - check_type: command

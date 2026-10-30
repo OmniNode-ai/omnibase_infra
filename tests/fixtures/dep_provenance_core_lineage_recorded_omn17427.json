@@ -3,11 +3,10 @@
     "source": "Live GitHub git ls-remote and the published core dev_tag_lineage runtime; exact command arguments and exit codes are stored in each case.",
     "core_tag": "dev-20261030041443-a5b07b5aeafc",
     "core_commit": "a5b07b5aeafcb4bbe2d702d3cc533c2a1dc9fead",
-    "captured_utc": "2026-10-30T04:26:08.475967+00:00",
+    "captured_utc": "2026-10-30T17:43:04.560689+00:00",
     "stdout_rewrite": "For each core stdout line, remove the absolute temporary working-directory prefix plus its trailing slash only when that prefix starts the line; preserve every other byte. The diagnostic target is then pyproject.toml.",
     "stderr_capture": "Install the published package before recording; uv installation/download progress is excluded. Both recorded validator commands emitted no stderr.",
-    "working_directory": "Each command runs beside the recorded minimal pyproject.toml; no working-directory path is retained.",
-    "real_case_recaptured_utc": "2026-10-30T16:35:14.855803+00:00"
+    "working_directory": "Each command runs beside the recorded minimal pyproject.toml; no working-directory path is retained."
   },
   "rules": "tag_absent,tag_suffix_mismatch,tag_off_branch,declared_version_mismatch,lock_mismatch,lineage_unresolved",
   "cases": [
