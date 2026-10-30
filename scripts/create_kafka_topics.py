@@ -517,7 +517,7 @@ def main() -> int:
         try:
             client_config = ModelLaneAdminClientConfig.resolve(
                 args.lane, os.environ
-            ).client_config
+            ).librdkafka_config()
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
