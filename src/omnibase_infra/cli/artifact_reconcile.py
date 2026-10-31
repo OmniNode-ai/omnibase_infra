@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import getpass
 import json
-import logging
 import os
 import socket
 from uuid import uuid4
@@ -25,16 +24,15 @@ import click
 from rich.console import Console
 
 from omnibase_infra.enums.generated.enum_artifact_topic import EnumArtifactTopic
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 
-logger = logging.getLogger(__name__)
 console = Console()
-
-DEFAULT_BOOTSTRAP_SERVERS = "localhost:19092"
 
 
 def _get_bootstrap_servers() -> str:
     """Resolve Kafka bootstrap servers from environment."""
-    return os.environ.get("KAFKA_BOOTSTRAP_SERVERS", DEFAULT_BOOTSTRAP_SERVERS)
+    default = load_endpoint_defaults().local_kafka_bootstrap_servers
+    return os.environ.get("KAFKA_BOOTSTRAP_SERVERS", default)
 
 
 def _resolve_actor() -> str:

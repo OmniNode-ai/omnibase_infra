@@ -29,14 +29,14 @@ import logging
 import os
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.services.contract_resolver.main import create_app
 
 logger = logging.getLogger(__name__)
 
 # Create application using minimal container (no DB/Kafka required for core resolve)
-_container = ModelONEXContainer()
 app = create_app(
-    container=_container,
+    container=ModelONEXContainer(),
     cors_origins=None,  # Reads CORS_ORIGINS env var; fails fast if not set
 )
 
@@ -51,8 +51,9 @@ def main() -> None:
     """
     import uvicorn
 
+    defaults = load_endpoint_defaults()
     port = int(os.environ.get("CONTRACT_RESOLVER_PORT", "8091"))
-    host = os.environ.get("CONTRACT_RESOLVER_HOST", "0.0.0.0")  # noqa: S104 — Docker service binds all interfaces by default
+    host = os.environ.get("CONTRACT_RESOLVER_HOST", defaults.bind_all_address)
     log_level = os.environ.get("ONEX_LOG_LEVEL", "INFO").lower()
 
     logger.info(
@@ -65,7 +66,6 @@ def main() -> None:
         host=host,
         port=port,
         log_level=log_level,
-        reload=False,
     )
 
 

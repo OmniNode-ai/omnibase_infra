@@ -106,6 +106,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 logger = logging.getLogger(__name__)
@@ -602,6 +603,7 @@ class ModelRuntimeSchedulerConfig(BaseModel):
         Returns:
             Default configuration instance with environment overrides
         """
+        endpoint_defaults = load_endpoint_defaults()
         base_config = cls(
             tick_interval_ms=1000,
             scheduler_id="runtime-scheduler-default",
@@ -613,11 +615,9 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             circuit_breaker_reset_timeout_seconds=60.0,
             enable_metrics=True,
             metrics_prefix="runtime_scheduler",
-            valkey_host="localhost",
-            valkey_port=6379,
-            valkey_password=None,
+            valkey_host=endpoint_defaults.local_host,
+            valkey_port=endpoint_defaults.local_valkey_port,
             valkey_timeout_seconds=5.0,
-            valkey_connection_retries=3,
         )
         return base_config.apply_environment_overrides()
 

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Endpoint defaults (OMN-21690).
+#
+# The addresses, hosts and ports that infra services fall back to when the
+# environment names none: where a server binds, which host names count as
+# loopback, and the local stack's broker, cache host and runtime health port.
+# Read by ModelEndpointDefaults; code holds no host, address or port literal for
+# them. Every key is required: a block that omits one fails to load.
+settings:
+  # Health and metrics servers bind loopback unless the environment says otherwise,
+  # so an unconfigured service is never exposed to the network.
+  loopback_address: "127.0.0.1"
+  # Container-facing servers (MCP, health probes, the contract resolver) bind every interface.
+  bind_all_address: "0.0.0.0"
+  # Host names that reach the local machine; a database on one of them is not shared.
+  loopback_host_names:
+    - "localhost"
+    - "127.0.0.1"
+    - "::1"
+  # Host of the Docker-exposed local stack and the ports it publishes.
+  local_host: "localhost"
+  local_kafka_bootstrap_servers: "localhost:19092"
+  local_valkey_port: 6379
+  # Port the runtime's health server listens on unless ONEX_HTTP_PORT names another.
+  runtime_health_port: 8085

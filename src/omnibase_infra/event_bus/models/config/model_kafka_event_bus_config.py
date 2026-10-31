@@ -184,6 +184,7 @@ from omnibase_infra.enums import (
     EnumKafkaAcks,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -1575,7 +1576,7 @@ class ModelKafkaEventBusConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            bootstrap_servers="localhost:19092",  # fallback-ok: local-dev default factory
+            bootstrap_servers=load_endpoint_defaults().local_kafka_bootstrap_servers,  # fallback-ok: local-dev default factory
             environment="local",
             timeout_seconds=30,
             max_retry_attempts=3,
@@ -1587,8 +1588,6 @@ class ModelKafkaEventBusConfig(BaseModel):
             enable_idempotence=True,
             auto_offset_reset="latest",
             enable_auto_commit=True,
-            dead_letter_topic=None,
-            instance_id=None,
             reconnect_backoff_ms=2000,
             reconnect_backoff_max_ms=30000,
         )

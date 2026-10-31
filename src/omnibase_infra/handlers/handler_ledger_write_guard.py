@@ -36,14 +36,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
+
 GUARD_NAME = "ledger-test-write-guard"
 TEST_CONTEXT_ENV = "ONEX_TEST_CONTEXT"
 EXIT_TEST_WRITE_REFUSED = 79
 CANONICAL_TOPIC = re.compile(
     r"^onex\.(?:evt|cmd)\.omnimarket\.work-ledger-[a-z0-9-]+\.v\d+$"
 )
-_LOOPBACK_HOSTS = frozenset({"", "localhost", "127.0.0.1", "::1"})
-_RUNNER_MODULES = ("pytest", "unittest")
+_LOOPBACK_HOSTS = frozenset(("", *load_endpoint_defaults().loopback_host_names))
 
 
 class LedgerTestWriteRefusedError(Exception):
@@ -67,7 +68,7 @@ def test_context(environ: Mapping[str, str]) -> str | None:
         return "PYTEST_CURRENT_TEST is set"
     if environ.get(TEST_CONTEXT_ENV, "").strip():
         return f"{TEST_CONTEXT_ENV} is set"
-    for name in _RUNNER_MODULES:
+    for name in ("pytest", "unittest"):
         if name in sys.modules:
             return f"{name} is imported"
     return None
