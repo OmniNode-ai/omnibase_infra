@@ -15,8 +15,7 @@ Use Cases:
 Design Decisions:
     - No circuit breaker integration: Optimistic conflicts are application logic,
       not infrastructure failures. They indicate contention, not service degradation.
-    - Lower initial backoff: 0.1s vs 1.0s for transient errors because conflicts
-      typically resolve faster as other transactions complete.
+    - Lower initial backoff than transient errors: conflicts clear as transactions finish.
     - Jitter by default: Critical for preventing thundering herd on high-contention
       resources where multiple retries might synchronize.
     - Caller-provided conflict check: Flexible for different conflict indicators
@@ -65,6 +64,8 @@ import logging
 import random
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeVar
+
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -130,9 +131,9 @@ async def retry_on_optimistic_conflict(
     *,
     check_conflict: Callable[[T], bool],
     max_retries: int = 3,
-    initial_backoff: float = 0.1,
-    max_backoff: float = 5.0,
-    backoff_multiplier: float = 2.0,
+    initial_backoff: float = TIMEOUTS.optimistic_retry_initial_backoff_seconds,
+    max_backoff: float = TIMEOUTS.optimistic_retry_max_backoff_seconds,
+    backoff_multiplier: float = TIMEOUTS.optimistic_retry_backoff_multiplier,
     jitter: bool = True,
     correlation_id: UUID | None = None,
 ) -> T:

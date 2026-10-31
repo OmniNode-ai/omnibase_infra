@@ -8,8 +8,7 @@ orchestrators to reliably detect state transitions via the Observer pattern,
 maintaining loose coupling between reducers and workflow coordinators.
 
 Architecture Overview:
-    Post-commit notification publishing in the ONEX
-    state machine architecture:
+    Post-commit notification publishing in the ONEX state machine architecture:
 
     1. Reducers commit state transitions to projections
     2. Post-commit hook creates ModelStateTransitionNotification
@@ -106,6 +105,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
 from omnibase_infra.runtime.models.model_transition_notification_publisher_metrics import (
     ModelTransitionNotificationPublisherMetrics,
@@ -185,7 +185,7 @@ class TransitionNotificationPublisher(MixinAsyncCircuitBreaker):
         *,
         publisher_id: str | None = None,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = TIMEOUTS.circuit_breaker_reset_seconds,
         max_tracked_failures: int = DEFAULT_MAX_TRACKED_FAILURES,
     ) -> None:
         """Initialize transition notification publisher.
