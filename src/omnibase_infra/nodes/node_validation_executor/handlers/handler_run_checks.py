@@ -24,6 +24,7 @@ from omnibase_infra.models.validation import (
     ModelValidationChecksCompleted,
     ModelValidationExecutionRequested,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import current_dispatch_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,8 @@ class HandlerRunChecks:
         """Initialize the handler.
 
         Args:
-            correlation_id: Correlation ID for log tracing, when the caller has one.
+            correlation_id: Fallback trace ID for standalone calls. Runtime
+                dispatch uses the current message's envelope correlation ID.
         """
         self._correlation_id = correlation_id
 
@@ -90,9 +92,9 @@ class HandlerRunChecks:
         Actual subprocess execution (mypy, ruff, pytest) will be wired
         in a follow-up ticket.
 
-        The runtime hands the handler the typed request alone, so
-        the constructor's ``correlation_id`` is optional. The runtime applier
-        carries the envelope's correlation ID onto the published event.
+        The runtime binds the incoming envelope for each dispatch. Its
+        correlation ID takes precedence over the optional constructor fallback
+        used by standalone callers.
 
         Args:
             request: Execution event containing the validation plan fields.
@@ -102,7 +104,10 @@ class HandlerRunChecks:
             score threshold, published as ``validation-checks-completed``.
         """
         plan = request
-        correlation_id = self._correlation_id
+        envelope = current_dispatch_envelope()
+        correlation_id = (
+            envelope.correlation_id if envelope is not None else self._correlation_id
+        )
         logger.info(
             "Executing validation plan %s with %d checks (correlation_id=%s)",
             plan.plan_id,

@@ -64,6 +64,7 @@ from omnibase_infra.models.validation_ledger import (
     ModelPayloadValidationLedgerAppend,
     ModelValidationLedgerAppendResult,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import current_dispatch_envelope
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
@@ -356,8 +357,17 @@ class HandlerValidationLedgerAppend:
             ModelHandlerOutput wrapping ModelValidationLedgerAppendResult.
         """
         payload = request
-        correlation_id = payload.correlation_id or uuid4()
-        input_envelope_id = uuid4()
+        envelope = current_dispatch_envelope()
+        correlation_id = (
+            payload.correlation_id
+            or (envelope.correlation_id if envelope is not None else None)
+            or uuid4()
+        )
+        input_envelope_id = envelope.envelope_id if envelope is not None else uuid4()
+        if payload.correlation_id is None:
+            # Keep the DB operation and handler output on the same trace without
+            # mutating the frozen request supplied by the dispatch adapter.
+            payload = payload.model_copy(update={"correlation_id": correlation_id})
 
         result = await self.append(payload)
 

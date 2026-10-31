@@ -73,7 +73,7 @@ handler_routing:
       handler:
         name: "HandlerRunChecks"
         module: "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks"
-      description: "Execute all checks in a validation plan"
+      description: "Execute the typed validation request, tracing each dispatch with its incoming envelope correlation ID."
       event_model:
         name: "ModelValidationExecutionRequested"
         module: "omnibase_infra.models.validation.model_validation_execution_requested"
