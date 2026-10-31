@@ -104,7 +104,9 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "apply": False,
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 def _merged_with_contract() -> _Gh:

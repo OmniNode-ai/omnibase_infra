@@ -292,7 +292,7 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "readback_max_attempts": 2,
     }
     payload.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**payload)
+    return ModelEvidenceAutocloseSweepRequest(**{"demotion_window_hours": 0, **payload})
 
 
 # ---------------------------------------------------------------------------

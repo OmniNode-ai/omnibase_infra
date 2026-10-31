@@ -251,7 +251,9 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "apply": False,
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 async def test_all_verified_but_merge_state_only_posts_a_gap_not_a_flip() -> None:
