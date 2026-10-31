@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +20,7 @@ from scripts.check_topic_drift import (
 
 @pytest.mark.unit
 class TestExtractSuffixValues:
-    """Tests for AST-based SUFFIX_* extraction."""
+    """Tests for SUFFIX_* extraction."""
 
     def test_extracts_simple_string_constants(self, tmp_path: Path) -> None:
         """Extracts SUFFIX_* = "string" assignments."""
@@ -48,6 +49,43 @@ class TestExtractSuffixValues:
         )
         result = _extract_suffix_values(py_file)
         assert result == {"SUFFIX_REAL": "onex.evt.platform.test.v1"}
+
+    def test_resolves_generated_enum_member_values(self, tmp_path: Path) -> None:
+        """SUFFIX_* = EnumProducerTopic.MEMBER.value resolves to the enum's string."""
+        py_file = tmp_path / "suffixes.py"
+        py_file.write_text(
+            textwrap.dedent("""\
+                from omnibase_infra.enums.generated import EnumPlatformTopic
+
+                SUFFIX_NODE_REGISTRATION: str = EnumPlatformTopic.EVT_NODE_REGISTRATION_V1.value
+            """)
+        )
+        result = _extract_suffix_values(py_file)
+        assert result == {
+            "SUFFIX_NODE_REGISTRATION": "onex.evt.platform.node-registration.v1",
+        }
+
+    def test_real_registry_extracts_every_suffix_name(self) -> None:
+        """Every SUFFIX_* the registry defines still resolves to a string."""
+        constants_file = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "omnibase_infra"
+            / "topics"
+            / "platform_topic_suffixes.py"
+        )
+        defined = {
+            node.target.id
+            for node in ast.walk(ast.parse(constants_file.read_text()))
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id.startswith("SUFFIX_")
+        }
+        extracted = _extract_suffix_values(constants_file)
+        assert defined - set(extracted) == set()
+        assert extracted["SUFFIX_NODE_REGISTRATION"] == (
+            "onex.evt.platform.node-registration.v1"
+        )
 
 
 @pytest.mark.unit

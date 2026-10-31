@@ -54,12 +54,11 @@ See Also:
     model_topic_spec.ModelTopicSpec - Per-topic creation spec
 """
 
-from __future__ import annotations
-
 import os
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.enums.generated import EnumOmnibaseInfraTopic, EnumPlatformTopic
 from omnibase_infra.topics.model_topic_provisioning_policy import (
     MANAGED_MINIMUM_REPLICATION_FACTOR,
 )
@@ -71,14 +70,14 @@ from omnibase_infra.utils.util_runtime_packages import is_runtime_package_active
 # =============================================================================
 
 # Node lifecycle events
-SUFFIX_NODE_REGISTRATION: str = "onex.evt.platform.node-registration.v1"
+SUFFIX_NODE_REGISTRATION: str = EnumPlatformTopic.EVT_NODE_REGISTRATION_V1.value
 """Topic suffix for node registration events.
 
 Published when a node registers with the runtime. Contains node metadata,
 capabilities, and health check configuration.
 """
 
-SUFFIX_NODE_INTROSPECTION: str = "onex.evt.platform.node-introspection.v1"
+SUFFIX_NODE_INTROSPECTION: str = EnumPlatformTopic.EVT_NODE_INTROSPECTION_V1.value
 """Topic suffix for node introspection events.
 
 Published when a node responds to an introspection request. Contains node
@@ -86,7 +85,7 @@ capabilities, supported operations, and current state.
 """
 
 SUFFIX_REGISTRY_REQUEST_INTROSPECTION: str = (
-    "onex.evt.platform.registry-request-introspection.v1"
+    EnumPlatformTopic.EVT_REGISTRY_REQUEST_INTROSPECTION_V1.value
 )
 """Topic suffix for registry-initiated introspection request events.
 
@@ -95,7 +94,7 @@ registration workflow. The registration orchestrator subscribes to this topic
 to trigger node registration processing.
 """
 
-SUFFIX_NODE_HEARTBEAT: str = "onex.evt.platform.node-heartbeat.v1"
+SUFFIX_NODE_HEARTBEAT: str = EnumPlatformTopic.EVT_NODE_HEARTBEAT_V1.value
 """Topic suffix for node heartbeat events.
 
 Published periodically by nodes to indicate liveness. Contains timestamp,
@@ -111,7 +110,7 @@ monitoring infrastructure for service failure detection and health dashboards.
 """
 
 # Command topics
-SUFFIX_REQUEST_INTROSPECTION: str = "onex.cmd.platform.request-introspection.v1"
+SUFFIX_REQUEST_INTROSPECTION: str = EnumPlatformTopic.CMD_REQUEST_INTROSPECTION_V1.value
 """Topic suffix for introspection request commands.
 
 Published to request introspection from a specific node or all nodes.
@@ -119,7 +118,7 @@ Nodes respond on the SUFFIX_NODE_INTROSPECTION topic.
 """
 
 # FSM and state management
-SUFFIX_FSM_STATE_TRANSITIONS: str = "onex.evt.platform.fsm-state-transitions.v1"
+SUFFIX_FSM_STATE_TRANSITIONS: str = EnumPlatformTopic.EVT_FSM_STATE_TRANSITIONS_V1.value
 """Topic suffix for FSM state transition events.
 
 Published when a node's finite state machine transitions between states.
@@ -127,7 +126,7 @@ Contains previous state, new state, trigger event, and transition metadata.
 """
 
 # Runtime coordination
-SUFFIX_RUNTIME_TICK: str = "onex.intent.platform.runtime-tick.v1"
+SUFFIX_RUNTIME_TICK: str = EnumPlatformTopic.INTENT_RUNTIME_TICK_V1.value
 """Topic suffix for runtime tick intents.
 
 Internal topic for runtime orchestration. Triggers periodic tasks like
@@ -143,13 +142,13 @@ dashboard displays and monitoring systems.
 """
 
 # Contract lifecycle events (used by ContractRegistrationEventRouter in kernel)
-SUFFIX_CONTRACT_REGISTERED: str = "onex.evt.platform.contract-registered.v1"
+SUFFIX_CONTRACT_REGISTERED: str = EnumPlatformTopic.EVT_CONTRACT_REGISTERED_V1.value
 """Topic suffix for contract registration events.
 
 Published when a node contract is registered with the runtime.
 """
 
-SUFFIX_CONTRACT_DEREGISTERED: str = "onex.evt.platform.contract-deregistered.v1"
+SUFFIX_CONTRACT_DEREGISTERED: str = EnumPlatformTopic.EVT_CONTRACT_DEREGISTERED_V1.value
 """Topic suffix for contract deregistration events.
 
 Published when a node contract is deregistered from the runtime.
@@ -157,7 +156,7 @@ Published when a node contract is deregistered from the runtime.
 
 # Registration acceptance events
 SUFFIX_NODE_REGISTRATION_ACCEPTED: str = (
-    "onex.evt.platform.node-registration-accepted.v1"
+    EnumPlatformTopic.EVT_NODE_REGISTRATION_ACCEPTED_V1.value
 )
 """Topic suffix for node registration acceptance events.
 
@@ -541,7 +540,7 @@ Producer: NodeGmailArchiveCleanupEffect / HandlerGmailArchiveCleanup
 Consumer: None (intentionally fire-and-forget; see OMN-2937)
 """
 
-SUFFIX_BASELINES_COMPUTED: str = "onex.evt.omnibase-infra.baselines-computed.v1"
+SUFFIX_BASELINES_COMPUTED: str = EnumOmnibaseInfraTopic.EVT_BASELINES_COMPUTED_V1.value
 """Emitted after baseline ROI computation completes for a pattern cohort.
 
 Published by the omnibase_infra baselines compute node after each baseline
@@ -585,7 +584,7 @@ Consumer: omnidash /wiring-health dashboard
 """
 
 SUFFIX_RUNTIME_MANIFEST_PUBLISHED: str = (
-    "onex.evt.omnibase-infra.runtime-manifest-published.v1"
+    EnumOmnibaseInfraTopic.EVT_RUNTIME_MANIFEST_PUBLISHED_V1.value
 )
 """Topic suffix for runtime manifest publication events.
 
@@ -610,7 +609,7 @@ Producer: CircuitBreakerEventPublisher (MixinAsyncCircuitBreaker integrations)
 Consumer: omnidash /circuit-breaker dashboard (OMN-5293)
 """
 
-SUFFIX_SAVINGS_ESTIMATED: str = "onex.evt.omnibase-infra.savings-estimated.v1"
+SUFFIX_SAVINGS_ESTIMATED: str = EnumOmnibaseInfraTopic.EVT_SAVINGS_ESTIMATED_V1.value
 """Topic suffix for savings estimation projection events."""
 
 SUFFIX_RUNNER_USAGE_RECORDED: str = "onex.evt.omninode.runner-usage-recorded.v1"
@@ -680,7 +679,7 @@ Ticket: OMN-6136
 # OMNIBASE_INFRA CONSUMER HEALTH TOPIC SUFFIXES (OMN-5515 / OMN-5529)
 # =============================================================================
 
-SUFFIX_CONSUMER_HEALTH: str = "onex.evt.omnibase-infra.consumer-health.v1"
+SUFFIX_CONSUMER_HEALTH: str = EnumOmnibaseInfraTopic.EVT_CONSUMER_HEALTH_V1.value
 """Topic suffix for consumer health events.
 
 Published by ConsumerHealthEmitter when consumer lifecycle events occur
@@ -699,7 +698,7 @@ Producer: ServiceRuntimeHealthMonitor
 Consumer: runtime health projections and operator diagnostics
 """
 
-SUFFIX_CONSUMER_RESTART_CMD: str = "onex.cmd.omnibase-infra.consumer-restart.v1"
+SUFFIX_CONSUMER_RESTART_CMD: str = EnumOmnibaseInfraTopic.CMD_CONSUMER_RESTART_V1.value
 """Topic suffix for consumer restart commands.
 
 Published by NodeConsumerHealthTriageEffect when graduated response
@@ -743,7 +742,7 @@ Consumer: NodeLlmEmbeddingEffect runtime handler
 # importing the legacy TOPIC_DELEGATION_* constants from
 # event_bus/topic_constants.py (OMN-12803, OMN-13191).
 
-SUFFIX_DELEGATION_REQUEST: str = "onex.cmd.omnibase-infra.delegation-request.v1"
+SUFFIX_DELEGATION_REQUEST: str = EnumOmnibaseInfraTopic.CMD_DELEGATION_REQUEST_V1.value
 """Command topic for delegation requests from /delegate skill."""
 
 SUFFIX_DELEGATION_ROUTING_DECISION: str = "onex.evt.omnibase-infra.routing-decision.v1"
@@ -785,12 +784,12 @@ Wire model: ModelDelegationTerminalFailedUnroutedV2 (omnibase_core).
 """
 
 SUFFIX_DELEGATION_QUALITY_GATE_RESULT: str = (
-    "onex.evt.omnibase-infra.quality-gate-result.v1"
+    EnumOmnibaseInfraTopic.EVT_QUALITY_GATE_RESULT_V1.value
 )
 """Event topic for quality gate evaluation results."""
 
 SUFFIX_DELEGATION_ROUTING_REQUEST: str = (
-    "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    EnumOmnibaseInfraTopic.CMD_DELEGATION_ROUTING_REQUEST_V1.value
 )
 """Command topic for routing reducer invocation from the delegation orchestrator."""
 
@@ -798,7 +797,7 @@ SUFFIX_DELEGATION_INVOCATION_COMMAND: str = "onex.cmd.omnibase-infra.invocation.
 """Command topic for typed invocation commands from the delegation orchestrator."""
 
 SUFFIX_DELEGATION_AGENT_TASK_LIFECYCLE: str = (
-    "onex.evt.omnibase-infra.agent-task-lifecycle.v1"
+    EnumOmnibaseInfraTopic.EVT_AGENT_TASK_LIFECYCLE_V1.value
 )
 """Event topic for remote agent task lifecycle updates."""
 
@@ -813,7 +812,7 @@ SUFFIX_DELEGATION_INFERENCE_REQUEST: str = (
 """Command topic for LLM inference invocation from the delegation orchestrator."""
 
 SUFFIX_DELEGATION_INFERENCE_RESPONSE: str = (
-    "onex.evt.omnibase-infra.inference-response.v1"
+    EnumOmnibaseInfraTopic.EVT_INFERENCE_RESPONSE_V1.value
 )
 """Event topic for LLM inference responses in the delegation pipeline."""
 
@@ -829,7 +828,7 @@ SUFFIX_DELEGATION_BASELINE_COMPARISON: str = (
 # OMNIBASE_INFRA RUNTIME ERROR TOPIC SUFFIXES (OMN-5517 / OMN-5529)
 # =============================================================================
 
-SUFFIX_RUNTIME_ERROR: str = "onex.evt.omnibase-infra.runtime-error.v1"
+SUFFIX_RUNTIME_ERROR: str = EnumOmnibaseInfraTopic.EVT_RUNTIME_ERROR_V1.value
 """Topic suffix for runtime error events.
 
 Published by RuntimeLogEventBridge (logging.Handler) when ERROR/WARNING
@@ -841,7 +840,7 @@ Consumer: NodeRuntimeErrorTriageEffect, omnidash /runtime-errors dashboard
 
 # Full topic name (not a suffix) — named as such to be unambiguous.
 # Used by monitor_logs.py postgres error emitter and downstream consumers.
-TOPIC_DB_ERROR_V1: str = "onex.evt.omnibase-infra.db-error.v1"
+TOPIC_DB_ERROR_V1: str = EnumOmnibaseInfraTopic.EVT_DB_ERROR_V1.value
 """Full topic name for PostgreSQL error events (OMN-3407).
 
 Published by the postgres error emitter in ``scripts/monitor_logs.py`` when
@@ -2102,7 +2101,7 @@ Source: ``omniclaude/src/omniclaude/nodes/node_skill_*/contract.yaml``
 # TOPIC CATALOG TOPIC SUFFIXES
 # =============================================================================
 
-SUFFIX_TOPIC_CATALOG_QUERY: str = "onex.cmd.platform.topic-catalog-query.v1"
+SUFFIX_TOPIC_CATALOG_QUERY: str = EnumPlatformTopic.CMD_TOPIC_CATALOG_QUERY_V1.value
 """Topic suffix for topic catalog query commands.
 
 Published when a client requests the current topic catalog. Contains optional
@@ -2117,7 +2116,7 @@ Published in response to a catalog query. Contains the full list of topic
 entries with publisher/subscriber counts, plus catalog metadata.
 """
 
-SUFFIX_TOPIC_CATALOG_CHANGED: str = "onex.evt.platform.topic-catalog-changed.v1"
+SUFFIX_TOPIC_CATALOG_CHANGED: str = EnumPlatformTopic.EVT_TOPIC_CATALOG_CHANGED_V1.value
 """Topic suffix for topic catalog change notification events.
 
 Published when topics are added or removed from the catalog. Contains

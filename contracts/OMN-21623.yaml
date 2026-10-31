@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: omnibase_infra topic literals move to contract-generated topic enums and a kind enum (contracts_and_di burn-down, literal_topic slice B)
+summary: The contracts_and_di check reported 556 literal_topic findings in src (topics 380, enums/generated 165, 11 elsewhere). This slice removes 28. Twenty-four SUFFIX_* constants in topics/platform_topic_suffixes.py now read their value from the per-producer topic enums generated from contract YAML, the chain canary request default reads the generated quarantine topic member, and the cost API snapshot cache is keyed by a snapshot kind enum instead of three topic strings the cache never published or consumed. scripts/check_topic_drift.py resolves enum-valued suffixes so its orphan check sees the same values.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-slice-topic-literals
+    statement: The twenty-four SUFFIX_* constants, the chain canary quarantine default and the cost API cache keys hold no topic literal, and every constant keeps the value it had.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: each converted SUFFIX_* constant equals the generated enum member it names, the drift check extracts every SUFFIX_* name from the real registry, and the cost snapshot cache is keyed per kind and window -- falsifier: uv run pytest tests/unit/topics tests/unit/services/cost_api tests/integration/api/test_cost_api_routes.py -q, where a suffix constant whose enum reference is dropped or a cache keyed by a topic string fails'
+      - id: AC6
+        statement: 'AC6: the contracts_and_di check over src/omnibase_infra/services/cost_api and the chain canary request model reports no literal_topic finding, and the same check over src reports 528 literal_topic findings where it reported 556 at the merge base -- falsifier: any literal_topic finding in those two paths'
+evidence_requirements:
+  - kind: tests
+    description: The topic registry, drift check, chain canary and cost API tests pass with the enum-sourced values.
+    command: uv run --frozen pytest tests/unit/topics tests/unit/services/cost_api tests/unit/nodes/node_chain_canary_effect tests/integration/api/test_cost_api_routes.py -q
+  - kind: command
+    description: The contracts_and_di check exits 0 over the cost API and the chain canary request model.
+    command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/services/cost_api src/omnibase_infra/nodes/node_chain_canary_effect/models/model_chain_canary_request.py
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-ac5-topic-enum-values
+    description: Converted suffix constants equal their generated enum members, the drift check extracts every SUFFIX_* name, and the cost snapshot cache is keyed by kind. Fails at the merge base, where the drift check cannot read an enum-valued suffix and the cache has no kind.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/topics tests/unit/services/cost_api tests/integration/api/test_cost_api_routes.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn21623-ac6-check-clean
+    description: The contracts_and_di check reports no literal_topic finding over the cost API and the chain canary request model. Fails at the merge base, where those paths report four.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/services/cost_api src/omnibase_infra/nodes/node_chain_canary_effect/models/model_chain_canary_request.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn21623-deploy-topic-enums
+    description: >-
+      Post-deploy probe: the runtime container imports the topic registry and the cost snapshot kind enum it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_NODE_REGISTRATION; from omnibase_infra.enums.enum_cost_snapshot_kind import EnumCostSnapshotKind; assert SUFFIX_NODE_REGISTRATION == "onex.evt.platform.node-registration.v1"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

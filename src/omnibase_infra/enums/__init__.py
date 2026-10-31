@@ -26,6 +26,7 @@ Exports:
     EnumContextSectionCategory: Semantic categories for static context sections (CONFIG, RULES, TOPOLOGY, etc.)
     EnumContractCheckType: Runtime contract check types (REGISTRATION, SUBSCRIPTION, PUBLICATION, etc.)
     EnumContractType: Contract types for ONEX nodes (effect, compute, reducer, orchestrator)
+    EnumCostSnapshotKind: Cost projection snapshot kinds the cost API cache holds (SUMMARY, BY_REPO, TOKEN_USAGE)
     EnumCostTier: Cost tier for LLM backend routing (LOW, MID, HIGH)
     EnumDataProvenance: Origin quality classification for projected values
     EnumDegradedBehavior: Fallback strategy for stale or unavailable projections
@@ -96,6 +97,7 @@ from omnibase_infra.enums.enum_context_section_category import (
 )
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_contract_type import EnumContractType
+from omnibase_infra.enums.enum_cost_snapshot_kind import EnumCostSnapshotKind
 from omnibase_infra.enums.enum_cost_tier import EnumCostTier
 from omnibase_infra.enums.enum_data_provenance import EnumDataProvenance
 from omnibase_infra.enums.enum_declarative_node_violation import (
@@ -170,6 +172,7 @@ __all__: list[str] = [
     "EnumBuildLoopPhase",
     "EnumBuildability",
     "EnumBackendType",
+    "EnumCostSnapshotKind",
     "EnumCostTier",
     "EnumCaptureOutcome",
     "EnumCaptureState",
