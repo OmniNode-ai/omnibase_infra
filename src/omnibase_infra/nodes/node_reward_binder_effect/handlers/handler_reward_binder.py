@@ -242,8 +242,7 @@ class HandlerRewardBinder:
 
         if self._publisher is None:
             raise RuntimeHostError(
-                "HandlerRewardBinder requires a publisher to be configured. "
-                "Use RegistryInfraRewardBinderEffect.create_with_publisher().",
+                "HandlerRewardBinder requires a publisher to be configured.",
                 context=context,
             )
 

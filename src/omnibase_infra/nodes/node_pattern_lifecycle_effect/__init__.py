@@ -23,7 +23,6 @@ Available Exports:
     - ModelLifecycleState: Lifecycle state for a single pattern
     - ModelLifecycleResult: Result of a lifecycle tier update
     - HandlerLifecycleUpdate: Apply verdict and compute tier transition
-    - RegistryInfraPatternLifecycle: DI registry
 
 Tracking:
     - OMN-2147: Validation Skeleton -- Orchestrator + Executor
@@ -39,9 +38,6 @@ from omnibase_infra.nodes.node_pattern_lifecycle_effect.models import (
 from omnibase_infra.nodes.node_pattern_lifecycle_effect.node import (
     NodePatternLifecycleEffect,
 )
-from omnibase_infra.nodes.node_pattern_lifecycle_effect.registry import (
-    RegistryInfraPatternLifecycle,
-)
 
 __all__: list[str] = [
     # Node
@@ -51,6 +47,4 @@ __all__: list[str] = [
     # Models
     "ModelLifecycleResult",
     "ModelLifecycleState",
-    # Registry
-    "RegistryInfraPatternLifecycle",
 ]
