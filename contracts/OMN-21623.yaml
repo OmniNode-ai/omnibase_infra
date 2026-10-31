@@ -20,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The lab proof plan node tests, including the policy-supplied timeouts and the contract completeness tests.
-    command: uv run pytest tests/unit/nodes/node_lab_proof_plan_compute -q
+    command: uv run pytest tests/unit/nodes/node_lab_proof_plan_compute/test_handler_lab_proof_plan.py tests/unit/nodes/node_lab_proof_plan_compute/test_lab_proof_contracts.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -34,7 +34,7 @@ dod_evidence:
       - AC1
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_lab_proof_plan_compute -q -o addopts=''
+        check_value: uv run pytest tests/unit/nodes/node_lab_proof_plan_compute/test_handler_lab_proof_plan.py tests/unit/nodes/node_lab_proof_plan_compute/test_lab_proof_contracts.py -q -o addopts=''
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn21623-infra-ac2-check
     description: The contracts_and_di check judges the handler clean.
