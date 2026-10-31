@@ -50,13 +50,8 @@ from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 
 __all__ = [
     "CALLER_LANE_ENV_VARS",
-    "DELEGATE_CALLER_LANE_METADATA_KEY",
     "resolve_delegate_caller",
 ]
-
-#: The request ``metadata`` key naming the caller's lane. omnimarket's
-#: delegate-skill handler and projection read the same key (OMN-19860).
-DELEGATE_CALLER_LANE_METADATA_KEY = "caller_lane"
 
 #: A ledger lane token; the same shape omnimarket's projection accepts.
 _CALLER_LANE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
