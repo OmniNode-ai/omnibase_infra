@@ -221,8 +221,11 @@ async def _hand_over_on_kafka(
     try:
         await retired.start()
         try:
-            await successor.topics()
-            partition_ids = sorted(successor.partitions_for_topic(physical_topic) or ())
+            # ``topics()`` and ``partitions_for_topic()`` read different
+            # metadata objects on a consumer with no subscription; read the
+            # partitions off the fetched cluster, as the DLQ depth monitor does.
+            cluster = await successor._client.fetch_all_metadata()
+            partition_ids = sorted(cluster.partitions_for_topic(physical_topic) or ())
             if not partition_ids:
                 raise ValueError(
                     f"topic {physical_topic!r} has no partitions in broker "
