@@ -292,3 +292,66 @@ def test_unknown_profile_propagates_when_caller_handles_failure(override: bool) 
         check=True,
     )
     assert "Unknown folded runtime profile: unknown-role" in result.stderr
+
+
+# OMN-21288: the five projection writers main dispatches in-process.
+_DEV_RUNTIME_WRITERS = (
+    "projection-live-events-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-tenant-registry-writer",
+)
+
+
+def test_committed_dev_fold_retires_every_writer_before_main_and_keeps_the_rest() -> (
+    None
+):
+    """The committed dev policy retires the five writers and the tenant carrier."""
+    harness = (
+        _harness(
+            "effects",
+            DEV_PROJECT,
+            dev_profiles=_policy("DEV_RUNTIME_MAIN_FOLDED_PROFILES"),
+        )
+        + "\n"
+        + _function("restart_services")
+        + r"""
+log_step() { :; }
+log_info() { :; }
+log_cmd() { :; }
+resolve_compose_file_args() { local -n out="$1"; out=(); }
+exclude_cloud_database_services() { :; }
+COMPOSE_PROFILE=runtime
+RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS=60
+docker() {
+    case "$1" in
+        ps)
+            [[ "$*" == *"label=com.docker.compose.project=$PROJECT"* ]] || return 9
+            local svc="${*##*service=}"
+            printf '%s-id\n' "${svc}" ;;
+        stop | rm) printf '%s\n' "$*" ;;
+        *) return 9 ;;
+    esac
+}
+compose_up_bounded() { shift; printf 'UP %s\n' "$*"; }
+restart_services /tmp "$PROJECT"
+"""
+    )
+    result = subprocess.run(
+        ["bash", "-c", harness], capture_output=True, text=True, check=True
+    )
+    lines = result.stdout.splitlines()
+    up = next(i for i, line in enumerate(lines) if line.startswith("UP "))
+    for service in (*_DEV_RUNTIME_WRITERS, "tenant-projection-writer"):
+        assert (
+            lines.index(f"stop --time 30 {service}-id")
+            < lines.index(f"rm {service}-id")
+            < up
+        )
+        assert f" {service}" not in lines[up]
+    # Writers that still run their own consume loop are recreated as before.
+    assert "projection-delegation-writer" in lines[up]
+    assert "projection-claude-hook-events-writer" in lines[up]
+    assert "omninode-runtime" in lines[up]
+    assert " -v" not in result.stdout

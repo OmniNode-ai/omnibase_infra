@@ -2,6 +2,13 @@
 # SPDX-License-Identifier: MIT
 # OMN-21288: primary dev only, after the shared dev-lane overlay. Other dev
 # instances continue to use the shared overlay and carry their own roles.
+#
+# Every role folded into omninode-runtime retires its container here: the
+# service starts only under the profile `folded-<runtime profile>`, which no
+# lane bring-up requests. The runtime profile is the one named in
+# DEV_RUNTIME_MAIN_FOLDED_PROFILES; the deploy agent reads that gate to know
+# which containers to retire. A service-level `!reset` would break every reader
+# that loads the overlays with SafeLoader.
 services:
   omninode-runtime:
     environment:
@@ -11,8 +18,20 @@ services:
       # state and logs separately; no volume is removed during retirement.
       - tenant_projection_data:/app/tenant-projection-data
       - tenant_projection_logs:/app/tenant-projection-logs:ro
-  # The retired carrier starts under no profile a lane bring-up requests, as
-  # the stability lane folds runtime-effects. A service-level `!reset` would
-  # break every reader that loads the overlays with SafeLoader.
   tenant-projection-writer:
     profiles: !override ["folded-tenant-projection"]
+  # The five writers whose contracts route to omnimarket's in-process
+  # handler_runtime_writer (omnimarket#4492). Main already carries the bindings
+  # their topology resolves (ONEX_DATABASE_TOPOLOGY_PROFILE, the internal and
+  # tenant DSNs in the base runtime env), so they need no environment here.
+  # They hold no volume.
+  projection-live-events-writer:
+    profiles: !override ["folded-projection-writer-live-events"]
+  projection-registration-writer:
+    profiles: !override ["folded-projection-writer-registration"]
+  projection-savings-writer:
+    profiles: !override ["folded-projection-writer-savings"]
+  projection-tenant-credentials-writer:
+    profiles: !override ["folded-projection-writer-tenant-credentials"]
+  projection-tenant-registry-writer:
+    profiles: !override ["folded-projection-writer-tenant-registry"]

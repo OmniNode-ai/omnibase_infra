@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    runtime_profile_owns_contract,
+)
 from scripts.render_runtime_policy_env import format_dotenv, load_contract, render_env
 from tests.helpers.lane_overlay_fixtures import load_compose
 from tests.unit.docker.test_dev_stack_runtime_only_omn21288 import (
@@ -123,3 +126,103 @@ def test_fold_overlay_always_triggers_the_stack_gate() -> None:
     ]
     assert len(hooks) == 1
     assert re.search(hooks[0]["files"], str(OVERLAY.relative_to(ROOT)))
+
+
+# ---------------------------------------------------------------------------
+# OMN-21288: the five projection writers that dispatch in-process
+# ---------------------------------------------------------------------------
+# omnimarket#4492 routes these contracts to handler_runtime_writer classes
+# (onex_runtime_inprocess_dispatch), so main runs them as nodes once it owns
+# their profiles. Runtime profile -> the dev-lane service that ran it alone.
+RUNTIME_WRITERS = {
+    "projection-writer-live-events": "projection-live-events-writer",
+    "projection-writer-registration": "projection-registration-writer",
+    "projection-writer-savings": "projection-savings-writer",
+    "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
+    "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+}
+# The contract names those profiles own, as omnimarket declares them.
+RUNTIME_WRITER_CONTRACTS = {
+    "projection-writer-live-events": "projection_live_events",
+    "projection-writer-registration": "projection_registration",
+    "projection-writer-savings": "projection_savings",
+    "projection-writer-tenant-credentials": "projection_tenant_credentials",
+    "projection-writer-tenant-registry": "projection_tenant_registry",
+}
+HANDLER = ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
+
+
+def _overlay_gates() -> dict[str, str]:
+    """Service -> the single folded profile the fold overlay gates it under."""
+    document = yaml.compose(OVERLAY.read_text())
+    assert isinstance(document, yaml.MappingNode)
+    services = next(value for key, value in document.value if key.value == "services")
+    gates: dict[str, str] = {}
+    for key, service in services.value:
+        assert isinstance(service, yaml.MappingNode)
+        for field, value in service.value:
+            if field.value == "profiles":
+                assert value.tag == "!override", key.value
+                items = [item.value for item in value.value]
+                assert len(items) == 1 and items[0].startswith("folded-"), key.value
+                gates[key.value] = items[0].removeprefix("folded-")
+    return gates
+
+
+def _handler_profile_map() -> dict[str, str]:
+    body = re.search(
+        r"local -A folded_profile_services=\((.*?)\n    \)", HANDLER.read_text(), re.S
+    )
+    assert body
+    return dict(re.findall(r"\[([\w-]+)\]=([\w-]+)", body.group(1)))
+
+
+def test_policy_folds_the_runtime_writers_on_primary_dev_only() -> None:
+    policy = load_contract()
+    folded = policy.profiles["dev"].processes["main"].folded_profiles
+    assert set(RUNTIME_WRITERS) <= set(folded)
+    for name, profile in policy.profiles.items():
+        if name == "dev":
+            continue
+        for process in profile.processes.values():
+            assert not set(RUNTIME_WRITERS) & set(process.folded_profiles), name
+    rendered = render_env(policy)[FOLDED_KEY].split(",")
+    assert set(RUNTIME_WRITERS) <= set(rendered)
+
+
+def test_overlay_gates_each_folded_profile_and_nothing_else() -> None:
+    gates = _overlay_gates()
+    folded = set(render_env(load_contract())[FOLDED_KEY].split(","))
+    assert set(gates.values()) == folded
+    for profile, service in RUNTIME_WRITERS.items():
+        assert gates[service] == profile
+        assert service not in dev_stack_services()
+    # The two writers that still run their own consume loop stay in the stack.
+    for service in (
+        "projection-delegation-writer",
+        "projection-claude-hook-events-writer",
+    ):
+        assert service not in gates
+        assert service in dev_stack_services()
+
+
+def test_deploy_handler_retires_exactly_the_overlay_gated_services() -> None:
+    """The handler's explicit map and the overlay's gates name the same pairs."""
+    handler = _handler_profile_map()
+    gates = _overlay_gates()
+    for service, profile in gates.items():
+        assert handler.get(profile) == service, profile
+
+
+@pytest.mark.parametrize("profile", sorted(RUNTIME_WRITER_CONTRACTS))
+def test_folded_writer_contract_attaches_to_main_only_when_folded(profile: str) -> None:
+    """Main owns the writer's contract under the committed fold, and not without it."""
+    contract = {
+        "name": RUNTIME_WRITER_CONTRACTS[profile],
+        "runtime_profiles": [profile],
+    }
+    folded = render_env(load_contract())[FOLDED_KEY]
+    assert runtime_profile_owns_contract(
+        contract, "main", environ={"ONEX_RUNTIME_FOLDED_PROFILES": folded}
+    )
+    assert not runtime_profile_owns_contract(contract, "main", environ={})

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""The dev fold retires tenant-projection and cannot widen an empty restart scope."""
+"""The dev fold retires every folded role's container and cannot widen an empty restart scope."""
 
 from __future__ import annotations
 
@@ -20,6 +20,26 @@ from deploy_agent.executor import (
 )
 
 pytestmark = pytest.mark.unit
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+@pytest.fixture(autouse=True)
+def _committed_fold_overlay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read this checkout's fold overlay, not the deploy host's clone path."""
+    monkeypatch.setattr(
+        "deploy_agent.executor._DEV_TENANT_FOLD_OVERLAY",
+        str(REPO_ROOT / "docker/docker-compose.dev-tenant-fold.yml"),
+    )
+
+
+RUNTIME_WRITERS = {
+    "projection-writer-live-events": "projection-live-events-writer",
+    "projection-writer-registration": "projection-registration-writer",
+    "projection-writer-savings": "projection-savings-writer",
+    "projection-writer-tenant-credentials": "projection-tenant-credentials-writer",
+    "projection-writer-tenant-registry": "projection-tenant-registry-writer",
+}
 
 
 def test_primary_dev_disables_the_tenant_carrier_only(
@@ -42,60 +62,96 @@ def test_primary_dev_disables_the_tenant_carrier_only(
     assert not lane_folded_profiles(EnumRuntimeLane.DEV)
 
 
+def test_committed_policy_disables_every_folded_writer() -> None:
+    """The committed policy folds the five in-process writers; each container is disabled."""
+    policy = Path(__file__).resolve().parents[4] / "docker/runtime-policy.env"
+    with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
+        folded = lane_folded_profiles(EnumRuntimeLane.DEV)
+        config = lane_config_for(EnumRuntimeLane.DEV)
+    assert set(RUNTIME_WRITERS) <= folded
+    assert config.disabled_services == frozenset(
+        {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
+    )
+    # The two writers that still run their own consume loop keep their containers.
+    assert "projection-delegation-writer" not in config.disabled_services
+    assert "projection-claude-hook-events-writer" not in config.disabled_services
+
+
+def test_folded_profile_without_a_gated_service_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "deploy_agent.executor._load_runtime_policy_env",
+        lambda: {"DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers"},
+    )
+    with pytest.raises(
+        RuntimeError, match=r"gates no service under \['folded-workers'\]"
+    ):
+        lane_config_for(EnumRuntimeLane.DEV)
+
+
 @pytest.mark.parametrize("failure", [None, "ps", "stop", "rm"])
 def test_retirement_is_scoped_and_keeps_volumes(failure: str | None) -> None:
     calls: list[list[str]] = []
 
     def run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
+        service = next(
+            (
+                arg.rsplit("=", 1)[1]
+                for arg in cmd
+                if arg.startswith("label=com.docker.compose.service=")
+            ),
+            "",
+        )
         return subprocess.CompletedProcess(
             cmd,
             1 if cmd[1] == failure else 0,
-            stdout="tenant-projection-writer-a\ntenant-projection-writer-b\n"
-            if cmd[1] == "ps"
-            else "",
+            stdout=f"{service}-a\n{service}-b\n" if cmd[1] == "ps" else "",
             stderr="",
         )
 
+    profiles = frozenset({"tenant-projection", "projection-writer-savings"})
     with (
         patch(
             "deploy_agent.executor.lane_folded_profiles",
-            return_value={"tenant-projection"},
+            return_value=profiles,
         ),
         patch("deploy_agent.executor._run", side_effect=run),
     ):
         if failure:
             with pytest.raises(RuntimeError):
-                DeployExecutor()._retire_folded_dev_tenant_projections(
-                    EnumRuntimeLane.DEV
-                )
+                DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.DEV)
         else:
-            DeployExecutor()._retire_folded_dev_tenant_projections(EnumRuntimeLane.DEV)
-    assert "label=com.docker.compose.service=tenant-projection-writer" in calls[0]
-    assert "label=com.docker.compose.project=omnibase-infra" in calls[0]
+            DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.DEV)
+    assert all(
+        "label=com.docker.compose.project=omnibase-infra" in c
+        for c in calls
+        if c[1] == "ps"
+    )
     assert all("-v" not in c and "--volumes" not in c for c in calls)
+    if failure in ("ps",):
+        assert len(calls) == 1
+        return
+    censused = [c[-1] for c in calls if c[1] == "ps"]
+    assert censused == [
+        "label=com.docker.compose.service=projection-savings-writer",
+        "label=com.docker.compose.service=tenant-projection-writer",
+    ]
     if failure is None:
-        assert calls[1] == [
-            "docker",
-            "stop",
-            "--time",
-            "30",
+        ids = [
+            "projection-savings-writer-a",
+            "projection-savings-writer-b",
             "tenant-projection-writer-a",
             "tenant-projection-writer-b",
         ]
-        assert calls[2] == [
-            "docker",
-            "rm",
-            "tenant-projection-writer-a",
-            "tenant-projection-writer-b",
-        ]
+        assert calls[2] == ["docker", "stop", "--time", "30", *ids]
+        assert calls[3] == ["docker", "rm", *ids]
 
 
 def test_retirement_is_inert_on_other_lanes() -> None:
     with patch("deploy_agent.executor._run") as run:
-        DeployExecutor()._retire_folded_dev_tenant_projections(
-            EnumRuntimeLane.STABILITY_TEST
-        )
+        DeployExecutor()._retire_folded_dev_services(EnumRuntimeLane.STABILITY_TEST)
     run.assert_not_called()
 
 
@@ -136,7 +192,7 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
         return subprocess.CompletedProcess(
             cmd,
             0,
-            stdout="tenant-projection-writer-a\n" if cmd[1] == "ps" else "",
+            stdout=f"{cmd[-1].rsplit('=', 1)[1]}-a\n" if cmd[1] == "ps" else "",
             stderr="",
         )
 
@@ -163,7 +219,10 @@ def test_real_folded_deploy_retires_tenant_carrier_before_starting_main() -> Non
             lambda *args: None,
             lane=EnumRuntimeLane.DEV,
         )
-    assert [c[1] for c in calls] == ["ps", "stop", "rm", "compose"]
+    retired = {"tenant-projection-writer", *RUNTIME_WRITERS.values()}
+    assert [c[1] for c in calls] == [*["ps"] * len(retired), "stop", "rm", "compose"]
     assert "omninode-runtime" in calls[-1]
-    assert "tenant-projection-writer" not in calls[-1]
-    assert "tenant-projection-writer" not in verify.call_args.args[0]
+    for service in retired:
+        assert service not in calls[-1]
+        assert service not in verify.call_args.args[0]
+        assert f"{service}-a" in calls[len(retired)]

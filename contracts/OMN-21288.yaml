@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21288
 title: "Projection writers, event consumers and effect processes run as nodes inside the one runtime container"
 summary: >-
-  Folds the primary dev tenant-projection carrier into main, removes its container definition through a primary-dev-only overlay, and refuses a restored carrier even with an image-only definition. The thirteen other dev workloads remain on the shrink-only list; the worker fold is owned by a separate lane. AC2's final end state remains pending.
+  Folds the primary dev tenant-projection carrier and the five in-process projection writers (live-events, registration, savings, tenant-credentials, tenant-registry) into main, retires their containers through a primary-dev-only overlay, and refuses a restored carrier or writer even with an image-only definition. Eight other dev workloads remain on the shrink-only list; the worker fold is owned by a separate pull request. AC2's final end state remains pending.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -169,7 +169,22 @@ dod_evidence:
         check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1, AC2]
+  - id: dod-omn21288-runtime-writers-fold
+    description: >-
+      Hosted-runner falsifier for the writers fold: the committed dev policy folds the five projection-writer profiles into main only on dev, the fold overlay gates each writer under its folded profile and nothing else, the deploy handler's explicit profile map retires exactly the overlay-gated services before main is recreated (delegation and hook-ledger writers keep their containers), main owns each writer contract only when folded, and the deploy agent disables and retires every folded container by compose labels without removing volumes. These test assertions fail at the merge base, where the writers are still separate containers. The live readback on the dev lane (no writer container, consumer groups Stable, projection tables advancing) is pending the deploy agent's post-merge redeploy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -k "writer or real_dev_stack" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_deploy_runtime_folded_services_omn21288.py -k committed_dev_fold -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env PYTHONPATH=scripts/deploy-agent uv run --frozen pytest scripts/deploy-agent/tests/unit/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2]
 context:
-  remaining_after_this_change: "AC2 end state: thirteen dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test; each leaves the list when its node runs inside the runtime."
+  remaining_after_this_change: "AC2 end state: eight dev-stack services still run outside the runtime container and are listed in SEPARATE_SERVICES in the test (effects, worker, projection-api, four consumers, the delegation writer); each leaves the list when its node runs inside the runtime."
   tenant_fold_proof: "Pending governed pre-PR slot boot with docker-compose.dev-tenant-fold.yml. No lane was redeployed by this lane."
   worker_integration: "The independently owned worker fold must preserve both overlays and union main.folded_profiles to [workers, tenant-projection]; then remove runtime-worker from SEPARATE_SERVICES as well. This branch never changes the worker branch."
