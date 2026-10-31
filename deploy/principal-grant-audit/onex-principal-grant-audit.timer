@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Runs the machine principal grant audit every 15 minutes (OMN-21622), inside the host
+# drift fleet's 900 s interval so a machine minted without its profile is named within
+# one fleet pass.
+
+[Unit]
+Description=ONEX dev lane machine principal grant audit timer (OMN-21622)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=onex-principal-grant-audit.service
+
+[Install]
+WantedBy=timers.target

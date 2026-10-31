@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Machine-only supplement, selected by a trusted overlay role (OMN-21622).
+# Derived by node_broker_grant_derive_compute; produce only.
+principal: "{principal}"
+bindings:
+  - {broker: dev, physical_topic: onex.evt.omnimarket.credential-registered.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ack.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-claim.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-correction.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-friction.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-hold.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-msg.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-operator-consent.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-release.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ruling.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-status.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-terminal.v1, direction: produce}
+  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-terminal-refused.v1, direction: produce}
