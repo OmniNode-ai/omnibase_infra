@@ -145,6 +145,11 @@ requirements:
     acceptance:
       - id: AC31
         statement: 'AC31: the build-workspace-candidate-runtime.yml install step before the Stage workspace sibling trees step installs every third-party package that check_sibling_lock_pins.py and checker_first_party_sources.py import, pyyaml included -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party fails against the merge-base workflow, which installs pydantic only'
+  - id: req-omn19998-verifier-override-pins
+    statement: The repo-evidence caller must pin a verifier whose dependency-pin-only classifier admits tool.uv.override-dependencies, so the OCC writer app's core bump pull requests (omnibase_infra#5453, #5458) are exempt from dod-verify instead of failing it for binding no evidence of their own.
+    acceptance:
+      - id: AC32
+        statement: 'AC32: call-repo-evidence-gate.yml pins verifier-version 0.4.310 or newer, the first omnimarket release with omnimarket#3694, and pyproject.toml pins omnibase-core by its dev-merge tag alone in tool.uv.sources -- falsifier: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0 fails test_caller_verifier_admits_override_dependency_pins against the merge-base caller, which pins 0.4.305'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -215,6 +220,9 @@ evidence_requirements:
   - kind: tests
     description: The candidate-build tests read build-workspace-candidate-runtime.yml and locate the compose step relative to the infra build, the Trivy steps, the config-path check and the push.
     command: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0
+  - kind: tests
+    description: The override-pin tests read the repo-evidence caller's verifier-version and pyproject.toml's omnibase-core tag source.
+    command: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
 emergency_bypass:
   enabled: false
   justification: ''
@@ -597,3 +605,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC31
+  - id: dod-omn19998-ac32-verifier-override-pins
+    description: AC32 tests read the caller's verifier-version against the 0.4.310 floor and the omnibase-core dev-merge tag source in tool.uv.sources.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_verifier_override_pins_omn19998.py -q -n 0
+        cwd: .
+    binds_ac:
+      - AC32
