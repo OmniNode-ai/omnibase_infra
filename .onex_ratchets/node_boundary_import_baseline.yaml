@@ -106,7 +106,7 @@ edges:
   - omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval -> omnibase_infra.nodes.node_chain_orchestrator.models:ModelChainMatch
   - omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval -> omnibase_infra.nodes.node_chain_orchestrator.models:ModelChainRetrievalResult
   - omnibase_infra.nodes.node_chain_store_effect.handlers.handler_chain_store -> omnibase_infra.nodes.node_chain_orchestrator.models.protocol_chain_vector_client:ProtocolChainVectorClient
-  - omnibase_infra.nodes.node_chain_store_effect.handlers.handler_chain_store -> omnibase_infra.nodes.node_chain_orchestrator.models:ModelChainStoreRequest
+  - omnibase_infra.nodes.node_chain_store_effect.handlers.handler_chain_store -> omnibase_infra.nodes.node_chain_orchestrator.models:ModelChainEntry
   - omnibase_infra.nodes.node_chain_store_effect.handlers.handler_chain_store -> omnibase_infra.nodes.node_chain_orchestrator.models:ModelChainStoreResult
   - omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify -> omnibase_infra.nodes.node_chain_orchestrator.models:EnumChainVerifyState
   - omnibase_infra.nodes.node_contract_persistence_effect.handlers.handler_postgres_cleanup_topics -> omnibase_infra.nodes.node_contract_registry_reducer.models:ModelPayloadCleanupTopicReferences

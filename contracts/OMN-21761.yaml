@@ -2,11 +2,11 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21761"
 title: "omnibase_infra handler-shape burn-down, slice rf1400-s1: handlers take one typed request and the runtime owns the envelope"
-summary: "Eight noncanonical_handle findings of core's ValidatorHandlerShape in the chain orchestrator, chain store, registry effect and contract loader handlers are cleared: each handle now takes one typed request model (the registry request protocol and models carry correlation_id themselves; ModelContractScanRequest is new). Repo total 104 to 96, no baseline entry or suppression added."
+summary: "Seven noncanonical_handle findings of core's ValidatorHandlerShape in the chain orchestrator, registry effect and contract loader handlers are cleared: each handle now takes one typed request model (the registry request protocol and models carry correlation_id themselves; ModelContractScanRequest is new). Repo total 104 to 97, no baseline entry or suppression added."
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "handle signatures of HandlerChainLearnInitiate, HandlerChainRetrievalComplete, HandlerChainStoreComplete, HandlerChainStore, HandlerPartialRetry, HandlerPostgresUpsert, HandlerPostgresDeactivate and HandlerContractScan"
+  - "handle signatures of HandlerChainLearnInitiate, HandlerChainRetrievalComplete, HandlerChainStoreComplete, HandlerPartialRetry, HandlerPostgresUpsert, HandlerPostgresDeactivate and HandlerContractScan"
 requirements:
   - id: req-omn21761-handle-takes-one-typed-request
     statement: "The slice handlers take one typed request and ValidatorHandlerShape reports nothing on the slice paths."
