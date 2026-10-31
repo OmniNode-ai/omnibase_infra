@@ -117,8 +117,8 @@ def extract_paths(content: str) -> list[str]:
 def resolve_path(path_str: str, repo_root: Path, omni_home: Path) -> Path | None:
     """Try to resolve a path relative to repo root or omni_home."""
     # Expand ~ to home
-    if path_str.startswith("~/"):
-        return Path.home() / path_str[2:]
+    if (parts := Path(path_str).parts)[:1] == ("~",):
+        return Path.home().joinpath(*parts[1:])
 
     # Absolute paths
     if path_str.startswith("/"):

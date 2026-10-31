@@ -132,10 +132,9 @@ def _render_registry_root(tracked: bytes, variable: str) -> bytes:
 def _installed_path(
     entry: ModelUnitEntry, home: Path, *, resolve_registry: bool = True
 ) -> Path:
-    if entry.installed == "~":
-        return home
-    if entry.installed.startswith("~/"):
-        return home / entry.installed[2:]
+    installed = Path(entry.installed)
+    if installed.parts[:1] == ("~",):
+        return home.joinpath(*installed.parts[1:])
     if entry.installed.startswith("{registry_root}/") and resolve_registry:
         return Path(_registry_root()) / entry.installed.removeprefix("{registry_root}/")
     return Path(entry.installed)

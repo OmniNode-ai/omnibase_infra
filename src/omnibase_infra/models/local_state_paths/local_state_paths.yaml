@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+settings:
+  # Unix socket for the runtime-owned local command ingress.
+  runtime_socket_path: /tmp/onex-runtime.sock
+  # Shared default so the writer and the healthcheck cannot drift apart.
+  # Container-local, not the /app/data named volume, deliberately: these
+  # counters describe the CURRENT process. Surviving a restart would let a
+  # denial burst from a previous process report the new one unhealthy before
+  # it has published anything of its own.
+  gateway_egress_health_path: /tmp/gateway-egress-health.json
+  # Shared default so the writer and the healthcheck cannot drift apart.
+  # Container-local, not the /app/data named volume, deliberately: these
+  # counters describe the CURRENT process, and a loop detected by a previous
+  # process must not report a freshly repointed one unhealthy.
+  gateway_lane_mirror_health_path: /tmp/gateway-lane-mirror-health.json
+  # Container-local cadence cache of the canary probe's last real result.
+  gateway_canary_probe_state_path: /tmp/gateway-canary-probe-state.json
+  # Home-relative file the scope workflow writes its manifest to by default.
+  scope_manifest_path: ~/.claude/scope-manifest.json

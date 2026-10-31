@@ -16,15 +16,14 @@ from omnibase_core.models.runtime import (
     ModelRuntimeSkillResponse,
 )
 from omnibase_core.protocols.runtime import ProtocolRuntimeSkillClient
-
-_DEFAULT_RUNTIME_SOCKET_PATH = "/tmp/onex-runtime.sock"  # noqa: S108
+from omnibase_infra.models.local_state_paths import load_local_state_paths
 
 
 def default_runtime_socket_path() -> str:
     """Resolve the local runtime ingress socket path."""
 
     return os.environ.get(
-        "ONEX_LOCAL_RUNTIME_SOCKET_PATH", _DEFAULT_RUNTIME_SOCKET_PATH
+        "ONEX_LOCAL_RUNTIME_SOCKET_PATH", load_local_state_paths().runtime_socket_path
     )
 
 
