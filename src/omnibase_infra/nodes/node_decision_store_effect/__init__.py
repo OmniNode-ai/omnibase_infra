@@ -21,7 +21,6 @@ Architecture:
     - node.py: Declarative node shell extending NodeEffect
     - handlers/: PostgreSQL operation handlers (write_decision, write_conflict)
     - models/: Payload models for both intent types
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Intent routing and I/O definitions
 
 Node Type: EFFECT_GENERIC
@@ -51,15 +50,10 @@ from omnibase_infra.nodes.node_decision_store_effect.handlers import (
 from omnibase_infra.nodes.node_decision_store_effect.node import (
     NodeDecisionStoreEffect,
 )
-from omnibase_infra.nodes.node_decision_store_effect.registry import (
-    RegistryInfraDecisionStoreEffect,
-)
 
 __all__: list[str] = [
     # Node
     "NodeDecisionStoreEffect",
-    # Registry
-    "RegistryInfraDecisionStoreEffect",
     # Handlers
     "HandlerWriteConflict",
     "HandlerWriteDecision",

@@ -81,9 +81,6 @@ from omnibase_infra.nodes.node_architecture_validator.node_architecture_validato
 from omnibase_infra.nodes.node_architecture_validator.protocols import (
     ProtocolArchitectureRule,
 )
-from omnibase_infra.nodes.node_architecture_validator.registry import (
-    RegistryInfraArchitectureValidator,
-)
 
 __all__ = [
     # OMN-1726: HandlerArchitectureValidation
@@ -96,7 +93,6 @@ __all__ = [
     "ProtocolArchitectureRule",
     # OMN-1099: NodeArchitectureValidator
     "NodeArchitectureValidator",
-    "RegistryInfraArchitectureValidator",
     # Shared models
     "ModelArchitectureValidationRequest",
     "ModelArchitectureValidationResult",

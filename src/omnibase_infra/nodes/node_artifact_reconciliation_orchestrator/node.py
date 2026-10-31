@@ -60,8 +60,8 @@ class NodeArtifactReconciliationOrchestrator(NodeOrchestrator):
 
     Handler Routing:
         Handler routing is initialized by the runtime, not by this class.
-        The runtime uses RegistryInfraArtifactReconciliationOrchestrator
-        to create instances with properly configured dependencies.
+        The runtime builds instances from the node contract with properly
+        configured dependencies.
 
     Usage:
         >>> from omnibase_core.models.container import ModelONEXContainer

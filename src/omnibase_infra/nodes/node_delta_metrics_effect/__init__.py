@@ -9,7 +9,6 @@ Architecture:
     - node.py: Declarative node shell extending NodeEffect
     - handlers/: PostgreSQL operation handler (upsert_metrics)
     - models/: Payload model for metrics rollup
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Intent routing and I/O definitions
 
 Node Type: EFFECT_GENERIC
@@ -28,15 +27,10 @@ from omnibase_infra.nodes.node_delta_metrics_effect.handlers import (
 from omnibase_infra.nodes.node_delta_metrics_effect.node import (
     NodeDeltaMetricsEffect,
 )
-from omnibase_infra.nodes.node_delta_metrics_effect.registry import (
-    RegistryInfraDeltaMetricsEffect,
-)
 
 __all__: list[str] = [
     # Node
     "NodeDeltaMetricsEffect",
-    # Registry
-    "RegistryInfraDeltaMetricsEffect",
     # Handlers
     "HandlerUpsertMetrics",
 ]

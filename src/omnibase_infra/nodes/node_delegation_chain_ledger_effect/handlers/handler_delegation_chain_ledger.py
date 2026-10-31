@@ -19,7 +19,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
-from omnibase_infra.handlers.handler_db import HandlerDb
+from omnibase_infra.handlers.container.container_handler_db import bind_handler_db
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay import (
     assemble_replay_and_verify,
 )
@@ -225,7 +225,7 @@ class HandlerDelegationChainLedger:
         contract_chain, contract_attempts, contract_delay, contract_sources = (
             _load_contract_settings()
         )
-        self._db_handler = HandlerDb(container)
+        self._db_handler = bind_handler_db(container)
         self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._declared_chain = (
             contract_chain if declared_chain is None else tuple(declared_chain)
