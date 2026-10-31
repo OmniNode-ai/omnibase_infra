@@ -60,13 +60,13 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.handlers.handler_db import HandlerDb
-from omnibase_infra.models.validation_ledger import ModelValidationLedgerAppendResult
+from omnibase_infra.models.validation_ledger import (
+    ModelPayloadValidationLedgerAppend,
+    ModelValidationLedgerAppendResult,
+)
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.models.validation_ledger import (
-        ModelPayloadValidationLedgerAppend,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -344,49 +344,19 @@ class HandlerValidationLedgerAppend:
 
     async def handle(
         self,
-        envelope: object,
+        request: ModelPayloadValidationLedgerAppend,
     ) -> ModelHandlerOutput[ModelValidationLedgerAppendResult]:
-        """Contract-typed auto-wiring entry point.
+        """Append the typed payload delivered by the runtime and wrap the result.
 
-        ``node_validation_ledger_write_effect``'s contract declares
-        ``operation_match`` routing with no ``event_model``, so the dispatch
-        engine's auto-wiring (``handler_wiring._make_dispatch_callback``)
-        invokes ``handle(envelope)`` directly instead of ``execute()``.
-        Without this method the callback binds ``_missing_handle``, which
-        raises on every dispatched validation-ledger-append command (mirrors
-        OMN-14134).
+        Args:
+            request: Validation event payload containing Kafka position,
+                envelope data, and an optional correlation ID for tracing.
 
-        The value actually delivered here is whatever
-        ``MessageDispatchEngine._materialize_envelope_with_bindings`` produces
-        for the live dispatch path -- a **dict**
-        (``{"payload": ..., "correlation_id": ...}``), the exact shape
-        ``IntentEffectDispatchBridge.execute()`` constructs -- not an
-        attribute-bearing envelope object. ``_extract_envelope_field`` handles
-        both shapes so this method works for the real intent-routed dispatch
-        path as well as for object-shaped test envelopes.
-
-        Extracts the append payload from the auto-wired envelope, delegates
-        to append(), and wraps the result identically to execute().
+        Returns:
+            ModelHandlerOutput wrapping ModelValidationLedgerAppendResult.
         """
-        from omnibase_infra.models.validation_ledger import (
-            ModelPayloadValidationLedgerAppend,
-        )
-
-        payload_raw = self._extract_envelope_field(envelope, "payload")
-        if payload_raw is None:
-            payload_raw = envelope
-        payload = (
-            payload_raw
-            if isinstance(payload_raw, ModelPayloadValidationLedgerAppend)
-            else ModelPayloadValidationLedgerAppend.model_validate(payload_raw)
-        )
-
-        envelope_correlation_id = self._extract_envelope_field(
-            envelope, "correlation_id"
-        )
-        correlation_id = self._safe_correlation_id(
-            envelope_correlation_id or payload.correlation_id
-        )
+        payload = request
+        correlation_id = payload.correlation_id or uuid4()
         input_envelope_id = uuid4()
 
         result = await self.append(payload)
@@ -397,40 +367,6 @@ class HandlerValidationLedgerAppend:
             handler_id=HANDLER_ID_VALIDATION_LEDGER_APPEND,
             result=result,
         )
-
-    @staticmethod
-    def _extract_envelope_field(envelope: object, key: str) -> object:
-        """Return `key` from a dict-shaped or attribute-shaped envelope.
-
-        The dispatch engine may deliver either a materialized dict (the real
-        runtime dispatch path, via
-        ``MessageDispatchEngine._materialize_envelope_with_bindings``, and the
-        shape ``IntentEffectDispatchBridge.execute()`` constructs) or a
-        ``ModelEventEnvelope``-like object (test doubles) -- ``handle()`` must
-        accept both shapes.
-        """
-        if isinstance(envelope, dict):
-            return envelope.get(key)
-        return getattr(envelope, key, None)
-
-    @staticmethod
-    def _safe_correlation_id(raw: object) -> UUID:
-        """Parse a correlation ID from envelope/payload-supplied raw input.
-
-        Returns a fresh UUID if `raw` is missing or unparseable. Unlike
-        ``execute()``, ``handle()`` has no envelope validation step to reject
-        a malformed correlation_id before reaching this point -- the
-        validation ledger must never drop an event over a bad correlation_id,
-        so this degrades to a fresh UUID rather than raising.
-        """
-        if not raw:
-            return uuid4()
-        if isinstance(raw, UUID):
-            return raw
-        try:
-            return UUID(str(raw))
-        except (ValueError, TypeError):
-            return uuid4()
 
     async def execute(
         self,

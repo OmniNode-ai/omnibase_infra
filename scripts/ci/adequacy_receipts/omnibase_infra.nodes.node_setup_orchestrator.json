@@ -1,0 +1,21 @@
+{
+  "branch_coverage_pct": 71.19,
+  "candidate_count": 1,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator",
+  "handler_module_sha256": "sha256:376e69f1444c26d801c308a4d52d36f37158ee944e9986a90066add967092dfd",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_setup_orchestrator",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T09:15:21.118656+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 1,
+  "selected_input_hashes": [
+    "sha256:9e3cd1316a8d9e17457f6528e6160d1ec3ce780ec600bcd2aa18cbd66ed1ec2c"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21536 flips the node to canonical def-B by changing handle() to take one typed request; the parameters are read from the request and the handler body is otherwise unchanged. Measured branch coverage is the node's existing and updated unit tests over the handler module. The selected input is the one signature parity test, identified by the sha256 of its test id; equivalence rests on the verbatim-preserved symbols the ratchet re-derives from git plus the node's updated unit suite, not on a broad coverage claim.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

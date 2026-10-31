@@ -22,7 +22,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation import (
     ModelCheckResult,
     ModelValidationChecksCompleted,
-    ModelValidationPlan,
+    ModelValidationExecutionRequested,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,13 @@ class HandlerRunChecks:
     wired in a follow-up ticket.
     """
 
-    def __init__(self) -> None:  # stub-ok: stateless init
-        """Initialize the handler (stateless)."""
+    def __init__(self, correlation_id: UUID | None = None) -> None:
+        """Initialize the handler.
+
+        Args:
+            correlation_id: Correlation ID for log tracing, when the caller has one.
+        """
+        self._correlation_id = correlation_id
 
     @property
     def handler_id(self) -> str:
@@ -74,8 +79,7 @@ class HandlerRunChecks:
 
     async def handle(
         self,
-        plan: ModelValidationPlan,
-        correlation_id: UUID | None = None,
+        request: ModelValidationExecutionRequested,
     ) -> ModelValidationChecksCompleted:
         """Execute all checks in the validation plan.
 
@@ -87,18 +91,18 @@ class HandlerRunChecks:
         in a follow-up ticket.
 
         The runtime hands the handler the typed request alone, so
-        ``correlation_id`` is optional; the dispatch envelope's correlation id
-        is carried onto the published event by the runtime applier.
+        the constructor's ``correlation_id`` is optional. The runtime applier
+        carries the envelope's correlation ID onto the published event.
 
         Args:
-            plan: Validation plan containing the checks to execute.
-            correlation_id: Correlation ID for log tracing, when the caller
-                has one.
+            request: Execution event containing the validation plan fields.
 
         Returns:
             Aggregated executor result with all check outcomes and the plan's
             score threshold, published as ``validation-checks-completed``.
         """
+        plan = request
+        correlation_id = self._correlation_id
         logger.info(
             "Executing validation plan %s with %d checks (correlation_id=%s)",
             plan.plan_id,

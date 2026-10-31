@@ -16,8 +16,8 @@ class ModelOnboardingInput(BaseModel):
     interactive executor.  Otherwise the existing DAG-based
     ``resolve_policy`` + verification path is used.
 
-    The ``input_adapter`` is injected via handler function parameter,
-    NOT in this model (DI outside models — OMN-10784 GPT #1).
+    The ``input_adapter`` is injected via the handler constructor or the
+    implementation function, outside this model (OMN-10784 GPT #1).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

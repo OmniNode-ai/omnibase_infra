@@ -310,12 +310,12 @@ class TestHandlerInteractivePath:
             HandlerOnboarding,
         )
 
-        handler = HandlerOnboarding()
+        handler = HandlerOnboarding(input_adapter=local_no_llm_adapter)
         input_model = ModelOnboardingInput(
             policy_name="interactive_onboarding",
             dry_run=True,
         )
-        output = await handler.handle(input_model, input_adapter=local_no_llm_adapter)
+        output = await handler.handle(input_model)
 
         assert output.success is True
         assert output.policy_name == "interactive_onboarding"

@@ -38,6 +38,9 @@ from omnibase_infra.nodes.node_setup_orchestrator.constants.setup_event_types im
 from omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator import (
     HandlerSetupOrchestrator,
 )
+from omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request import (
+    ModelSetupOrchestratorRequest,
+)
 from omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_check_result import (
     ModelPreflightCheckResult,
 )
@@ -230,7 +233,13 @@ class TestHandlerSetupOrchestrator:
         )
 
         topology = _make_cloud_topology("postgres")
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.cloud.unavailable" in event_types
@@ -249,7 +258,13 @@ class TestHandlerSetupOrchestrator:
         )
 
         topology = _make_minimal_topology()
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.preflight.started" in event_types
@@ -266,7 +281,13 @@ class TestHandlerSetupOrchestrator:
         )
 
         topology = _make_standard_topology()  # has infisical
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.provision.started" in event_types
@@ -282,7 +303,13 @@ class TestHandlerSetupOrchestrator:
         handler = _make_handler()
 
         topology = _make_minimal_topology()  # no infisical
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.infisical.skipped" in event_types
@@ -297,7 +324,13 @@ class TestHandlerSetupOrchestrator:
         handler = _make_handler()
 
         topology = _make_standard_topology()  # has infisical
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.infisical.started" in event_types
@@ -311,7 +344,13 @@ class TestHandlerSetupOrchestrator:
         handler = _make_handler()
 
         topology = _make_minimal_topology()
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         event_types = [e.event_type for e in result.result.events]
         assert "setup.completed" in event_types
@@ -325,7 +364,13 @@ class TestHandlerSetupOrchestrator:
         handler = _make_handler()
 
         topology = _make_minimal_topology()
-        handler_output = await handler.handle(topology, corr_id, "docker-compose.yml")
+        handler_output = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         dumped = handler_output.result.model_dump()
         assert "result" not in dumped, (
@@ -341,7 +386,13 @@ class TestHandlerSetupOrchestrator:
         handler = _make_handler()
 
         topology = _make_standard_topology()
-        result = await handler.handle(topology, corr_id, "docker-compose.yml")
+        result = await handler.handle(
+            ModelSetupOrchestratorRequest(
+                topology=topology,
+                correlation_id=corr_id,
+                compose_file_path="docker-compose.yml",
+            )
+        )
 
         for event in result.result.events:
             assert event.event_type in SETUP_EVENT_TYPES, (

@@ -25,6 +25,9 @@ handler_routing:
       handler:
         name: "HandlerScopeFileRead"
         module: "omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read"
+      input_model:
+        name: "ModelScopeFileReadRequest"
+        module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request"
 metadata:
   description: "Filesystem read effect for scope-check workflow"
   author: "OmniNode Team"

@@ -1,0 +1,20 @@
+{
+  "base_ref": "65e3994c3d870c6d24a9c233872b3498c3c9ec39",
+  "canonical_handler_module": "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append",
+  "legacy_handler_module": "omnibase_infra.nodes.node_validation_ledger_write_effect.handlers.handler_validation_ledger_append",
+  "node_id": "omnibase_infra.nodes.node_validation_ledger_write_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:8586db254de33b1ec67810fd9e79add30e69601e262d3a140ef1f3b21bf25af6"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_signatures_omn21536.py::test_validation_ledger_write_effect_handle_takes_one_typed_request"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerValidationLedgerAppend.append",
+    "HandlerValidationLedgerAppend.execute"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}
