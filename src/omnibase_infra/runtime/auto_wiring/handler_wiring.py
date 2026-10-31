@@ -120,17 +120,11 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
-from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
-    HandlerContractSubscribePreflight,
-)
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
-)
-from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
-    ModelContractSubscribePreflightRequest,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
@@ -11490,7 +11484,13 @@ async def _subscribe_contract_topics(
     )
 
     from omnibase_infra.enums import EnumConsumerGroupPurpose
+    from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
+        HandlerContractSubscribePreflight,
+    )
     from omnibase_infra.models import ModelNodeIdentity
+    from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
+        ModelContractSubscribePreflightRequest,
+    )
     from omnibase_infra.runtime.event_bus_subcontract_wiring import (
         load_published_events_map,
     )
