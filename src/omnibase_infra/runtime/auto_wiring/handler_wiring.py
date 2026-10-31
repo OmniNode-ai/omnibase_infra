@@ -126,6 +126,9 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -1101,24 +1104,19 @@ def _make_dispatch_callback(
             raise
         if pre_dispatch_guard is not None:
             pre_dispatch_guard(typed_payload)
+        handler_arg: object = typed_payload
+        request_model = _resolve_def_b_input_model_type(handle_method)
         if handler_takes_envelope:
-            handler_envelope = _materialize_typed_event_envelope(
-                envelope,
-                cast("BaseModel", typed_payload),
-                event_model.name,
+            handler_arg = _materialize_typed_event_envelope(
+                envelope, cast("BaseModel", typed_payload), event_model.name
             )
-            envelope_result = handle_method(handler_envelope)
-            if asyncio.iscoroutine(envelope_result):
-                envelope_result = await cast("Awaitable[object]", envelope_result)
-            return _normalize_handler_result(
-                envelope_result,
-                envelope,
-                event_model.name,
-                handler_node_kind,
-                published_event_names,
-            )
-
-        typed_result = handle_method(typed_payload)
+        elif request_model is not None and issubclass(
+            request_model, ModelInjectedRequest
+        ):
+            # The runtime unwraps the envelope: the handler gets the clock
+            # reading and input id on its typed request, never the envelope.
+            handler_arg = request_model.from_dispatch(envelope, typed_payload)
+        typed_result = handle_method(handler_arg)
         if asyncio.iscoroutine(typed_result):
             typed_result = await cast("Awaitable[object]", typed_result)
         return _normalize_handler_result(

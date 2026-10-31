@@ -63,6 +63,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_query import (
     ModelTopicCatalogQuery,
 )
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
@@ -213,18 +216,16 @@ class DispatcherTopicCatalogQuery(MixinAsyncCircuitBreaker):
 
             now = datetime.now(UTC)
 
-            handler_envelope: ModelEventEnvelope[ModelTopicCatalogQuery] = (
-                ModelEventEnvelope(
-                    envelope_id=uuid4(),
-                    payload=payload,
-                    envelope_timestamp=now,
+            handler_request: ModelInjectedRequest[ModelTopicCatalogQuery] = (
+                ModelInjectedRequest(
+                    event=payload,
+                    now=now,
+                    input_id=uuid4(),
                     correlation_id=correlation_id,
-                    source_tool=self.dispatcher_id,
-                    tenant_id=None,
                 )
             )
 
-            handler_output = await self._handler.handle(handler_envelope)
+            handler_output = await self._handler.handle(handler_request)
             output_events = list(handler_output.events)
 
             completed_at = datetime.now(UTC)

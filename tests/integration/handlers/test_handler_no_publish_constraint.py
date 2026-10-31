@@ -899,8 +899,8 @@ class TestHandlerNoPublishConstraintCrossValidation:
     def test_introspection_handler_handle_signature_matches_pattern(self) -> None:
         """HandlerNodeIntrospected.handle follows the handler pattern.
 
-        Pattern: async def handle(envelope, ...) -> ModelHandlerOutput
-        NOT: async def handle(envelope, bus) -> None
+        Pattern: async def handle(request, ...) -> ModelHandlerOutput
+        NOT: async def handle(request, bus) -> None
 
         This test verifies key domain parameters exist and the no-publish
         constraint is enforced, while allowing the handler to evolve with
@@ -912,8 +912,9 @@ class TestHandlerNoPublishConstraintCrossValidation:
         # First parameter must be 'self'
         assert params[0] == "self", "First parameter must be 'self'"
 
-        # Must accept envelope parameter (contains the event)
-        assert "envelope" in params, "handle() must accept 'envelope' parameter"
+        # Must accept the typed request parameter (contains the event)
+        assert "request" in params, "handle() must accept 'request' parameter"
+        assert "envelope" not in params
 
         # Must NOT accept any bus-related parameters
         for forbidden in FORBIDDEN_BUS_PARAMETERS:

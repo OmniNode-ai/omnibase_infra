@@ -74,6 +74,9 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.dispatchers._util_envelope_extract import (
     extract_envelope_fields,
 )
@@ -258,18 +261,17 @@ class DispatcherRuntimeTick(MixinAsyncCircuitBreaker):
             # Get current time for handler
             now = datetime.now(UTC)
 
-            # Create envelope for handler (ProtocolMessageHandler signature)
-            handler_envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
-                envelope_id=uuid4(),
-                payload=payload,
-                envelope_timestamp=now,
-                correlation_id=correlation_id,
-                source_tool=self.dispatcher_id,
-                tenant_id=None,
+            # Create the typed request for the handler (clock reading and input id injected)
+            handler_request: ModelInjectedRequest[ModelRuntimeTick] = (
+                ModelInjectedRequest(
+                    event=payload,
+                    now=now,
+                    input_id=uuid4(),
+                    correlation_id=correlation_id,
+                )
             )
-
             # Delegate to wrapped handler
-            handler_output = await self._handler.handle(handler_envelope)
+            handler_output = await self._handler.handle(handler_request)
             output_events = list(handler_output.events)
             output_intents = handler_output.intents
 

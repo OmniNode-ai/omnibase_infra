@@ -48,10 +48,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.event_bus.models import ModelEventHeaders, ModelEventMessage
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
@@ -406,12 +408,11 @@ class OrchestratorPipeline:
                 now = datetime.now(UTC)
 
                 # Wrap event in envelope for handler API
-                envelope = ModelEventEnvelope(
-                    envelope_id=uuid4(),
-                    payload=event,
-                    envelope_timestamp=now,
+                envelope = ModelInjectedRequest(
+                    event=event,
+                    now=now,
+                    input_id=uuid4(),
                     correlation_id=correlation_id,
-                    source_tool="e2e-test-pipeline",
                 )
 
                 handler_output = await self._handler.handle(envelope)
@@ -1456,12 +1457,8 @@ class TestFullPipelineWithRealInfrastructure:
         now = datetime.now(UTC)
 
         # Wrap event in envelope for handler API
-        envelope = ModelEventEnvelope(
-            envelope_id=uuid4(),
-            payload=event,
-            envelope_timestamp=now,
-            correlation_id=unique_correlation_id,
-            source_tool="e2e-test",
+        envelope = ModelInjectedRequest(
+            event=event, now=now, input_id=uuid4(), correlation_id=unique_correlation_id
         )
 
         handler_output = await handler.handle(envelope)
