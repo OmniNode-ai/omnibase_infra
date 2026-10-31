@@ -129,6 +129,7 @@ def test_a_malformed_session_model_is_a_usage_error(value: str) -> None:
     )
     assert result.exit_code == 2, result.output
     assert "--session-model" in result.output
+    assert "is not a model id" in result.output
 
 
 _COMMAND = "onex.cmd.synthetic.delegate-skill.v1"
@@ -210,3 +211,29 @@ def test_golden_chain_the_run_is_handed_the_session_model(
     (call,) = calls
     assert call["payload"]["metadata"]["session_model"] == SESSION_MODEL
     assert f"session model: {SESSION_MODEL}" in result.stderr
+
+
+def test_golden_chain_without_the_flag_writes_no_key_and_says_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC3 at the command level: the real command, no flag, no key, a 'none' line."""
+    monkeypatch.chdir(tmp_path)
+    calls = _chain(monkeypatch, tmp_path, EnumDelegateLocus.IN_PROCESS)
+    result = CliRunner().invoke(
+        delegate_command,
+        [
+            "Summarise this.",
+            "--task-type",
+            "document",
+            "--bus",
+            "inmemory",
+            "--locus",
+            "in-process",
+            "--state-root",
+            str(tmp_path / "state"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    (call,) = calls
+    assert "session_model" not in call["payload"].get("metadata", {})
+    assert "session model: none" in result.stderr
