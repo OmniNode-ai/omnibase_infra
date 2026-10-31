@@ -455,7 +455,7 @@ def principal_name(declaration: Declaration, login: str, device: str) -> str:
 OVERLAY_SCHEMA_VERSION = "developer_principal.v1"
 OVERLAY_GRANTS_SOURCE = "omnibase_infra:deploy/lab/developer-principal-grants.yaml"
 _OVERLAY_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
-# omnibase_core EnumDeveloperPrincipalRole; a test holds the two together (OMN-21622).
+# The roles the overlay admits; the omnibase_core enum is not yet in a pinned release (OMN-21622).
 OVERLAY_ROLES = frozenset({"developer", "machine"})
 
 
@@ -488,7 +488,7 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
     name this issuer's grant file as its ``grants_source``, and each row's
     principal must be the name the issuer derives from the row's login and device.
     Mirrors omnibase_core ``ModelDeveloperPrincipalOverlay``; the issuer image
-    carries no omnibase_core, so the unit tests hold the two together.
+    carries no omnibase_core.
     """
     doc = yaml.safe_load(path.read_bytes())
     if not isinstance(doc, dict) or set(doc) != {

@@ -157,12 +157,14 @@ def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) 
 # --- the overlay names which principals are machines ----------------------------
 
 
-def test_the_role_vocabulary_is_the_core_enum() -> None:
-    core = pytest.importorskip(
-        "omnibase_core.enums.enum_developer_principal_role",
-        reason="the omnibase_core release that ships EnumDeveloperPrincipalRole",
-    )
-    assert {role.value for role in core.EnumDeveloperPrincipalRole} == lpi.OVERLAY_ROLES
+def test_an_unknown_role_is_refused(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    assert {"developer", "machine"} == lpi.OVERLAY_ROLES
+    with pytest.raises(Exception, match="role must be one of"):
+        lpi.load_overlay(
+            _overlay(tmp_path, {**MACHINE_ROW, "role": "operator"}), declaration
+        )
 
 
 def test_a_machine_row_loads_with_its_role(
@@ -321,4 +323,6 @@ def test_the_audit_unit_runs_the_machine_audit_and_names_no_host() -> None:
     text = UNIT.read_text()
     assert "audit-grants" in text and "--role machine" in text
     assert "--overlay" in text and "--rpk-container" in text
-    assert "apply-grants" not in text and "serve" not in text.split("ExecStart", 1)[1]
+    (exec_start,) = [ln for ln in text.splitlines() if ln.startswith("ExecStart=")]
+    assert 'lab_principal_issuer.py" audit-grants ' in exec_start
+    assert "apply-grants" not in text and " serve" not in exec_start
