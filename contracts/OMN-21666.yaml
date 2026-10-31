@@ -1,0 +1,22 @@
+schema_version: '1.0.0'
+ticket_id: OMN-21666
+title: 'Infra handler ownership remediation names the handlers/ home and a shrink-only allowlist'
+summary: 'Rewrite the reject-node-implementations remediation line and the allowlist header so they point at binding an infra handler from src/omnibase_infra/handlers/.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The gate output and the allowlist header carry the corrected text
+    command: uv run pytest scripts/ci/tests/test_reject_node_implementations.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: The remediation line and the allowlist header name src/omnibase_infra/handlers/ and say the allowlist only shrinks
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest scripts/ci/tests/test_reject_node_implementations.py -q'
