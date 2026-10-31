@@ -16,8 +16,9 @@ hardcoded_env:
   TELEMETRY_ENABLED: 'false'
 operational_defaults:
   # OMN-13417: dev lane host port is 8881 so `onex up core` no longer collides
-  # with the stability-test lane infisical (host 8880) on a shared host.
-  SITE_URL: http://localhost:8881
+  # with the other lane's infisical (host 8880) on a shared host.
+  # OMN-20999: override-backed so a host can point invite links off-box.
+  SITE_URL: '${INFISICAL_SITE_URL:-http://localhost:8881}'
   # OMN-20999: see docker-compose.infra.yml for why these are empty by default
   # and for the v0.146 name verification. Blank SMTP_HOST means email off, which
   # is the current behaviour of every lane.
