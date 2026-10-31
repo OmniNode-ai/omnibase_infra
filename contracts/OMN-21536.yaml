@@ -25,3 +25,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py tests/unit/nodes/node_chain_learning/test_handlers.py tests/unit/nodes/node_registry_effect -q -p no:cacheprovider'
+  - id: dod-omn21536-infra-deploy
+    description: "Deploy check: the runtime image at the deployed head carries handlers whose handle takes only a request, for the registry-effect and chain-orchestrator handlers."
+    source: generated
+    binds_ac: [AC21536101]
+    checks:
+      - check_type: command
+        check_value: |-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import inspect; from omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert import HandlerPostgresUpsert as U; from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_store_complete import HandlerChainStoreComplete as S; assert list(inspect.signature(U.handle).parameters) == ['self', 'request']; assert list(inspect.signature(S.handle).parameters) == ['self', 'request']"
