@@ -274,6 +274,7 @@ def _roll_harness(
             # the current key -- credentials for a deleted registration.
             "_runner_cache_ready() { return 0; }",
             "wait_for_runner_online() { return 0; }",
+            "wait_for_no_dead_containers() { return 0; }",
         ]
     )
     fn = _extract_function(script_text, "roll_one_runner")

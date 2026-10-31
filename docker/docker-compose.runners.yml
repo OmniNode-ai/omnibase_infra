@@ -203,6 +203,25 @@ x-runner-base: &runner-base
     UV_CONCURRENT_BUILDS: "1"
     UV_CONCURRENT_INSTALLS: "1"
     UV_HTTP_TIMEOUT: "600"
+    # OMN-21807 -- keep the tool caches OUT of the container's writable layer.
+    # Measured 2026-10-31 (lane dev-restore-1515): a runner recreate removes the
+    # old container, and when its layer holds the uv cache and the shared
+    # ci-envs, containerd's garbage collector holds its metadata write lock for
+    # about 28 minutes while it deletes them; every `docker rm` on the host
+    # blocks behind that lock, and the dev deploy agent's redeploys failed.
+    # Each general-pool service therefore mounts two per-runner NAMED volumes
+    # (runner-N-cache at /home/runner/.cache, runner-N-work at the job
+    # workspace) so a recreate removes a thin layer. A named volume is seeded
+    # from the image on first use, so the baked ci-env under
+    # ~/.cache/omni/ci-envs is there on the first job. The uv cache lives INSIDE
+    # the workspace volume, not in ~/.cache: uv installs a wheel by hardlinking
+    # out of its cache, a hardlink cannot cross a mount, and a cache on its own
+    # mount would copy every file instead (OMN-19998 measured 262 s against 32 s
+    # for the same sync). The runner's `rm -rf _work/*` job cleanup does not
+    # match the dot-directory, so the cache survives job cleanup. npm keeps its
+    # cache under ~/.cache so the one volume holds it too.
+    UV_CACHE_DIR: /home/runner/actions-runner/_work/.uv-cache
+    npm_config_cache: /home/runner/.cache/npm
     # OMN-14027 C1 — PyPI pull-through cache wiring (INERT until rollout).
     # DO NOT uncomment here. This block is shovel-ready but deliberately inert:
     # activating it fleet-wide is a soak-gated rollout action, and pointing the
@@ -310,6 +329,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-1-cache:/home/runner/.cache
+      - runner-1-work:/home/runner/actions-runner/_work
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
@@ -324,6 +345,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-2-cache:/home/runner/.cache
+      - runner-2-work:/home/runner/actions-runner/_work
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
@@ -338,6 +361,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-3-cache:/home/runner/.cache
+      - runner-3-work:/home/runner/actions-runner/_work
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
@@ -352,6 +377,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-4-cache:/home/runner/.cache
+      - runner-4-work:/home/runner/actions-runner/_work
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
@@ -366,6 +393,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-5-cache:/home/runner/.cache
+      - runner-5-work:/home/runner/actions-runner/_work
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
@@ -380,6 +409,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-6-cache:/home/runner/.cache
+      - runner-6-work:/home/runner/actions-runner/_work
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
@@ -394,6 +425,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-7-cache:/home/runner/.cache
+      - runner-7-work:/home/runner/actions-runner/_work
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
@@ -408,6 +441,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-8-cache:/home/runner/.cache
+      - runner-8-work:/home/runner/actions-runner/_work
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
@@ -422,6 +457,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-9-cache:/home/runner/.cache
+      - runner-9-work:/home/runner/actions-runner/_work
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
@@ -436,6 +473,8 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
+      - runner-10-cache:/home/runner/.cache
+      - runner-10-work:/home/runner/actions-runner/_work
       - runner-10-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
@@ -1268,21 +1307,61 @@ volumes:
     name: omninode-prod-deploy-runner-1-creds
   runner-1-creds:
     name: omninode-runner-1-creds
+  runner-1-cache:
+    name: omninode-runner-1-cache
+  runner-1-work:
+    name: omninode-runner-1-work
   runner-2-creds:
     name: omninode-runner-2-creds
+  runner-2-cache:
+    name: omninode-runner-2-cache
+  runner-2-work:
+    name: omninode-runner-2-work
   runner-3-creds:
     name: omninode-runner-3-creds
+  runner-3-cache:
+    name: omninode-runner-3-cache
+  runner-3-work:
+    name: omninode-runner-3-work
   runner-4-creds:
     name: omninode-runner-4-creds
+  runner-4-cache:
+    name: omninode-runner-4-cache
+  runner-4-work:
+    name: omninode-runner-4-work
   runner-5-creds:
     name: omninode-runner-5-creds
+  runner-5-cache:
+    name: omninode-runner-5-cache
+  runner-5-work:
+    name: omninode-runner-5-work
   runner-6-creds:
     name: omninode-runner-6-creds
+  runner-6-cache:
+    name: omninode-runner-6-cache
+  runner-6-work:
+    name: omninode-runner-6-work
   runner-7-creds:
     name: omninode-runner-7-creds
+  runner-7-cache:
+    name: omninode-runner-7-cache
+  runner-7-work:
+    name: omninode-runner-7-work
   runner-8-creds:
     name: omninode-runner-8-creds
+  runner-8-cache:
+    name: omninode-runner-8-cache
+  runner-8-work:
+    name: omninode-runner-8-work
   runner-9-creds:
     name: omninode-runner-9-creds
+  runner-9-cache:
+    name: omninode-runner-9-cache
+  runner-9-work:
+    name: omninode-runner-9-work
   runner-10-creds:
     name: omninode-runner-10-creds
+  runner-10-cache:
+    name: omninode-runner-10-cache
+  runner-10-work:
+    name: omninode-runner-10-work

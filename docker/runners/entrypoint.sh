@@ -46,14 +46,13 @@ _fix_docker_socket_gid() {
         return 0
     fi
 
-    local host_gid
+    local host_gid container_gid owning_group
     host_gid=$(stat -c '%g' "${socket}" 2>/dev/null || echo "")
     if [[ -z "${host_gid}" ]]; then
         echo "[entrypoint] Could not determine Docker socket GID — skipping"
         return 0
     fi
 
-    local container_gid
     container_gid=$(getent group docker | cut -d: -f3 2>/dev/null || echo "")
 
     if [[ "${host_gid}" == "${container_gid}" ]]; then
@@ -64,7 +63,6 @@ _fix_docker_socket_gid() {
     echo "[entrypoint] Docker socket GID mismatch: socket=${host_gid}, container docker group=${container_gid}"
 
     # Is the socket's GID already claimed by a group in this image?
-    local owning_group
     owning_group=$(getent group "${host_gid}" | cut -d: -f1 2>/dev/null || echo "")
 
     if [[ -n "${owning_group}" ]]; then
@@ -81,8 +79,18 @@ _fix_docker_socket_gid() {
     echo "[entrypoint] Docker group GID updated to ${host_gid}"
 }
 
+# OMN-21807: the cache and workspace mounts are per-runner NAMED volumes, so a
+# recreate removes a thin container layer instead of a layer full of caches
+# (containerd's garbage collector locked every `docker rm` on the host for about
+# 28 minutes per runner before). A named volume takes its owner from the image
+# directory it covers: ~/.cache exists in the image and is runner-owned, but the
+# job workspace does not, so Docker creates it root-owned and config.sh and the
+# jobs, which run as `runner`, could not write to it. Hand both mount points to
+# runner, top-level only (a recursive chown of gigabytes of cache would cost
+# minutes on every start); an absent directory is skipped.
 if [[ "$(id -u)" -eq 0 ]]; then
     _fix_docker_socket_gid
+    chown runner:runner /home/runner/.cache "${RUNNER_HOME:-/home/runner/actions-runner}/${RUNNER_WORK_DIR:-_work}" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
