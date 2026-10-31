@@ -413,6 +413,7 @@ class TestDev202PhasesOff:
         assert _FakeApplier.calls == []
 
     @pytest.mark.gateway_lane
+    @pytest.mark.usefixtures("gateway_phase_available")
     def test_dev_202_phases_off_gateway_deploy_is_a_no_op(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -542,12 +543,13 @@ class TestDev201Unchanged:
         assert set(DEV_LANE_ONLY_MIGRATION_SERVICES) <= named
 
     @pytest.mark.gateway_lane
+    @pytest.mark.usefixtures("gateway_phase_available")
     def test_dev_201_unchanged_gateway_deploy_runs_where_the_flag_is_absent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The gateway phase is not removed, it is a flag (OMN-21629).
 
-        The conftest's ``gateway_lane`` marker puts the composition of an
+        The ``gateway_phase_available`` fixture puts the composition of an
         instance without ``flags: disabled_phases`` in dev-201's slot.
         """
         monkeypatch.setattr(

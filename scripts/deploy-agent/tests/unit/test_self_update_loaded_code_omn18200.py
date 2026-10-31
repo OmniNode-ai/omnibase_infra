@@ -447,7 +447,10 @@ class TestTheIdleHeartbeatBoundary:
 
 
 class TestTheGatewayStepClosesThePhaseItReopens:
-    pytestmark = pytest.mark.gateway_lane
+    pytestmark = [
+        pytest.mark.gateway_lane,
+        pytest.mark.usefixtures("gateway_phase_available"),
+    ]
 
     def test_the_runtime_phase_ends_success_after_the_gateway_step(
         self, monkeypatch: pytest.MonkeyPatch

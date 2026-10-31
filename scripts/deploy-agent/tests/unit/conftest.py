@@ -467,6 +467,26 @@ def _derive_gateway_deploy_budget_from_this_checkout(
 
 
 @pytest.fixture(autouse=True)
+def _no_host_runtime_policy_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """OMN-21629: no test reads the runtime policy env of the host it runs on.
+
+    The file is read from the host checkout the agent runs from (REPO_DIR), so a
+    lab host that carries one (the tenant fold) made a dozen composition tests
+    red there while CI, which has none, stayed green. An absent file reads as
+    empty; the tests that want values patch the loader.
+    """
+    from deploy_agent import executor as executor_mod
+
+    monkeypatch.setattr(
+        executor_mod,
+        "RUNTIME_POLICY_ENV_FILE",
+        tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
+    )
+
+
+@pytest.fixture(autouse=True)
 def _resolve_gateway_lane_from_this_checkout(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -502,16 +522,6 @@ def _resolve_gateway_lane_from_this_checkout(
     script = repo_root / "scripts" / "deploy-gateway.sh"
     monkeypatch.setattr(executor_mod, "deploy_gateway_script", lambda: str(script))
 
-    # OMN-21629: the runtime policy env is read from the host checkout the agent
-    # runs from (REPO_DIR), so a lab host that carries one (the tenant fold) made
-    # a dozen composition tests red there while CI, which has none, stayed green.
-    # An absent file reads as empty; the tests that want values patch the loader.
-    monkeypatch.setattr(
-        executor_mod,
-        "RUNTIME_POLICY_ENV_FILE",
-        tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
-    )
-
     lane_dir = tmp_path_factory.mktemp("gateway-lane")
     lines: list[str] = []
     for name in sorted(executor_mod.GATEWAY_REQUIRED_MAP_VARS):
@@ -523,22 +533,30 @@ def _resolve_gateway_lane_from_this_checkout(
     monkeypatch.setattr(executor_mod, "gateway_env_file", lambda: str(env_file))
 
     if request.node.get_closest_marker("gateway_lane") is not None:
-        # OMN-21629: the shipped routing table declares gateway-deploy off for
-        # dev-201 (its ``flags: disabled_phases``), so a test that exercises the
-        # gateway deploy itself runs it on the composition of an instance that
-        # does not carry that flag -- the one the phase stays available to.
-        # The tests of the flag itself (test_dev_201_gateway_off_omn21629.py)
-        # set the shipped dev-201 composition back.
-        monkeypatch.setitem(
-            executor_mod.DEV_INSTANCE_LANE_CONFIGS,
-            executor_mod.DEFAULT_DEV_INSTANCE,
-            executor_mod._LANE_CONFIGS[executor_mod.EnumRuntimeLane.DEV],
-        )
         return
     monkeypatch.setattr(
         executor_mod.DeployExecutor,
         "_deploy_gateway_lane",
         lambda self, *args, **kwargs: None,
+    )
+
+
+@pytest.fixture
+def gateway_phase_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the composition no ``disabled_phases`` flag touches in dev-201's slot.
+
+    The shipped routing table declares ``gateway-deploy`` off for dev-201
+    (OMN-21629), so a test that drives the gateway deploy itself asks for this
+    fixture by name and runs it on the composition of an instance that does not
+    carry that flag, the one the phase stays available to. The shipped slot is
+    otherwise left alone.
+    """
+    from deploy_agent import executor as executor_mod
+
+    monkeypatch.setitem(
+        executor_mod.DEV_INSTANCE_LANE_CONFIGS,
+        executor_mod.DEFAULT_DEV_INSTANCE,
+        executor_mod._LANE_CONFIGS[executor_mod.EnumRuntimeLane.DEV],
     )
 
 

@@ -69,16 +69,8 @@ def _fail() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _shipped_default_instance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Put the composition the agent builds from the SHIPPED table in the slot.
-
-    The ``gateway_lane`` marker (conftest) gives the slot the historical
-    composition, which carries no flag; these tests are about the flag, so they
-    set the shipped one back.
-    """
-    monkeypatch.setitem(
-        DEV_INSTANCE_LANE_CONFIGS, DEFAULT_DEV_INSTANCE, BUILT_AT_IMPORT
-    )
+def _shipped_default_instance() -> None:
+    """The shipped composition sits in the slot (no fixture replaces it here)."""
     select_dev_instance(DEFAULT_DEV_INSTANCE)
 
 
