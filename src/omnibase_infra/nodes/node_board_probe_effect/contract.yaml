@@ -59,6 +59,10 @@ consumer_flow_topics:
   audit_projection: "onex.evt.omnibase-infra.gateway-heartbeat.v1"
   publishing_reducer: "onex.evt.platform.node-heartbeat.v1"
   applied: "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
+# The projection API the consumer-flow check reads, as seen from the lab lane's
+# runtime container; a request names another base_url to override it (OMN-21688).
+consumer_flow_endpoints:
+  projection_api_base_url: "http://host.docker.internal:3002"
 capabilities:
   - name: "board_probe.consumer_flow"
     description: "Observe and grade C28 consumer-flow observability on the lab lane"
