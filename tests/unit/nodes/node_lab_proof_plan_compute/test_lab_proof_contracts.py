@@ -16,10 +16,10 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_bundle_policy import (
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
     ModelLabProofBundlePolicy,
 )
-from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_step_timeouts import (
+from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
     ModelLabProofStepTimeouts,
 )
 

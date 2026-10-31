@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_step_timeouts import (
+from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
     ModelLabProofStepTimeouts,
 )
 

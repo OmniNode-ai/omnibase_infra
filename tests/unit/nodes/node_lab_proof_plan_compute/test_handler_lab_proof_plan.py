@@ -18,13 +18,13 @@ from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
 )
 from omnibase_infra.lab_proof.model_lab_proof_plan import ModelLabProofPlan
+from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
+    ModelLabProofStepTimeouts,
+)
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     SABOTAGE_LINE,
     HandlerLabProofPlan,
     LabProofPlanError,
-)
-from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_step_timeouts import (
-    ModelLabProofStepTimeouts,
 )
 from tests.unit.nodes.node_lab_proof_plan_compute.lab_proof_fixtures import (
     BASE,

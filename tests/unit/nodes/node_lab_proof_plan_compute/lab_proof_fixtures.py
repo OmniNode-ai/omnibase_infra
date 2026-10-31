@@ -26,11 +26,11 @@ from omnibase_infra.lab_proof.model_lab_proof_run_report import (
     ModelLabProofRunReport,
 )
 from omnibase_infra.lab_proof.model_lab_proof_subject import ModelLabProofSubject
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
+    ModelLabProofBundlePolicy,
+)
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     HandlerLabProofPlan,
-)
-from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_bundle_policy import (
-    ModelLabProofBundlePolicy,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
