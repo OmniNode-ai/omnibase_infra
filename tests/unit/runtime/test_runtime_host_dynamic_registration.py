@@ -29,6 +29,19 @@ from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 
 pytestmark = pytest.mark.unit
 
+# The listener runs only where the runtime config opts in and its allowlist
+# names the environment (OMN-20079).
+_HOTLOAD_ON: dict[str, object] = {
+    "enabled": True,
+    "mode": "on_demand",
+    "allowed_environments": ["dev"],
+}
+
+
+@pytest.fixture(autouse=True)
+def _dev_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_ENVIRONMENT", "dev")
+
 
 def _join_timeout() -> InfraTimeoutError:
     return InfraTimeoutError(
@@ -45,6 +58,7 @@ def _recovery_config(
     *, initial: float, maximum: float = 1.0, attempt_timeout: float = 1.0
 ) -> dict[str, object]:
     return {
+        "contract_hotload": _HOTLOAD_ON,
         "event_bus": {
             "environment": "dev",
             "recovery": {
@@ -53,7 +67,7 @@ def _recovery_config(
                 "backoff_multiplier": 2,
                 "attempt_timeout_seconds": attempt_timeout,
             },
-        }
+        },
     }
 
 
@@ -131,7 +145,10 @@ def _make_process(
     process._node_identity.node_name = "test-node"
     process._node_identity.version = "v1"
     process._dynamic_contract_unsubscribe = None
-    process._config = {"event_bus": {"environment": "dev"}}
+    process._config = {
+        "contract_hotload": _HOTLOAD_ON,
+        "event_bus": {"environment": "dev"},
+    }
     return process
 
 
@@ -269,10 +286,11 @@ class TestStartDynamicContractListener:
         process = _make_process()
         process._kafka_contract_source.environment = "dev"
         process._config = {
+            "contract_hotload": _HOTLOAD_ON,
             "event_bus": {
                 "environment": "dev",
                 "recovery": {"initial_backoff_seconds": -1},
-            }
+            },
         }
 
         with pytest.raises(ProtocolConfigurationError):
@@ -285,7 +303,10 @@ class TestStartDynamicContractListener:
         """A non-mapping event_bus config is not silently replaced by defaults."""
         process = _make_process()
         process._kafka_contract_source.environment = "dev"
-        process._config = {"event_bus": "not-a-mapping"}
+        process._config = {
+            "contract_hotload": _HOTLOAD_ON,
+            "event_bus": "not-a-mapping",
+        }
 
         with pytest.raises(ProtocolConfigurationError, match="must be a mapping"):
             await process._start_dynamic_contract_listener()

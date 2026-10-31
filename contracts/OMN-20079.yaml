@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20079
+title: Both contract hot-load paths are off unless the runtime config opts in
+summary: >-
+  This contract covers the omnibase_infra half of the interim hot-load gate (plan task H0). The listener on the node-registration topic and the baseline subscription on the contract-registered topic start only when the runtime config carries contract_hotload.enabled with a mode and a non-empty allowed_environments list, the switch on in an environment that list does not name (or with ONEX_ENVIRONMENT unset) is a boot error before architecture validation and the event bus start, and a malformed block is a boot error. The guard is a declared allowlist read from the runtime config or overlay, so it fails closed and the code holds no environment names. It does not claim the deploy-repository policy test, the production promotion or the production listener log readback; those are the ticket's own AC3 and AC4.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-hotload-gate-default-off
+    statement: The runtime starts no contract hot-load subscription unless the runtime config opts in.
+    acceptance:
+      - id: AC1
+        statement: With no contract_hotload block, with enabled false, and with enabled false plus a mode, a real host with handler_source.mode kafka_events and profile main subscribes to neither node-registration.v1 nor contract-registered.v1, and a generation-consumer registration plus two boot announcements (one parseable handler-shell contract, one ordinary node contract) materialize nothing.
+      - id: AC2
+        statement: With enabled true and a mode, the same host subscribes to both topics and the two handler-shell payloads each materialize, so the zero in AC1 is the gate's doing.
+  - id: req-hotload-gate-environment
+    statement: The switch on in an environment the declared allowlist does not name, or in an unset environment, or a malformed block, fails the boot.
+    acceptance:
+      - id: AC3
+        statement: With enabled true and ONEX_ENVIRONMENT or the event bus environment set to prod-eu, onex-production or onex-prod (none on the allowlist), or ONEX_ENVIRONMENT unset, start raises ProtocolConfigurationError before architecture validation and the event bus start; an environment the allowlist names (the lab environment) passes; with the switch off the same environments boot.
+      - id: AC4
+        statement: A contract_hotload block that is not a mapping, that enables without a mode, that names an unknown mode or that carries an unknown field raises ProtocolConfigurationError.
+evidence_requirements:
+  - kind: tests
+    description: Unit tests drive the real RuntimeHostProcess with a recording in-memory bus and a counting materializer; the pre-image runtime_host_process.py fails the gate-off tests.
+    command: uv run pytest tests/unit/runtime/test_contract_hotload_interim_gate.py tests/unit/runtime/test_runtime_host_dynamic_registration.py tests/integration/test_runtime_host_dynamic_registration.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-hotload-gate-default-off-ac1
+    description: The gate-off tests publish the three planted payloads through a started in-memory bus and count zero subscriptions and zero materializations for three off shapes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_contract_hotload_interim_gate.py -q -p no:randomly -k TestDisabledByDefault
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-hotload-gate-control-ac2
+    description: The control test enables the switch and requires both subscriptions and two materializations of the same fixtures.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_contract_hotload_interim_gate.py -q -p no:randomly -k TestControlGateOnMaterializes
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-hotload-gate-environment-ac3-ac4
+    description: The allowlist check refuses unlisted production-like names and an unset environment, start refuses before validation and the bus starts, the lab environment passes, and each malformed block (including a missing or blank allowlist) is refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_contract_hotload_interim_gate.py -q -p no:randomly -k "TestGateResolution or TestModelContractHotloadConfig"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3, AC4]
+  - id: dod-hotload-gate-merged-source
+    description: Hermetic deployed-source readback of the runtime host at the evaluated commit; the gate call is absent at the merge base.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          bash -o pipefail -c 'gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_host_process.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F "_resolve_contract_hotload_gate().enabled" > /dev/null'
+        cwd: ${OMNI_HOME}/omnibase_infra
