@@ -1,0 +1,44 @@
+# OMN-21765 contract file for omnibase_infra: the runner registration token leaves every ssh command string.
+schema_version: "1.0.0"
+ticket_id: "OMN-21765"
+title: "deploy-runners.sh hands the runner registration token to the host on ssh stdin, so it is in no ps listing"
+summary: "On the runner host a base64 of the GitHub Actions registration token was visible in a ps listing, in the command line of the compose run. The cause is that four ssh sites of scripts/deploy-runners.sh (default deploy, additive, rolling recreate, secondary stand-up) built RUNNER_TOKEN=$(echo '<base64>' piped to base64 -d) into the remote script, which sshd runs as the remote shell's argv. The token now crosses on ssh stdin and is read into the remote shell's environment; encode_token is removed. No token is rotated or printed."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21765-token-not-in-argv
+    statement: "No ssh call of deploy-runners.sh carries the registration token, or a base64 of it, in its command string, and a compose run still receives the token in its environment."
+    acceptance:
+      - id: AC1
+        statement: "AC1: every ssh call of deploy-runners.sh that carries a registration token sends it on stdin, and the remote script text holds only the read of it -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q fails when a remote script interpolates the token or a base64 of it"
+      - id: AC2
+        statement: "AC2: a regression test with a stub ssh that records its argv and stdin and then runs the remote script fails on the old command-string pattern and passes on the fix -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k old_command_string"
+      - id: AC3
+        statement: "AC3: a ps listing taken by the stub docker at the moment compose runs holds neither the token nor its base64, on the default deploy, the rolling recreate and the additive mode -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k keeps_the_token_out_of_argv"
+evidence_requirements:
+  - kind: tests
+    description: "The ps listing and the recorded ssh argv hold no token on three of the four ssh sites run end to end, the fourth is scanned, and the detector has a positive control."
+    command: "uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py tests/unit/scripts/test_deploy_runners_restore_retired_runner.py tests/unit/scripts/test_deploy_runners_credential_cache_preflight_omn19274.py tests/ci/test_deploy_runners_registration_preflight.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "No remote script carries a token and the token still reaches compose through stdin and the environment."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "The detector catches the old command string, so a clean listing means something."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "old_command_string or flags_the_old_pattern"'
+  - id: dod-003
+    description: "The ps listing at compose time is clean on the default deploy, the rolling recreate and the additive mode."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k keeps_the_token_out_of_argv'
