@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
+    ModelSessionIndexReadRequest,
     ModelSessionStateResult,
 )
 from omnibase_infra.utils import sanitize_error_string
@@ -74,12 +75,12 @@ class HandlerSessionIndexRead:
 
     async def handle(
         self,
-        correlation_id: UUID,
+        request: ModelSessionIndexReadRequest,
     ) -> tuple[ModelSessionIndex | None, ModelSessionStateResult]:
         """Read session.json and return the parsed index.
 
         Args:
-            correlation_id: Correlation ID for distributed tracing.
+            request: Request with the correlation ID for distributed tracing.
 
         Returns:
             Tuple of (parsed index or None on error, operation result).
@@ -87,7 +88,7 @@ class HandlerSessionIndexRead:
             that callers are forced to check ``result.success`` before
             using the index (prevents silent overwrite with empty data).
         """
-        return await asyncio.to_thread(self._read_sync, correlation_id)
+        return await asyncio.to_thread(self._read_sync, request.correlation_id)
 
     def _read_sync(
         self,

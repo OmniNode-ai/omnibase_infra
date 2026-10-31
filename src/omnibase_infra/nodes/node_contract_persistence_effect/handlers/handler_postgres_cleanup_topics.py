@@ -105,7 +105,7 @@ class HandlerPostgresCleanupTopics(MixinPostgresOpExecutor):
         >>> import asyncpg
         >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
         >>> handler = HandlerPostgresCleanupTopics(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -135,8 +135,7 @@ class HandlerPostgresCleanupTopics(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadCleanupTopicReferences,
-        correlation_id: UUID,
+        request: ModelPayloadCleanupTopicReferences,
     ) -> ModelBackendResult:
         """Remove contract_id from all topic contract_ids arrays.
 
@@ -145,9 +144,8 @@ class HandlerPostgresCleanupTopics(MixinPostgresOpExecutor):
         empty (per OMN-1709 topic orphan handling).
 
         Args:
-            payload: Cleanup payload containing contract_id to remove and
+            request: Cleanup request containing contract_id to remove and
                 cleaned_at timestamp.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -164,13 +162,14 @@ class HandlerPostgresCleanupTopics(MixinPostgresOpExecutor):
             references for a contract that has no topic associations is
             not an error.
         """
+        correlation_id = request.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.CLEANUP_ERROR,
             correlation_id=correlation_id,
             log_context={
-                "contract_id": payload.contract_id,
+                "contract_id": request.contract_id,
             },
-            fn=lambda: self._execute_cleanup(payload, correlation_id),
+            fn=lambda: self._execute_cleanup(request, correlation_id),
         )
 
     async def _execute_cleanup(

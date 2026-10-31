@@ -95,6 +95,11 @@ output_model:
 # │                                                                        │
 # └────────────────────────────────────────────────────────────────────────┘
 #
+# Handler Call Shape (OMN-21536):
+#   Each handler exposes handle(request: <input_model>) -> ModelBackendResult.
+#   The routed payload is the single request argument and carries the
+#   correlation_id; handlers read it from the payload.
+#
 # Handler Responsibility:
 #   Each handler manages its own retry logic using the retry_policy defined
 #   in error_handling. The effect layer dispatches once per handler and

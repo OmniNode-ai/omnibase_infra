@@ -35,6 +35,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionIndex,
+    ModelSessionIndexWriteRequest,
     ModelSessionStateResult,
 )
 from omnibase_infra.utils import sanitize_error_string
@@ -107,19 +108,19 @@ class HandlerSessionIndexWrite:
 
     async def handle(
         self,
-        index: ModelSessionIndex,
-        correlation_id: UUID,
+        request: ModelSessionIndexWriteRequest,
     ) -> ModelSessionStateResult:
         """Atomically write session.json with flock protection.
 
         Args:
-            index: The session index to persist.
-            correlation_id: Correlation ID for distributed tracing.
+            request: Request with the index and correlation ID.
 
         Returns:
             Operation result indicating success or failure.
         """
-        return await asyncio.to_thread(self._write_sync, index, correlation_id)
+        return await asyncio.to_thread(
+            self._write_sync, request.index, request.correlation_id
+        )
 
     async def handle_read_modify_write(
         self,
