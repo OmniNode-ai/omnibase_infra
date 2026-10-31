@@ -67,7 +67,7 @@ from deploy_agent.events import (
     ModelLaneMirrorForwarder,
     ModelLaneMirrorReceipt,
 )
-from deploy_agent.routing import ROUTING_TABLE_RELPATH, RoutingTableError
+from deploy_agent.routing import ROUTING_TABLE_RELPATH, PhaseName, RoutingTableError
 
 #: The key an instance's composition sits under in the routing table.
 LANE_KEY: Final = "lane"
@@ -90,7 +90,7 @@ class ModelInstanceLane(BaseModel):
     postgres_container: str
     runtime_container: str
     health_ports: ModelHealthPorts
-    disabled_phases: tuple[str, ...] = ()
+    disabled_phases: tuple[PhaseName, ...] = ()
     disabled_services: tuple[str, ...] = ()
     receipt_lane: str
     proves: tuple[str, ...]

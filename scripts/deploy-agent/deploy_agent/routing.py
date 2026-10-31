@@ -56,7 +56,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 import yaml
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
@@ -489,11 +489,28 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
 # probe windows, and the agent publishes a dev-lane drift event naming the
 # running image, the head and the lag (deploy_agent.idle_converge).
 #
+# THE THIRD FLAG: ``disabled_phases`` (OMN-21629)
+# -----------------------------------------------
+# The phases of the instance's deploy that it never runs, as data. The dev lane
+# (dev-201) declares no ``lane:`` block (its composition is the executor's
+# historical one), so a ``lane:`` block's ``disabled_phases`` cannot reach it;
+# this flag does, and is read for every instance. A lane block's list and this
+# one are unioned. Declaring ``gateway-deploy`` here stops the gateway forwarder
+# phase and subtracts the gateway services from the lane's scope, so the boot
+# guard judges only the lab runtime and never a cloud edge. An instance that
+# omits the flag keeps every phase. The names are the executor's
+# ``EnumInstancePhase`` values; the executor refuses an unknown one when it
+# builds the lane (it owns the enum, and this module cannot import it).
+#
 # An unknown key or a naive ``until`` refuses the table, and the agent reading
 # its own table then refuses to start, as it does for a malformed load gate.
 
 #: The key an instance's flags sit under in the routing table.
 LANE_FLAGS_KEY: Final = "flags"
+
+#: The phase names a table may turn off: the executor's ``EnumInstancePhase``
+#: values, checked equal to it by a test (this module cannot import the executor).
+PhaseName = Literal["gateway-deploy", "lab-overlay", "onex-api-pin", "infisical-seed"]
 
 #: ``requested_by`` prefix of a deliberate promotion, the one way onto a frozen lane.
 PROMOTION_REQUESTER_PREFIX: Final = "promotion/"
@@ -524,18 +541,20 @@ class ModelLaneFlags(BaseModel):
     #: probe windows, and the agent publishes a dev-lane drift event. ``None``:
     #: no bound, the converge waits as before (deploy_agent.idle_converge).
     max_dev_lag_minutes: int | None = Field(default=None, gt=0)
+    #: OMN-21629. Phases this instance never runs (executor
+    #: ``EnumInstancePhase`` values), unioned with its ``lane:`` block's list.
+    #: Empty: the instance runs every phase its composition carries.
+    disabled_phases: tuple[PhaseName, ...] = ()
 
     def max_dev_lag(self) -> timedelta | None:
         """The declared lag bound, or ``None`` when the instance declares none."""
-        if self.max_dev_lag_minutes is None:
-            return None
-        return timedelta(minutes=self.max_dev_lag_minutes)
+        minutes = self.max_dev_lag_minutes
+        return None if minutes is None else timedelta(minutes=minutes)
 
     def frozen_reason(self, now: datetime) -> str | None:
         """The FROZEN reason in force at ``now``, or ``None``."""
-        if self.freeze is not None and self.freeze.active(now):
-            return self.freeze.describe()
-        return None
+        freeze = self.freeze
+        return freeze.describe() if freeze and freeze.active(now) else None
 
 
 def is_promotion(requested_by: str) -> bool:

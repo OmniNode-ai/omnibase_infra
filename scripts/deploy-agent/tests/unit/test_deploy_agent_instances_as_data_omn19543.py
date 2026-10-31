@@ -198,11 +198,10 @@ class TestInstanceCompositionIsData:
             parse_instance_lanes(_FIXTURE_TABLE.replace(old, new, 1))
 
     def test_an_unknown_phase_refuses(self) -> None:
-        specs = parse_instance_lanes(
-            _FIXTURE_TABLE.replace("[lab-overlay]", "[lab-overlay, reboot-host]")
-        )
         with pytest.raises(RoutingTableError, match="reboot-host"):
-            build_dev_instance_lane_configs(specs)
+            parse_instance_lanes(
+                _FIXTURE_TABLE.replace("[lab-overlay]", "[lab-overlay, reboot-host]")
+            )
 
     def test_two_instances_may_not_share_a_receipt_lane(self) -> None:
         text = _TABLE.read_text().replace(

@@ -17,6 +17,11 @@ requirements:
     acceptance:
       - id: AC2
         statement: "AC2: the topic demand source reports a watched topic as idle until its first record and clears it on that record and on stop, and the health monitor reports projection_attachment HEALTHY for a projection whose topics are all idle-watched while the same projection off the idle set still degrades it -- falsifier: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py fails at origin/dev 9de6fcbd3, which has no idle_watched_topics"
+  - id: req-omn21629-dev201-gateway-deploy-off
+    statement: "The dev-201 deploy instance declares disabled_phases gateway-deploy in config/deploy_lane_routing.yaml, so the deploy agent skips the gateway phase and its gateway-forwarder service for that instance, while an instance that omits the entry still runs it."
+    acceptance:
+      - id: AC3
+        statement: "AC3: the shipped routing table lists gateway-deploy in disabled_phases for the default dev instance and for no other, the executor never reaches the gateway script or the host for that instance, and an instance without the flag still runs the phase -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q fails at origin/dev 9de6fcbd3, which has no disabled_phases flag"
 evidence_requirements:
   - kind: tests
     description: "The discovery shim returns the unfiltered manifest, the one filter runs once, and a real node exclusion over a real manifest does not raise."
@@ -24,6 +29,9 @@ evidence_requirements:
   - kind: tests
     description: "A projection whose topics all wait for a first record is out of the attachment scope, and the demand source keeps the idle set."
     command: "uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The dev-201 instance runs no gateway-deploy phase, the phase stays available to an instance without the flag, and the deploy-agent suite stays green."
+    command: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider"
   - kind: manual
     description: "Deploy check: on the dev lane after a deploy at this head, the main runtime's /health reports the discovery_errors dimension HEALTHY rather than CRITICAL with RuntimeHostError."
     command: "deploy: curl -s http://host.docker.internal:8085/health | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[v for v in d[\"details\"][\"runtime_health\"][\"dimensions\"] if v[\"name\"]==\"discovery_errors\"][0]; assert x[\"status\"]==\"HEALTHY\", x'"
@@ -42,3 +50,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "The default dev instance declares gateway-deploy off and the deploy agent skips that phase for it."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider'

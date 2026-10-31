@@ -513,6 +513,17 @@ def _resolve_gateway_lane_from_this_checkout(
     monkeypatch.setattr(executor_mod, "gateway_env_file", lambda: str(env_file))
 
     if request.node.get_closest_marker("gateway_lane") is not None:
+        # OMN-21629: the shipped routing table declares gateway-deploy off for
+        # dev-201 (its ``flags: disabled_phases``), so a test that exercises the
+        # gateway deploy itself runs it on the composition of an instance that
+        # does not carry that flag -- the one the phase stays available to.
+        # The tests of the flag itself (test_dev_201_gateway_off_omn21629.py)
+        # set the shipped dev-201 composition back.
+        monkeypatch.setitem(
+            executor_mod.DEV_INSTANCE_LANE_CONFIGS,
+            executor_mod.DEFAULT_DEV_INSTANCE,
+            executor_mod._LANE_CONFIGS[executor_mod.EnumRuntimeLane.DEV],
+        )
         return
     monkeypatch.setattr(
         executor_mod.DeployExecutor,
