@@ -499,8 +499,9 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
 # phase and subtracts the gateway services from the lane's scope, so the boot
 # guard judges only the lab runtime and never a cloud edge. An instance that
 # omits the flag keeps every phase. The names are the executor's
-# ``EnumInstancePhase`` values; the executor refuses an unknown one when it
-# builds the lane (it owns the enum, and this module cannot import it).
+# ``EnumInstancePhase`` values; the ``PhaseName`` literal below rejects an
+# unknown one when the table is parsed (this module cannot import the executor's
+# enum, so a test keeps the literal equal to it).
 #
 # An unknown key or a naive ``until`` refuses the table, and the agent reading
 # its own table then refuses to start, as it does for a malformed load gate.
