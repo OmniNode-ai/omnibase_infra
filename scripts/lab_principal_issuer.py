@@ -289,7 +289,44 @@ def load_declaration(path: Path) -> Declaration:
 
 # OPERATOR-CONSENT 2026-10-25T23:01:04Z, lane=orchestrator-31d9: the one command
 # topic a principal-specific addition may write (h105's `onex scm pr-create`).
-SCOPED_WRITE_TOPICS = frozenset({"onex.cmd.omnimarket.github-repo-write-requested.v1"})
+# ORCHESTRATOR DERIVATION (basis=orchestrator-derivation), lane=h105-hook-grants-0325,
+# OMN-21279, from OPERATOR-CONSENT 2026-10-01T14:13:07Z and 2026-10-08T03:53:32Z: the 29
+# `onex.evt.omniclaude.*` hook topics the other host logins hold, which h105's hook-emit
+# drainer publishes. Produce only; no `onex.cmd.*` hook topic is named here.
+SCOPED_WRITE_TOPICS = frozenset(
+    {
+        "onex.cmd.omnimarket.github-repo-write-requested.v1",
+        "onex.evt.omniclaude.agent-actions.v1",
+        "onex.evt.omniclaude.agent-status.v1",
+        "onex.evt.omniclaude.correlation-trace.v1",
+        "onex.evt.omniclaude.delegation-shadow-comparison.v1",
+        "onex.evt.omniclaude.dod-guard-fired.v1",
+        "onex.evt.omniclaude.friction-observed.v1",
+        "onex.evt.omniclaude.hook-event.v1",
+        "onex.evt.omniclaude.hook-health-error.v1",
+        "onex.evt.omniclaude.intent-commit-bound.v1",
+        "onex.evt.omniclaude.llm-routing-decision.v1",
+        "onex.evt.omniclaude.llm-routing-fallback.v1",
+        "onex.evt.omniclaude.pattern-enforcement.v1",
+        "onex.evt.omniclaude.phase-metrics.v1",
+        "onex.evt.omniclaude.prompt-submitted.v1",
+        "onex.evt.omniclaude.pr-validation-rollup.v1",
+        "onex.evt.omniclaude.routing-decision.v1",
+        "onex.evt.omniclaude.routing-feedback.v1",
+        "onex.evt.omniclaude.session-ended.v1",
+        "onex.evt.omniclaude.session-outcome.v1",
+        "onex.evt.omniclaude.session-started.v1",
+        "onex.evt.omniclaude.skill-completed.v1",
+        "onex.evt.omniclaude.skill-invoked.v1",
+        "onex.evt.omniclaude.skill-started.v1",
+        "onex.evt.omniclaude.static-context-edit-detected.v1",
+        "onex.evt.omniclaude.team-evidence-written.v1",
+        "onex.evt.omniclaude.team-task-assigned.v1",
+        "onex.evt.omniclaude.team-task-completed.v1",
+        "onex.evt.omniclaude.team-task-progress.v1",
+        "onex.evt.omniclaude.tool-executed.v1",
+    }
+)
 
 
 def _scoped_write_allowed(grant: Grant) -> bool:
