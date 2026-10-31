@@ -8,6 +8,10 @@ from omnibase_infra.models.observability.model_consumer_flow_delta import (
 from omnibase_infra.models.observability.model_node_flow_window import (
     ModelNodeFlowWindow,
 )
+from omnibase_infra.models.observability.model_observability_timeouts import (
+    ModelObservabilityTimeouts,
+    observability_timeouts,
+)
 from omnibase_infra.models.observability.model_projection_apply_delta import (
     ModelProjectionApplyDelta,
 )
@@ -18,6 +22,8 @@ from omnibase_infra.models.observability.model_topic_produce_delta import (
 __all__ = [
     "ModelConsumerFlowDelta",
     "ModelNodeFlowWindow",
+    "ModelObservabilityTimeouts",
     "ModelProjectionApplyDelta",
     "ModelTopicProduceDelta",
+    "observability_timeouts",
 ]

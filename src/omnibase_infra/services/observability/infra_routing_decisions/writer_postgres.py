@@ -22,6 +22,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.services.observability.infra_routing_decisions.model_routing_decision_ingest import (
     ModelInfraRoutingDecisionIngest,
 )
@@ -37,18 +38,16 @@ class WriterInfraRoutingDecisionsPostgres(MixinAsyncCircuitBreaker):
     are always inserted as new rows).
     """
 
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
-
     def __init__(
         self,
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
         query_timeout: float | None = None,
     ) -> None:
         self._pool = pool
-        self._query_timeout = query_timeout or self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        self._query_timeout = query_timeout or observability_timeouts().query_seconds
         self._init_circuit_breaker(
             threshold=circuit_breaker_threshold,
             reset_timeout=circuit_breaker_reset_timeout,

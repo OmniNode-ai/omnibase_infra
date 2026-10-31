@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: timeout defaults now come from observability_timeouts.yaml; no schema change (OMN-21623)
 """PostgreSQL Writer for Consumer Health read-model projection (OMN-6757).
 
 Persists consumer health events to the ``consumer_health_events`` table
@@ -35,6 +36,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
         pool: asyncpg.Pool,  # type: ignore[type-arg]
         *,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
     ) -> None:
         self._pool = pool
@@ -157,13 +159,12 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
         try:
             async with self._pool.acquire() as conn:
                 await conn.executemany(_INSERT_SQL, rows)
-            written = len(rows)
 
             async with self._circuit_breaker_lock:
                 await self._reset_circuit_breaker()
 
-            logger.debug("Wrote %d consumer health events", written)
-            return written
+            logger.debug("Wrote %d consumer health events", len(rows))
+            return len(rows)
         except asyncpg.QueryCanceledError as exc:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(
@@ -177,7 +178,7 @@ class WriterConsumerHealthPostgres(MixinAsyncCircuitBreaker):
                     operation=context.operation,
                     target_name=context.target_name,
                     correlation_id=context.correlation_id,
-                    timeout_seconds=30.0,
+                    timeout_seconds=observability_timeouts().query_seconds,
                 ),
             ) from exc
         except asyncpg.PostgresConnectionError as exc:

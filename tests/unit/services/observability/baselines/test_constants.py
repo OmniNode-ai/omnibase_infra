@@ -15,7 +15,6 @@ pytestmark = pytest.mark.unit
 
 from omnibase_infra.services.observability.baselines.constants import (
     DEFAULT_BATCH_SIZE,
-    DEFAULT_QUERY_TIMEOUT,
     TREATMENT_CONFIDENCE_THRESHOLD,
     parse_execute_count,
 )
@@ -26,9 +25,6 @@ class TestConstants:
 
     def test_default_batch_size(self) -> None:
         assert DEFAULT_BATCH_SIZE == 500
-
-    def test_default_query_timeout(self) -> None:
-        assert DEFAULT_QUERY_TIMEOUT == 60.0
 
     def test_treatment_confidence_threshold(self) -> None:
         assert TREATMENT_CONFIDENCE_THRESHOLD == 0.8

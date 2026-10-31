@@ -42,6 +42,7 @@ from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
 logger = logging.getLogger(__name__)
@@ -78,18 +79,15 @@ class WriterLlmCostAggregationPostgres(MixinAsyncCircuitBreaker):
     Attributes:
         _pool: Injected asyncpg connection pool.
         _dedup_cache: Bounded OrderedDict for event ID deduplication.
-        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for database queries (30s).
     """
-
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
 
     def __init__(
         self,
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
-        query_timeout: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
+        query_timeout: float = observability_timeouts().query_seconds,
     ) -> None:
         """Initialize the writer with connection pool.
 

@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_batch_compute_command import (
     ModelBaselinesBatchComputeCommand,
 )
@@ -36,7 +37,6 @@ from omnibase_infra.nodes.node_baselines_batch_compute.models.model_baselines_ba
 )
 from omnibase_infra.services.observability.baselines.constants import (
     DEFAULT_BATCH_SIZE,
-    DEFAULT_QUERY_TIMEOUT,
     TREATMENT_CONFIDENCE_THRESHOLD,
     parse_execute_count,
 )
@@ -103,7 +103,7 @@ class HandlerBaselinesBatchCompute:
         pool: asyncpg.Pool,
         publisher: Callable[..., Awaitable[bool]] | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        query_timeout: float = observability_timeouts().batch_query_seconds,
     ) -> None:
         """Initialize the handler.
 

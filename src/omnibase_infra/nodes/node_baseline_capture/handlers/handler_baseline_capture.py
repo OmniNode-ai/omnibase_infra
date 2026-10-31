@@ -30,6 +30,7 @@ import asyncpg
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_command import (
     ModelBaselineCaptureCommand,
 )
@@ -37,9 +38,6 @@ from omnibase_infra.nodes.node_baseline_capture.models.model_baseline_capture_ou
     ModelBaselineCaptureOutput,
 )
 from omnibase_infra.runtime.emit_daemon.topics import TOPIC_BASELINES_COMPUTED
-from omnibase_infra.services.observability.baselines.constants import (
-    DEFAULT_QUERY_TIMEOUT,
-)
 from omnibase_infra.services.observability.baselines.models.model_baselines_breakdown_row import (
     ModelBaselinesBreakdownRow,
 )
@@ -96,7 +94,7 @@ class HandlerBaselineCapture:
         self,
         pool: asyncpg.Pool,
         publisher: Callable[..., Awaitable[bool]] | None = None,
-        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        query_timeout: float = observability_timeouts().batch_query_seconds,
     ) -> None:
         self._pool = pool
         self._publisher = publisher

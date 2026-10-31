@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: timeout defaults now come from observability_timeouts.yaml; no schema change (OMN-21623)
 """PostgreSQL Writer for Skill Lifecycle Observability (OMN-2934).
 
 Persists skill-started and skill-completed events consumed from Kafka
@@ -49,6 +50,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +138,6 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
 
     Attributes:
         _pool: Injected asyncpg connection pool.
-        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for database queries.
 
     Example:
         >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
@@ -144,13 +145,11 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
         >>> count = await writer.write_started(started_batch)
     """
 
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
-
     def __init__(
         self,
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
         query_timeout: float | None = None,
     ) -> None:
@@ -159,13 +158,13 @@ class WriterSkillLifecyclePostgres(MixinAsyncCircuitBreaker):
         Args:
             pool: asyncpg connection pool (lifecycle managed externally).
             circuit_breaker_threshold: Failures before opening circuit (default: 5).
-            circuit_breaker_reset_timeout: Seconds before auto-reset (default: 60.0).
+            circuit_breaker_reset_timeout: Seconds before auto-reset (default: declared).
             circuit_breaker_half_open_successes: Successful requests required to close
                 circuit from half-open state (default: 1).
             query_timeout: Timeout in seconds for database queries.
         """
         self._pool = pool
-        self._query_timeout = query_timeout or self.DEFAULT_QUERY_TIMEOUT_SECONDS
+        self._query_timeout = query_timeout or observability_timeouts().query_seconds
 
         self._init_circuit_breaker(
             threshold=circuit_breaker_threshold,

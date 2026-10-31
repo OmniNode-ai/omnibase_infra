@@ -76,6 +76,7 @@ from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.mixin_consumer_health import MixinConsumerHealth
+from omnibase_infra.models.observability import observability_timeouts as timeouts
 from omnibase_infra.services.observability.llm_cost_aggregation.config import (
     ConfigLlmCostAggregation,
 )
@@ -100,9 +101,6 @@ _FATAL_COMMIT_ERROR_NAMES: frozenset[str] = frozenset(
         "FencedInstanceIdError",
     }
 )
-
-# How many consecutive getmany() timeouts before emitting a warning.
-_CONSECUTIVE_TIMEOUT_LOG_INTERVAL: int = 5
 
 
 # =============================================================================
@@ -677,7 +675,7 @@ class ServiceLlmCostAggregator(MixinConsumerHealth):
                     )
                 except TimeoutError:
                     consecutive_timeouts += 1
-                    if consecutive_timeouts % _CONSECUTIVE_TIMEOUT_LOG_INTERVAL == 0:
+                    if consecutive_timeouts % timeouts().warn_every_polls == 0:
                         logger.warning(
                             "Kafka getmany() timed out %d consecutive times",
                             consecutive_timeouts,
@@ -1205,9 +1203,9 @@ async def _main() -> None:
         finally:
             active_consumer[0] = None
             try:
-                await asyncio.wait_for(consumer.stop(), timeout=10.0)
+                await asyncio.wait_for(consumer.stop(), timeouts().stop_seconds)
             except TimeoutError:
-                logger.warning("consumer.stop() timed out after 10s")
+                logger.warning("consumer.stop() timed out")
 
     await run_with_restart(
         _run_once,

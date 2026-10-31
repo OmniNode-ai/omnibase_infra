@@ -63,6 +63,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.emit_daemon.event_registry import EventRegistry
 from omnibase_infra.runtime.emit_daemon.topics import (
@@ -71,7 +72,6 @@ from omnibase_infra.runtime.emit_daemon.topics import (
 )
 from omnibase_infra.services.observability.baselines.constants import (
     DEFAULT_BATCH_SIZE,
-    DEFAULT_QUERY_TIMEOUT,
     TREATMENT_CONFIDENCE_THRESHOLD,
     parse_execute_count,
 )
@@ -132,7 +132,7 @@ class ServiceBatchComputeBaselines:
         self,
         pool: asyncpg.Pool,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        query_timeout: float = observability_timeouts().batch_query_seconds,
         event_bus: ProtocolEventBusLike | None = None,
     ) -> None:
         """Initialize batch computation engine.
@@ -840,7 +840,6 @@ class ServiceBatchComputeBaselines:
 __all__: list[str] = [
     "ServiceBatchComputeBaselines",
     "DEFAULT_BATCH_SIZE",
-    "DEFAULT_QUERY_TIMEOUT",
     "TREATMENT_CONFIDENCE_THRESHOLD",
     "parse_execute_count",
 ]

@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
+# no-migration: timeout defaults now come from observability_timeouts.yaml; no schema change (OMN-21623)
 
 # Copyright (c) 2026 OmniNode Team
 """PostgreSQL ledger sink for injection effectiveness events.
@@ -44,6 +45,7 @@ import asyncpg
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.utils.util_db_error_context import db_operation_error_context
 from omnibase_infra.utils.util_db_transaction import set_statement_timeout
 
@@ -78,16 +80,13 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
 
     Attributes:
         _pool: Injected asyncpg connection pool.
-        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for writes (30s).
     """
-
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
 
     def __init__(
         self,
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
         query_timeout: float | None = None,
     ) -> None:
@@ -96,7 +95,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Args:
             pool: asyncpg connection pool (lifecycle managed externally).
             circuit_breaker_threshold: Failures before opening circuit (default: 5).
-            circuit_breaker_reset_timeout: Seconds before auto-reset (default: 60.0).
+            circuit_breaker_reset_timeout: Seconds before auto-reset (default: declared).
             circuit_breaker_half_open_successes: Successes to close from half-open (default: 1).
             query_timeout: Timeout in seconds for writes (default: 30.0).
         """
@@ -104,7 +103,7 @@ class LedgerSinkInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         self._query_timeout = (
             query_timeout
             if query_timeout is not None
-            else self.DEFAULT_QUERY_TIMEOUT_SECONDS
+            else observability_timeouts().query_seconds
         )
 
         self._init_circuit_breaker(

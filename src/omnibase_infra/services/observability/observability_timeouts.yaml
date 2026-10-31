@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Observability service timeouts (OMN-21623).
+#
+# The database, circuit-breaker and consumer waits the observability consumers and
+# writers run under. Read by ModelObservabilityTimeouts; the services hold no
+# timeout literal. Every key is required: a block that omits one fails to load.
+timeouts:
+  # PostgreSQL statement timeout of the writers and the reader, in seconds.
+  query_seconds: 30
+  # Statement timeout of the batch compute services, in seconds.
+  batch_query_seconds: 60
+  # Seconds an open writer circuit waits before it half-opens.
+  reset_seconds: 60
+  # Wait for the LLM cost consumer to stop on shutdown, in seconds.
+  stop_seconds: 10
+  # Consecutive empty polls between warnings in the LLM cost consumer.
+  warn_every_polls: 5

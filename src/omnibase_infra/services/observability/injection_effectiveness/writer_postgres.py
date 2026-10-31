@@ -47,6 +47,7 @@ import asyncpg
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.observability import observability_timeouts
 from omnibase_infra.services.observability.injection_effectiveness.models.model_agent_match import (
     ModelAgentMatchEvent,
 )
@@ -88,7 +89,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         _pool: Injected asyncpg connection pool.
         circuit_breaker_threshold: Failure threshold before opening circuit.
         circuit_breaker_reset_timeout: Seconds before auto-reset.
-        DEFAULT_QUERY_TIMEOUT_SECONDS: Default timeout for database queries (30s).
         DEFAULT_MINIMUM_SUPPORT_THRESHOLD: Default minimum sample count for confidence (20).
         DEFAULT_HIT_MISS_THRESHOLD: Default threshold for hit/miss classification (0.5).
 
@@ -108,7 +108,6 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         >>> count = await writer.write_context_utilization(events)
     """
 
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
     DEFAULT_MINIMUM_SUPPORT_THRESHOLD: int = 20
     DEFAULT_HIT_MISS_THRESHOLD: float = 0.5
 
@@ -116,7 +115,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         self,
         pool: asyncpg.Pool,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = observability_timeouts().reset_seconds,
         circuit_breaker_half_open_successes: int = 1,
         query_timeout: float | None = None,
         minimum_support_threshold: int | None = None,
@@ -127,11 +126,11 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         Args:
             pool: asyncpg connection pool (lifecycle managed externally).
             circuit_breaker_threshold: Failures before opening circuit (default: 5).
-            circuit_breaker_reset_timeout: Seconds before auto-reset (default: 60.0).
+            circuit_breaker_reset_timeout: Seconds before auto-reset (default: declared).
             circuit_breaker_half_open_successes: Successful requests required to close
                 circuit from half-open state (default: 1).
             query_timeout: Timeout in seconds for database queries. Applied via
-                PostgreSQL statement_timeout (default: DEFAULT_QUERY_TIMEOUT_SECONDS).
+                PostgreSQL statement_timeout (default: declared).
             minimum_support_threshold: Minimum sample count required before calculating
                 confidence score for pattern_hit_rates. This implements statistical
                 minimum support gating to avoid premature confidence scores based on
@@ -148,7 +147,7 @@ class WriterInjectionEffectivenessPostgres(MixinAsyncCircuitBreaker):
         self._query_timeout = (
             query_timeout
             if query_timeout is not None
-            else self.DEFAULT_QUERY_TIMEOUT_SECONDS
+            else observability_timeouts().query_seconds
         )
         self._minimum_support_threshold = (
             minimum_support_threshold

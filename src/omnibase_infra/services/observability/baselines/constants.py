@@ -14,8 +14,6 @@ from __future__ import annotations
 
 DEFAULT_BATCH_SIZE: int = 500
 
-DEFAULT_QUERY_TIMEOUT: float = 60.0
-
 TREATMENT_CONFIDENCE_THRESHOLD: float = 0.8
 
 
@@ -54,7 +52,6 @@ def parse_execute_count(result: object) -> int:
 
 __all__: list[str] = [
     "DEFAULT_BATCH_SIZE",
-    "DEFAULT_QUERY_TIMEOUT",
     "TREATMENT_CONFIDENCE_THRESHOLD",
     "parse_execute_count",
 ]
