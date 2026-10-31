@@ -123,6 +123,7 @@ from omnibase_infra.models.projection import (
     ModelSnapshotTopicConfig,
 )
 from omnibase_infra.models.resilience import ModelCircuitBreakerConfig
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 from omnibase_infra.utils import sanitize_error_message
 
@@ -130,11 +131,6 @@ if TYPE_CHECKING:
     from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 logger = logging.getLogger(__name__)
-
-# Kafka session timeout constants — prevents rebalance storms
-_KAFKA_SESSION_TIMEOUT_MS = 45000
-_KAFKA_HEARTBEAT_INTERVAL_MS = 15000
-_KAFKA_MAX_POLL_INTERVAL_MS = 300000
 
 
 class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
@@ -206,7 +202,7 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
         *,
         snapshot_version_tracker: dict[str, int] | None = None,
         bootstrap_servers: str | None = None,
-        consumer_timeout_ms: int = 5000,
+        consumer_timeout_ms: int = RUNTIME_TIMEOUTS.snapshot_consumer_timeout_ms,
         debounce_ms: int = 500,
     ) -> None:
         """Initialize snapshot publisher.
@@ -920,9 +916,9 @@ class SnapshotPublisherRegistration(MixinAsyncCircuitBreaker):
                 group_id=consumer_group,
                 auto_offset_reset="earliest",
                 enable_auto_commit=False,
-                session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
-                heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
-                max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
+                session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_timeout_ms,
+                heartbeat_interval_ms=RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms,
+                max_poll_interval_ms=RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms,
                 **build_aiokafka_auth_kwargs_from_env(),
             )
 

@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Runtime timeouts (OMN-21719).
+#
+# The waits, bounds and Kafka consumer session settings the capability probe,
+# the lifecycle executor, request-response wiring, the node invocation adapter,
+# the snapshot publisher, the LLM HTTP transport and the introspection mixin
+# apply. Read by ModelRuntimeTimeouts; the callers hold no timeout literal.
+# Every key is required: a block that omits one fails to load.
+# Keys ending _seconds are seconds; keys ending _ms are milliseconds.
+timeouts:
+  # Capability probe: cache lifetime of a probe result, and the wait of one
+  # socket, Kafka-host or HTTP health probe.
+  capability_probe_ttl_seconds: 300
+  capability_probe_seconds: 1.0
+  # Lifecycle executor: bounds and default of a handler health check and of a
+  # handler shutdown. The default must lie within its bounds.
+  health_check_min_seconds: 1.0
+  health_check_max_seconds: 60.0
+  health_check_default_seconds: 5.0
+  handler_shutdown_min_seconds: 1.0
+  handler_shutdown_max_seconds: 300.0
+  handler_shutdown_default_seconds: 10.0
+  # Kafka consumer session settings that keep a group out of rebalance storms.
+  # The heartbeat interval must stay below the session timeout.
+  kafka_session_timeout_ms: 45000
+  kafka_heartbeat_interval_ms: 15000
+  kafka_max_poll_interval_ms: 300000
+  # Snapshot publisher: consumer wait when reading a snapshot topic.
+  snapshot_consumer_timeout_ms: 5000
+  # Circuit breaker reset wait of the request-response wiring and LLM transport.
+  circuit_breaker_reset_seconds: 60.0
+  # Node invocation adapter: runtime health probe, whole local dispatch, and
+  # the wait for the terminal event after the dispatch returns.
+  health_probe_seconds: 2.0
+  local_dispatch_seconds: 120
+  terminal_seconds: 0.5
+  # LLM HTTP transport: ceiling a caller may request, and the wait of one POST.
+  llm_transport_max_seconds: 120.0
+  llm_post_seconds: 30.0
+  # Introspection mixin: base of the listener retry backoff, and the heartbeat period.
+  introspection_base_backoff_seconds: 1.0
+  introspection_heartbeat_interval_seconds: 30.0

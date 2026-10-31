@@ -38,6 +38,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.runtime.models import (
     ModelBatchLifecycleResult,
     ModelHealthCheckResult,
@@ -50,14 +51,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Health check timeout bounds (per ModelLifecycleSubcontract)
-MIN_HEALTH_CHECK_TIMEOUT = 1.0
-MAX_HEALTH_CHECK_TIMEOUT = 60.0
-DEFAULT_HEALTH_CHECK_TIMEOUT = 5.0
+MIN_HEALTH_CHECK_TIMEOUT = RUNTIME_TIMEOUTS.health_check_min_seconds
+MAX_HEALTH_CHECK_TIMEOUT = RUNTIME_TIMEOUTS.health_check_max_seconds
+DEFAULT_HEALTH_CHECK_TIMEOUT = RUNTIME_TIMEOUTS.health_check_default_seconds
 
 # Handler shutdown timeout bounds (per OMN-882)
-MIN_HANDLER_SHUTDOWN_TIMEOUT = 1.0
-MAX_HANDLER_SHUTDOWN_TIMEOUT = 300.0
-DEFAULT_HANDLER_SHUTDOWN_TIMEOUT = 10.0
+MIN_HANDLER_SHUTDOWN_TIMEOUT = RUNTIME_TIMEOUTS.handler_shutdown_min_seconds
+MAX_HANDLER_SHUTDOWN_TIMEOUT = RUNTIME_TIMEOUTS.handler_shutdown_max_seconds
+DEFAULT_HANDLER_SHUTDOWN_TIMEOUT = RUNTIME_TIMEOUTS.handler_shutdown_default_seconds
 
 
 class ProtocolLifecycleExecutor:
@@ -325,8 +326,7 @@ class ProtocolLifecycleExecutor:
                 },
             )
             return ModelLifecycleResult.failed(
-                handler_type,
-                f"Shutdown timed out after {effective_timeout}s",
+                handler_type, f"Shutdown timed out after {effective_timeout}s"
             )
         except Exception as e:
             # Log exception but return failure status instead of raising

@@ -83,6 +83,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_for
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
@@ -94,11 +95,6 @@ logger = logging.getLogger(__name__)
 # Boot nonce: Generated ONCE per process at module load time.
 # Used to create unique consumer groups per process instance.
 _BOOT_NONCE: str = uuid4().hex[:8]
-
-# Kafka session timeout constants — prevents rebalance storms
-_KAFKA_SESSION_TIMEOUT_MS = 45000
-_KAFKA_HEARTBEAT_INTERVAL_MS = 15000
-_KAFKA_MAX_POLL_INTERVAL_MS = 300000
 
 
 @dataclass  # internal-dataclass-ok: holds asyncio.Task, asyncio.Future, and AIOKafkaConsumer — not Pydantic-serializable
@@ -260,7 +256,7 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
         # Initialize circuit breaker for publish protection
         self._init_circuit_breaker(
             threshold=5,
-            reset_timeout=60.0,
+            reset_timeout=RUNTIME_TIMEOUTS.circuit_breaker_reset_seconds,
             service_name=f"request-response.{app_name}",
             transport_type=EnumInfraTransportType.KAFKA,
             half_open_successes=1,
@@ -370,9 +366,9 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             group_id=consumer_group,
             auto_offset_reset=instance.auto_offset_reset,
             enable_auto_commit=True,
-            session_timeout_ms=_KAFKA_SESSION_TIMEOUT_MS,
-            heartbeat_interval_ms=_KAFKA_HEARTBEAT_INTERVAL_MS,
-            max_poll_interval_ms=_KAFKA_MAX_POLL_INTERVAL_MS,
+            session_timeout_ms=RUNTIME_TIMEOUTS.kafka_session_timeout_ms,
+            heartbeat_interval_ms=RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms,
+            max_poll_interval_ms=RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms,
             # Reply consumer uses this broker's bound lane transport, like producer (OMN-17427).
             **build_aiokafka_auth_kwargs_for(self._bootstrap_servers),
         )
