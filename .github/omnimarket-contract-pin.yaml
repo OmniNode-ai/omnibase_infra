@@ -20,10 +20,15 @@
 # Why this is NOT a return to the OMN-15701 stale-pin incident: this pin is
 # advanced automatically by .github/workflows/omnimarket-contract-pin-refresh.yml,
 # which regenerates the grants and the rendered catalogs in the same commit and
-# opens a PR. The pin can be briefly behind omnimarket `dev`; it cannot sit
-# stale silently, and scripts/ci/check_omnimarket_contract_pin_advance.py makes
-# it forward-only so a regeneration can never resurrect an older contract set
-# and delete live grants (which is exactly what OMN-15701 was).
+# opens a PR. The pin can be briefly behind omnimarket's newest release; it
+# cannot sit stale silently, and scripts/ci/check_omnimarket_contract_pin_advance.py
+# makes it forward-only so a regeneration can never resurrect an older contract
+# set and delete live grants (which is exactly what OMN-15701 was).
+#
+# The value is an omnimarket RELEASE TAG (vX.Y.Z), never a commit sha. A release
+# is created overnight by the release train (release-train-nightly.yml) and at no
+# other time, so the pin moves once per release and no pull request is opened
+# per omnimarket merge. Nobody writes a sha here, by hand or by a bot.
 #
 # To move this by hand you must also regenerate:
 #   uv run python scripts/generate_application_database_table_grants.py \
@@ -32,4 +37,4 @@
 # An `Omnimarket-Source-Ref: <ref>` PR-body trailer still overrides this pin for
 # cross-repo co-development (OMN-15703's escape hatch, unchanged).
 repository: OmniNode-ai/omnimarket
-omnimarket_contract_ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0
+omnimarket_contract_ref: v0.4.319

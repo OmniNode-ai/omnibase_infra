@@ -1715,7 +1715,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
+          ref: v0.4.319 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -3836,7 +3836,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/resolve_node_migration_source_ref.py
 
-      - name: Resolve pinned omnimarket contract SHA
+      - name: Resolve pinned omnimarket contract release tag
         # OMN-17292: the derivation input is committed repository state, not a
         # foreign repo's moving branch tip.
         #
@@ -3867,6 +3867,10 @@ jobs:
         # backwards (the forward-only guard below), which is the specific
         # direction that produced OMN-15701's silent grant reversion.
         #
+        # The pin is omnimarket's newest RELEASE tag (vX.Y.Z), not a commit sha:
+        # the refresh bot follows the tag the overnight release train produced,
+        # once per release, and no pull request is opened per omnimarket merge.
+        #
         # No token and no network here -- which is the point, and also makes
         # this step immune to the fork/dependabot org-secret withholding
         # (OMN-16152 / OMN-16373) the live-resolve step had to work around.
@@ -3883,7 +3887,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.ref || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
@@ -3904,7 +3908,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+          ref: ${{ steps.resolve-omnimarket-pin.outputs.ref }}
           path: .proof-dependencies/omnimarket-pin
           persist-credentials: false
         # The assertion that consumes this checkout runs AFTER "Setup Python
@@ -3934,7 +3938,7 @@ jobs:
           # github.token is present on fork and dependabot runs alike.
           GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
           PIN_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
-          HEAD_PIN: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+          HEAD_PIN: ${{ steps.resolve-omnimarket-pin.outputs.ref }}
         run: |
           set -euo pipefail
           PIN_FILE=".github/omnimarket-contract-pin.yaml"
@@ -3959,13 +3963,24 @@ jobs:
           git show "${PIN_BASE_REVISION}:${PIN_FILE}" > "$base_pin_file"
           base_pin="$(python3 scripts/resolve_omnimarket_contract_pin.py \
             --pin-file "$base_pin_file")"
+          # The pins are release tags (OMN-17292). The guard binds its compare
+          # payload to the pair it was asked about by the payload's own url, so
+          # it is handed the two commits the tags name, not the tag spellings.
+          base_commit="$(gh api "repos/OmniNode-ai/omnimarket/commits/${base_pin}" --jq .sha)"
+          head_commit="$(gh api "repos/OmniNode-ai/omnimarket/commits/${HEAD_PIN}" --jq .sha)"
+          for commit in "$base_commit" "$head_commit"; do
+            if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::omnimarket release tag ${base_pin} or ${HEAD_PIN} did not resolve to a commit: '${commit}'" >&2
+              exit 1
+            fi
+          done
           compare_json="$(mktemp)"
-          gh api "repos/OmniNode-ai/omnimarket/compare/${base_pin}...${HEAD_PIN}" \
+          gh api "repos/OmniNode-ai/omnimarket/compare/${base_commit}...${head_commit}" \
             > "$compare_json"
           python3 scripts/ci/check_omnimarket_contract_pin_advance.py \
             --compare-json "$compare_json" \
-            --base-pin "$base_pin" \
-            --head-pin "$HEAD_PIN"
+            --base-pin "$base_commit" \
+            --head-pin "$head_commit"
 
       # OMN-16152: GitHub withholds ALL repo secrets from dependabot-triggered
       # pull_request runs even when the head branch is same-repo, not a fork

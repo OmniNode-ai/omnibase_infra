@@ -290,7 +290,8 @@
 #                   SessionStart line and any read-only probe must use.
 #     --proven      Restore omnimarket to the proven commit in the dispatch venv:
 #                   .onex-workspace-floor.json's omnimarket_commit first, then
-#                   .github/sibling-pins.yaml's pins.omnimarket. Refuse if neither
+#                   .github/sibling-pins.yaml's pins.omnimarket (a release tag,
+#                   resolved to its commit in the clone). Refuse if neither
 #                   is readable. Installs that sha; never moves the clone, and
 #                   refuses a sha that is not in the clone HEAD's history.
 #                   Never stamp the floor. Invalid with --check.
@@ -1760,6 +1761,16 @@ resolve_proven_market() {
   if [[ -z "$proven" ]]; then
     say "INDETERMINATE: no proven omnimarket commit in $floor or $pins"
     exit "$EXIT_INDETERMINATE"
+  fi
+  # The sibling pin names omnimarket by RELEASE TAG (OMN-17292). Resolve it to the
+  # commit it names in the clone, read-only; a tag the clone has not fetched is
+  # refused here like any other proven commit it cannot reach.
+  if [[ "$proven" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    local tagged
+    tagged="$(git -C "$MARKET_CLONE" rev-parse --verify --quiet "refs/tags/${proven}^{commit}" 2>/dev/null || true)"
+    [[ -n "$tagged" ]] || fail "proven omnimarket release tag $proven is not in $MARKET_CLONE." \
+      "The clone is advanced by canonical-clone-sync, which fetches tags; this script never fetches."
+    proven="$tagged"
   fi
   [[ "$proven" =~ ^[[:xdigit:]]{40}$ ]] || fail "invalid proven omnimarket commit: $proven"
   PROVEN_MARKET="$proven"
