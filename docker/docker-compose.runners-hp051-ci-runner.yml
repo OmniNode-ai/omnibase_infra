@@ -58,6 +58,21 @@ x-lab-host-table: &lab-host-table
   read_only: true
   bind:
     create_host_path: false
+# Long-form bind mounts keep variable defaults out of Compose's short-volume parser.
+# This also lets `compose config --no-interpolate` validate the shipped declaration.
+x-runner-disk-admission-pause: &runner-disk-admission-pause
+  type: bind
+  source: ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}
+  target: /home/runner/.onex-disk-admission-pause
+  bind:
+    create_host_path: true
+x-runner-lab-credentials: &runner-lab-credentials
+  type: bind
+  source: ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}
+  target: /home/runner/.lab-credentials
+  read_only: true
+  bind:
+    create_host_path: true
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -92,8 +107,8 @@ x-runner-base: &runner-base
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ./runners:/opt/onex-runner-hooks:ro
-    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+    - *runner-disk-admission-pause
+    - *runner-lab-credentials
     - *lab-host-table
   group_add:
     - "988" # h051 docker group GID (getent group docker on the host, read 2026-10-29)
@@ -119,8 +134,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
       - *lab-host-table
       - /data/scratch/cache/runners/1/pip:/home/runner/.cache/pip
       - /data/scratch/cache/runners/1/pre-commit:/home/runner/.cache/pre-commit
@@ -141,8 +156,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
       - *lab-host-table
       - /data/scratch/cache/runners/2/pip:/home/runner/.cache/pip
       - /data/scratch/cache/runners/2/pre-commit:/home/runner/.cache/pre-commit
@@ -163,8 +178,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
       - *lab-host-table
       - /data/scratch/cache/runners/3/pip:/home/runner/.cache/pip
       - /data/scratch/cache/runners/3/pre-commit:/home/runner/.cache/pre-commit
@@ -185,8 +200,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./runners:/opt/onex-runner-hooks:ro
-      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
-      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *runner-disk-admission-pause
+      - *runner-lab-credentials
       - *lab-host-table
       - /data/scratch/cache/runners/4/pip:/home/runner/.cache/pip
       - /data/scratch/cache/runners/4/pre-commit:/home/runner/.cache/pre-commit
