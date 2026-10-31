@@ -1,0 +1,50 @@
+# OMN-21688 contract file for omnibase_infra: two node contracts bind the URLs their code held.
+schema_version: "1.0.0"
+ticket_id: "OMN-21688"
+title: "omnibase_infra contracts_and_di literal_url burn-down, slice rf1135-c1: a URL comes from the node contract or overlay through DI"
+summary: "Three literal_url findings of the contracts_and_di check sat in two nodes. node_board_probe_effect declares the consumer-flow projection API base under consumer_flow_endpoints in its contract and ModelConsumerFlowRequest.base_url defaults to it; the unused DEFAULT_BASE_URL constant is deleted. node_merge_provenance_observe_effect declares its GitHub REST API base under github_api in its contract and HandlerMergeGroupRunReadGithub binds it through the node's contract_api reader when no api_url is injected. The literal_url count over src/omnibase_infra drops from 42 to 39; no other rule's count changes on the touched files, and no baseline entry or suppression is added."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21688-contract-bound-urls
+    statement: "The consumer-flow board check and the merge-group run reader take their URL from their node contract, or from an injected parameter, and hold no URL literal in code."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for literal_url over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every moved value is taken through an injected parameter bound from the node contract or overlay and none remains hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The contracts_and_di check reports no literal_url finding in the slice files and reports a planted URL; the request default and the reader base equal the contract-declared values and an injected value overrides them."
+    command: "uv run pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_endpoint_omn21688.py tests/unit/nodes/node_merge_provenance_observe_effect/test_github_api_url_from_contract_omn21688.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The touched nodes' unit tests pass (this is a cloud lane: hosted CI at the PR head is the evidence in place of a lab receipt)."
+    command: "uv run pytest tests/unit/nodes/node_board_probe_effect tests/unit/nodes/node_merge_provenance_observe_effect -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-omn21688-ac1-no-literal-url
+    description: "The contracts_and_di check reports no literal_url issue in the slice files and reports the planted URL. Fails at the merge base, where the slice files held three literal_url findings."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_endpoint_omn21688.py tests/unit/nodes/node_merge_provenance_observe_effect/test_github_api_url_from_contract_omn21688.py -q -p no:cacheprovider -k 'url_literal or planted'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21688-ac2-contract-bound
+    description: "The request default and the reader base equal the values the node contracts declare, an injected value overrides them, and a contract without the value is refused. Fails at the merge base, where the contract readers do not exist."
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect/test_consumer_flow_endpoint_omn21688.py tests/unit/nodes/node_merge_provenance_observe_effect/test_github_api_url_from_contract_omn21688.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21688-ac3-unit-suite
+    description: "The touched nodes' unit suites pass at the PR head; for this cloud lane the hosted CI run of the PR stands in for the lab receipt."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/nodes/node_board_probe_effect tests/unit/nodes/node_merge_provenance_observe_effect -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra

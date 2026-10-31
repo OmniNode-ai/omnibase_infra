@@ -29,7 +29,6 @@ def _contract_topic(name: str) -> str:
 # ---- the subject, as the readback named it ---------------------------------
 EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
 CURSOR_FIELD: Final[str] = "projection_cursor"
-DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
 # consumer_flow_windows keeps every window (48M rows, 32 GB on dev-201) and no
 # index leads with window_start, so a plain distinct over it is a whole-table
