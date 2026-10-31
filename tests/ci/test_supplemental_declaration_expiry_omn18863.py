@@ -3,7 +3,7 @@
 
 """Interim supplemental declarations must expire, loudly (OMN-18863).
 
-A supplemental entry in ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` exists to close
+A vendored ``db_io.yaml`` declaration (``VENDORED_TABLE_DECLARATIONS``) exists to close
 the window between the two halves of a deliberate infra-first cross-repo
 ordering: this repo vendors a relation's migrations first, because omnimarket's
 node-migration-vendor-parity gate refuses the producing pull request until the
@@ -51,7 +51,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     load_contract_declarations,
 )
 
@@ -114,6 +114,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_receipts": "omnimarket OMN-21336 (node_projection_compaction_receipts)",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "local_environment": "omnimarket OMN-19988 (node_projection_local_environment)",
+    "receipt_gate_pin_friction": "omnimarket OMN-20134 (node_projection_receipt_gate_pin_friction_rows)",
 }
 
 _SKIP_REASON = (
@@ -131,9 +132,7 @@ def _pinned_relation_names() -> set[str]:
 
 
 def _supplemental_relation_names() -> set[str]:
-    return {
-        declaration.table.name for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-    }
+    return {declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS}
 
 
 class TestTheMapMatchesTheManifest:
@@ -150,7 +149,7 @@ class TestTheMapMatchesTheManifest:
         orphaned = sorted(set(_INTERIM_ENTRIES) - _supplemental_relation_names())
         assert not orphaned, (
             f"{orphaned} appear in _INTERIM_ENTRIES but in no "
-            "LEGACY_MIGRATION_TABLE_DECLARATIONS entry. Either the bridge was "
+            "VENDORED_TABLE_DECLARATIONS entry. Either the bridge was "
             "deleted and the map was not, or the name is misspelled"
         )
 
@@ -214,11 +213,12 @@ class TestEachEntryExpiresWhenThePinDeclaresIt:
         redundant = sorted(name for name in _INTERIM_ENTRIES if name in pinned)
         assert not redundant, (
             f"the pinned omnimarket contracts now declare {redundant}, so the "
-            "supplemental LEGACY_MIGRATION_TABLE_DECLARATIONS entries for them "
+            "vendored db_io.yaml declarations for them "
             "are redundant and must be DELETED in this same change (source: "
             + ", ".join(f"{name} -> {_INTERIM_ENTRIES[name]}" for name in redundant)
-            + "). Remove each entry from "
-            "src/omnibase_infra/topology/table_grant_derivation.py, remove it "
+            + "). Remove each relation from its "
+            "docker/migrations/forward/nodes/<node>/db_io.yaml (and the file "
+            "when it is empty), remove it "
             "from _INTERIM_ENTRIES here, and regenerate -- the instances must "
             "come back byte-identical, because the contract now derives what "
             "the entry used to"

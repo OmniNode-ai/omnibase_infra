@@ -5,7 +5,7 @@
 
 OMN-19716 (#4165) vendored the topic-activity projection migrations and
 declared ``omninode_internal.topic_activity`` by hand in
-``LEGACY_MIGRATION_TABLE_DECLARATIONS``, because its producing contract was not
+``VENDORED_TABLE_DECLARATIONS``, because its producing contract was not
 yet in the pinned omnimarket checkout. The entry's own comment named the
 retiring pull request: omnimarket#2953.
 
@@ -39,7 +39,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -99,8 +99,7 @@ def _committed_privileges(profile: str) -> frozenset[str]:
 class TestTheBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

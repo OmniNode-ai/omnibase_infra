@@ -5,7 +5,7 @@
 
 Infra vendored the ``alert_channel_liveness_verdicts`` migration (OMN-20578)
 before omnimarket#3417 landed the ``node_projection_alert_channel_liveness``
-contract, so a hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry
+contract, so a hand-authored ``VENDORED_TABLE_DECLARATIONS`` entry
 carried it in the interim. The omnimarket contract pin advancing to
 f859c7af5e1d carries omnimarket#3417, so the bridge is redundant and was
 deleted from ``table_grant_derivation.py`` and ``_INTERIM_ENTRIES``.
@@ -26,7 +26,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -39,8 +39,7 @@ _PROFILES = ("local", "onex-dev", "onex-prod")
 class TestTheAlertChannelLivenessBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

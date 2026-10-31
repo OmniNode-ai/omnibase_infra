@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-21334/OMN-21336: vendored ahead of the omnimarket node contract. 0001
+# grants omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
+# USAGE. Retired when the node_projection_compaction_receipts contract merges
+# and the pin advances past it; the expiry module names it.
+db_io:
+  db_tables:
+    - name: compaction_receipts
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_projection_compaction_receipts/0000_create_compaction_receipts.sql
+      access: read_write
+      role: compaction_receipts

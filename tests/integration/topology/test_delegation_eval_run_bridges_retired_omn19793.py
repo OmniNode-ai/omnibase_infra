@@ -6,7 +6,7 @@
 Infra vendored the ``delegation_eval_item_verdicts`` and
 ``delegation_eval_results`` migrations before omnimarket#3127 landed the
 declaring node contract, so two hand-authored
-``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries carried them in the interim.
+``VENDORED_TABLE_DECLARATIONS`` entries carried them in the interim.
 The omnimarket contract pin advancing to 49ee50d5f1b0 carries omnimarket#3127,
 so the bridges are redundant and were deleted from ``table_grant_derivation.py``
 and ``_INTERIM_ENTRIES``.
@@ -31,7 +31,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -46,8 +46,7 @@ _RELATIONS = {
 class TestTheDelegationEvalRunBridgesWereRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         lingering = sorted(set(_RELATIONS) & carried)
         assert not lingering, (

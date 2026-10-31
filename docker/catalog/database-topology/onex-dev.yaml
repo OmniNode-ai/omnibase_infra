@@ -106,6 +106,7 @@ databases:
               - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
+              - receipt_gate_pin_friction
               - runner_fleet_liveness
               - runtime_error_fingerprints
               - savings_correlation_finalizations
@@ -444,5 +445,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 6986917a7d9446342b4c74ad0203526ab87264c8892a5a97e4c114c48e7ab85e
+  sha256: e68eb10be9721614301c067aa7b4ef4c243333ebf8f88b285dfe705576049279
 topology_instance: onex-dev

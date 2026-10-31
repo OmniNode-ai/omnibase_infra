@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-20169: vendored ahead of omnimarket#4380 landing its node contract.
+# Retired by omnimarket#4380 merging and the pin advancing past it; the expiry
+# module names it.
+db_io:
+  db_tables:
+    - name: delegation_capability_cells
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_delegation_capability_map/0000_create_delegation_capability_cells.sql
+      access: read_write
+      role: delegation_capability_cells

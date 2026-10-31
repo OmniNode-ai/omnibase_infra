@@ -14,10 +14,10 @@ job, which reads the pinned checkout, so no test here is collected-but-skipped
 from __future__ import annotations
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 
 def test_no_supplemental_bridge_remains_for_delegation_dispositions() -> None:
-    bridged = {d.table.name for d in LEGACY_MIGRATION_TABLE_DECLARATIONS}
+    bridged = {d.table.name for d in VENDORED_TABLE_DECLARATIONS}
     assert "delegation_dispositions" not in bridged

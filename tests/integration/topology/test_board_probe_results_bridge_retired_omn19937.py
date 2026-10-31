@@ -5,7 +5,7 @@
 
 Infra vendored the ``board_probe_results`` migration before omnimarket#3061
 landed the declaring node contract, so a hand-authored
-``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry carried it in the interim. The
+``VENDORED_TABLE_DECLARATIONS`` entry carried it in the interim. The
 omnimarket contract pin advancing to fbf4f45c3a0c carries omnimarket#3061, so
 the bridge is redundant and was deleted from ``table_grant_derivation.py`` and
 ``_INTERIM_ENTRIES``.
@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -36,8 +36,7 @@ _PROFILES = ("local", "onex-dev", "onex-prod")
 class TestTheBoardProbeResultsBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

@@ -116,6 +116,7 @@ databases:
               - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
+              - receipt_gate_pin_friction
               - runner_fleet_liveness
               - runtime_error_fingerprints
               - savings_correlation_finalizations

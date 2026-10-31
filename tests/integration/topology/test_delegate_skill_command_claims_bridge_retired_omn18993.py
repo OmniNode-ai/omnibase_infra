@@ -9,7 +9,7 @@ repository vendors the migration that creates and grants the relation before
 the omnimarket node package that declares it in its contract merges, because
 omnimarket's ``node-migration-vendor-parity`` gate refuses the producing pull
 request until the vendored counterpart is on this repo's ``dev``. A
-hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry carried it for the
+hand-authored ``VENDORED_TABLE_DECLARATIONS`` entry carried it for the
 length of that window.
 
 The pin advance to ``fb41fdedc57e`` (OMN-17292) closes the window -- it is
@@ -48,7 +48,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -108,8 +108,7 @@ def _committed_privileges(profile: str) -> frozenset[str]:
 class TestTheBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

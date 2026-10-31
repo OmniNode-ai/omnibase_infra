@@ -166,18 +166,16 @@ def test_the_sql_gate_is_live_positive_control() -> None:
 
 @pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
 def test_the_shipped_runtime_grant_is_the_writer_scope(profile: str) -> None:
-    # The interim LEGACY_MIGRATION_TABLE_DECLARATIONS bridge for this relation
+    # The interim VENDORED_TABLE_DECLARATIONS bridge for this relation
     # was retired when the omnimarket contract pin reached omnimarket#3061, which
     # declares it (tests/integration/topology/
     # test_board_probe_results_bridge_retired_omn19937.py). What must not change
     # is the grant each shipped topology instance carries.
     from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
+        VENDORED_TABLE_DECLARATIONS,
     )
 
-    assert not any(
-        entry.table.name == _TABLE for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-    )
+    assert not any(entry.table.name == _TABLE for entry in VENDORED_TABLE_DECLARATIONS)
     instance = yaml.safe_load(
         (
             _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"

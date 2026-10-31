@@ -105,7 +105,7 @@ class TestTheRefusalNamesTheRemedy:
     def test_it_names_both_halves_of_the_bridge(self) -> None:
         """A declaration without its expiry entry is how five went stale."""
         source = _SCRIPT.read_text(encoding="utf-8")
-        assert "LEGACY_MIGRATION_TABLE_DECLARATIONS" in source
+        assert "VENDORED_TABLE_DECLARATIONS" in source
         assert "_INTERIM_ENTRIES" in source
 
     def test_it_cites_the_precedent_blocks(self) -> None:

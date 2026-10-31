@@ -59,7 +59,8 @@ __all__ = [
     "PRUNE_PRIVILEGES",
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
-    "LEGACY_MIGRATION_TABLE_DECLARATIONS",
+    "VENDORED_TABLE_DECLARATIONS",
+    "load_vendored_declarations",
     "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
     "derive_table_grants",
@@ -180,533 +181,57 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     ),
 )
 
-# Some migration-owned projection relations landed before their producing node's
-# ``db_io.db_tables`` contract is available in the omnimarket contracts root
-# consumed by this repo's CI. They still participate in the same grant
-# derivation path because runtime wiring validates the topology grant before the
-# physical-schema bridge can resolve the insert target (OMN-16316). Keeping this
-# as an explicit supplemental manifest is preferable to hand-maintaining the
-# generated YAML: ``--check`` continues to prove every shipped instance and
-# rendered catalog against one auditable derivation source.
-LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
-    ContractTableDeclaration(
-        node="legacy_migration:tenant_inference_credentials",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-            "0000_create_tenant_inference_credentials.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="tenant_inference_credentials",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
-                "0000_create_tenant_inference_credentials.sql"
-            ),
-            access="write",
-            role="credentials",
-        ),
-    ),
-    # OMN-18159: the four delegation aggregate READ VIEWS, in this manifest for
-    # exactly the reason the docstring above gives -- the migration that
-    # creates them is vendored here, but the producing node's db_io
-    # declaration is not yet in the PINNED omnimarket contracts root this
-    # repo's CI derives from, and the pin advances only after the omnimarket
-    # source PR merges. The source PR in turn cannot merge until this grant
-    # exists, because the runtime validates the binding principal's declared
-    # read privilege before it will wire the handler. Declaring them here
-    # breaks that cycle without pointing the pin at an unmerged commit.
-    #
-    # These entries become redundant once the pin advances past the source
-    # PR and the contract declares the same four relations; removing them
-    # then is the follow-up, and leaving them is inert rather than wrong --
-    # the derivation is idempotent per relation.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_model_routing",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_model_routing",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_model_routing",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_quality_gate",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_quality_gate",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_quality_gate",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_summary",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_token_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_token_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_token_usage",
-        ),
-    ),
-    # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
-    # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
-    # request its own comment named. The expiry module went red on the bot pull
-    # request naming the entry, and the deletion rode the commit that caused
-    # it; the regeneration wrote nothing, which is the proof the contract
-    # derives what the entry used to.
-    # OMN-18863: the runtime-error fingerprints entry that used to sit here was
-    # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
-    # squash, because the contract declares the relation itself now. That is the
-    # expiry test in tests/integration/topology working on its first real
-    # occasion rather than a cleanup somebody remembered: it went red naming
-    # this entry, and this is the deletion it asked for. The instances came back
-    # byte-identical, which is the proof the contract derives what the entry
-    # used to. The lab_lane_health entry below is still live because its own
-    # source pull request has not merged.
-    # OMN-18863: the two supplemental bridges that sat here, for
-    # runtime_error_fingerprints and lab_lane_health, were both DELETED by the
-    # pin advances that made them redundant -- ac35d56338b3 and e1c4c8f61a1f.
-    # Neither deletion was remembered by anyone. The expiry module,
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, went red on
-    # each bot pull request naming the entry, and the deletion rode the commit
-    # that caused it. Both regenerations wrote nothing, which is the proof the
-    # contracts derive what the entries used to.
-    #
-    # OMN-18993 and OMN-18999 added two more, for delegate_skill_command_claims
-    # and prod_promotion_gate_decisions, and both were DELETED here by the pin
-    # advance to 622664a35575, which carries omnimarket#2744 and #2753 -- the
-    # retiring pull requests each entry named in its own comment. The pinned
-    # contract set went from 74 declared relations to 76, and those are the two.
-    # Same mechanism as the three above and the same proof: the expiry module
-    # went red on the bot's pin-advance pull request naming both entries, the
-    # deletion rode that commit, and the regeneration wrote nothing.
-    #
-    # OMN-18903 added ci_attempt_outcome, and it was DELETED here by the pin
-    # advance to fcc374d5908f, which carries omnimarket#2730 -- the retiring
-    # pull request the entry named in its own comment. The node
-    # node_projection_ci_attempt_outcome now declares the relation in its
-    # db_io.db_tables with the same schema, access (read_write) and role
-    # (ci_attempts) the bridge carried. Same mechanism and same proof as the
-    # entries above: the expiry module went red on the bot's pin-advance pull
-    # request naming it, the deletion rode that pull request, and the
-    # regeneration wrote nothing.
-    #
-    # OMN-19550, OMN-19833, OMN-19961, OMN-19513 and OMN-19399 added seven more
-    # (session_content, pr_landing_state, pr_landing_transitions,
-    # lab_container_memory_window, claude_agent_spans, claude_hook_events and
-    # worktree_reconcile_hosts), and all seven were DELETED here by the pin
-    # advance to e01380bfde11, which carries the retiring omnimarket pull
-    # requests each entry named in its own comment. Same mechanism and same
-    # proof: the expiry module went red on the bot's pin-advance pull request
-    # naming all seven, and the deletion rode that pull request.
-    #
-    # OMN-19937 added board_probe_results, and it was DELETED here by the pin
-    # advance to fbf4f45c3a0c, which carries omnimarket#3061 -- the retiring
-    # pull request the entry named in its own comment. The node
-    # node_projection_board_probe_results now declares the relation with the
-    # same schema, access (read_write) and role (board_probe_results) the
-    # bridge carried. Same mechanism and same proof as the entries above.
-    #
-    # OMN-19513, OMN-19978 and OMN-19999 added five more (work_ledger_rows,
-    # work_ledger_state, usage_by_model_day_calls, usage_by_model_day and
-    # pr_state), and all five were DELETED here by the pin advance to
-    # 92bc73177b90, which carries omnimarket#3050, #3073 and #3054 -- the
-    # retiring pull requests each entry named in its own comment. Same
-    # mechanism and same proof: the expiry module went red on the bot's
-    # pin-advance pull request naming all five, and the deletion rode that pull
-    # request.
-    #
-    # If you add a bridge here for a new infra-first vendoring, add it to that
-    # module's _INTERIM_ENTRIES map in the same pull request. One line, no
-    # baseline edit, and you will be told when to take it out.
-    #
-    # OMN-20604, OMN-20802 and OMN-19987 added six more (lab_job_state,
-    # lab_job_transitions, automation_liveness_state, automation_run_history,
-    # automation_alarm_episodes and run_trace), and all six were DELETED here by
-    # the pin advance to 464634262791, which carries the retiring omnimarket
-    # pull requests each entry named in its own comment. Same mechanism and
-    # same proof: the expiry module went red on the bot's pin-advance pull
-    # request naming all six, and the deletion rode that pull request.
-    #
-    # OMN-17427: durable delegation execution ownership and its outbox,
-    # vendored infra-first ahead of omnimarket#4277. Both carry the source
-    # contract's read_write access and table-name role. Removable once the
-    # pin advances past that pull request; the expiry module names both.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_lab_jobs",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-            "0000_delegation_lab_job_execution.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_lab_jobs",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-                "0000_delegation_lab_job_execution.sql"
-            ),
-            access="read_write",
-            role="delegation_lab_jobs",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_lab_job_outbox",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-            "0000_delegation_lab_job_execution.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_lab_job_outbox",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-                "0000_delegation_lab_job_execution.sql"
-            ),
-            access="read_write",
-            role="delegation_lab_job_outbox",
-        ),
-    ),
-    #
-    # OMN-19861: same infra-first window; this repo vendors
-    # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
-    # package that declares the relation. The source contract declares access
-    # read_write, role demo_readiness; 0001 grants omninode_runtime SELECT,
-    # INSERT, UPDATE. Retired by the omnimarket OMN-19861
-    # node_projection_demo_readiness pull request merging and the pin advancing
-    # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:demo_readiness_latest",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-            "0000_create_demo_readiness_latest.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="demo_readiness_latest",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
-                "0000_create_demo_readiness_latest.sql"
-            ),
-            access="read_write",
-            role="demo_readiness",
-        ),
-    ),
-    # OMN-21115: activation ingestion precedes the omnimarket contract pin.
-    # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
-    # when node_context_install_confirm_trigger_effect reaches the pin.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_activations",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
-            "0000_create_compaction_activations.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_activations",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
-                "0000_create_compaction_activations.sql"
-            ),
-            access="read_write",
-            role="compaction_activations",
-        ),
-    ),
-    # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
-    # omnimarket node contract, as compaction_receipts below. 0001 grants
-    # omninode_runtime SELECT, INSERT, UPDATE plus schema and cursor sequence
-    # USAGE. The ownership declaration names access read_write, role
-    # compaction_current_context. Retired when the
-    # node_projection_compaction_current_context contract merges and the
-    # omnimarket pin advances past it; the OMN-18863 expiry module names this
-    # bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_current_context",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
-            "0000_create_compaction_current_context.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_current_context",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
-                "0000_create_compaction_current_context.sql"
-            ),
-            access="read_write",
-            role="compaction_current_context",
-        ),
-    ),
-    # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
-    # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
-    # UPDATE plus schema and cursor sequence USAGE. The ownership declaration
-    # names access read_write, role compaction_receipts. Retired when the
-    # node_projection_compaction_receipts contract merges and the omnimarket
-    # pin advances past it; the OMN-18863 expiry module names this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_receipts",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-            "0000_create_compaction_receipts.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_receipts",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-                "0000_create_compaction_receipts.sql"
-            ),
-            access="read_write",
-            role="compaction_receipts",
-        ),
-    ),
-    # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
-    # lands its node contract (head 677d2941ff7e). This bridge expires once the
-    # pin includes that contract. Retired by: omnimarket#4380 merging and the pin
-    # advancing past it; the OMN-18863 expiry module names this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_capability_cells",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-            "0000_create_delegation_capability_cells.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_capability_cells",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_capability_map/"
-                "0000_create_delegation_capability_cells.sql"
-            ),
-            access="read_write",
-            role="delegation_capability_cells",
-        ),
-    ),
-    # OMN-19988: the same infra-first window; this repo vendors
-    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation, which lands after this release (the
-    # node's wiring check refuses a contract whose table no release grants). The
-    # source declares access read_write, role local_environment in omnimarket's
-    # scripts/application-relation-ownership.yaml; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
-    # node_projection_local_environment contract merges and the pin advances
-    # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:local_environment",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_local_environment/"
-            "0000_create_local_environment.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="local_environment",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_local_environment/"
-                "0000_create_local_environment.sql"
-            ),
-            access="read_write",
-            role="local_environment",
-        ),
-    ),
-    # OMN-18862: migration 089 grants BOTH savings read views to
-    # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
-    # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
-    # block below declared only the second. The first has therefore been granted
-    # by this corpus and declared by nothing since 089 landed, which the
-    # OMN-18768 reverse arm reports as a delivered-but-undeclared residual.
-    #
-    # UNLIKE the interim entries above, this pair has NO EXPIRY and is not
-    # tracked by the OMN-18863 expiry test. Those entries bridge a window until
-    # an omnimarket contract declares the relation; these two are VIEWS, and a
-    # view is never a `db_io.db_tables` entry, so no contract will ever declare
-    # them and the supplemental declaration is the steady state rather than a
-    # bridge. Adding them to _INTERIM_ENTRIES would require naming a retiring PR
-    # that does not exist and asserting an expiry that will never arrive.
-    #
-    # What guards them instead is the pairing: both views are granted by the
-    # same statement block in one migration, so declaring one and not the other
-    # is the defect, and a test asserts they are declared together.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_delegation_savings",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_delegation_savings",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_delegation_savings",
-        ),
-    ),
-    # OMN-17426: the savings overview READ VIEW follows the same temporary
-    # supplemental-declaration path as OMN-18159 above. Infra vendors migration
-    # 089 before the omnimarket source PR can merge, and the market PR cannot
-    # merge until this infra PR gives the tenant projection reader an explicit
-    # grant. The source contract declaration makes this redundant once the pin
-    # advances; until then, the vendored migration is the local authority.
-    ContractTableDeclaration(
-        node="legacy_migration:projection_cost_savings_overview",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="projection_cost_savings_overview",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_savings/"
-                "089_savings_aggregate_views_per_tenant.sql"
-            ),
-            access="read",
-            role="aggregate_savings_overview",
-        ),
-    ),
-    # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
-    # omnibase_infra node that writes with direct SQL rather than through the
-    # runtime's projection wiring, so no db_io.db_tables entry declares them and
-    # no omnimarket contract ever will. Like the savings views above, these are
-    # steady state, not interim bridges: they are not in the OMN-18863 expiry
-    # map, because there is no retiring pull request to name.
-    #
-    # Access is what the handlers do, read from the code rather than from the
-    # grants that happen to exist:
-    #   * savings_injection_signals, savings_validator_catch_signals: INSERT and
-    #     SELECT; savings_correlation_finalizations: SELECT 1 and INSERT ... ON
-    #     CONFLICT DO NOTHING (node_savings_estimation_compute,
-    #     handler_savings_correlation). read_write matches the SELECT, INSERT,
-    #     UPDATE the creating migrations grant.
-    #
-    #   * gateway_link_health (AC2 step 2): HandlerGatewayLinkHealthUpsert
-    #     runs INSERT ... ON CONFLICT (tenant_id) DO UPDATE, which needs SELECT,
-    #     INSERT and UPDATE. Declared together with the migration that GRANTs
-    #     it explicitly (node_gateway_link_health_write_effect/0003), so the
-    #     declaration never runs ahead of a migration that delivers it
-    #     (check_topology_grant_delivery). Before that file, its privileges came
-    #     only from the default-privilege rules, which AC2 step 4 drops.
-    #
-    # The gateway_link_health_status VIEW is not declared at all: no runtime
-    # node reads or writes it, so its privileges are revoked rather than
-    # declared.
-    ContractTableDeclaration(
-        node="infra_direct_sql:node_savings_estimation_compute",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-            "0001_create_savings_signal_tables.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="savings_injection_signals",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-                "0001_create_savings_signal_tables.sql"
-            ),
-            access="read_write",
-            role="savings_injection_signals",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="infra_direct_sql:node_savings_estimation_compute",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-            "0001_create_savings_signal_tables.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="savings_validator_catch_signals",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-                "0001_create_savings_signal_tables.sql"
-            ),
-            access="read_write",
-            role="savings_validator_catch_signals",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="infra_direct_sql:node_savings_estimation_compute",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-            "0002_create_savings_correlation_finalizations.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="savings_correlation_finalizations",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
-                "0002_create_savings_correlation_finalizations.sql"
-            ),
-            access="read_write",
-            role="savings_correlation_finalizations",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="infra_direct_sql:node_gateway_link_health_write_effect",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
-            "0001_create_gateway_link_health.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="gateway_link_health",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
-                "0001_create_gateway_link_health.sql"
-            ),
-            access="read_write",
-            role="gateway_link_health",
-        ),
-    ),
+# Relations a node's vendored migrations create ahead of (or beside) any pinned
+# omnimarket contract declaring them are declared as DATA, next to the migrations
+# that create them: ``docker/migrations/forward/nodes/<node>/db_io.yaml``, in the
+# shape of a node contract's own ``db_io`` block (OMN-20134). The projection owns
+# the declaration of its relation (name, schema, access, role); the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so no principal and no privilege is ever listed by hand, and a new
+# projection relation adds a file, not a line of this module. Where the pinned
+# contract declares the same relation the two must agree
+# (tests/ci/test_vendored_declarations_omn20134.py) and the supplemental-expiry
+# module names the entry that the pin advance has made redundant.
+VENDORED_NODES_ROOT = (
+    Path(__file__).resolve().parents[3] / "docker" / "migrations" / "forward" / "nodes"
+)
+VENDORED_DECLARATION_FILE = "db_io.yaml"
+
+
+def _db_io_tables(document: object) -> tuple[ModelDbTableDeclaration, ...]:
+    """The ``db_io.db_tables`` entries of one parsed contract or declaration file."""
+    db_io = document.get("db_io") if isinstance(document, dict) else None
+    entries = db_io.get("db_tables") if isinstance(db_io, dict) else None
+    if not isinstance(entries, Sequence):
+        return ()
+    return tuple(ModelDbTableDeclaration(**entry) for entry in entries)
+
+
+def load_vendored_declarations(
+    nodes_root: Path = VENDORED_NODES_ROOT,
+) -> tuple[ContractTableDeclaration, ...]:
+    """Read every ``<node>/db_io.yaml`` under the vendored node-migration tree.
+
+    The node name is ``vendored:<directory>`` so a vendored declaration never
+    shares a node identity with the pinned contract of the same directory name.
+    ``contract_path`` is the repository-relative migration the entry names, as
+    the supplemental ownership gate resolves it.
+    """
+    if not nodes_root.is_dir():
+        raise FileNotFoundError(f"vendored node-migration root {nodes_root} is missing")
+    return tuple(
+        ContractTableDeclaration(
+            node=f"vendored:{path.parent.name}",
+            contract_path=Path(table.migration),
+            table=table,
+        )
+        for path in sorted(nodes_root.glob(f"*/{VENDORED_DECLARATION_FILE}"))
+        for table in _db_io_tables(yaml.safe_load(path.read_text(encoding="utf-8")))
+    )
+
+
+VENDORED_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
+    load_vendored_declarations()
 )
 
 
@@ -772,25 +297,15 @@ def load_contract_declarations(
             f"contracts root {contracts_root} does not exist; the cross-repo "
             "checkout that provides node contracts is required for derivation"
         )
-    declarations: list[ContractTableDeclaration] = []
-    for contract_path in sorted(contracts_root.rglob("contract.yaml")):
-        document = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
-        if not isinstance(document, dict):
-            continue
-        db_io = document.get("db_io")
-        if not isinstance(db_io, dict):
-            continue
-        entries = db_io.get("db_tables")
-        if not isinstance(entries, Sequence):
-            continue
-        for entry in entries:
-            declarations.append(
-                ContractTableDeclaration(
-                    node=contract_path.parent.name,
-                    contract_path=contract_path,
-                    table=ModelDbTableDeclaration(**entry),
-                )
-            )
+    declarations = [
+        ContractTableDeclaration(
+            node=contract_path.parent.name, contract_path=contract_path, table=table
+        )
+        for contract_path in sorted(contracts_root.rglob("contract.yaml"))
+        for table in _db_io_tables(
+            yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        )
+    ]
     if not declarations:
         raise ValueError(
             f"no db_io.db_tables declarations found under {contracts_root}; "

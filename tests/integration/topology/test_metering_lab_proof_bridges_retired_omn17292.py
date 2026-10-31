@@ -5,7 +5,7 @@
 
 The omnimarket contract pin advancing to 532ec1f53834 carries omnimarket#3079
 and omnimarket#3043, so the pinned contracts now declare both relations. The
-hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries are deleted; the
+hand-authored ``VENDORED_TABLE_DECLARATIONS`` entries are deleted; the
 vendored migration lineage and the exact shipped grants must survive.
 This proof uses committed repository state alone.
 """
@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -96,8 +96,7 @@ class TestTheBridgeWasRetired:
         migrations: tuple[str, ...],
     ) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert relation not in carried
 

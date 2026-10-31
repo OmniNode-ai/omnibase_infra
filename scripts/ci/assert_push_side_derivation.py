@@ -87,9 +87,9 @@ grants it -- which arms the OMN-18768 boot crash rather than fixing anything.
 
 Add a self-expiring supplemental declaration in this same pull request:
 
-  1. a `ContractTableDeclaration` in `LEGACY_MIGRATION_TABLE_DECLARATIONS`
-     (`src/omnibase_infra/topology/table_grant_derivation.py`), following the
-     `OMN-18159` / `OMN-17426` precedent blocks already in that tuple; and
+  1. the relation, as the node contract's `db_io` block, in the node's
+     `db_io.yaml` beside its vendored migration (read into
+     `VENDORED_TABLE_DECLARATIONS`), as `OMN-18159` / `OMN-17426` did; and
   2. one line in `_INTERIM_ENTRIES`
      (`tests/ci/test_supplemental_declaration_expiry_omn18863.py`) naming the
      relation and the omnimarket pull request that retires it.

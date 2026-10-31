@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-16316: the migration-owned credentials relation, declared here because
+# runtime wiring validates the topology grant before the physical-schema bridge
+# resolves its insert target.
+db_io:
+  db_tables:
+    - name: tenant_inference_credentials
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql
+      access: write
+      role: credentials

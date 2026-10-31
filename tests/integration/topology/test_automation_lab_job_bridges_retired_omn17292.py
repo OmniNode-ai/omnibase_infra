@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -92,8 +92,7 @@ class TestTheBridgesWereRetired:
         self, relation: str, node: str, migrations: tuple[str, ...]
     ) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert relation not in carried, (
             f"{relation} still has a supplemental declaration, although the "

@@ -5,7 +5,7 @@
 
 Infra vendored these migrations before the omnimarket node contracts that
 declare their relations landed, so hand-authored
-``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries carried them in the interim:
+``VENDORED_TABLE_DECLARATIONS`` entries carried them in the interim:
 
 - ``lab_job_state`` and ``lab_job_transitions`` (omnimarket#3434)
 - ``automation_liveness_state``, ``automation_run_history`` and
@@ -26,7 +26,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -129,8 +129,7 @@ class TestTheBridgeWasRetired:
         migrations: tuple[str, ...],
     ) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert relation not in carried
 

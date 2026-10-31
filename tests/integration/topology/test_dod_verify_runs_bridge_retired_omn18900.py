@@ -8,7 +8,7 @@ infra-first supplemental-bridge mechanism documented in
 `test_runtime_error_fingerprints_grant_omn18863.py`: this repository vendors
 the migration that creates and grants the relation before the omnimarket
 node package that declares it in its contract merges, so a hand-authored
-``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry carried it in the interim
+``VENDORED_TABLE_DECLARATIONS`` entry carried it in the interim
 (``table_grant_derivation.py``, tracked for expiry in ``_INTERIM_ENTRIES`` in
 ``tests/ci/test_supplemental_declaration_expiry_omn18863.py``).
 
@@ -25,7 +25,7 @@ omnimarket checkout the CI enforcement job provides, and lives in
 here):
 
 1. no supplemental bridge for ``dod_verify_runs`` remains in
-   ``LEGACY_MIGRATION_TABLE_DECLARATIONS``; and
+   ``VENDORED_TABLE_DECLARATIONS``; and
 2. the shipped topology instances still declare the relation, so the removal
    above did not silently drop a projection binding the vendored migration
    still grants -- the OMN-18768 reverse-ratchet failure mode a regeneration
@@ -39,7 +39,7 @@ from pathlib import Path
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -61,8 +61,7 @@ def _instance_text(profile: str) -> str:
 class TestTheDodVerifyRunsBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

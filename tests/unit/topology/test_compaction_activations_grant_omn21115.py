@@ -12,7 +12,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import TOPOLOGY_PROFILE_INSTANCE_MAP
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.unit
@@ -32,7 +32,7 @@ def test_activation_write_uses_only_the_runtime_table_grant(profile):
     topology = load_topology_profile(profile)
     (declaration,) = (
         d
-        for d in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        for d in VENDORED_TABLE_DECLARATIONS
         if d.table.name == "compaction_activations"
     )
     _resolve_projection_database_target((declaration.table,), topology)
@@ -49,7 +49,7 @@ def test_activation_write_uses_only_the_runtime_table_grant(profile):
 def test_interim_declaration_has_delivered_migrations():
     declarations = [
         d
-        for d in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        for d in VENDORED_TABLE_DECLARATIONS
         if d.table.name == "compaction_activations"
     ]
     assert len(declarations) == 1

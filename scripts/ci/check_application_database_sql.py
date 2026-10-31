@@ -13,8 +13,8 @@ from pathlib import Path
 
 from omnibase_infra.topology.application_database import load_topology_profile
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
     STATE_IO_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     ContractTableDeclaration,
 )
 from omnibase_infra.validation.application_database_domain_enforcement import (
@@ -714,8 +714,7 @@ def validate_changed_sql(
         ownership_identities += _supplemental_ownership_identities(
             repository,
             ownership_identities,
-            declarations=STATE_IO_TABLE_DECLARATIONS
-            + LEGACY_MIGRATION_TABLE_DECLARATIONS,
+            declarations=STATE_IO_TABLE_DECLARATIONS + VENDORED_TABLE_DECLARATIONS,
         )
     except ValueError as exc:
         ownership_identities = ()

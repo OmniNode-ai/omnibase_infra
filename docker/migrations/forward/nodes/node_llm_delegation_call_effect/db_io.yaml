@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-17427: durable delegation execution ownership and its outbox, vendored
+# infra-first ahead of omnimarket#4277. Both carry the source contract's
+# read_write access and table-name role. Removable once the pin advances past
+# that pull request; the expiry module names both.
+db_io:
+  db_tables:
+    - name: delegation_lab_jobs
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_llm_delegation_call_effect/0000_delegation_lab_job_execution.sql
+      access: read_write
+      role: delegation_lab_jobs
+    - name: delegation_lab_job_outbox
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_llm_delegation_call_effect/0000_delegation_lab_job_execution.sql
+      access: read_write
+      role: delegation_lab_job_outbox

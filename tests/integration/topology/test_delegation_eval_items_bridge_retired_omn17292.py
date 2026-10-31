@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -39,9 +39,7 @@ _REQUIRED_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE"})
 
 
 def test_no_supplemental_bridge_remains() -> None:
-    carried = {
-        declaration.table.name for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-    }
+    carried = {declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS}
     assert _TABLE not in carried, (
         f"{_TABLE} still has a supplemental declaration, although the pinned "
         "omnimarket contract now declares it"

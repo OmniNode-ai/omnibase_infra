@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.unit
@@ -111,7 +111,7 @@ def test_neither_current_context_migration_is_fenced() -> None:
 def test_the_interim_grant_declaration_names_the_vendored_create() -> None:
     matches = [
         declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        for declaration in VENDORED_TABLE_DECLARATIONS
         if declaration.table.name == "compaction_current_context"
     ]
     assert len(matches) == 1

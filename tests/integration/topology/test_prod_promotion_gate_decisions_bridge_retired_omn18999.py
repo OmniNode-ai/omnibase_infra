@@ -16,7 +16,7 @@ ancestor-forward of ``622664a35575`` (verified: git merge-base --is-ancestor
 => true, reverse => false). It carries omnimarket#2753, the retiring pull
 request the entry named in its own comment, so the pinned contracts now
 declare ``omninode_internal.prod_promotion_gate_decisions`` themselves and the
-hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry contributes
+hand-authored ``VENDORED_TABLE_DECLARATIONS`` entry contributes
 byte-identical output. ``test_no_interim_entry_is_redundant`` in
 ``tests/ci/test_supplemental_declaration_expiry_omn18863.py`` went red naming
 it, and the deletion rides the commit that caused it -- the same sequence
@@ -25,7 +25,7 @@ retirement module (``test_dod_verify_runs_bridge_retired_omn18900.py``) this
 one mirrors.
 
 **Why the replaced module cannot simply be kept.** It derives from
-``STATE_IO_TABLE_DECLARATIONS + LEGACY_MIGRATION_TABLE_DECLARATIONS`` alone,
+``STATE_IO_TABLE_DECLARATIONS + VENDORED_TABLE_DECLARATIONS`` alone,
 deliberately excluding the pinned contracts so that it needs no foreign
 checkout. Once the contract supplies the relation, that in-repo-only derivation
 is no longer the thing the deploy ships, and asserting against it would demand
@@ -53,7 +53,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 pytestmark = pytest.mark.integration
@@ -113,8 +113,7 @@ def _committed_privileges(profile: str) -> frozenset[str]:
 class TestTheBridgeWasRetired:
     def test_no_supplemental_bridge_remains(self) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"

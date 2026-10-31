@@ -52,8 +52,8 @@ from omnibase_infra.topology.application_database import (
     write_database_projection,
 )
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
     STATE_IO_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     ContractTableDeclaration,
     TopologyTableGrants,
     derive_topology_table_grants,
@@ -332,7 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--write and --check are mutually exclusive")
 
     supplemental_declarations = (
-        STATE_IO_TABLE_DECLARATIONS + LEGACY_MIGRATION_TABLE_DECLARATIONS
+        STATE_IO_TABLE_DECLARATIONS + VENDORED_TABLE_DECLARATIONS
     )
     declarations = (
         load_contract_declarations(args.contracts_root) + supplemental_declarations
@@ -341,7 +341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"loaded {len(declarations) - len(supplemental_declarations)} "
         f"db_io.db_tables declaration(s) from {args.contracts_root} plus "
         f"{len(STATE_IO_TABLE_DECLARATIONS)} state_io declaration(s) and "
-        f"{len(LEGACY_MIGRATION_TABLE_DECLARATIONS)} legacy migration declaration(s)"
+        f"{len(VENDORED_TABLE_DECLARATIONS)} vendored db_io.yaml declaration(s)"
     )
 
     exit_code = 0

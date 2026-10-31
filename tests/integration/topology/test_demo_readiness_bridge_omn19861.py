@@ -16,7 +16,7 @@ from omnibase_core.enums.enum_database_grant_object_type import (
 )
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     derive_table_grants,
 )
 
@@ -44,7 +44,7 @@ _VENDORED_MIGRATIONS = (
 def _bridge_entries(relation: str) -> tuple[Any, ...]:
     return tuple(
         declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        for declaration in VENDORED_TABLE_DECLARATIONS
         if declaration.table.name == relation
     )
 
@@ -72,7 +72,7 @@ class TestTheActiveBridgeIsCommitted:
         entries = _bridge_entries(relation)
         assert len(entries) == 1, (
             f"{relation} is carried by {len(entries)} "
-            "LEGACY_MIGRATION_TABLE_DECLARATIONS entries; the active interim "
+            "VENDORED_TABLE_DECLARATIONS entries; the active interim "
             "window requires exactly one bridge. Add the missing declaration or "
             "remove the duplicate before regenerating topology grants."
         )
@@ -105,7 +105,7 @@ class TestTheActiveBridgeProducesTheShippedGrant:
         self, profile: str, relation: str
     ) -> None:
         derived = derive_table_grants(
-            load_topology_profile(profile), LEGACY_MIGRATION_TABLE_DECLARATIONS
+            load_topology_profile(profile), VENDORED_TABLE_DECLARATIONS
         )
         matching_grants = tuple(
             grant

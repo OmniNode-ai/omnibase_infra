@@ -124,14 +124,12 @@ def test_bridge_derives_the_shipped_table_grant(profile: str) -> None:
     )
     from omnibase_infra.topology import load_topology_profile
     from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
+        VENDORED_TABLE_DECLARATIONS,
         derive_table_grants,
     )
 
     bridges = tuple(
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name == _TABLE
+        entry for entry in VENDORED_TABLE_DECLARATIONS if entry.table.name == _TABLE
     )
     assert len(bridges) == 1
     bridge = bridges[0]

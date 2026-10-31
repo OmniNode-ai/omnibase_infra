@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-17886 AC2 step 1: omninode_internal relations owned by an omnibase_infra
+# node that writes with direct SQL rather than through the runtime's projection
+# wiring, so no handler db_io entry declares them. Steady state, not an interim
+# bridge: no expiry. Access is what the handlers do (INSERT and SELECT; SELECT 1
+# and INSERT ... ON CONFLICT DO NOTHING); read_write matches the SELECT, INSERT,
+# UPDATE the creating migrations grant.
+db_io:
+  db_tables:
+    - name: savings_injection_signals
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_savings_estimation_compute/0001_create_savings_signal_tables.sql
+      access: read_write
+      role: savings_injection_signals
+    - name: savings_validator_catch_signals
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_savings_estimation_compute/0001_create_savings_signal_tables.sql
+      access: read_write
+      role: savings_validator_catch_signals
+    - name: savings_correlation_finalizations
+      database_ref: application
+      schema: omninode_internal
+      migration: docker/migrations/forward/nodes/node_savings_estimation_compute/0002_create_savings_correlation_finalizations.sql
+      access: read_write
+      role: savings_correlation_finalizations

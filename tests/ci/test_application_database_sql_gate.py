@@ -197,7 +197,7 @@ def test_infra_first_ownership_requires_one_exact_migration_declaration(
     monkeypatch.setattr(gate, "STATE_IO_TABLE_DECLARATIONS", (), raising=False)
     monkeypatch.setattr(
         gate,
-        "LEGACY_MIGRATION_TABLE_DECLARATIONS",
+        "VENDORED_TABLE_DECLARATIONS",
         (declaration, declaration) if duplicate else (declaration,),
         raising=False,
     )

@@ -60,7 +60,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
 )
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     WRITE_PRIVILEGES,
     ContractTableDeclaration,
     derive_table_grants,
@@ -245,12 +245,11 @@ class TestTheBridgesWereRetired:
     @pytest.mark.parametrize("relation", sorted(_VENDORED_RELATIONS))
     def test_no_supplemental_bridge_remains(self, relation: str) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert relation not in carried, (
             f"{relation} still has a supplemental "
-            "LEGACY_MIGRATION_TABLE_DECLARATIONS entry, but the pinned "
+            "VENDORED_TABLE_DECLARATIONS entry, but the pinned "
             "contracts declare it. A redundant bridge contributes "
             "byte-identical output and nothing else will tell you it is there"
         )

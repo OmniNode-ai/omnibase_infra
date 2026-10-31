@@ -118,18 +118,16 @@ def test_tenant_tables_and_writer_grants_are_exact() -> None:
 
 @pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
 def test_the_shipped_tenant_writer_grants_are_read_write(profile: str) -> None:
-    # The interim LEGACY_MIGRATION_TABLE_DECLARATIONS bridges for these relations
+    # The interim VENDORED_TABLE_DECLARATIONS bridges for these relations
     # were retired when the omnimarket contract pin reached omnimarket#3073, which
     # declares both (tests/integration/topology/
     # test_vendored_bridges_retired_omn17292.py). What must not change is the
     # grant each shipped topology instance carries.
     from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
+        VENDORED_TABLE_DECLARATIONS,
     )
 
-    assert not any(
-        entry.table.name in _TABLES for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-    )
+    assert not any(entry.table.name in _TABLES for entry in VENDORED_TABLE_DECLARATIONS)
     instance = yaml.safe_load(
         (
             _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"

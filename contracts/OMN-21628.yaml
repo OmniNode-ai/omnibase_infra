@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21628
+title: A projection relation's TABLE grant derives from its declared db_io data, not from a line in a baselined infra module
+summary: >-
+  The relations a node's vendored migrations create ahead of (or beside) the pinned omnimarket contracts move from the LEGACY_MIGRATION_TABLE_DECLARATIONS tuple in table_grant_derivation.py, a file the canonical-file-shape ratchet only lets shrink, to docker/migrations/forward/nodes/<node>/db_io.yaml, in the shape of the node contract's own db_io block and read by load_vendored_declarations. Nineteen existing entries move with their derived grants unchanged on every shipped instance, the module drops from 693 to 384 code lines, and the receipt_gate_pin_friction relation of omnimarket's node_projection_receipt_gate_pin_friction_rows is vendored the same way, so it needs no line in any module.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21628-declarations-are-data
+    statement: >-
+      The vendored relations are declared as data, each declaration file is a db_io block that names a migration this repository holds, and the derived TABLE grants are unchanged by the move.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: every declaration file loads through load_vendored_declarations, names a held migration, declares a relation once, agrees with the pinned contract where that declares the same relation, and derives a grant on every shipped instance -- falsifier: uv run pytest tests/ci/test_vendored_declarations_omn20134.py -q fails when a declaration file is removed or its access or role differs.
+  - id: req-omn21628-new-relation
+    statement: >-
+      The receipt_gate_pin_friction migrations are vendored byte-identical with checksum-bound ledger rows and classes, and the relation derives SELECT, INSERT and UPDATE for omninode_runtime from its declaration file alone.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the vendored bytes match their digests, each has one ledger row and the correct class, neither is fenced, and the declaration is read_write under role receipt_gate_pin_friction -- falsifier: uv run pytest tests/unit/migrations/test_omn20134_pin_friction_rows_vendor.py -q fails any assertion.
+evidence_requirements:
+  - kind: tests
+    description: Declaration files as data, their agreement with the pin, and the derived grants.
+    command: uv run pytest tests/ci/test_vendored_declarations_omn20134.py -q
+  - kind: tests
+    description: Vendored bytes, ledger rows, classes and the declaration of the new relation.
+    command: uv run pytest tests/unit/migrations/test_omn20134_pin_friction_rows_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21628-declarations-are-data
+    description: Declaration files load, agree with the pin and derive a grant on every instance.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_vendored_declarations_omn20134.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21628-new-relation
+    description: The new relation's vendored bytes, ledger rows, classes and declaration.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20134_pin_friction_rows_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

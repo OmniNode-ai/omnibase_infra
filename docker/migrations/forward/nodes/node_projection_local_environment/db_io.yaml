@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-19988: vendored ahead of the omnimarket node contract, which lands after
+# this release (the node's wiring check refuses a contract whose table no
+# release grants). The source declares access read_write, role local_environment
+# in omnimarket's scripts/application-relation-ownership.yaml; 0001 grants
+# tenant_projection_writer SELECT, INSERT, UPDATE. Retired when
+# node_projection_local_environment merges and the pin advances past it; the
+# expiry module names it.
+db_io:
+  db_tables:
+    - name: local_environment
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_local_environment/0000_create_local_environment.sql
+      access: read_write
+      role: local_environment

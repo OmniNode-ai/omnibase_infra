@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Relations this node's vendored migrations create, declared in the shape of the
+# node contract's own ``db_io`` block (``ModelDbTableDeclaration``). The TABLE
+# grant derivation (table_grant_derivation.load_vendored_declarations) reads this
+# file exactly as it reads a contract's ``db_io.db_tables``; the principal comes
+# from the schema's domain binding in the topology and the privileges from
+# ``access``, so nothing here names a principal or a privilege.
+#
+# OMN-18159: the four delegation aggregate READ VIEWS created by 0039. A view is
+# not a base-table declaration of the node's own handler, so the views are
+# declared here beside the migration that creates them. Removable per relation
+# once the pinned omnimarket contract declares the same relation (the expiry
+# module names it).
+db_io:
+  db_tables:
+    - name: projection_delegation_model_routing
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql
+      access: read
+      role: aggregate_model_routing
+    - name: projection_delegation_quality_gate
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql
+      access: read
+      role: aggregate_quality_gate
+    - name: projection_delegation_summary
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql
+      access: read
+      role: aggregate_summary
+    - name: projection_delegation_token_usage
+      database_ref: application
+      schema: public
+      migration: docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql
+      access: read
+      role: aggregate_token_usage

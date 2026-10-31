@@ -5,7 +5,7 @@
 
 Infra vendored these migrations before the omnimarket node contracts that
 declare their relations landed, so hand-authored
-``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries carried them in the interim:
+``VENDORED_TABLE_DECLARATIONS`` entries carried them in the interim:
 
 - ``work_ledger_rows`` and ``work_ledger_state`` (omnimarket#3050)
 - ``pr_state`` (omnimarket#3054)
@@ -30,7 +30,7 @@ import pytest
 import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -48,8 +48,7 @@ class TestTheVendoredBridgesWereRetired:
     @pytest.mark.parametrize("relation", _RELATIONS)
     def test_no_supplemental_bridge_remains(self, relation: str) -> None:
         carried = {
-            declaration.table.name
-            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            declaration.table.name for declaration in VENDORED_TABLE_DECLARATIONS
         }
         assert relation not in carried, (
             f"{relation} still has a supplemental LEGACY_MIGRATION_TABLE_"

@@ -12,7 +12,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.application_database import TOPOLOGY_PROFILE_INSTANCE_MAP
 from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    VENDORED_TABLE_DECLARATIONS,
     WRITE_PRIVILEGES,
     derive_table_grants,
 )
@@ -30,7 +30,7 @@ def test_shipped_activation_declaration_derives_the_runtime_binding(
     profile: str,
 ) -> None:
     declarations = tuple(
-        d for d in LEGACY_MIGRATION_TABLE_DECLARATIONS if d.table.name == _TABLE
+        d for d in VENDORED_TABLE_DECLARATIONS if d.table.name == _TABLE
     )
     assert len(declarations) == 1
     (declaration,) = declarations

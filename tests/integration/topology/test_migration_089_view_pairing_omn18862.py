@@ -108,5 +108,5 @@ def test_both_089_views_are_declared_in_every_instance(instance: str) -> None:
         "declaration, so this refuses auto-wiring at boot and takes the whole "
         "process down (OMN-18768). Both views are granted by one statement "
         "block; declare them together. Do not hand-edit the generated block -- "
-        "add the entry to LEGACY_MIGRATION_TABLE_DECLARATIONS and regenerate."
+        "add the entry to VENDORED_TABLE_DECLARATIONS and regenerate."
     )
