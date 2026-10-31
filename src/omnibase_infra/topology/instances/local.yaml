@@ -88,6 +88,7 @@ databases:
               - compaction_receipts
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - delegation_budget_readings
               - delegation_lab_job_outbox
               - delegation_lab_jobs
               - demo_readiness_latest
