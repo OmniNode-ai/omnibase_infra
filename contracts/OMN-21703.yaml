@@ -1,0 +1,92 @@
+schema_version: 1.0.0
+ticket_id: OMN-21703
+title: >-
+  Verification probe timeouts and the check-catalog executors are declared in contracts, not built or timed in code
+summary: >-
+  The contracts_and_di check reported 23 findings in src/omnibase_infra/verification and src/omnibase_infra/validation, among 1228 in src. This change declares the rpk probe timeouts in verification/contract.yaml, builds the check registry's executors from a declared check_catalog.yaml, takes the node-introspection topic from the platform topic suffixes, and deletes the handler-execution probe, which nothing in src calls. 20 findings clear; three remain. The evidence is unit tests that read the contract and the catalog.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21703-slice-probe-timeouts
+    statement: >-
+      The verification probes read their rpk timeouts from the verification contract, and a contract block that omits one fails to load. The check registry builds its executors from the declared check catalog and refuses a handler outside the checks namespace or whose code disagrees with its entry.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the verification probe timeouts and the check catalog of omnibase_infra#5490 are read from contracts and the contracts_and_di count drops as the PR states -- falsifier: uv run pytest tests/unit -q over the touched modules plus the contracts_and_di checker re-run on the PR paths
+  - id: req-omn21703-contract-location
+    statement: >-
+      The acceptance items of omnibase_infra#5490 live in contracts/OMN-21703.yaml and the PR leaves contracts/OMN-21623.yaml as the base branch has it.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the PR's acceptance items live in contracts/OMN-21703.yaml and the PR does not edit contracts/OMN-21623.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21703.yaml and not contracts/OMN-21623.yaml
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The probe settings equal the contract block, a missing timeout fails to load, and the rpk call carries the declared timeout.
+    command: uv run --frozen pytest tests/unit/verification/test_probe_settings.py -q
+  - kind: tests
+    description: >-
+      The registry holds one executor per declared entry and refuses a stray, non-executor or mismatched handler.
+    command: uv run --frozen pytest tests/unit/validation/test_check_catalog_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21703-ac1-probe-timeouts
+    description: >-
+      The probe settings load from the verification contract, a block missing a timeout is refused, and the rpk call carries the declared timeout. Fails at the merge base, where the settings model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/verification/test_probe_settings.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21703-ac2-check-catalog
+    description: >-
+      The check registry is built from the declared catalog and refuses a stray handler. Fails at the merge base, where the catalog entry model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run --frozen pytest tests/unit/validation/test_check_catalog_contract.py tests/unit/validation/test_check_catalog.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21703-deploy-probe-settings
+    description: >-
+      Post-deploy probe: the runtime container loads the probe settings from the verification contract it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.verification.model_verification_probe_settings import load_probe_settings; load_probe_settings()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21703-deploy-contract-catalog-runtime
+    description: >-
+      Hosted post-deploy smoke: a fresh Python runtime loads the shipped settings and all 12 catalog executors in both import orders, rejects unacknowledged security changes, accepts acknowledged changes, and checks artifact files.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/validation/test_contract_catalog_runtime_omn21623.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21703-ac2-contract-location
+    description: >-
+      The PR diff against origin/dev lists contracts/OMN-21703.yaml and does not list contracts/OMN-21623.yaml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'files=$(git diff --name-only origin/dev...HEAD) && printf "%s\n" "$files" | grep -Fx contracts/OMN-21703.yaml && ! printf "%s\n" "$files" | grep -Fx contracts/OMN-21623.yaml'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
