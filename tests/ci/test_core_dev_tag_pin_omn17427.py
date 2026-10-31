@@ -16,8 +16,8 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261030152335-66d35d2283c3"
-COMMIT = "66d35d2283c3011c436799eacb9bce1a434ee6c9"
+TAG = "dev-20261031000524-fc6159b98026"
+COMMIT = "fc6159b9802687dcf8496ac34ff13a409a6d5230"
 # The published floor stays where the moved node APIs need it; the lock moves on.
 VERSION = "0.47.58"
 LOCKED_VERSION = "0.47.60"
