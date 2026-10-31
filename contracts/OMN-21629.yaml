@@ -1,0 +1,44 @@
+# OMN-21629 contract file for omnibase_infra: the runtime health monitor filters the discovered manifest once.
+schema_version: "1.0.0"
+ticket_id: "OMN-21629"
+title: "the runtime health monitor stops failing a cleanly booted dev lane: one ownership filter, and deferred projections are not unattached"
+summary: "The health monitor's discovery shim applied the runtime-profile ownership filter and _discover_contracts_for_runtime_profile applied it again. Since OMN-19513 the filter refuses an ONEX_RUNTIME_NODE_EXCLUSION that names a contract the manifest lacks, and the second pass always lacks the contract the first pass excluded. The dev lane's main runtime excludes projection_claude_hook_events, so every health check raised RuntimeHostError, discovery_errors read CRITICAL, /health answered unhealthy and every lane receipt failed its health_dimensions check. The shim now returns the unfiltered manifest and the one filter runs after it."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21629-health-monitor-single-filter
+    statement: "The runtime health monitor applies the runtime-profile ownership filter to the discovered manifest exactly once, so a deployment node exclusion does not make its discovery check raise."
+    acceptance:
+      - id: AC1
+        statement: "AC1: with ONEX_RUNTIME_NODE_EXCLUSION naming a discovered contract, _discover_contracts_for_runtime_profile returns the manifest without it and with no errors, and the discovery shim returns the unfiltered manifest -- falsifier: uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -k TestDiscoverContractsHelper fails 3 of 3 at origin/dev 9de6fcbd3 with RuntimeHostError ONEX_RUNTIME_NODE_EXCLUSION names undiscovered contracts"
+  - id: req-omn21629-demand-deferred-not-unattached
+    statement: "A projection the runtime deferred to its first request (OMN-18087) is out of the projection_attachment scope until a record starts it, so a boot with idle projections does not read DEGRADED; once started it is judged by the live registry again."
+    acceptance:
+      - id: AC2
+        statement: "AC2: the topic demand source reports a watched topic as idle until its first record and clears it on that record and on stop, and the health monitor reports projection_attachment HEALTHY for a projection whose topics are all idle-watched while the same projection off the idle set still degrades it -- falsifier: uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py fails at origin/dev 9de6fcbd3, which has no idle_watched_topics"
+evidence_requirements:
+  - kind: tests
+    description: "The discovery shim returns the unfiltered manifest, the one filter runs once, and a real node exclusion over a real manifest does not raise."
+    command: "uv run pytest tests/unit/services/test_service_runtime_health_monitor.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "A projection whose topics all wait for a first record is out of the attachment scope, and the demand source keeps the idle set."
+    command: "uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: on the dev lane after a deploy at this head, the main runtime's /health reports the discovery_errors dimension HEALTHY rather than CRITICAL with RuntimeHostError."
+    command: "deploy: curl -s http://host.docker.internal:8085/health | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[v for v in d[\"details\"][\"runtime_health\"][\"dimensions\"] if v[\"name\"]==\"discovery_errors\"][0]; assert x[\"status\"]==\"HEALTHY\", x'"
+dod_evidence:
+  - id: dod-001
+    description: "The discovery shim returns the unfiltered manifest and a node exclusion does not make the health check raise."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/services/test_service_runtime_health_monitor.py tests/unit/services/test_runtime_health_monitor_profile_read.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "A projection whose topics all wait for a first record is out of the attachment scope, and the demand source keeps the idle set."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/handlers/test_omn18087_handler_kafka_topic_demand_source.py tests/unit/runtime/health/test_omn16994_projection_liveness.py -q -p no:cacheprovider'

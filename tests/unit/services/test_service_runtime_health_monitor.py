@@ -31,6 +31,9 @@ from omnibase_infra.models.health.model_runtime_health_check_event import (
 from omnibase_infra.models.health.model_runtime_health_dimension import (
     ModelRuntimeHealthDimension,
 )
+from omnibase_infra.models.runtime.model_runtime_node_selection import (
+    ENV_RUNTIME_NODE_EXCLUSION,
+)
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -42,6 +45,7 @@ from omnibase_infra.services.service_runtime_health_monitor import (
     ConsumerGroupSnapshot,
     ServiceRuntimeHealthMonitor,
     _discover_contracts,
+    _discover_contracts_for_runtime_profile,
     _expected_consumer_groups_from_manifest,
     _worst,
 )
@@ -102,11 +106,30 @@ class TestWorstHelper:
 
 class TestDiscoverContractsHelper:
     @pytest.mark.unit
-    def test_filters_manifest_to_runtime_profile(self):
+    def test_returns_the_unfiltered_manifest(self):
+        """OMN-21629: the shim does not filter; the one filter runs after it."""
         raw_manifest = _make_manifest(contracts=9, errors=0, subscribe_topics=["a"])
-        filtered_manifest = _make_manifest(
-            contracts=2, errors=0, subscribe_topics=["b"]
+
+        with (
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discovery.discover_contracts",
+                return_value=raw_manifest,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.profile_ownership.filter_manifest_for_runtime_profile",
+            ) as mock_filter,
+        ):
+            result = _discover_contracts()
+
+        assert result is raw_manifest
+        mock_filter.assert_not_called()
+
+    @pytest.mark.unit
+    def test_filters_manifest_to_runtime_profile_exactly_once(self):
+        raw_manifest = ModelAutoWiringManifest(
+            contracts=(_make_discovered_contract(name="node_a_omn21629"),)
         )
+        filtered_manifest = ModelAutoWiringManifest(contracts=())
 
         with (
             patch.dict(os.environ, {"RUNTIME_PROFILE": "effects"}, clear=False),
@@ -116,16 +139,58 @@ class TestDiscoverContractsHelper:
             ),
             patch(
                 "omnibase_infra.runtime.auto_wiring.profile_ownership.filter_manifest_for_runtime_profile",
-                return_value=SimpleNamespace(manifest=filtered_manifest),
+                return_value=SimpleNamespace(
+                    manifest=filtered_manifest,
+                    skipped_contracts=(),
+                    runtime_profile="effects",
+                ),
             ) as mock_filter,
         ):
-            result = _discover_contracts()
+            result = _discover_contracts_for_runtime_profile()
 
         assert result is filtered_manifest
         mock_filter.assert_called_once_with(
             manifest=raw_manifest,
             runtime_profile="effects",
         )
+
+    @pytest.mark.unit
+    def test_a_node_exclusion_does_not_refuse_the_health_check(self):
+        """OMN-21629: the dev lane's exclusion reported discovery CRITICAL.
+
+        The main runtime runs with ``ONEX_RUNTIME_NODE_EXCLUSION`` naming the
+        hook-events projection (OMN-19513). Filtering twice made the second
+        pass refuse the name the first pass had dropped, so the health check
+        raised ``RuntimeHostError`` on every run against a cleanly wired
+        runtime. This runs the real filter over a real manifest.
+        """
+        handed_off = "node_handed_off_omn21629"
+        kept = "node_kept_omn21629"
+        raw_manifest = ModelAutoWiringManifest(
+            contracts=(
+                _make_discovered_contract(name=handed_off),
+                _make_discovered_contract(name=kept),
+            )
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "RUNTIME_PROFILE": "main",
+                    ENV_RUNTIME_NODE_EXCLUSION: handed_off,
+                },
+                clear=False,
+            ),
+            patch(
+                "omnibase_infra.runtime.auto_wiring.discovery.discover_contracts",
+                return_value=raw_manifest,
+            ),
+        ):
+            result = _discover_contracts_for_runtime_profile()
+
+        assert {contract.name for contract in result.contracts} == {kept}
+        assert result.errors == ()
 
 
 # =============================================================================
