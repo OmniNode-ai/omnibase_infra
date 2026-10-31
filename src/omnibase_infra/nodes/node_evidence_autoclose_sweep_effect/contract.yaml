@@ -545,6 +545,8 @@ handler_routing:
         - companions_scanned
         - backfill_pool_size
         - backfill_candidates_selected
+        - contract_pool_size
+        - contract_candidates_selected
         - bindings_extracted
         - tickets_flipped
         - tickets_gap_posted
@@ -714,6 +716,7 @@ io_operations:
       - lookback_hours
       - backfill_lookback_hours
       - backfill_max_candidates
+      - contract_enumeration_max_candidates
       - backfill_pool_size
       - backfill_rotation_minutes
       # OMN-17658. `scheduled_apply` is THE arming authority for unattended
@@ -769,6 +772,8 @@ io_operations:
       - companions_scanned
       - backfill_pool_size
       - backfill_candidates_selected
+      - contract_pool_size
+      - contract_candidates_selected
       - bindings_extracted
       - tickets_flipped
       - tickets_gap_posted

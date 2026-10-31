@@ -38,6 +38,12 @@ class EnumEvidenceAutocloseArm(StrEnum):
     # enumerated, which is the same class of claim as a label that reads as a
     # fact and is not one.
     OFFER = "offer"
+    # OMN-21731. The ticket-contract arm. Like OFFER it makes no freshness
+    # claim: it enumerates the operator's open tickets that hold a merged
+    # contract and examines a bounded rotating slice of them, whatever age their
+    # merge is. Its coverage claim is only "this slice of tickets was examined on
+    # this tick".
+    CONTRACT = "contract"
 
 
 __all__ = ["EnumEvidenceAutocloseArm"]

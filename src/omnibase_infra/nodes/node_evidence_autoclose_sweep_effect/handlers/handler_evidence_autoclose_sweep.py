@@ -456,6 +456,26 @@ query InProgressIssues($after: String, $since: DateTimeOrDuration!) {
 }
 """
 
+# OMN-21731. The ticket-contract arm's census: the identifiers of the KEY'S OWN
+# open tickets. `isMe` is the collaborator fence: a ticket assigned to anyone
+# else is not in this list, so no arm built on it can offer, comment on or move
+# a collaborator's ticket.
+_OPEN_TICKETS_QUERY = """
+query OpenTickets($after: String) {
+  issues(
+    first: 250
+    after: $after
+    filter: {
+      assignee: { isMe: { eq: true } }
+      state: { type: { nin: ["completed", "canceled"] } }
+    }
+  ) {
+    pageInfo { hasNextPage endCursor }
+    nodes { identifier }
+  }
+}
+"""
+
 _ISSUE_UPDATE_STATE_MUTATION = """
 mutation UpdateIssueState($issueId: String!, $stateId: String!) {
   issueUpdate(id: $issueId, input: { stateId: $stateId }) {
@@ -620,6 +640,8 @@ _MAX_COMMENT_PAGES = 5
 # OMN-18489. 50 issues a page; the census has been 360 and a leg that cannot
 # read the whole of it must refuse rather than demote on a fragment.
 _MAX_IN_PROGRESS_PAGES = 20
+# OMN-21731. 250 per page: 40 pages is 10,000 open tickets, ~4x today's census.
+_MAX_OPEN_TICKET_PAGES = 40
 
 # OMN-16106, class (c). Signals that a dod_verify check failed because the LIVE
 # SURFACE it reads was unreachable, rather than because the behaviour it
@@ -2731,6 +2753,42 @@ class _LinearClient:
             "pages; a partial census is not read as the whole."
         )
 
+    async def fetch_open_ticket_ids(self) -> tuple[frozenset[str] | None, str]:
+        """Identifiers of the key's own tickets that are not completed or canceled.
+
+        OMN-21731. ``(None, error)`` on any failed page, a malformed connection
+        or a cursor the connection did not supply: a partial census would rank
+        a partial pool and read as the whole. Hitting the page cap is a failure
+        for the same reason.
+        """
+        found: set[str] = set()
+        cursor: str | None = None
+        for _ in range(_MAX_OPEN_TICKET_PAGES):
+            data = await self._query(_OPEN_TICKETS_QUERY, {"after": cursor})
+            if data is None:
+                detail = f" ({self.last_error})" if self.last_error else ""
+                return None, f"Failed to fetch open tickets from Linear.{detail}"
+            connection = data.get("issues")
+            nodes = connection.get("nodes") if isinstance(connection, dict) else None
+            if not isinstance(connection, dict) or not isinstance(nodes, list):
+                return None, "Malformed issues connection in Linear response."
+            for node in nodes:
+                identifier = node.get("identifier") if isinstance(node, dict) else None
+                if isinstance(identifier, str) and identifier:
+                    found.add(identifier.strip().upper())
+            page_info = connection.get("pageInfo")
+            page_info = page_info if isinstance(page_info, dict) else {}
+            if not page_info.get("hasNextPage"):
+                return frozenset(found), ""
+            end_cursor = page_info.get("endCursor")
+            if not isinstance(end_cursor, str) or not end_cursor:
+                return None, "Linear returned no cursor for the next issues page."
+            cursor = end_cursor
+        return None, (
+            f"The open-ticket census is longer than {_MAX_OPEN_TICKET_PAGES} "
+            "pages; a partial census is not read as the whole."
+        )
+
     async def update_issue_state(self, issue_id: str, state_id: str) -> bool:
         """Flip an issue to the given workflow state. False on any failure."""
         data = await self._query(
@@ -3207,6 +3265,111 @@ class HandlerEvidenceAutocloseSweep:
             "files": [f"contracts/{wanted}.yaml"],
         }, ""
 
+    async def _contract_arm_candidates(
+        self,
+        request: ModelEvidenceAutocloseSweepRequest,
+        now: datetime,
+        excluded: set[str],
+    ) -> tuple[
+        list[tuple[dict[str, object], str]],
+        int,
+        list[ModelEvidenceAutocloseOutcome],
+    ]:
+        """The ticket-contract arm (OMN-21731): ``(candidates, pool_size, outcomes)``.
+
+        Windows over merged PRs never reach a ticket whose PR merged longer ago.
+        This arm enumerates TICKETS: the key's own open tickets (the Linear
+        census, ``isMe``) that hold a ``contracts/<ticket>.yaml`` on a clone's
+        default branch, ranked by number, a bounded slice of which rotates on
+        ``backfill_rotation_minutes``. Each ticket's newest merged PR is then
+        resolved from the clones exactly as an offer is, and only a real merged
+        PR is a candidate: a contract with no PR naming it has nothing to bind
+        a verdict to, and is recorded rather than dropped.
+
+        Every refusal that matters is upstream of the write and unchanged: the
+        candidates join the same per-ticket pipeline as the window arms. A
+        census that cannot be read yields one ERROR_LINEAR_API outcome and no
+        candidates, and the other arms still run.
+        """
+        width = request.contract_enumeration_max_candidates
+        if width <= 0 or not request.clone_root:
+            return [], 0, []
+        root = Path(request.clone_root)
+        holders = offer_companion_sources.list_contract_tickets(
+            root, "onex_change_control", self._run_git
+        )
+        if not holders:
+            return [], 0, []
+        open_ids, census_error = await self._linear.fetch_open_ticket_ids()
+        if open_ids is None:
+            return (
+                [],
+                0,
+                [
+                    ModelEvidenceAutocloseOutcome(
+                        decision=EnumEvidenceAutocloseDecision.ERROR_LINEAR_API,
+                        reason=(
+                            "The ticket-contract arm could not read the open-ticket "
+                            f"census: {census_error} It offered nothing this run; "
+                            "the forward and backfill arms were not affected."
+                        ),
+                        enumeration_arm=EnumEvidenceAutocloseArm.CONTRACT,
+                    )
+                ],
+            )
+        pool = sorted(
+            (
+                ticket
+                for ticket in holders
+                if ticket in open_ids and ticket not in excluded
+            ),
+            key=lambda ticket: int(ticket.split("-", 1)[1]),
+        )
+        selected = _rotating_slice(
+            pool, width, _rotation_tick(now, request.backfill_rotation_minutes)
+        )
+        owner = request.evidence_repo.split("/", 1)[0]
+        window_cutoff = (
+            now - timedelta(hours=request.backfill_lookback_hours)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        resolved: list[tuple[dict[str, object], str]] = []
+        outcomes: list[ModelEvidenceAutocloseOutcome] = []
+        for ticket in selected:
+            best: dict[str, object] | None = None
+            for clone in sorted(root.iterdir()):
+                if clone.name == "onex_change_control" or not (clone / ".git").exists():
+                    continue
+                repo = f"{owner}/{clone.name}"
+                for found in self._local_offer_candidates(repo, ticket, request):
+                    if best is None or (
+                        str(found.get("merged_at") or ""),
+                        self._gate.as_int(found.get("number")),
+                    ) > (
+                        str(best.get("merged_at") or ""),
+                        self._gate.as_int(best.get("number")),
+                    ):
+                        best = {**found, _EVIDENCE_REPO_KEY: repo}
+            if best is None or self._gate.as_int(best.get("number")) <= 0:
+                outcomes.append(
+                    ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket,
+                        decision=EnumEvidenceAutocloseDecision.SKIPPED_NO_OFFER_COMPANION,
+                        reason=(
+                            f"{ticket} is open and holds a contract on a default "
+                            "branch, but no merged pull request in the clones this "
+                            "run holds names it, so there is nothing to bind a "
+                            "verdict to. Recorded rather than dropped."
+                        ),
+                        enumeration_arm=EnumEvidenceAutocloseArm.CONTRACT,
+                    )
+                )
+                continue
+            if str(best.get("merged_at") or "") >= window_cutoff:
+                # Inside the backfill window: that arm rotates over it.
+                continue
+            resolved.append((best, ticket))
+        return resolved, len(pool), outcomes
+
     async def _fetch_pr_files(
         self, repo: str, number: int, gh_timeout_seconds: int
     ) -> tuple[list[str], str]:
@@ -3347,6 +3510,8 @@ class HandlerEvidenceAutocloseSweep:
         backfill_slice: list[dict[str, object]] = []
         backfill_error = ""
         candidates: list[tuple[dict[str, object], EnumEvidenceAutocloseArm]] = []
+        contract_pool_size = 0
+        contract_selected = 0
         # PR number -> the ticket the CALLER nominated it for. Empty for every
         # window-arm candidate, because no caller nominated those.
         offer_bindings: dict[int, str] = {}
@@ -3543,6 +3708,37 @@ class HandlerEvidenceAutocloseSweep:
                 + [(pr, EnumEvidenceAutocloseArm.FORWARD) for pr in product_prs]
                 + [(pr, EnumEvidenceAutocloseArm.BACKFILL) for pr in backfill_slice]
             )
+
+            # OMN-21731. The ticket-contract arm, last: the window arms keep the
+            # freshest verdict for a ticket they both reach (`seen_tickets`).
+            # Its candidates are registered as nominations, so the same
+            # changed-file guard that protects an offer refuses a companion
+            # whose files bind a different ticket. A PR number two tickets
+            # resolve to is dropped for both: the binding would be a guess.
+            (
+                contract_resolved,
+                contract_pool_size,
+                contract_outcomes,
+            ) = await self._contract_arm_candidates(
+                request, now, _excluded_tickets(request)
+            )
+            outcomes.extend(contract_outcomes)
+            claimed_numbers: dict[int, str] = {}
+            ambiguous_numbers: set[int] = set()
+            for contract_pr, contract_ticket in contract_resolved:
+                number_key = self._gate.as_int(contract_pr.get("number"))
+                if number_key in claimed_numbers and (
+                    claimed_numbers[number_key] != contract_ticket
+                ):
+                    ambiguous_numbers.add(number_key)
+                claimed_numbers[number_key] = contract_ticket
+            for contract_pr, contract_ticket in contract_resolved:
+                number_key = self._gate.as_int(contract_pr.get("number"))
+                if number_key in ambiguous_numbers or number_key in offer_bindings:
+                    continue
+                offer_bindings[number_key] = contract_ticket
+                contract_selected += 1
+                candidates.append((contract_pr, EnumEvidenceAutocloseArm.CONTRACT))
 
         for pr, arm in candidates:
             number = self._gate.as_int(pr.get("number"))
@@ -3979,7 +4175,10 @@ class HandlerEvidenceAutocloseSweep:
             # reported 0 companions scanned on a run that adjudicated three
             # nominated tickets would understate exactly what the run did.
             companions_scanned=(
-                len(companions) + len(product_prs) + len(backfill_slice)
+                len(companions)
+                + len(product_prs)
+                + len(backfill_slice)
+                + contract_selected
                 if not offered
                 else sum(
                     1
@@ -3989,6 +4188,8 @@ class HandlerEvidenceAutocloseSweep:
             ),
             backfill_pool_size=len(backfill_pool),
             backfill_candidates_selected=len(backfill_slice),
+            contract_pool_size=contract_pool_size,
+            contract_candidates_selected=contract_selected,
             bindings_extracted=bindings_extracted,
             tickets_flipped=flipped,
             tickets_gap_posted=gap_posted,

@@ -252,6 +252,9 @@ skills:
       # advances on -- set it to the caller's real schedule interval.
       - {name: backfill-lookback-hours, payload_field: backfill_lookback_hours, arg_type: integer}
       - {name: backfill-max-candidates, payload_field: backfill_max_candidates, arg_type: integer}
+      # OMN-21731. The ticket-contract arm: the per-run cap on open tickets with a
+      # merged contract it offers. 0 turns the arm off.
+      - {name: contract-enumeration-max-candidates, payload_field: contract_enumeration_max_candidates, arg_type: integer}
       - {name: backfill-pool-size, payload_field: backfill_pool_size, arg_type: integer}
       - {name: backfill-rotation-minutes, payload_field: backfill_rotation_minutes, arg_type: integer}
       # OMN-17658. The ARMING SPLIT. `--trigger` carries the FACT (what

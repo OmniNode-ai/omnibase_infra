@@ -100,6 +100,29 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "widen what the flip predicate accepts."
         ),
     )
+    # OMN-21731. The ticket-contract arm: it enumerates TICKETS, not merge
+    # windows. The forward window (6 h) and the backfill window (168 h) are
+    # windows over merged PRs, so a ticket whose PR merged longer ago was never
+    # offered: 598 of the 722 done-not-closed tickets of the 2026-10-31 triage.
+    # This arm lists the key's own open tickets, intersects them with the
+    # `contracts/<ticket>.yaml` files on the default branch of the clones the run
+    # holds, and offers a rotating slice through the offer resolution. 10 is
+    # sized with the backfill width against the workflow timeout in
+    # tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21723_contract_enumeration.py.
+    # 0 turns the arm off. It never widens what the flip predicate accepts.
+    contract_enumeration_max_candidates: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+        description=(
+            "OMN-21731. Hard per-run bound on how many open tickets with a "
+            "merged contract the ticket-contract arm offers to the same "
+            "downstream pipeline, rotating on `backfill_rotation_minutes`. 0 "
+            "turns the arm off. Tickets not assigned to the key's user are "
+            "never listed. It widens which tickets are asked and nothing about "
+            "what counts as proven."
+        ),
+    )
     backfill_pool_size: int = Field(
         default=200,
         ge=1,
