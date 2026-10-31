@@ -13,6 +13,7 @@
 #
 # Related Tickets:
 #   - OMN-20822: this node
+#   - OMN-20823: broker.principal.describe, the mint audit's read-only ACL read
 #   - OMN-20821: the plan compute node whose output this node applies
 #   - OMN-20150: one command takes a Mac to lab-ready with its bus identity
 name: "node_broker_principal_effect"
@@ -97,6 +98,22 @@ handler_routing:
         - verified
         - visible_topics
         - reason
+    - operation: "broker.principal.describe"
+      handler:
+        name: "HandlerBrokerPrincipalDescribe"
+        module: "omnibase_infra.handlers.handler_broker_principal_describe"
+      description: >
+        Read every ACL the broker holds for the principal, DENY and host-scoped bindings included; no password, no mutation (OMN-20823).
+
+      supported_operations:
+        - "broker.principal.describe"
+      input_model:
+        name: "ModelBrokerPrincipalDescribeRequest"
+        module: "omnibase_infra.models.developer_principal.model_broker_principal_describe_request"
+        description: "The principal to read."
+      output_fields:
+        - principal
+        - acls
 io_operations:
   - operation: "broker.principal.list"
     description: "List the developer principals under a prefix."
@@ -130,6 +147,13 @@ io_operations:
       - verified
       - visible_topics
       - reason
+  - operation: "broker.principal.describe"
+    description: "Read one developer principal's ACLs, changing nothing."
+    input_fields:
+      - principal
+    output_fields:
+      - principal
+      - acls
 capabilities:
   - name: "broker.principal.apply"
     description: "Create, grant and verify a developer principal on a broker in the mint plan's fixed order."
@@ -157,5 +181,6 @@ metadata:
     - developer
   related_tickets:
     - "OMN-20822"
+    - "OMN-20823"
     - "OMN-20821"
     - "OMN-20150"

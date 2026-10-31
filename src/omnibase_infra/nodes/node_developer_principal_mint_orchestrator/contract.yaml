@@ -1,0 +1,163 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeDeveloperPrincipalMintOrchestrator
+#
+# Mints (converge) or audits one developer machine's principal on the broker the
+# developer runs. `make mint-local` runs it with `onex node` inside the stack's
+# runtime-effects container, never over the broker it secures: the first
+# principal has no login on that bus, and a request over the bus would carry the
+# password (plan D5, accepted as plan section 13 question 1). The handler
+# sequences node_broker_principal_effect and node_developer_principal_plan_compute
+# in process. The request names the password variable, never its value, and the
+# completion event carries no secret.
+#
+# Related Tickets:
+#   - OMN-20823: this node and make mint-local
+#   - OMN-20822: the broker principal effect it sequences
+#   - OMN-20821: the plan compute node it sequences
+#   - OMN-20150: one command takes a Mac to lab-ready with its bus identity
+name: "node_developer_principal_mint_orchestrator"
+contract_name: "node_developer_principal_mint_orchestrator"
+node_name: "node_developer_principal_mint_orchestrator"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "ORCHESTRATOR_GENERIC"
+description: >
+  Mint or audit one developer machine's broker principal: converge lists the broker's principals, plans, applies and verifies, stopping at the first failure; audit lists, plans and reads the principal's ACLs, mutating nothing.
+
+runtime_profiles:
+  - local-dev
+terminal_event: "onex.evt.omnibase-infra.developer-principal-mint-completed.v1"
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1"
+  publish_topics:
+    - "onex.evt.omnibase-infra.developer-principal-mint-completed.v1"
+input_model:
+  name: "ModelDeveloperPrincipalMintRequest"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_mint_request"
+  description: "Mode, declaration, login, device, Admin API URL and the name of the password variable."
+output_model:
+  name: "ModelDeveloperPrincipalMintResult"
+  module: "omnibase_infra.models.developer_principal.model_developer_principal_mint_result"
+  description: "Success or failure with the step that stopped it, the action, and the ACLs outside the plan; no password."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "developer_principal.mint"
+      handler:
+        name: "HandlerDeveloperPrincipalMint"
+        module: "omnibase_infra.handlers.handler_developer_principal_mint"
+      event_model:
+        name: "ModelDeveloperPrincipalMintRequest"
+        module: "omnibase_infra.models.developer_principal.model_developer_principal_mint_request"
+      output_events:
+        - "ModelDeveloperPrincipalMintResult"
+      description: >
+        Converge: list, plan, apply, verify. Audit: list, plan, describe. A refused plan makes no apply call and a refused apply no verify call.
+
+io_operations:
+  - operation: "developer_principal.mint"
+    description: "Mint or audit one developer principal."
+    input_fields:
+      - mode
+      - declaration_yaml
+      - derived_documents
+      - login
+      - device
+      - admin_url
+      - password_env_ref
+    output_fields:
+      - status
+      - principal
+      - action
+      - exists
+      - verified
+      - extra_acls
+      - missing_acls
+      - failed_step
+workflow_coordination:
+  workflow_definition:
+    workflow_metadata:
+      workflow_name: "developer_principal_mint_workflow"
+      workflow_version:
+        major: 1
+        minor: 0
+        patch: 0
+      description: "In-process steps of one mint; the stage nodes have no bus surface."
+    execution_graph:
+      nodes:
+        - node_id: "list"
+          node_type: EFFECT_GENERIC
+          description: "List the broker's principals under the prefix (Admin API check)"
+          step_config:
+            node: "node_broker_principal_effect"
+        - node_id: "plan"
+          node_type: COMPUTE_GENERIC
+          description: "Plan the principal, its action and its grants"
+          depends_on: ["list"]
+          step_config:
+            node: "node_developer_principal_plan_compute"
+        - node_id: "apply_or_describe"
+          node_type: EFFECT_GENERIC
+          description: "Converge: apply the plan. Audit: read the principal's ACLs"
+          depends_on: ["plan"]
+          step_config:
+            node: "node_broker_principal_effect"
+        - node_id: "verify"
+          node_type: EFFECT_GENERIC
+          description: "Converge only: verify the grants and the login"
+          depends_on: ["apply_or_describe"]
+          step_config:
+            node: "node_broker_principal_effect"
+    coordination_rules:
+      execution_mode: sequential
+      parallel_execution_allowed: false
+      max_parallel_branches: 1
+      failure_recovery_strategy: fail_fast
+      max_retries: 0
+      timeout_ms: 120000
+published_events:
+  - topic: "onex.evt.omnibase-infra.developer-principal-mint-completed.v1"
+    event_type: "DeveloperPrincipalMintCompleted"
+    message_category: "EVENT"
+    description: "Terminal event of one mint or audit; status success or failure. Carries no secret."
+capabilities:
+  - name: "developer_principal.mint"
+    description: "Mint or audit a developer machine's broker principal in process."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - "BrokerPrincipalError"
+metadata:
+  description: >
+    The developer bus mint (plan T4). Declares the local-dev runtime profile, which no deployed runtime carries, so main and effects never attach it; it runs through onex node.
+
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-10-30"
+  updated: "2026-10-30"
+  tags:
+    - orchestrator
+    - broker
+    - principal
+    - developer
+  related_tickets:
+    - "OMN-20823"
+    - "OMN-20822"
+    - "OMN-20821"
+    - "OMN-20150"

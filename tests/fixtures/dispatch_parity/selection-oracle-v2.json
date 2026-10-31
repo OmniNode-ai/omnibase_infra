@@ -582,6 +582,22 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833": {
+      "category": "command",
+      "contract_name": "node_developer_principal_mint_orchestrator",
+      "event_model_module": "omnibase_infra.models.developer_principal.model_developer_principal_mint_request",
+      "event_model_name": "ModelDeveloperPrincipalMintRequest",
+      "handler_id": "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833",
+      "handler_module": "omnibase_infra.handlers.handler_developer_principal_mint",
+      "handler_name": "HandlerDeveloperPrincipalMint",
+      "message_types": [
+        "ModelDeveloperPrincipalMintRequest",
+        "omnibase-infra.developer-principal-mint-requested",
+        "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_dlq_replay_effect.HandlerDlqReplay.replay_dlq_4314b56c": {
       "category": "event",
       "contract_name": "node_dlq_replay_effect",
@@ -3944,6 +3960,21 @@
       },
       "topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1"
     },
+    "P1a::onex.cmd.omnibase-infra.developer-principal-mint-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.developer-principal-mint-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.omnibase-infra.v1",
+        "message_category": "command",
+        "message_type": "omnibase-infra.developer-principal-mint-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1"
+    },
     "P1a::onex.cmd.omnibase-infra.fault-inject-fixture.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5437,6 +5468,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.delegation-routing-request.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.developer-principal-mint-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1"
     },
     "P1b::onex.cmd.omnibase-infra.fault-inject-fixture.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7247,6 +7293,26 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
+    },
+    "P4::dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833::onex.cmd.omnibase-infra.developer-principal-mint-requested.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833",
+      "event_model": "omnibase_infra.models.developer_principal.model_developer_principal_mint_request.ModelDeveloperPrincipalMintRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "omnibase-infra.developer-principal-mint-requested",
+        "payload": "ModelDeveloperPrincipalMintRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.developer-principal-mint-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1"
     },
     "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
       "construct_only": true,
@@ -25021,6 +25087,16 @@
       "route_id": "route.auto.node_delegation_chain_ledger_effect.HandlerDelegationChainLedger.delegation_chain_record_c603af8e.onex_evt_omnimarket_delegate_skill_completed_v1",
       "topic": "onex.evt.omnimarket.delegate-skill-completed.v1",
       "topic_pattern": "*.evt.omnimarket.delegate-skill-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_developer_principal_mint_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833",
+      "handler_id": "dispatcher.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833",
+      "message_category": "command",
+      "route_id": "route.auto.node_developer_principal_mint_orchestrator.HandlerDeveloperPrincipalMint.developer_principal_mint_cdef8833.onex_cmd_omnibase_infra_developer_principal_mint_requested_v1",
+      "topic": "onex.cmd.omnibase-infra.developer-principal-mint-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.developer-principal-mint-requested.*",
       "type_scoped": true
     },
     {

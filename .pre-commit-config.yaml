@@ -85,6 +85,16 @@ repos:
         files: ^(src/omnibase_infra/nodes/node_broker_principal_effect/|src/omnibase_infra/handlers/handler_broker_principal_[a-z]+\.py$|src/omnibase_infra/models/developer_principal/|src/omnibase_infra/protocols/protocol_broker_principal_[a-z_]+\.py$|tests/unit/nodes/node_broker_principal_effect/)
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20823: the mint orchestrator's order and audit, make mint-local's lock,
+      # tenant, password and terminal handling against stubs, and lane local's
+      # refusal without a stored login.
+      - id: developer-principal-mint
+        name: Developer principal mint and make mint-local (OMN-20823)
+        entry: uv run --frozen pytest tests/unit/nodes/node_developer_principal_mint_orchestrator tests/unit/infra/test_make_mint_local.py tests/unit/cli/test_delegate_lane_local_omn20823.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(Makefile$|src/omnibase_infra/nodes/node_developer_principal_mint_orchestrator/|src/omnibase_infra/handlers/handler_(developer_principal_mint|broker_principal_[a-z]+)\.py$|src/omnibase_infra/models/developer_principal/|src/omnibase_infra/cli/delegate_lane_credentials\.py$|deploy/local/developer-principal-grants\.yaml$|tests/unit/nodes/node_developer_principal_mint_orchestrator/|tests/unit/infra/test_make_mint_local\.py$|tests/unit/cli/test_delegate_lane_local_omn20823\.py$)
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov

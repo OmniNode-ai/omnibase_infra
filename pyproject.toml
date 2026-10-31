@@ -126,6 +126,9 @@ dependencies = [
     # >=50.0.0,<51.0.0 in the same commit that bumps omnibase-core off 0.46.8.
     "cryptography>=46.0.3,<51.0.0",
     "sigstore>=4.0.0,<5.0.0",
+    # pyasn1 0.6.5 fixes the four HIGH-severity ASN.1 decoding DoS advisories
+    # blocking Lockfile CVE Scan (OMN-16228); sigstore pulls it transitively.
+    "pyasn1>=0.6.5,<0.7.0",
     # packaging: PEP 440 version parsing/comparison for the release-identity
     # fitness node (node_release_identity_compute, OMN-14471). Previously a
     # transitive dependency; now a direct src import, so it is declared here.
@@ -652,6 +655,7 @@ node_delegation_chain_ledger_effect = "omnibase_infra.nodes.node_delegation_chai
 node_delta_bundle_effect = "omnibase_infra.nodes.node_delta_bundle_effect"
 node_delta_metrics_effect = "omnibase_infra.nodes.node_delta_metrics_effect"
 node_dev_boot_guard_effect = "omnibase_infra.nodes.node_dev_boot_guard_effect"
+node_developer_principal_mint_orchestrator = "omnibase_infra.nodes.node_developer_principal_mint_orchestrator"
 node_developer_principal_plan_compute = "omnibase_infra.nodes.node_developer_principal_plan_compute"
 node_dlq_depth_evaluate_compute = "omnibase_infra.nodes.node_dlq_depth_evaluate_compute"
 node_dlq_depth_monitor_effect = "omnibase_infra.nodes.node_dlq_depth_monitor_effect"
