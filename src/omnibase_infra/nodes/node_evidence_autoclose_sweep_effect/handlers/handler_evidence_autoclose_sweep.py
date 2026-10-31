@@ -3943,6 +3943,16 @@ class HandlerEvidenceAutocloseSweep:
             )
         )
 
+        enumeration_errors: list[str] = []
+        if backfill_error:
+            enumeration_errors.append(
+                f"Backfill enumeration failed: {backfill_error}. The forward "
+                "window's decisions below are unaffected and complete; this "
+                "run made no coverage claim about the backfill pool."
+            )
+        if in_progress_demotion is not None and not in_progress_demotion.success:
+            enumeration_errors.append(in_progress_demotion.error_message)
+
         return ModelEvidenceAutocloseSweepResult(
             correlation_id=correlation_id,
             # OMN-17658. `dry_run` answers "could this run have written?", so a
@@ -3965,14 +3975,8 @@ class HandlerEvidenceAutocloseSweep:
             # blast radius larger than the coverage it buys. `success=False`
             # plus the message is what makes the partial coverage legible —
             # this run's backfill claim is void, its forward claim is not.
-            success=not backfill_error,
-            error_message=(
-                f"Backfill enumeration failed: {backfill_error}. The forward "
-                "window's decisions below are unaffected and complete; this "
-                "run made no coverage claim about the backfill pool."
-                if backfill_error
-                else ""
-            ),
+            success=not enumeration_errors,
+            error_message=" ".join(enumeration_errors),
             # OMN-16106 Item 1. In offer mode `companions` and `backfill_slice`
             # are both empty by construction -- no window was enumerated -- so
             # this counts the directly-resolved offers instead. A receipt that
