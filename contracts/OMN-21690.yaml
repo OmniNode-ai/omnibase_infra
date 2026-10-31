@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21690
+title: omnibase_infra contracts_and_di literal_host, literal_ip and literal_port burn-down, slice rf1135-c3
+summary: Nine source files held a literal loopback or bind-all address, a local broker or cache host, or the runtime health port as a default. This change declares them in models/endpoint_defaults/endpoint_defaults.yaml, loads them through ModelEndpointDefaults (no field defaults, so an omitted value fails to load), and reads them where those files held the literals. Every default keeps its previous value. Three findings of the rules sit in files that another change holds or that must stay standard-library only, and stay.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21690-slice-endpoint-defaults
+    statement: Infra services take their fallback bind addresses, loopback host names, local broker and cache endpoints and runtime health port from the declared endpoint defaults, and a defaults block that omits a value fails to load.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contracts_and_di count for literal_host, literal_ip and literal_port over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule'
+      - id: AC2
+        statement: 'AC2: every moved value is taken through an injected parameter bound from the node contract or overlay and none remains hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths'
+evidence_requirements:
+  - kind: tests
+    description: The contracts_and_di check reports no host, address or port finding in the slice files and reports a planted file.
+    command: uv run --frozen pytest tests/unit/validation/test_endpoint_defaults_contracts_and_di_omn21690.py -q -p no:cacheprovider
+  - kind: tests
+    description: The loaded defaults equal the declared file, each omitted key fails to load, and each consumer carries the declared value.
+    command: uv run --frozen pytest tests/unit/models/endpoint_defaults -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21690-ac1-binding-check-clean
+    description: The contracts_and_di check reports no host, address or port finding in the slice files and reports a planted file. Fails at the merge base, where those files hold 15 such findings.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_endpoint_defaults_contracts_and_di_omn21690.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21690-ac2-endpoint-defaults-consumers
+    description: The defaults load from the declared file, an omitted key is refused, and the artifact reconcile CLI, Kafka default config, scheduler default config, metrics config, health server and ledger guard carry the declared values. Fails at the merge base, where the defaults model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/endpoint_defaults -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21690-deploy-endpoint-defaults
+    description: >-
+      Post-deploy probe: the runtime container loads the endpoint defaults from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults; load_endpoint_defaults()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

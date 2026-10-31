@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# ruff: noqa: S104
-# S104 disabled: Binding to 0.0.0.0 is intentional for Docker/K8s health checks
 """HTTP Health Service for ONEX Runtime.
 
 A minimal HTTP service for exposing health check endpoints.
@@ -19,8 +17,7 @@ Configuration:
 
 Exports:
     ServiceHealth: HTTP health check service class
-    DEFAULT_HTTP_HOST: Default bind address ("0.0.0.0")
-    DEFAULT_HTTP_PORT: Default HTTP port (8085)
+    DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT: Bind address and port from the endpoint defaults
 
 Example (Direct Runtime Injection):
     >>> from omnibase_infra.services.health_checker import ServiceHealth
@@ -86,6 +83,7 @@ from omnibase_infra.errors import (
 from omnibase_infra.event_bus.enum_runtime_readiness_state import (
     EnumRuntimeReadinessState,
 )
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.runtime.health.runtime_health_block import (
     RUNTIME_HEALTH_DETAIL_KEY,
     build_runtime_health_block,
@@ -123,8 +121,8 @@ logger = logging.getLogger(__name__)
 
 # Default configuration - hardcoded to avoid import-time crashes from invalid env vars
 # Environment variable override is handled safely in ServiceHealth.__init__
-DEFAULT_HTTP_PORT: int = 8085
-DEFAULT_HTTP_HOST = "0.0.0.0"
+DEFAULT_HTTP_PORT: int = load_endpoint_defaults().runtime_health_port
+DEFAULT_HTTP_HOST = load_endpoint_defaults().bind_all_address
 
 
 def _get_port_from_env(default: int) -> int:
