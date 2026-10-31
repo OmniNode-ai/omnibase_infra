@@ -23,6 +23,9 @@ from omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_ret
     COLLECTION_NAME,
     HandlerChainRetrieval,
 )
+from omnibase_infra.nodes.node_chain_retrieval_effect.models import (
+    ModelChainRetrievalRequest,
+)
 from omnibase_infra.nodes.node_chain_store_effect.handlers.handler_chain_store import (
     HandlerChainStore,
 )
@@ -104,9 +107,11 @@ class TestHandlerChainRetrieval:
     async def test_no_matches_returns_miss(self) -> None:
         handler = self._make_handler(search_result=[])
         result = await handler.handle(
-            prompt_text="hello",
-            correlation_id=uuid4(),
-            similarity_threshold=0.85,
+            ModelChainRetrievalRequest(
+                prompt_text="hello",
+                correlation_id=uuid4(),
+                similarity_threshold=0.85,
+            )
         )
         assert not result.is_hit
         assert result.matches == ()
@@ -120,9 +125,11 @@ class TestHandlerChainRetrieval:
         handler = self._make_handler(search_result=[hit])
 
         result = await handler.handle(
-            prompt_text="test prompt",
-            correlation_id=uuid4(),
-            similarity_threshold=0.85,
+            ModelChainRetrievalRequest(
+                prompt_text="test prompt",
+                correlation_id=uuid4(),
+                similarity_threshold=0.85,
+            )
         )
         assert result.is_hit
         assert len(result.matches) == 1
@@ -136,9 +143,11 @@ class TestHandlerChainRetrieval:
         handler = self._make_handler(search_result=[hit])
 
         result = await handler.handle(
-            prompt_text="different prompt",
-            correlation_id=uuid4(),
-            similarity_threshold=0.85,
+            ModelChainRetrievalRequest(
+                prompt_text="different prompt",
+                correlation_id=uuid4(),
+                similarity_threshold=0.85,
+            )
         )
         assert not result.is_hit
         assert len(result.matches) == 1
@@ -155,9 +164,11 @@ class TestHandlerChainRetrieval:
         handler = self._make_handler(search_result=hits)
 
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=uuid4(),
-            similarity_threshold=0.85,
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=uuid4(),
+                similarity_threshold=0.85,
+            )
         )
         assert result.is_hit
         assert len(result.matches) == 2
@@ -170,8 +181,10 @@ class TestHandlerChainRetrieval:
             embedding_result=RuntimeError("embedding endpoint down")
         )
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=uuid4(),
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=uuid4(),
+            )
         )
         assert not result.is_hit
         assert result.matches == ()
@@ -181,8 +194,10 @@ class TestHandlerChainRetrieval:
     async def test_qdrant_search_failure_returns_miss(self) -> None:
         handler = self._make_handler(search_result=ConnectionError("qdrant down"))
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=uuid4(),
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=uuid4(),
+            )
         )
         assert not result.is_hit
         assert result.matches == ()
@@ -201,9 +216,11 @@ class TestHandlerChainRetrieval:
         handler = self._make_handler(search_result=[invalid_hit, valid_hit])
 
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=uuid4(),
-            similarity_threshold=0.85,
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=uuid4(),
+                similarity_threshold=0.85,
+            )
         )
         assert len(result.matches) == 1
         assert result.matches[0].chain_entry.chain_id == valid_entry.chain_id
@@ -213,8 +230,10 @@ class TestHandlerChainRetrieval:
         handler = self._make_handler(collection_exists=False)
         # Should not raise -- collection creation is best-effort
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=uuid4(),
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=uuid4(),
+            )
         )
         assert not result.is_hit
 
@@ -223,8 +242,10 @@ class TestHandlerChainRetrieval:
         cid = uuid4()
         handler = self._make_handler()
         result = await handler.handle(
-            prompt_text="test",
-            correlation_id=cid,
+            ModelChainRetrievalRequest(
+                prompt_text="test",
+                correlation_id=cid,
+            )
         )
         assert result.correlation_id == cid
 

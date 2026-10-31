@@ -1,0 +1,22 @@
+{
+  "branch_coverage_pct": 27.59,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_decision_store_effect.handlers.handler_write_conflict",
+  "handler_module_sha256": "sha256:21e76272112de6e09b6ab28accb6c7bd20157e952b92460d0673f3edbacfb57c",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_decision_store_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T09:12:20.430269+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:ec4c09f4419774389d49794e95a1a3fd0a536a3c70021c57ad6ffd196ec097f5",
+    "sha256:e51f32df6a70660ac963f89795efe0ac7942e96ad20189679365484de6339d52"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21536 flips the node to canonical def-B by changing handle() to take one typed request (correlation id read from the request); the private helpers that hold the business logic are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence rests on that git-verbatim preservation plus the executed parity tests, not on a broad branch-coverage claim: the scenario pool drives this node's representative handler only.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

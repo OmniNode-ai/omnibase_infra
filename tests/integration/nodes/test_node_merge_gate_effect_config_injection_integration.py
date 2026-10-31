@@ -136,7 +136,7 @@ async def test_injected_credential_reaches_linear_request_not_env() -> None:
             linear_api_key="resolver-injected-key",
             linear_team_id="resolver-injected-team",
         )
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
     assert result.success is True
     mock_client.post.assert_called_once()
@@ -155,7 +155,7 @@ async def test_missing_injected_credential_skips_linear_call() -> None:
         "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
     ) as mock_client_cls:
         handler = HandlerUpsertMergeGate(_make_pool())
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
     assert result.success is True
     mock_client_cls.assert_not_called()

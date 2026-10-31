@@ -70,7 +70,7 @@ class HandlerWriteConflict(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerWriteConflict(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -96,19 +96,18 @@ class HandlerWriteConflict(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelPayloadWriteConflict,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Insert a conflict pair idempotently into decision_conflicts.
 
         Args:
-            payload: Conflict write payload containing the pair and scores.
-            correlation_id: Request correlation ID for distributed tracing.
+            payload: Conflict write payload containing the pair, scores, and correlation ID.
 
         Returns:
             ModelBackendResult with success=True on successful insert or
             idempotent skip (ON CONFLICT DO NOTHING). Returns success=False
             only on infrastructure errors.
         """
+        correlation_id = payload.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,
