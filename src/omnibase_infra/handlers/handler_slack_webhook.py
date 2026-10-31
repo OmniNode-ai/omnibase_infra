@@ -52,6 +52,7 @@ from omnibase_infra.handlers.models.model_slack_alert import (
     ModelSlackAlert,
     ModelSlackAlertResult,
 )
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ _DEFAULT_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 2.0, 4.0)
 _DEFAULT_TIMEOUT_SECONDS: float = 10.0
 
 # Slack Web API endpoint
-_SLACK_WEB_API_URL: str = "https://slack.com/api/chat.postMessage"
+_SLACK_WEB_API_URL: str = load_third_party_endpoints().slack_post_message_url
 
 # Slack Block Kit emoji mapping for severity levels
 _SEVERITY_EMOJI: dict[EnumAlertSeverity, str] = {

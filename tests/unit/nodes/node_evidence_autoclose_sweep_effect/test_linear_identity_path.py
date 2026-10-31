@@ -35,9 +35,7 @@ from typing import Any
 import httpx
 import pytest
 
-from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
-    DEFAULT_LINEAR_GRAPHQL_ENDPOINT,
-)
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
     handler_evidence_autoclose_sweep as sweep_mod,
 )
@@ -175,7 +173,7 @@ async def test_application_secrets_are_exchanged_for_a_bearer_token(
         "scope",
     }
 
-    assert graphql_post["url"] == DEFAULT_LINEAR_GRAPHQL_ENDPOINT
+    assert graphql_post["url"] == load_third_party_endpoints().linear_graphql_url
     assert graphql_post["headers"]["Authorization"] == f"Bearer {_FAKE_ACCESS_TOKEN}"
     assert client.identity_path is EnumLinearIdentityPath.OAUTH_APPLICATION
     assert client.last_error == ""
@@ -254,7 +252,7 @@ async def test_personal_key_fallback_is_taken_and_is_logged_as_such(
         assert await client._query(_QUERY, {}) == {"ok": True}
 
     assert len(recording.posts) == 1
-    assert recording.posts[0]["url"] == DEFAULT_LINEAR_GRAPHQL_ENDPOINT
+    assert recording.posts[0]["url"] == load_third_party_endpoints().linear_graphql_url
     assert recording.posts[0]["headers"]["Authorization"] == _FAKE_PERSONAL_KEY
     assert client.identity_path is EnumLinearIdentityPath.PERSONAL_API_KEY
 
@@ -337,7 +335,7 @@ async def test_explicit_injected_key_bypasses_env_resolution_entirely(
     )
     assert await client._query(_QUERY, {}) == {"ok": True}
     assert len(recording.posts) == 1
-    assert recording.posts[0]["url"] == DEFAULT_LINEAR_GRAPHQL_ENDPOINT
+    assert recording.posts[0]["url"] == load_third_party_endpoints().linear_graphql_url
 
     empty = _LinearClient(api_key="", max_attempts=1, base_delay_seconds=0.0)
     assert await empty._query(_QUERY, {}) is None
