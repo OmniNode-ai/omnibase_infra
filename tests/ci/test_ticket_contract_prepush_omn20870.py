@@ -24,6 +24,7 @@ from typing import Any, cast
 
 import pytest
 import yaml
+from packaging.version import Version
 
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
@@ -34,11 +35,11 @@ from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_CONTRACT,
     NOTICE_NO_TICKET_CITED,
     PASS_CONTRACTS,
+    PREREQUISITE_VERIFIER_VERSION,
     cited_tickets,
     classify_ticket_contracts,
     pinned_verifier_judge,
     read_head_contract,
-    read_verifier_version,
     resolve_branch_subjects,
     verifier_prerequisite_argv,
 )
@@ -111,9 +112,9 @@ def _accept_all(contracts: Mapping[str, str]) -> dict[str, str | None]:
 
 @pytest.fixture(scope="module")
 def released_judge(tmp_path_factory: pytest.TempPathFactory):
-    """The released verifier's guard, at the pin the repo-evidence caller uses."""
+    """The released verifier's guard, at the pin the pre-push leg uses."""
     return pinned_verifier_judge(
-        read_verifier_version(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
+        PREREQUISITE_VERIFIER_VERSION, tmp_path_factory.mktemp("judge-cwd")
     )
 
 
@@ -230,13 +231,23 @@ def _never_read(ticket: str) -> str | None:
     raise AssertionError(f"no contract should be read: {ticket}")
 
 
-def test_the_prerequisite_is_the_released_verifier_at_the_callers_pin() -> None:
+#: The first omnimarket release carrying ``contract_prerequisite`` (OMN-21642), and
+#: the first whose node_dod_verify reads the live Linear ticket (OMN-20858).
+_PREREQUISITE_AND_LINEAR_READ_RELEASE = Version("0.4.312")
+
+
+def _caller_verifier_version() -> Version:
     caller = yaml.safe_load(_CALLER.read_text(encoding="utf-8"))
-    pinned = caller["jobs"]["repo-evidence"]["with"]["verifier-version"]
+    return Version(str(caller["jobs"]["repo-evidence"]["with"]["verifier-version"]))
 
-    argv = verifier_prerequisite_argv(read_verifier_version(REPO_ROOT))
 
-    assert f"omnimarket=={pinned}" in argv
+def test_the_prerequisite_is_the_released_verifier_at_its_own_pin() -> None:
+    argv = verifier_prerequisite_argv(PREREQUISITE_VERIFIER_VERSION)
+
+    assert f"omnimarket=={PREREQUISITE_VERIFIER_VERSION}" in argv
+    assert Version(PREREQUISITE_VERIFIER_VERSION) >= (
+        _PREREQUISITE_AND_LINEAR_READ_RELEASE
+    )
     assert any(
         "from omnimarket.nodes.node_dod_verify.services.contract_prerequisite "
         "import contract_prerequisite" in arg
@@ -266,3 +277,10 @@ def test_a_command_shaped_contract_passes_the_released_guard(released_judge) -> 
 
     assert decision.outcome == PASS_CONTRACTS
     assert decision.findings == ()
+
+
+def test_the_hosted_caller_pins_a_verifier_that_reads_no_linear_ticket() -> None:
+    """OMN-20413: the caller passes no secrets, so a verifier that reads the live
+    Linear ticket gives every contract with a requirements acceptance id
+    status=unresolved ticket_unavailable, whatever the pull request changed."""
+    assert _caller_verifier_version() < _PREREQUISITE_AND_LINEAR_READ_RELEASE

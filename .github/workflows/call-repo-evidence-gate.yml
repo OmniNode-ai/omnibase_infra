@@ -42,10 +42,14 @@
 # S6 part 2 (OMN-20074) removed every OCC caller from this repository, so no
 # OCC context is enforced beside it.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
-# verifier-version 0.4.320 ships the occ-difference classifier and omnimarket#3563,
-# so a rollback turns comparison back on with one input. It is also the first pin
-# the pre-push ticket-contract leg can run contract_prerequisite from (released in
-# 0.4.312, the function onex scm pr-create calls; OMN-21642), which 0.4.305 lacks. The pinned reusable
+# verifier-version 0.4.310 ships the occ-difference classifier and omnimarket#3563,
+# so a rollback turns comparison back on with one input. It stays below 0.4.312
+# (OMN-20413): from 0.4.312 node_dod_verify reads the live Linear ticket of every
+# contract that records a requirements acceptance id (omnimarket OMN-20858), and this
+# caller passes no secrets, so every such pull request read status=unresolved
+# ticket_unavailable whatever its change. The pre-push ticket-contract leg's
+# contract_prerequisite (released in 0.4.312; OMN-21642) carries its own pin,
+# PREREQUISITE_VERIFIER_VERSION in scripts/ci/check_deploy_scope_dod.py. The pinned reusable
 # refuses a verifier-version below 0.4.303 before installing it (VERIFIER_FLOOR,
 # omnibase_core#1932; OMN-20032), the first release that refuses a contract leaving
 # a criterion unbound. The full-SHA pin is the squash commit of omnibase_core#1932
@@ -85,7 +89,7 @@ jobs:
     uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@66d35d2283c3011c436799eacb9bce1a434ee6c9 # dev-20261030152335-66d35d2283c3; carries the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134)
     with:
       evidence-source: caller
-      verifier-version: 0.4.320
+      verifier-version: 0.4.310
       compare-with-occ: "false"
       shadow: "false"
       check-timeout-seconds: "180"

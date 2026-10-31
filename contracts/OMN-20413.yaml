@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC8
         statement: 'AC8: run in bash against a stub docker, the cross-build step passes after a QEMU crash followed by a clean build, fails after a QEMU crash on both attempts, fails after one attempt on a failure without the QEMU signature, and builds linux/amd64 and linux/arm64 on every attempt -- falsifier: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q'
+  - id: req-omn20413-repo-evidence-no-linear-read
+    statement: The repo-evidence / dod-verify check pins a verifier that reads no live Linear ticket, because its caller passes no secrets, so a pull request whose contract records requirements acceptance ids is not failed status=unresolved ticket_unavailable whatever it changed, while the pre-push ticket-contract leg keeps running contract_prerequisite from its own pin.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: the repo-evidence caller verifier-version is below 0.4.312 and the pre-push leg runs contract_prerequisite from PREREQUISITE_VERIFIER_VERSION at or above 0.4.312 -- falsifier: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "hosted_caller_pins or released_verifier_at_its_own_pin"'
 evidence_requirements:
   - kind: tests
     description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
@@ -68,6 +73,9 @@ evidence_requirements:
   - kind: tests
     description: The cross-build step's run script is executed in bash with a stub docker that plays a QEMU crash, a clean build and a non-QEMU failure.
     command: uv run pytest tests/ci/test_runner_image_multiarch_qemu_retry_omn20413.py -q
+  - kind: tests
+    description: The caller's verifier-version and the pre-push leg's prerequisite pin are compared with 0.4.312, the first release that reads the live Linear ticket.
+    command: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "hosted_caller_pins or released_verifier_at_its_own_pin"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -145,3 +153,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn20413-ac9-repo-evidence-no-linear-read
+    description: AC9 tests read the repo-evidence caller's verifier-version and the pre-push leg's PREREQUISITE_VERIFIER_VERSION; they fail at the merge base, where neither test exists and the caller pins 0.4.320.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k 'hosted_caller_pins or released_verifier_at_its_own_pin'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9

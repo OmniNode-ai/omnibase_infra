@@ -71,8 +71,11 @@ released ``omnimarket==<verifier-version>`` (``node_dod_verify`` services), the
 one function ``onex scm pr-create`` (``node_github_repo_write_effect``) calls
 before it opens a pull request, so a contract this leg passes is one pr-create
 accepts (OMN-21642; FRICTION 2026-10-31T01:38:58Z, where the earlier shape-only
-judge passed a contract pr-create then refused twice). The version is read from
-the caller workflow, so the local and hosted verdicts use one pin. The leg runs
+judge passed a contract pr-create then refused twice). The version is
+``PREREQUISITE_VERIFIER_VERSION``, not the caller workflow's ``verifier-version``:
+the first release carrying ``contract_prerequisite`` (0.4.312) is also the first
+whose ``node_dod_verify`` reads the live Linear ticket, which the hosted caller
+cannot reach, so the caller stays below it (OMN-20413). The leg runs
 no bound check: ``contract_prerequisite`` only judges presence and static shape.
 Bot authorship is not consulted -- a push has no GitHub-verified author, and the
 hosted job's bot exemptions are derived from that metadata alone, so they stay
@@ -100,8 +103,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-
-import yaml
 
 # Relative location of the canonical deploy-gate validator inside the omniclaude
 # sibling clone. This is the SAME file the hosted reusable workflow sparse-checks
@@ -457,8 +458,11 @@ def render(decision: DeployScopeDecision, validator: ModuleType) -> None:
 # Ticket-contract leg (OMN-20870)
 # ---------------------------------------------------------------------------
 
-#: The repo-evidence caller; its ``verifier-version`` input is the one pin.
-_REPO_EVIDENCE_CALLER_RELPATH = Path(".github/workflows/call-repo-evidence-gate.yml")
+#: The released omnimarket whose ``contract_prerequisite`` this leg runs. It is
+#: not the repo-evidence caller's ``verifier-version``: that pin stays below
+#: 0.4.312, the first release that both carries ``contract_prerequisite`` and
+#: reads the live Linear ticket the hosted caller has no credential for (OMN-20413).
+PREREQUISITE_VERIFIER_VERSION = "0.4.320"
 #: The same ticket pattern the hosted job greps out of the PR title.
 _CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
 #: The Python the hosted job installs the verifier into.
@@ -586,23 +590,6 @@ def classify_ticket_contracts(
         tickets=tuple(tickets),
         findings=(),
     )
-
-
-def read_verifier_version(repo_root: Path) -> str:
-    """The ``verifier-version`` the repo-evidence caller pins."""
-    caller = repo_root / _REPO_EVIDENCE_CALLER_RELPATH
-    try:
-        workflow = yaml.safe_load(caller.read_text(encoding="utf-8"))
-        version = workflow["jobs"]["repo-evidence"]["with"]["verifier-version"]
-    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
-        raise DeployScopeHookError(
-            f"cannot read verifier-version from {_REPO_EVIDENCE_CALLER_RELPATH}: {exc}"
-        ) from exc
-    if not isinstance(version, str) or not version.strip():
-        raise DeployScopeHookError(
-            f"{_REPO_EVIDENCE_CALLER_RELPATH} pins no verifier-version"
-        )
-    return version.strip()
 
 
 def verifier_prerequisite_argv(verifier_version: str) -> list[str]:
@@ -772,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
         contract_decision = classify_ticket_contracts(
             tickets=cited_tickets(subjects),
             read_contract=lambda ticket: read_head_contract(repo_root, ticket),
-            judge=pinned_verifier_judge(read_verifier_version(repo_root), repo_root),
+            judge=pinned_verifier_judge(PREREQUISITE_VERIFIER_VERSION, repo_root),
         )
     except DeployScopeHookError as exc:
         _log(f"ERROR (fail-loud): {exc}")
