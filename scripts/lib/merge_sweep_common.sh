@@ -31,7 +31,6 @@ fi
 # Mirrors scripts/pull-all.sh; this is the single source of truth for shell loops.
 REPOS=(
   omniclaude
-  omnibase_compat
   omnibase_core
   omnibase_infra
   omnibase_spi

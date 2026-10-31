@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
 from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
 
 # ---------------------------------------------------------------------------
@@ -40,7 +42,17 @@ def _load_script() -> ModuleType:
 
 
 _mod = _load_script()
-_discover_all_packages = _mod._discover_all_packages
+
+
+def _discover_all_packages(
+    *, filter_names: list[str] | None = None, lenient: bool = False
+) -> list[tuple[str, Path]]:
+    return [
+        (e.name, e.path)
+        for e in ModelNodePackageEntry.discover(
+            filter_names=filter_names, lenient=lenient
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +63,7 @@ _discover_all_packages = _mod._discover_all_packages
 @pytest.mark.unit
 def test_discover_skips_unimportable_entry_point(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entry point that raises on load() is skipped with a warning in lenient mode."""
     bad_ep = MagicMock()
@@ -61,14 +73,14 @@ def test_discover_skips_unimportable_entry_point(
 
     result = _discover_all_packages(lenient=True)
     assert result == []
-    assert "WARNING" in capsys.readouterr().err
+    assert "skipping" in caplog.text
 
 
 @pytest.mark.unit
 def test_discover_skips_nonexistent_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entry point whose __path__ does not exist is skipped with a warning."""
     ep = MagicMock()
@@ -80,7 +92,7 @@ def test_discover_skips_nonexistent_path(
 
     result = _discover_all_packages(lenient=True)
     assert result == []
-    assert "WARNING" in capsys.readouterr().err
+    assert "skipping" in caplog.text
 
 
 @pytest.mark.unit
@@ -147,15 +159,14 @@ def test_discover_filters_by_name(
 def test_discover_exits_on_error_in_strict_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """In strict mode (lenient=False), unloadable entry points cause sys.exit."""
+    """In strict mode (lenient=False), unloadable entry points raise."""
     bad_ep = MagicMock()
     bad_ep.name = "broken_pkg"
     bad_ep.load.side_effect = ImportError("missing")
     monkeypatch.setattr(ilm, "entry_points", lambda *, group: [bad_ep])
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(ProtocolConfigurationError, match="broken_pkg"):
         _discover_all_packages(lenient=False)
-    assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------
@@ -489,3 +500,32 @@ def test_build_specs_keeps_an_undeclared_replication_factor_none() -> None:
     assert len(specs) == 1
     assert specs[0].replication_factor is None
     assert specs[0].partitions == 6  # the canonical default, not the old CLI 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lenient", [False, True])
+def test_cli_discovery_failure_reports_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    lenient: bool,
+) -> None:
+    """The real CLI handles discovery errors and owns lenient diagnostics."""
+    import logging
+
+    bad_ep = MagicMock()
+    bad_ep.name = "broken_pkg"
+    bad_ep.load.side_effect = ImportError("missing module")
+    monkeypatch.setattr(ilm, "entry_points", lambda *, group: [bad_ep])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["create_kafka_topics.py", "--dry-run", *(["--lenient"] if lenient else [])],
+    )
+    logger = logging.getLogger("omnibase_infra.models.model_node_package_entry")
+    monkeypatch.setattr(logger, "disabled", True)
+    assert _mod.main() == (0 if lenient else 1)
+    stderr = capsys.readouterr().err
+    assert "broken_pkg" in stderr
+    assert ("WARNING:" if lenient else "ERROR:") in stderr
+    if lenient:
+        assert "skipping" in stderr

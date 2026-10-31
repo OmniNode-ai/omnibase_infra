@@ -1,0 +1,66 @@
+schema_version: '1.0.0'
+ticket_id: OMN-21529
+title: 'Topic provisioning authenticates to a SASL broker from the lane'
+summary: 'create_kafka_topics.py --lane reads address, protocol and mechanism from the lane declaration and the identity from the lane store or the SASL environment.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-lane-authentication
+    statement: Topic provisioning uses the lane's declared transport and resolved identity.
+    acceptance:
+      - id: AC1
+        statement: A declared SASL lane with a stored or environment identity reaches topic creation with its broker, protocol and mechanism; repeated provisioning is idempotent.
+      - id: AC2
+        statement: A SASL lane without an identity refuses before connecting and names lanes.<lane> and lane-login.
+evidence_requirements:
+  - kind: tests
+    description: Lane SASL provisioning tests pass
+    command: uv run pytest tests/unit/scripts/test_create_kafka_topics_lane_auth_omn21529.py tests/unit/scripts/test_create_kafka_topics.py -q
+  - kind: manual
+    description: Hosted deploy validation exercises the CLI, lane resolver, credential store and contract extraction, substituting only the broker boundary.
+    command: 'deploy: uv run pytest tests/integration/test_topic_provision_lane_auth_omn21529.py -q'
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-001
+    description: With only the lane declaration and an identity the admin client is built with SASL SCRAM settings; with the identity missing the run refuses naming lanes.<lane>
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_create_kafka_topics_lane_auth_omn21529.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC2]
+  - id: dod-002
+    description: Existing provisioning script tests still pass after discovery moved to a model
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_create_kafka_topics.py -q'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-lane-cli-integration
+    description: The CLI reads a lane declaration, resolves stored and environment identities, extracts a topic contract and creates the declared topic shape; the next run observes it and creates nothing.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_topic_provision_lane_auth_omn21529.py -q -k 'stored or environment'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-lane-cli-missing-identity
+    description: A SASL lane without a stored or environment identity refuses naming lanes.dev and lane-login, before the admin client is constructed.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/test_topic_provision_lane_auth_omn21529.py -q -k missing
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-cli-discovery-diagnostics
+    description: The real CLI returns 1 on strict discovery failure and prints lenient WARNING diagnostics to stderr even when the package logger is disabled.
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_create_kafka_topics.py -q -k cli_discovery_failure_reports_to_stderr
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
