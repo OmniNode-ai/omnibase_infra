@@ -25,7 +25,7 @@
 #               takes a lane argument; the project is derived from the slot.
 #
 # Params (sourced): TAG W [INFRA_PR INFRA_HEAD [INFRA_TAG] | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE] | INFRA_REF_SHA] [MARKET_PR MARKET_HEAD [MARKET_TAG] | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE] | MARKET_REF_SHA]
-#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF
+#   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS SUITE_REPO SUITE_WORKERS DEV_CONTROL_MAX CORE_REF SPI_REF INFRA_DEV_TAG STAGE_DEV_TAGS
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON OVERLAY_FILE POST_UP_COMMAND POST_BRINGUP_CMD]
 #
@@ -454,6 +454,7 @@ clone)
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "$INFRA_REF_SHA"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD" "${INFRA_TAG:-}"
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "${INFRA_TAG:+refs/tags/}${INFRA_TAG:-pull/$INFRA_PR/head}"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_DEV_TAG:-}" ]; then git clone -q --branch "$INFRA_DEV_TAG" https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra" || exit 1  # OMN-17427: the image audit takes a clean dev-merge-tag tree, never a test merge
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
   if [ -n "${MARKET_GROUP:-}" ]; then
     fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" "${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
@@ -514,10 +515,10 @@ build)
   export DEPLOY_SOURCE_REFS_OUT=$W/refs.json
   cd "$R/omnibase_infra" || exit 1
   echo "stage start $(ts)"
-  OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" bash scripts/runtime_build/stage_workspace.sh \
-    --repo-ref omnibase_core="$(git -C "$R/omnibase_core" rev-parse HEAD)" \
-    --repo-ref omnibase_spi="$(git -C "$R/omnibase_spi" rev-parse HEAD)" \
-    --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)" 2>&1 | tail -5
+  # STAGE_DEV_TAGS: every sibling at its newest dev-merge tag (omnibase_infra#5472); a sha pin records no tag and the audit refuses it
+  REFS=(--repo-ref omnibase_core="$(git -C "$R/omnibase_core" rev-parse HEAD)" --repo-ref omnibase_spi="$(git -C "$R/omnibase_spi" rev-parse HEAD)" --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)"); DR=
+  [ -z "${STAGE_DEV_TAGS:-}" ] || { REFS=(); DR=origin/dev; }
+  OMNI_HOME="$R" CONSUMER_LOCK="$R/omnimarket/uv.lock" DEPLOY_REF=$DR bash scripts/runtime_build/stage_workspace.sh ${REFS[@]+"${REFS[@]}"} 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
   make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2
   # the model rung comes from the pool config (config/lab/prepr_runtime_pool.yaml under the workspace config root)
