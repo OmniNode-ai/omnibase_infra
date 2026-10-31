@@ -34,15 +34,6 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EGRESS_HEALTH_PATH = "/tmp/gateway-egress-health.json"  # noqa: S108 -- container-local scratch state, same convention as the canary probe's --state-file
-"""Shared default so the writer and the healthcheck cannot drift apart.
-
-Container-local, not the ``/app/data`` named volume, and deliberately so:
-these counters describe the CURRENT process. Surviving a restart would let a
-denial burst from a previous process report the new one unhealthy before it
-has published anything of its own.
-"""
-
 EGRESS_DENIAL_WINDOW_SECONDS = 120
 """How long a leg must go denial-only before the container reads unhealthy.
 
@@ -197,7 +188,6 @@ def evaluate_egress_health(
 
 
 __all__ = [
-    "DEFAULT_EGRESS_HEALTH_PATH",
     "EGRESS_DENIAL_WINDOW_SECONDS",
     "evaluate_egress_health",
     "load_egress_health",

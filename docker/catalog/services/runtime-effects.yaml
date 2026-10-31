@@ -138,6 +138,12 @@ volumes:
 optional_directory_bind_mounts:
   - source_env: CODING_AGENT_CLAUDE_CREDS_HOST_DIR
     container_path: /home/omniinfra/.claude
+    # Compose default for an unset source. It must be a DIRECTORY: a file
+    # fallback such as /dev/null is invalid for a directory target (OMN-13248).
+    # Docker creates a missing bind source directory, so this resolves to an
+    # empty, read-only directory on any host; the coding-agent handler still
+    # fails closed on absent credentials.
+    absent_source: /var/lib/omninode/optional-bind-source-absent
     read_only: true
 # OMN-18843: service_started, NOT service_healthy. This container is a bus
 # consumer and never calls the main runtime at boot; waiting on the main

@@ -1,0 +1,53 @@
+# OMN-21757 contract file for omnibase_infra: literal_path burn-down, paths come from callers, overlays and the catalog.
+schema_version: "1.0.0"
+ticket_id: "OMN-21757"
+title: "omnibase_infra contracts_and_di literal_path burn-down, slice rf1840-c1: paths come from contracts and overlays"
+summary: "Eleven literal_path findings in src/omnibase_infra are removed with no baseline entry or suppression: the scope manifest output_path, the gateway health and probe state files, the local runtime ingress socket and the optional bind-mount source are required settings supplied by the caller, the runtime config overlay or the service catalog manifest."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21757-paths-injected
+    statement: "No touched module holds a filesystem path literal; each path is a required setting supplied by the caller, the runtime config overlay or the service catalog manifest."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for literal_path over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every path comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The checker re-run on the slice paths reports no literal_path, and the touched modules take their paths from their arguments, the ingress config and the catalog manifest."
+    command: "uv run --frozen pytest tests/unit/runtime/test_literal_path_slice_omn21757.py tests/unit/runtime/test_local_ingress_socket_path_required_omn21757.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The contracts_and_di checker reports no literal_path on the slice paths, and the probe and forwarder refuse to start without their path arguments."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_literal_path_slice_omn21757.py -q -p no:cacheprovider"
+  - id: dod-002
+    description: "The ingress socket path, the scope manifest path, the runtime socket client path and the bind-mount source are required settings and are not defaulted in code."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_local_ingress_socket_path_required_omn21757.py tests/unit/clients tests/unit/nodes/test_scope_canary tests/unit/infra/test_catalog_generator.py -q -p no:cacheprovider"
+  - id: dod-003
+    description: "The tests of the touched modules pass at the PR head on the lab."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: "uv run --frozen pytest tests/unit/runtime/test_literal_path_slice_omn21757.py tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py tests/unit/runtime/test_runtime_local_ingress.py -q -p no:cacheprovider"
+  - id: dod-004
+    description: >-
+      Read docker/catalog/services/runtime-effects.yaml from GitHub at the checked-out commit and count the optional directory bind mount that now declares its own absent_source. Hermetic: it reads the shipped catalog manifest, not a receipt this PR authors, and goes RED at the merge base where the manifest has no absent_source. The deployed containers are read on the lab after the deploy agent converges and are not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/runtime-effects.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'absent_source: /var/lib/omninode/optional-bind-source-absent'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
