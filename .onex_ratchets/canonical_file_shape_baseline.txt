@@ -1044,8 +1044,6 @@ src/omnibase_infra/registry/models/__init__.py
 src/omnibase_infra/registry/models/model_artifact_registry.py
 src/omnibase_infra/registry/models/model_artifact_registry_entry.py
 src/omnibase_infra/registry/models/model_source_trigger.py
-src/omnibase_infra/resources/__init__.py
-src/omnibase_infra/resources/handler_resource_manager.py
 src/omnibase_infra/runtime/__init__.py
 src/omnibase_infra/runtime/_enum_coercion.py
 src/omnibase_infra/runtime/action_authorization_claim/__init__.py

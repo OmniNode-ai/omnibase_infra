@@ -23,6 +23,7 @@ from omnibase_infra.handlers.registration_storage.models import (
     ModelDeleteRegistrationRequest,
     ModelUpdateRegistrationRequest,
 )
+from omnibase_infra.handlers.store_keyed_memory import StoreKeyedMemory
 from omnibase_infra.nodes.node_registration_storage_effect.models import (
     ModelDeleteResult,
     ModelRegistrationRecord,
@@ -43,7 +44,7 @@ class HandlerRegistrationStorageMock:
     protocol for unit and integration testing.
 
     Thread Safety:
-        This handler is coroutine-safe. All operations on the internal
+        This handler is coroutine-safe. All operations on the injected
         record store are protected by asyncio.Lock.
 
     Attributes:
@@ -55,9 +56,16 @@ class HandlerRegistrationStorageMock:
         >>> assert result.success
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerRegistrationStorageMock with empty record store."""
-        self._records: dict[UUID, ModelRegistrationRecord] = {}
+    def __init__(
+        self, store: StoreKeyedMemory[UUID, ModelRegistrationRecord] | None = None
+    ) -> None:
+        """Initialize HandlerRegistrationStorageMock.
+
+        Args:
+            store: Record store holding the mock's state. A new empty store
+                is used when none is injected.
+        """
+        self._store = store if store is not None else StoreKeyedMemory()
         self._lock = asyncio.Lock()
 
         logger.debug("HandlerRegistrationStorageMock initialized")
@@ -94,7 +102,7 @@ class HandlerRegistrationStorageMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            was_insert = record.node_id not in self._records
+            was_insert = self._store.get(record.node_id) is None
             now = datetime.now(UTC)
 
             # Update timestamps
@@ -110,7 +118,7 @@ class HandlerRegistrationStorageMock:
                 correlation_id=correlation_id,
             )
 
-            self._records[record.node_id] = updated_record
+            self._store.put(record.node_id, updated_record)
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
@@ -152,7 +160,7 @@ class HandlerRegistrationStorageMock:
         async with self._lock:
             matching_records: list[ModelRegistrationRecord] = []
 
-            for record in self._records.values():
+            for record in self._store.snapshot():
                 # Filter by node_id (exact match)
                 if query.node_id is not None and record.node_id != query.node_id:
                     continue
@@ -221,7 +229,8 @@ class HandlerRegistrationStorageMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            if node_id not in self._records:
+            existing = self._store.get(node_id)
+            if existing is None:
                 duration_ms = (time.monotonic() - start_time) * 1000
                 return ModelUpsertResult(
                     success=False,
@@ -233,7 +242,6 @@ class HandlerRegistrationStorageMock:
                     correlation_id=correlation_id,
                 )
 
-            existing = self._records[node_id]
             now = datetime.now(UTC)
 
             # Update with new values from ModelRegistrationUpdate
@@ -265,7 +273,7 @@ class HandlerRegistrationStorageMock:
                 correlation_id=correlation_id,
             )
 
-            self._records[node_id] = updated_record
+            self._store.put(node_id, updated_record)
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
@@ -306,11 +314,7 @@ class HandlerRegistrationStorageMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            if node_id in self._records:
-                del self._records[node_id]
-                deleted = True
-            else:
-                deleted = False
+            deleted = self._store.evict(node_id) is not None
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
@@ -369,7 +373,7 @@ class HandlerRegistrationStorageMock:
         Utility method for test cleanup.
         """
         async with self._lock:
-            self._records.clear()
+            self._store.reset()
 
         logger.debug("Mock registration store cleared")
 
@@ -380,7 +384,7 @@ class HandlerRegistrationStorageMock:
             Number of records in the store.
         """
         async with self._lock:
-            return len(self._records)
+            return self._store.count()
 
     async def get_record(self, node_id: UUID) -> ModelRegistrationRecord | None:
         """Get a specific record by node ID.
@@ -392,7 +396,7 @@ class HandlerRegistrationStorageMock:
             The record if found, None otherwise.
         """
         async with self._lock:
-            return self._records.get(node_id)
+            return self._store.get(node_id)
 
 
 __all__ = ["HandlerRegistrationStorageMock"]

@@ -1,0 +1,56 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21536
+title: "Handler shape burn-down in omnibase_infra: mutating_public_method findings in the two in-memory mock handlers and the unused resource manager"
+summary: >-
+  Core's handler-shape validator (omnibase_core.validation.validator_handler_shape, plan task T2.4a) reported 9 mutating_public_method findings at origin/dev 65e3994c3 across handlers/registration_storage/handler_registration_storage_mock.py (3), handlers/service_discovery/handler_service_discovery_mock.py (3) and resources/handler_resource_manager.py (3). The two mock handlers now hold their records in an injected StoreKeyedMemory (handlers/store_keyed_memory.py) and mutate nothing on themselves; their public API and results are unchanged. HandlerResourceManager had no consumer in src or in any sibling repo's code, so it is deleted with its tests, its two validation exemptions and its two canonical-file-shape baseline entries instead of being reshaped.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21536-mock-handler-state-stores
+    statement: >-
+      The registration-storage and service-discovery mock handlers keep no mutable state on themselves, the unused resource manager is gone, and core's handler-shape validator reports no mutating_public_method finding for the three former files.
+    acceptance:
+      - id: AC8
+        statement: >-
+          AC8: both mock handlers read and write through an injected StoreKeyedMemory, and a handler built without one gets its own empty store -- falsifier: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py -q; a handler that kept its own dict fails the injected-store assertions.
+      - id: AC9
+        statement: >-
+          AC9: the validator reports nothing under the registration_storage and service_discovery handler directories -- falsifier: uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape over those directories exits 0; restoring a self-assigning public method makes it exit 1.
+evidence_requirements:
+  - kind: tests
+    description: The mock handlers keep their behaviour while holding state in an injected store.
+    command: uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/unit/nodes/test_registry_infra_service_discovery.py tests/unit/nodes/test_registry_infra_registration_storage.py -q -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21536-ac8-injected-store
+    description: >-
+      Both mock handlers write through the injected store and keep separate default stores.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_mock_handler_injected_stores.py tests/unit/handlers/test_registration_storage_protocol_compliance.py tests/integration/handlers/test_registration_storage_handler_swapping.py tests/integration/handlers/test_service_discovery_handler_swapping.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
+  - id: dod-omn21536-ac9-validator-clean
+    description: >-
+      Core's handler-shape validator reports nothing for the two handler directories.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/handlers/registration_storage src/omnibase_infra/handlers/service_discovery --report-json /tmp/omn21536-handler-shape-report.json
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]
+  - id: dod-omn21536-deploy-mock-handler-store-injection
+    description: >-
+      Post-deploy probe: the running runtime image carries the injected-store constructor on both mock handlers. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec omninode-runtime python -c "import inspect; from omnibase_infra.handlers.store_keyed_memory import StoreKeyedMemory; from omnibase_infra.handlers.registration_storage.handler_registration_storage_mock import HandlerRegistrationStorageMock as R; from omnibase_infra.handlers.service_discovery.handler_service_discovery_mock import HandlerServiceDiscoveryMock as S; assert list(inspect.signature(R.__init__).parameters) == ['self', 'store']; assert list(inspect.signature(S.__init__).parameters) == ['self', 'store']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
