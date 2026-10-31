@@ -59,9 +59,9 @@ dod_evidence:
         check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider'
   - id: dod-004
     description: >-
-      Hosted deploy probe for AC1: start the real ServiceHealth HTTP server and ServiceRuntimeHealthMonitor over installed omnibase_infra contracts with node_architecture_validator excluded. Read /health over loopback and require a nonempty manifest and discovery_errors HEALTHY. The isolated process uses no broker and makes no claim about consumer coverage or the deployed lane. Before the single-filter fix the monitor reports discovery_errors CRITICAL because the second filter refuses the already-excluded contract.
+      Hosted deploy probe for AC1 and AC3: load the shipped deploy-agent routing table and require the default dev instance to disable gateway-deploy and omit gateway services from its runtime plan. Then start the real ServiceHealth HTTP server and ServiceRuntimeHealthMonitor with node_architecture_validator excluded; read /health over loopback and require a nonempty manifest and discovery_errors HEALTHY. The isolated process uses no broker or containers and makes no claim about the deployed lane. The gateway plan assertions fail before this PR even when the health-monitor fix is already on the merge base.
     source: generated
-    binds_ac: [AC1]
+    binds_ac: [AC1, AC3]
     checks:
       - check_type: command
         check_value: |-
@@ -73,12 +73,24 @@ dod_evidence:
           import signal
           import sys
           from pathlib import Path
+          sys.path.insert(0, str(Path.cwd() / "scripts/deploy-agent"))
+          from deploy_agent.events import DEV_LANE_GATEWAY_SERVICES, EnumRuntimeLane, Scope
+          from deploy_agent.executor import DEFAULT_DEV_INSTANCE, EnumInstancePhase, _requested_services_for_up, lane_config_for, lane_runs_phase, select_dev_instance
+          from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
           from omnibase_infra.runtime import RuntimeHostProcess
           from omnibase_infra.services.health_checker import ServiceHealth
           from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor
           from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 
           async def main():
+              select_dev_instance(DEFAULT_DEV_INSTANCE)
+              flags = lane_flags_for_instance(AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE)
+              assert flags.disabled_phases == ("gateway-deploy",), flags
+              assert not lane_runs_phase(EnumRuntimeLane.DEV, EnumInstancePhase.GATEWAY_DEPLOY)
+              config = lane_config_for(EnumRuntimeLane.DEV)
+              assert set(DEV_LANE_GATEWAY_SERVICES) <= config.disabled_services, config
+              services = _requested_services_for_up(Scope.RUNTIME, [], lane=EnumRuntimeLane.DEV)
+              assert services and not set(services) & set(DEV_LANE_GATEWAY_SERVICES), services
               raw = discover_contracts()
               assert "node_architecture_validator" in {c.name for c in raw.contracts}
               monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="")
