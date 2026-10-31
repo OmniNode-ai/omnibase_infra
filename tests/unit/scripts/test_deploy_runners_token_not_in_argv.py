@@ -225,12 +225,16 @@ def test_the_default_deploy_keeps_the_token_out_of_argv(
         RUNNER_HOST=fake-host
         RUNNER_HOST_DIR="{harness["host_dir"]}"
         {functions}
-        deploy_runners '{TOKEN}'
+        deploy_runners "${{TEST_REGISTRATION_TOKEN}}"
         """
     )
+    # The driver is itself a process with an argv: the token reaches it by
+    # environment, or the test would leak the token it is checking for.
+    env = _env(harness)
+    env["TEST_REGISTRATION_TOKEN"] = TOKEN
     result = subprocess.run(
         ["bash", "-c", driver],
-        env=_env(harness),
+        env=env,
         capture_output=True,
         text=True,
         timeout=60,
@@ -389,3 +393,68 @@ def test_the_scanner_flags_the_old_pattern() -> None:
 
 def test_no_remote_script_in_deploy_runners_carries_a_token() -> None:
     assert _token_in_a_command_string(SCRIPT.read_text(encoding="utf-8")) == []
+
+
+# --- inside the container: config.sh -------------------------------------------
+
+ENTRYPOINT = REPO_ROOT / "docker" / "runners" / "entrypoint.sh"
+
+FAKE_CONFIG_SH = """\
+#!/usr/bin/env bash
+{ printf 'ARGV:'; printf ' [%s]' "$@"; printf '\\n'; } >> "${FAKE_LOG_DIR}/config_argv.log"
+ps -A -ww -o args= >> "${FAKE_LOG_DIR}/config_ps.log" 2>&1
+printf '%s\\n' "${ACTIONS_RUNNER_INPUT_TOKEN:-}" >> "${FAKE_LOG_DIR}/config_env_token.log"
+exit 0
+"""
+
+
+def test_the_entrypoint_hands_config_sh_the_token_in_its_environment(
+    harness: dict[str, Path], tmp_path: Path
+) -> None:
+    """A container process is listed in the HOST's ps with its whole argv, so
+    ``config.sh --token <value>`` showed the token for as long as registration
+    took. The runner reads ACTIONS_RUNNER_INPUT_TOKEN for any input not given as
+    a flag (measured on runner 2.336.0: with it config.sh attempts the
+    registration, without it it stops at "Invalid configuration provided for
+    token")."""
+    runner_home = tmp_path / "runner_home"
+    runner_home.mkdir()
+    _write_exec(runner_home / "config.sh", FAKE_CONFIG_SH)
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    driver = textwrap.dedent(
+        f"""\
+        set -euo pipefail
+        _as_runner() {{ "$@"; }}
+        RUNNER_HOME="{runner_home}"
+        RUNNER_NAME=omninode-runner-1
+        GITHUB_ORG_URL=https://github.com/OmniNode-ai
+        RUNNER_LABELS=self-hosted
+        RUNNER_GROUP=
+        RUNNER_WORK_DIR=/tmp/work
+        {_extract_function(text, "_register")}
+        {_extract_function(text, "_deregister")}
+        _register
+        _deregister
+        # The variable must not outlive the call, or the listener inherits it.
+        [ -z "${{ACTIONS_RUNNER_INPUT_TOKEN:-}}" ]
+        """
+    )
+    env = _env(harness)
+    env["RUNNER_TOKEN"] = TOKEN
+    result = subprocess.run(
+        ["bash", "-c", driver],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    argv = _read(harness, "config_argv.log")
+    assert argv.count("ARGV:") == 2, "config.sh should have run for register and remove"
+    assert "--token" not in argv
+    assert TOKEN not in argv
+    assert TOKEN not in _read(harness, "config_ps.log")
+    assert _read(harness, "config_env_token.log").split() == [TOKEN, TOKEN]
+    assert TOKEN not in result.stdout + result.stderr

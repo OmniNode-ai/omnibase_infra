@@ -2,7 +2,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-21765"
 title: "deploy-runners.sh hands the runner registration token to the host on ssh stdin, so it is in no ps listing"
-summary: "On the runner host a base64 of the GitHub Actions registration token was visible in a ps listing, in the command line of the compose run. The cause is that four ssh sites of scripts/deploy-runners.sh (default deploy, additive, rolling recreate, secondary stand-up) built RUNNER_TOKEN=$(echo '<base64>' piped to base64 -d) into the remote script, which sshd runs as the remote shell's argv. The token now crosses on ssh stdin and is read into the remote shell's environment; encode_token is removed. No token is rotated or printed."
+summary: "On the runner host a base64 of the GitHub Actions registration token was visible in a ps listing, in the command line of the compose run. The cause is that four ssh sites of scripts/deploy-runners.sh (default deploy, additive, rolling recreate, secondary stand-up) built RUNNER_TOKEN=$(echo '<base64>' piped to base64 -d) into the remote script, which sshd runs as the remote shell's argv. The token now crosses on ssh stdin and is read into the remote shell's environment; encode_token is removed. Inside the container the entrypoint passed config.sh --token on its argv, which the host's ps also lists; it now sets ACTIONS_RUNNER_INPUT_TOKEN for that one call. No token is rotated or printed."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -15,7 +15,7 @@ requirements:
       - id: AC2
         statement: "AC2: a regression test with a stub ssh that records its argv and stdin and then runs the remote script fails on the old command-string pattern and passes on the fix -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k old_command_string"
       - id: AC3
-        statement: "AC3: a ps listing taken by the stub docker at the moment compose runs holds neither the token nor its base64, on the default deploy, the rolling recreate and the additive mode -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k keeps_the_token_out_of_argv"
+        statement: "AC3: a ps listing taken by the stub docker at the moment compose runs holds neither the token nor its base64, on the default deploy, the rolling recreate and the additive mode, and so is the config.sh call inside the container -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -k 'keeps_the_token_out_of_argv or hands_config_sh'"
 evidence_requirements:
   - kind: tests
     description: "The ps listing and the recorded ssh argv hold no token on three of the four ssh sites run end to end, the fourth is scanned, and the detector has a positive control."
@@ -41,4 +41,4 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k keeps_the_token_out_of_argv'
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_token_not_in_argv.py -q -p no:cacheprovider -k "keeps_the_token_out_of_argv or hands_config_sh"'
