@@ -140,6 +140,11 @@ requirements:
     acceptance:
       - id: AC30
         statement: 'AC30: build-workspace-candidate-runtime.yml builds omnimarket''s Dockerfile.runtime from the staged omnimarket tree on the infra candidate tag, with INFRA_RUNTIME_IMAGE and OMNIMARKET_VCS_REF build args and an import omnimarket probe, after the infra build and before the Trivy scan, config-path check and push -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes fails at the merge base, where the step does not exist'
+  - id: req-omn19998-stage-host-pyyaml
+    statement: "The workspace stability-candidate build installs PyYAML on the host interpreter that runs stage_workspace.sh, because the dev-merge-tag stamp #5472 added loads checker_first_party_sources.py there, which imports yaml, and job 124359950934 failed with No module named 'yaml'."
+    acceptance:
+      - id: AC31
+        statement: 'AC31: the build-workspace-candidate-runtime.yml install step before the Stage workspace sibling trees step installs every third-party package that check_sibling_lock_pins.py and checker_first_party_sources.py import, pyyaml included -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party fails against the merge-base workflow, which installs pydantic only'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -574,3 +579,21 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC30
+  - id: dod-omn19998-ac31-stage-host-pyyaml
+    description: AC31 tests discover SCRIPT_DIR-relative Python helpers and Python heredocs in stage_workspace.sh, read their imports with ast, and require exact normalized distribution names from executable python3 pip installs before staging. Controls cover source discovery, renamed steps, comments, unrelated package names, and late installs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party
+        cwd: .
+    binds_ac:
+      - AC31
+  - id: dod-omn19998-ac31-stage-host-deploy-probe
+    description: Hosted-runner deployment artifact check for AC31. Reads the candidate workflow and staging source imports and fails when any host dependency is missing before the executable staging command.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -k test_stage_step_host_python_has_every_third_party_import
+        cwd: .
+    binds_ac:
+      - AC31
