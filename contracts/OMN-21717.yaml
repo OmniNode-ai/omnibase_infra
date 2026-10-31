@@ -1,0 +1,35 @@
+# OMN-21717 contract file for omnibase_infra: the dedicated CI broker's Seastar budget and group offset retention.
+schema_version: "1.0.0"
+ticket_id: "OMN-21717"
+title: "The dedicated CI broker crash-loops on a Seastar out-of-memory abort at --memory 1G while recovering consumer-group state"
+summary: "The dedicated CI broker spent its 1 G Seastar budget replaying a 383 MB __consumer_offsets log of about 15,000 per-run consumer groups, aborted with exit 139 a few seconds after every start and restarted 642 times by 12:42Z on 2026-10-31. The compose now starts it at 4 G, which a copy of the live data volume recovered from and held for 36 minutes with no restart, and the broker setup job expires group offsets a day after the last member."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21717-broker-budget-and-retention
+    statement: "The dedicated CI broker starts with a Seastar budget that recovers the production consumer-group log, and its consumer-group offsets expire within a day of the last member."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the CI broker compose gives the broker a Seastar memory budget of at least 4 GiB and the partition-cap job sizes against the same dial -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -k memory_budget fails when the default is 1G"
+      - id: AC2
+        statement: "AC2: the CI broker setup job declares a group offset retention of at most one day -- falsifier: uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -k expire fails when the retention line is removed"
+evidence_requirements:
+  - kind: tests
+    description: "The broker's default memory dial and the setup job's retention are pinned by reading the compose file."
+    command: "uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py tests/unit/docker/test_ci_bus_broker_isolation_omn18691.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The broker's default Seastar budget is at least 4 GiB and the partition-cap job follows the same dial."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -q -p no:cacheprovider -k "covers_recovery or same_dial"'
+  - id: dod-002
+    description: "The setup job expires group offsets within a day."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_ci_bus_redpanda_memory_budget.py -q -p no:cacheprovider -k expire'

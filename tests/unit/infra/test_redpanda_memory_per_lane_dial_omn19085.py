@@ -84,7 +84,6 @@ def test_dev_lane_reads_its_own_memory_dial() -> None:
         ("docker-compose.lakshman.yml", "${LAKSHMAN_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.dogfood.yml", "${DOGFOOD_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.prod.yml", "${PROD_REDPANDA_MEMORY:-8G}"),
-        ("docker-compose.ci-bus.yml", "${CI_BUS_REDPANDA_MEMORY:-1G}"),
     ],
 )
 def test_other_lanes_are_undisturbed(compose_file: str, expected: str) -> None:

@@ -128,9 +128,19 @@ services:
   # keep-list under `redpandadata/redpanda`, and a second Redpanda generation on
   # one host is a second set of upgrade semantics nobody asked for.
   #
-  # `--smp 1` and a 1 GB memory reservation, against the lanes' 8 G: this broker
-  # carries sixteen low-volume CI and lab topics, not a runtime. Sizing it like
-  # a lane would take 8 GB from a host that ran out of headroom this morning.
+  # `--smp 1` and a 4 GB memory budget, against the lanes' 8-12 G: this broker
+  # carries sixteen low-volume CI and lab topics, not a runtime, so it is still
+  # sized well below a lane.
+  #
+  # OMN-21717: the budget was 1 G and that was too small. Seastar aborts the
+  # whole process when its `--memory` budget is spent, and on 2026-10-31 the
+  # broker spent 1 G (`Used memory: 1G / Free memory: 0B`, `Failed to allocate
+  # 64 bytes`, `Aborting on shard 0`, exit 139) a few seconds after every start,
+  # while `kafka::group_manager` replayed a 383 MB `__consumer_offsets` log, and
+  # crash-looped about every 15 s (restart count 518) while client reconnects
+  # landed on each fresh start. Measured on a copy of the live data volume: 1 G
+  # aborts at 20 s, 4 G is healthy at 20 s and holds at 2.2 GiB resident. Do not
+  # lower it again without replaying a copy of the live volume at the new value.
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     container_name: omninode-ci-bus-redpanda
@@ -151,7 +161,7 @@ services:
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
-      - --memory ${CI_BUS_REDPANDA_MEMORY:-1G}
+      - --memory ${CI_BUS_REDPANDA_MEMORY:-4G}
       - --default-log-level=warn
     ports:
       - "${CI_BUS_REDPANDA_EXTERNAL_PORT:-21092}:21092"
@@ -187,7 +197,15 @@ services:
       service: redpanda-settings
     container_name: omninode-ci-bus-redpanda-partition-cap
     environment:
-      REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-1G}
+      REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-4G}
+      # OMN-21717: lab-run opens a fresh consumer group per call
+      # (`lab_work_client.consume.v1.<12 hex>.cap.__t.<topic>`), so the
+      # `__consumer_offsets` log held about 15,000 distinct group ids on
+      # 2026-10-31 and the broker replays all of them into heap on every start.
+      # A day after the last member the offsets, and with them the group, expire
+      # (the dev lane's OMN-19998 value). A long-lived consumer is unaffected: a
+      # group with a member never expires.
+      REDPANDA_GROUP_OFFSET_RETENTION_SEC: ${CI_BUS_GROUP_OFFSET_RETENTION_SEC:-86400}
       RPK_USER: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set}
       RPK_PASS: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set}
     depends_on:
