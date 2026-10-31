@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-21722
+title: The evidence closer's backfill arm offers 40 candidates per run, sized from the measured run time instead of 5 (AC1, AC2)
+summary: Raises the request model's contract default backfill_max_candidates from 5 to 40. The width is held against the workflow's own job timeout by a test that carries the measured worst run (285 s) and worst per-call cost (31.7 s) from the receipts of the 8 scheduled runs of 2026-10-30/31, and by the existing rotation-period gate. The width can never widen what the flip predicate accepts.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+evidence_requirements:
+  - kind: tests
+    description: The default width, the sizing arithmetic against the workflow timeout, the pool coverage of the wider slice, and the rotation-period join.
+    command: uv run pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21715_backfill_width.py tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-backfill-width-sized
+    description: The contract default is 40, the worst measured run plus the added candidates stays under half the job timeout, and the slice covers a 133 pool in ceil(133/40) ticks.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21715_backfill_width.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-rotation-period-joined
+    description: The rotation period still equals the workflow cron interval, so the wider slice cannot partition the pool.
+    source: manual
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+requirements:
+  - id: req-backfill-width
+    statement: The backfill arm drains the pool in hours, not days, inside the run budget.
+    acceptance:
+      - id: AC1
+        statement: The request model's contract default for backfill_max_candidates is 40, a test fixes the sizing arithmetic against the job timeout and a test asserts the slice covers a 133 pool in ceil(133/40) consecutive ticks.
+      - id: AC2
+        statement: The rotation period still equals the workflow cron interval so the wider slice cannot partition the pool.
