@@ -23,6 +23,9 @@ from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof
     HandlerLabProofPlan,
     LabProofPlanError,
 )
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_step_timeouts import (
+    ModelLabProofStepTimeouts,
+)
 from tests.unit.nodes.node_lab_proof_plan_compute.lab_proof_fixtures import (
     BASE,
     HEAD,
@@ -30,6 +33,7 @@ from tests.unit.nodes.node_lab_proof_plan_compute.lab_proof_fixtures import (
     LANE,
     REGISTRY,
     RUN,
+    bundle,
     core_plan,
     core_request,
 )
@@ -229,3 +233,52 @@ def test_the_base_build_is_handed_the_runtime_policy_env_before_the_bundle_env()
     argv = list(steps[_ID.BUILD_BASE].argv)
     env_files = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--env-file"]
     assert env_files == ["docker/runtime-policy.env", f"{LANE}/{RUN}/local.env"]
+
+
+def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy() -> (
+    None
+):
+    """Nothing in the handler fixes a timeout or the bus address (OMN-21623).
+
+    Every bound is given a distinct value the handler could not have held, so a
+    step that still carried its own number would not match the policy.
+    """
+    names = list(ModelLabProofStepTimeouts.model_fields)
+    distinct = {name: 1001 + index for index, name in enumerate(names)}
+    policy = bundle().model_copy(
+        update={
+            "step_timeouts": ModelLabProofStepTimeouts.model_validate(distinct),
+            "bus_bootstrap_servers": "bus.example:4321",
+        }
+    )
+    plan = HandlerLabProofPlan().handle(core_request(bundle=policy))
+    by_id = {step.step_id: step for step in plan.steps}
+    expected = {
+        _ID.INFRA_INIT: "default_seconds",
+        _ID.INFRA_FETCH: "git_fetch_seconds",
+        _ID.SUBJECT_FETCH: "git_fetch_seconds",
+        _ID.FOCUSED_TESTS: "focused_tests_seconds",
+        _ID.GENERATE: "generate_seconds",
+        _ID.BUILD_BASE: "build_base_seconds",
+        _ID.BUILD_OVERRIDE: "build_override_seconds",
+        _ID.UP: "up_seconds",
+        _ID.HEALTH_MIGRATION_GATE: "health_probe_seconds",
+        _ID.HEALTH_RUNTIME_MAIN: "health_probe_seconds",
+        _ID.HEALTH_RUNTIME_EFFECTS: "health_probe_seconds",
+        _ID.IDENTITY_RUNTIME_MAIN: "identity_seconds",
+        _ID.IDENTITY_RUNTIME_EFFECTS: "identity_seconds",
+        _ID.IMPORT_SMOKE_RUNTIME_MAIN: "import_smoke_seconds",
+        _ID.IMPORT_SMOKE_RUNTIME_EFFECTS: "import_smoke_seconds",
+        _ID.WIRING_LOGS_RUNTIME_MAIN: "wiring_logs_seconds",
+        _ID.WIRING_LOGS_RUNTIME_EFFECTS: "wiring_logs_seconds",
+        _ID.DOWN: "down_seconds",
+        _ID.REMOVE_IMAGES: "remove_images_seconds",
+        _ID.REMOVE_WORKDIR: "remove_workdir_seconds",
+    }
+    for step_id, field in expected.items():
+        assert by_id[step_id].timeout_seconds == distinct[field], step_id
+    allowed = {*distinct.values(), policy.delegation_timeout_seconds}
+    assert {step.timeout_seconds for step in plan.steps} <= allowed
+    delegation = by_id[_ID.GOLDEN_CHAIN_DELEGATION]
+    bootstrap = delegation.argv[delegation.argv.index("--kafka-bootstrap") + 1]
+    assert bootstrap == "bus.example:4321"

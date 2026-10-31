@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_step_timeouts import (
+    ModelLabProofStepTimeouts,
+)
+
 
 class ModelLabProofBundlePolicy(BaseModel):
     """The laptop bundle's fixed names today; slot-derived once OMN-19569 lands.
@@ -42,6 +46,12 @@ class ModelLabProofBundlePolicy(BaseModel):
     consumer_modules: tuple[str, ...] = Field(min_length=1)
     delegation_prompt: str = Field(min_length=1)
     delegation_timeout_seconds: int = Field(ge=1)
+    bus_bootstrap_servers: str = Field(
+        pattern=r"^[A-Za-z0-9.-]+:[0-9]{1,5}$",
+        description="The bus address the effects container's delegation step reaches, "
+        "as the bundle's compose network names it.",
+    )
+    step_timeouts: ModelLabProofStepTimeouts
     uv_image: str = Field(min_length=1)
     override_dockerfile: str = Field(min_length=1)
 

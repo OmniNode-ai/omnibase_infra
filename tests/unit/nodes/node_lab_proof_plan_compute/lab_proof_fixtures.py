@@ -15,9 +15,6 @@ from omnibase_infra.lab_proof.enum_lab_proof_step_phase import EnumLabProofStepP
 from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
 )
-from omnibase_infra.lab_proof.model_lab_proof_bundle_policy import (
-    ModelLabProofBundlePolicy,
-)
 from omnibase_infra.lab_proof.model_lab_proof_observation import (
     ModelLabProofObservation,
 )
@@ -31,6 +28,9 @@ from omnibase_infra.lab_proof.model_lab_proof_run_report import (
 from omnibase_infra.lab_proof.model_lab_proof_subject import ModelLabProofSubject
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     HandlerLabProofPlan,
+)
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_proof_bundle_policy import (
+    ModelLabProofBundlePolicy,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
