@@ -1715,7 +1715,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: c7cd6a481acfe7e8c0821a5d5149d592efa556c0 # .github/sibling-pins.yaml
+          ref: v0.4.319 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -3855,12 +3855,12 @@ jobs:
         #   * internal consistency -- the checked-in grants are exactly the
         #     derivation of the contract set this repo pinned. Deterministic,
         #     stays a hard per-PR gate (the `--check --prove` step below).
-        #   * freshness -- the pinned contract set is current with omnimarket
-        #     dev. A property of a PAIR of repos, not of any infra PR. Moved to
+        #   * freshness -- the pinned contract set follows omnimarket releases.
+        #     A property of a PAIR of repos, not of any infra PR. Moved to
         #     .github/workflows/omnimarket-contract-pin-refresh.yml, which
-        #     advances the pin and regenerates grants + rendered catalogs in
-        #     the same commit and opens a PR. Drift is now an actionable PR
-        #     instead of an ambush on unrelated authors.
+        #     moves the pin to the newest release tag once per overnight train
+        #     run, regenerates grants + rendered catalogs in the same commit
+        #     and opens a PR. Drift is actionable for unrelated authors.
         #
         # AC3 / staleness: the pin cannot sit stale SILENTLY (the bot advances
         # it on a schedule and fails loudly when it cannot) and cannot move
@@ -3883,7 +3883,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.sha || steps.resolve-omnimarket-ref.outputs.ref }}
+          ref: ${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' && steps.resolve-omnimarket-pin.outputs.tag || steps.resolve-omnimarket-ref.outputs.ref }}
           path: .proof-dependencies/omnimarket
           persist-credentials: false
 
@@ -3904,7 +3904,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+          ref: ${{ steps.resolve-omnimarket-pin.outputs.tag }}
           path: .proof-dependencies/omnimarket-pin
           persist-credentials: false
         # The assertion that consumes this checkout runs AFTER "Setup Python
@@ -3934,7 +3934,7 @@ jobs:
           # github.token is present on fork and dependabot runs alike.
           GH_TOKEN: ${{ steps.app-token-proof.outputs.token || github.token }}
           PIN_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
-          HEAD_PIN: ${{ steps.resolve-omnimarket-pin.outputs.sha }}
+          HEAD_PIN: ${{ steps.resolve-omnimarket-pin.outputs.tag }}
         run: |
           set -euo pipefail
           PIN_FILE=".github/omnimarket-contract-pin.yaml"
@@ -3953,6 +3953,11 @@ jobs:
           # which executes THIS script against a synthetic base commit.
           if ! git cat-file -e "${PIN_BASE_REVISION}:${PIN_FILE}" 2>/dev/null; then
             echo "contract pin is introduced by this PR - no predecessor to advance from; forward-only guard not applicable"
+            exit 0
+          fi
+          base_pin_text="$(git show "${PIN_BASE_REVISION}:${PIN_FILE}")"
+          if ! grep -q '^omnimarket_release_tag:' <<< "$base_pin_text"; then
+            echo "base revision carries no release-tag pin - nothing in tag form to advance from; forward-only guard not applicable"
             exit 0
           fi
           base_pin_file="$(mktemp)"

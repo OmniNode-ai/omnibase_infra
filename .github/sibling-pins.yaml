@@ -1,34 +1,34 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-20331: the sibling-repo commits every gating omnibase_infra workflow
+# OMN-20331: the sibling-repo refs every gating omnibase_infra workflow
 # reads. A gating check that reads a sibling's live `dev`/`main` tip turns red
 # on every open omnibase_infra PR when that sibling merges, and no omnibase_infra
 # PR can fix it (the omnimarket-contract-pin.yaml rationale, OMN-17292, applied
 # to every sibling).
 #
-# Each value is the sha written inline as the `ref:` of the sibling checkout, the
+# Each value is the ref written inline as the `ref:` of the sibling checkout, the
 # `git clone` checkout, or the `uses: ...@<sha>` in .github/workflows/*.yml.
 # tests/ci/test_sibling_reads_pinned_omn20331.py fails when a workflow reads a
-# sibling by branch name, by no ref, or at a sha that is not the one below.
+# sibling by branch name, by no ref, or at a ref that is not the one below.
 #
 #   omnibase_core / omnibase_compat  the commits of the uv.lock releases
 #                                    (core 0.47.31, compat 0.5.7)
-#   omnimarket                       equals .github/omnimarket-contract-pin.yaml
+#   omnimarket                       equals .github/omnimarket-contract-pin.yaml; a release-train tag, not a sha (OMN-17292)
 #   the rest                         the `dev` tip when the pin was added
 #   omniintelligence                 still read at this pin by every workflow but
 #                                    hostile-reviewer.yml, which reads its newest
 #                                    dev-<UTC>-<sha12> tag at run time (OMN-20910)
 #
 # Move a pin only in a PR that also passes the gates reading that sibling at the
-# new sha. NON-GATING MONITOR workflows (schedule/dispatch only) read live tips by
+# new ref. NON-GATING MONITOR workflows (schedule/dispatch only) read live tips by
 # design and are not pinned; they carry the label in their header.
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
   omnibase_compat: 65aed95fa710748654e37d5c15c5446e779fdf52
-  omnimarket: c7cd6a481acfe7e8c0821a5d5149d592efa556c0
+  omnimarket: v0.4.319
   omniintelligence: 3fcbf795087a79081c0ceeb676216bf64c5d49ae
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
   omniclaude: 3b8addff365b1a53e04106284b9275b6d5fad3c6
   omninode_infra: 9819782319a96cae1bfee6a0a5955029e882c601
-  omnidash: e0dadfc6eadef5f5151f24f7f13bdc3628011c66
+  omnidash: 10b497541c43f52023bef6d9539f71e6a1680513

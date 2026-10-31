@@ -1,16 +1,22 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to c7cd6a481acfe7e8c0821a5d5149d592efa556c0"
-summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+title: "The omnimarket contract reference follows the release train tag v0.4.319"
+summary: The grants derivation and every gating omnimarket checkout read an omnimarket release tag written once per overnight train run, not a commit sha bumped per omnimarket dev merge.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-omn17292
-    statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
+  - id: req-omn17292-train-tag
+    statement: The omnimarket contract reference is an omnimarket release-train tag, moved by the overnight train and never per omnimarket dev merge.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        statement: "AC1: the pin is a strict release tag; the resolver refuses a sha, a branch, a dev merge tag and a prerelease; the only writer is the train follower, triggered by the scheduled train run and never by a schedule or push of its own -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_sibling_reads_pinned_omn20331.py tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+      - id: AC8
+        statement: "AC8: omnimarket dev moving past the pinned release does not move the derivation input, and the follower selects the newest strict release tag by numeric order, ignoring dev merge tags and prereleases -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
+      - id: AC9
+        statement: "AC9: staleness is bounded by one train cycle and every move stays forward-only; the legacy sha base bootstraps once and a tag-form base cannot skip a failed forward proof -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
+      - id: AC7
+        statement: "AC7: OMN-17156 stays the upstream ordering gate and this keeps infra's verdict a function of committed state, stated in the follower's header -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
   - id: req-omn17292-dashboard-owner-lane
     statement: The lane table generator declares a port row and a boundary row for the dashboard-owner lane the private lane census declares, so the lab-overlay parity job reads no undeclared lane.
     acceptance:
@@ -38,8 +44,11 @@ requirements:
         statement: "AC6: the builder stage upgrades filelock to >=4.2.1 after the PyTorch-index torch install, and the npm bundle patch loop overwrites undici at a ^6 release >=6.29.1 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runtime_image_cve_floors_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
-    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+    description: The pin, the sibling pin and every inline omnimarket ref carry the release tag v0.4.319, and the resolver refuses any other ref shape.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_sibling_reads_pinned_omn20331.py tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - kind: tests
+    description: The train follower's tag selection and pin writes, executed against a local tag repository.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q"
   - kind: tests
     description: The lane table generator declares the dashboard-owner lane's port and boundary rows.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/unit/scripts/test_lane_block_dashboard_owner_omn17292.py -q"
@@ -60,8 +69,40 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn-17292-train-tag-ac1
+    description: The pin, the sibling pin and every inline omnimarket ref carry the release tag v0.4.319; a sha, branch, dev merge tag or prerelease is refused; the follower runs only after the scheduled train.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_sibling_reads_pinned_omn20331.py tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn-17292-train-tag-ac2
+    description: An omnimarket dev move does not move the derivation input; the follower's tag selection is numeric and ignores dev merge tags and prereleases.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py tests/ci/test_omnimarket_contract_pin.py -q -k 'newest_release_tag or dev_moving_past or tag_writer'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC8]
+  - id: dod-omn-17292-train-tag-ac3
+    description: The forward-only guard bootstraps once from the legacy sha pin and runs for every tag-form base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k 'forward_only or staleness'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC9]
+  - id: dod-omn-17292-train-tag-ac4
+    description: The follower's header names OMN-17156 as the upstream ordering gate and the one-train-cycle staleness budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -k ordering_gate"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC7]
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry c7cd6a481acfe7e8c0821a5d5149d592efa556c0.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry the release tag v0.4.319.
     source: manual
     checks:
       - check_type: test_passes
@@ -92,6 +133,14 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_auto_merge_skip_draft_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC4]
+  - id: dod-omn-17292-train-tag-deploy-check
+    description: Hosted-runner deploy check executes the train follower tag selection and pin writer against local repositories, refusing invalid refs and backwards moves without credentials or a live deployment.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1, AC8, AC9, AC7]
   - id: dod-omn-17292-ac5-hostile-reviewer-lan-label
     description: The hostile-review job's trusted fallback requires arch-amd64, which the h203-light runners lack; at the merge base the fallback is [self-hosted, omnibase-ci], which an h203-light runner satisfies.
     source: manual
@@ -117,3 +166,11 @@ dod_evidence:
           gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | awk '/undici@6\.29\.1/{u=1} /"filelock>=4\.2\.1"/{f=1} END{exit !(u&&f)}'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC6]
+  - id: dod-omn17292-successful-train-only
+    description: Replays the actual refresh job guard; failed, cancelled and timed-out scheduled trains cannot refresh, successful scheduled trains and explicit manual dispatch can.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -n 0 --no-cov -k only_a_successful
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

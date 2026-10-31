@@ -365,6 +365,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # same proof: the expiry module went red on the bot's pin-advance pull
     # request naming all six, and the deletion rode that pull request.
     #
+    # OMN-19988 added local_environment, and it was DELETED here by the pin
+    # advance to the omnimarket release tag v0.4.319 (OMN-17292), which carries
+    # omnimarket#4161 -- the node_projection_local_environment contract the
+    # entry named in its own comment. The node now declares the relation with
+    # the same schema (public), access (read_write) and role
+    # (local_environment) the bridge carried. Same mechanism and same proof as
+    # the entries above: the expiry module went red on the pin-advance pull
+    # request naming it, and the deletion rode that pull request.
+    #
     # OMN-17427: durable delegation execution ownership and its outbox,
     # vendored infra-first ahead of omnimarket#4277. Both carry the source
     # contract's read_write access and table-name role. Removable once the
@@ -522,33 +531,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="delegation_capability_cells",
-        ),
-    ),
-    # OMN-19988: the same infra-first window; this repo vendors
-    # node_projection_local_environment/0000-0002 ahead of the omnimarket node
-    # contract that declares the relation, which lands after this release (the
-    # node's wiring check refuses a contract whose table no release grants). The
-    # source declares access read_write, role local_environment in omnimarket's
-    # scripts/application-relation-ownership.yaml; 0001 grants
-    # tenant_projection_writer SELECT, INSERT, UPDATE. Retired when omnimarket's
-    # node_projection_local_environment contract merges and the pin advances
-    # past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:local_environment",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_local_environment/"
-            "0000_create_local_environment.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="local_environment",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_local_environment/"
-                "0000_create_local_environment.sql"
-            ),
-            access="read_write",
-            role="local_environment",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

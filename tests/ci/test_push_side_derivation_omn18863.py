@@ -168,10 +168,10 @@ class TestTheWiringIsPresentAndConditioned:
             )
         )
         assert step.get("if") == "steps.resolve-omnimarket-ref.outputs.ref != 'dev'"
-        assert step["with"]["ref"] == "${{ steps.resolve-omnimarket-pin.outputs.sha }}"
+        assert step["with"]["ref"] == "${{ steps.resolve-omnimarket-pin.outputs.tag }}"
 
     def test_the_pin_resolution_is_unconditional(self) -> None:
-        """The trailered path needs the pin sha too, so it cannot be gated.
+        """The trailered path needs the pin tag too, so it cannot be gated.
 
         This is the one-line change that makes the rest possible, and it is the
         line most likely to be 'tidied' back by someone who reads the original
@@ -194,7 +194,7 @@ class TestTheWiringIsPresentAndConditioned:
         )
         assert step["with"]["ref"] == (
             "${{ steps.resolve-omnimarket-ref.outputs.ref == 'dev' "
-            "&& steps.resolve-omnimarket-pin.outputs.sha "
+            "&& steps.resolve-omnimarket-pin.outputs.tag "
             "|| steps.resolve-omnimarket-ref.outputs.ref }}"
         )
 

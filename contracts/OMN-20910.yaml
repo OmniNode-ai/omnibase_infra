@@ -40,6 +40,11 @@ requirements:
     acceptance:
       - id: "AC9"
         statement: "AC9: hostile-review-judge.yml runs --read-request, --pending and --post-verdicts from base-branch code, skips download and judging when the triggering run uploaded no hostile-review-judge-request artifact and fails closed when the artifact listing fails, and the gate still clears a rejection with a reason and no verdict -- falsifier: uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
+  - id: req-overlay-only-voter-swap-original-ac2
+    statement: The overlay alone selects each resolved voter model and endpoint; changing a model does not require a workflow edit.
+    acceptance:
+      - id: AC2
+        statement: "AC2: Adding or swapping a voter is an overlay-only diff, proven by a test that changes the overlay model and asserts the resolved call target changes with no workflow edit -- falsifier: pytest test over the resolver with two overlay fixtures"
   - id: "req-rung-eval-env-example-backend-pin"
     statement: "The rung-eval host env template names the variables the cloud-openrouter rung reads since OMN-20974 (RUNG_EVAL_CLOUD_OPENROUTER_BACKEND_ID and RUNG_EVAL_DOGFOOD_TENANT_ID), commented and empty, and no longer names the retired BASE_URL, MODEL and API_KEY variables of that rung."
     acceptance:
@@ -147,6 +152,29 @@ dod_evidence:
         check_value: "uv run pytest tests/ci/test_hostile_review_judge_omn17427.py tests/ci/test_hostile_review_judge_workflow_omn17427.py tests/ci/test_hostile_review_judge_secret_boundary_omn17427.py -q -n 0 --no-cov"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC9"]
+  - id: dod-omn20910-original-ac1-overlay-removal
+    description: The upstream resolver's CLI regression removes a voter from the overlay and proves the gate no longer calls it. This is a local dependency proof in omniintelligence, not a hosted deployment check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/review_pairing/test_review_voters_overlay_omn20910.py -q -n 0 --no-cov -k a_voter_removed_from_the_overlay_is_not_called
+        cwd: ${OMNI_HOME}/omniintelligence
+    binds_ac: [AC1]
+  - id: dod-omn20910-original-ac2-overlay-only-swap
+    description: The upstream resolver loads before/after overlay fixtures and proves a backend or Anthropic model swap changes the resolved call target without a workflow edit. This is a local dependency proof in omniintelligence.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/review_pairing/test_review_voters_overlay_omn20910.py -q -n 0 --no-cov -k 'changing_anthropic_model_is_an_overlay_only_swap or changing_the_backend_changes_the_model_and_nothing_else'
+        cwd: ${OMNI_HOME}/omniintelligence
+    binds_ac: [AC2]
+  - id: dod-omn20910-hrtg-hosted-deploy-check
+    description: Hosted-runner check replays the refresh workflow's actual guard against failed/cancelled/timed-out and successful scheduled train events, permitting explicit manual dispatch without a live service, credential or network.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen pytest tests/ci/test_omnimarket_contract_tag_follows_train_omn17292.py -q -n 0 --no-cov -k only_a_successful
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: "dod-omn20910-ac10-rung-env-backend-pin"
     description: "AC10. The rung-eval env example names the backend-pin variables of the cloud rung and none of its retired variables."
     source: "manual"

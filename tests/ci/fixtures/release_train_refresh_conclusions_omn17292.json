@@ -1,0 +1,46 @@
+{
+  "_provenance": {
+    "source": "https://api.github.com/repos/OmniNode-ai/omnibase_infra/actions/workflows/release-train-nightly.yml/runs?per_page=30 (and status=failure)",
+    "captured_utc": "2026-10-25T21:26:19.524365+00:00",
+    "projection": "Selected real run fields; no event or conclusion was synthesized.",
+    "response_sha256": {
+      "train-runs.json": "f0eb0a1cdc471a6ec58c30103482e6efaefeef1bf56514a50e43fa25153fe2d9",
+      "failed-train-runs.json": "3df0ae29c0482258a3156eed88bbe4c962e38a0d85fd8621b127ce12b230c9ca"
+    }
+  },
+  "workflow_runs": [
+    {
+      "id": 40172695658,
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/40172695658",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "8c5cba4b3acaa048e047d6ccf73db5962a7212c8",
+      "path": ".github/workflows/release-train-nightly.yml",
+      "created_at": "2026-10-25T07:25:14Z",
+      "updated_at": "2026-10-25T07:25:59Z"
+    },
+    {
+      "id": 40152963124,
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/40152963124",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "063f034b378f5e6df0aec75413d0bca00e5aed69",
+      "path": ".github/workflows/release-train-nightly.yml",
+      "created_at": "2026-10-25T02:03:00Z",
+      "updated_at": "2026-10-25T02:03:49Z"
+    },
+    {
+      "id": 35699682745,
+      "html_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35699682745",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_sha": "b891ebad7bee8652a5329de8feb3e27ad80bba45",
+      "path": ".github/workflows/release-train-nightly.yml",
+      "created_at": "2026-09-22T07:27:23Z",
+      "updated_at": "2026-09-22T07:28:17Z"
+    }
+  ]
+}
