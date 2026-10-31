@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
+from omnibase_infra.models.network_binding import load_network_binding_settings
+
 
 class ModelMCPServerConfig(BaseModel):
     """Configuration for the MCP server lifecycle.
@@ -45,7 +47,7 @@ class ModelMCPServerConfig(BaseModel):
         default=True, description="Whether to enable Kafka for hot reload"
     )
     http_host: str = Field(
-        default="0.0.0.0",  # noqa: S104 - Intentional bind-all for server
+        default=load_network_binding_settings().bind_all_address,
         description="Host to bind the MCP HTTP server",
     )
     http_port: int = Field(

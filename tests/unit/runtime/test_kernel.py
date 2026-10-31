@@ -43,14 +43,13 @@ _SKIP_REASON = (
     "service_registry is None due to circular import bug in omnibase_core 0.6.2. "
     "Upgrade to omnibase_core >= 0.6.3 to run these tests."
 )
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import ModelRuntimeConfig
 from omnibase_infra.runtime.service_kernel import (
     DEFAULT_GROUP_ID,
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
-    MAX_PORT,
-    MIN_PORT,
     bootstrap,
     configure_logging,
     load_runtime_config,
@@ -1985,9 +1984,10 @@ class TestHttpPortValidation:
             yield mock_cls
 
     def test_port_constants_are_valid(self) -> None:
-        """Test that port validation constants are correctly defined."""
-        assert MIN_PORT == 1
-        assert MAX_PORT == 65535
+        """Test that the declared port bounds are the TCP port range."""
+        port_bounds = load_network_binding_settings()
+        assert port_bounds.tcp_port_min == 1
+        assert port_bounds.tcp_port_max == 65535
 
     async def test_bootstrap_rejects_port_zero(
         self,

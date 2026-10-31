@@ -13,6 +13,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from omnibase_infra.event_bus.topic_constants import get_dlq_topic_for_original
+from omnibase_infra.models.network_binding import ModelLoopbackHealthServerBinding
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 
@@ -43,7 +44,9 @@ def _default_dlq_topic() -> str:
     return topic
 
 
-class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
+class ConfigInfraRoutingDecisionsConsumer(
+    ModelLoopbackHealthServerBinding, BaseSettings
+):
     """Configuration for the infra routing decisions Kafka consumer.
 
     Environment variables use the OMNIBASE_INFRA_ROUTING_DECISIONS_ prefix.
@@ -154,10 +157,6 @@ class ConfigInfraRoutingDecisionsConsumer(BaseSettings):
         ge=1024,
         le=65535,
         description="Port for HTTP health check endpoint",
-    )
-    health_check_host: str = Field(
-        default="127.0.0.1",  # fallback-ok: override to 0.0.0.0 in containers via env
-        description="Host for health check server binding.",
     )
     health_check_staleness_seconds: int = Field(
         default=300,

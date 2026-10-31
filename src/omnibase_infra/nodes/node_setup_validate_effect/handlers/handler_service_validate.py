@@ -36,6 +36,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.nodes.node_setup_validate_effect.models.model_service_health_result import (
     ModelSetupNodeHealthResult,
 )
@@ -225,7 +226,7 @@ class HandlerServiceValidate:
                     "TCP health check for %s: localhost:%d", svc_name, host_port
                 )
                 healthy, response_time_ms = await _check_tcp_health(
-                    "localhost", host_port, timeout_s
+                    load_network_binding_settings().local_host, host_port, timeout_s
                 )
                 message = f"TCP localhost:{host_port} {'OPEN' if healthy else 'CLOSED'}"
 

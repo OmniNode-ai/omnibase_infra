@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# ruff: noqa: S104
 # S104 disabled: Binding to 0.0.0.0 is intentional for container networking
 """MCP handler configuration model."""
 
 from pydantic import BaseModel, Field, model_validator
+
+from omnibase_infra.models.network_binding import load_network_binding_settings
 
 
 class ModelMcpHandlerConfig(BaseModel):
@@ -27,7 +28,10 @@ class ModelMcpHandlerConfig(BaseModel):
             key is required when ``auth_enabled`` is True.
     """
 
-    host: str = Field(default="0.0.0.0", description="Host to bind MCP server to")
+    host: str = Field(
+        default=load_network_binding_settings().bind_all_address,
+        description="Host to bind MCP server to",
+    )
     port: int = Field(default=8090, description="Port for MCP streamable HTTP endpoint")
     path: str = Field(default="/mcp", description="URL path for MCP endpoint")
     stateless: bool = Field(

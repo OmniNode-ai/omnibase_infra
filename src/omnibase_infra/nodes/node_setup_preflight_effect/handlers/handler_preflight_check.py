@@ -35,6 +35,7 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.nodes.node_setup_preflight_effect.models.model_preflight_check_result import (
     ModelPreflightCheckResult,
 )
@@ -261,7 +262,7 @@ def _check_port_availability() -> ModelPreflightCheckResult:
     """Check that local service ports are free."""
     occupied: list[int] = []
     for port in _LOCAL_SERVICE_PORTS:
-        if not _check_port_free("localhost", port):
+        if not _check_port_free(load_network_binding_settings().local_host, port):
             occupied.append(port)
     if occupied:
         return ModelPreflightCheckResult(
