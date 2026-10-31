@@ -16,8 +16,8 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The constants equal the declarations, an omitted or mis-shaped topic is refused, and the canary quarantine default is the registry member.
-    command: uv run --frozen pytest tests/unit/models/cost_api tests/unit/nodes/node_board_probe_effect/test_consumer_flow_contract_topics_omn21623.py tests/unit/nodes/node_developer_principal_plan_compute tests/unit/nodes/node_chain_canary_effect/test_quarantine_topic_default_omn21623.py -q
-  - kind: command
+    command: uv run --frozen pytest tests/unit/models/cost_api/test_model_cost_api_topics.py tests/unit/nodes/node_board_probe_effect/test_consumer_flow_contract_topics_omn21623.py tests/unit/nodes/node_developer_principal_plan_compute/test_scoped_write_topics_contract_omn21623.py tests/unit/nodes/node_chain_canary_effect/test_quarantine_topic_default_omn21623.py -q
+  - kind: ci
     description: The contracts_and_di check exits 0 over the cost API, its topics model and the developer principal models; at the merge base the same run reports 4 findings.
     command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/services/cost_api src/omnibase_infra/models/cost_api src/omnibase_infra/models/developer_principal
 emergency_bypass:
@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/models/cost_api tests/unit/nodes/node_board_probe_effect/test_consumer_flow_contract_topics_omn21623.py tests/unit/nodes/node_developer_principal_plan_compute tests/unit/nodes/node_chain_canary_effect/test_quarantine_topic_default_omn21623.py -q"
+        check_value: "uv run --frozen pytest tests/unit/models/cost_api/test_model_cost_api_topics.py tests/unit/nodes/node_board_probe_effect/test_consumer_flow_contract_topics_omn21623.py tests/unit/nodes/node_developer_principal_plan_compute/test_scoped_write_topics_contract_omn21623.py tests/unit/nodes/node_chain_canary_effect/test_quarantine_topic_default_omn21623.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC7
@@ -43,6 +43,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC8
+  - id: dod-omn21623-deploy-artifact-topic-readback
+    description: 'Deploy artifact probe: build the wheel, load its cost, board and plan topic declarations outside the source tree, and read back all three cached snapshots. Fails if a shipped declaration is absent or the cache cannot serve it; runs on the hosted runner without Docker.'
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/services/test_topic_declarations_wheel_omn21623.py -q -s
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
   - id: dod-omn21623-deploy-topic-declarations
     description: >-
       Post-deploy probe: the runtime container loads the cost API topics and the plan's scoped write topics from the files it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
