@@ -21,6 +21,7 @@
 #   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml up -d
 # Tear down:
 #   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml down
+name: factory-floor-web
 services:
   factory-floor-web:
     image: nginx:1.29-alpine

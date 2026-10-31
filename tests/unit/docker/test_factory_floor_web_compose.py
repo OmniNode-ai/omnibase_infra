@@ -105,6 +105,7 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert 'Cache-Control "no-store"' in conf
     assert "default-src 'self'" in conf
     assert "root /srv/site;" in conf
+    assert "try_files $uri $uri/index.html =404;" in conf
 
 
 @pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
