@@ -328,8 +328,8 @@ docker() {
     case "$1" in
         ps)
             [[ "$*" == *"label=com.docker.compose.project=$PROJECT"* ]] || return 9
-            local svc="${*##*service=}"
-            printf '%s-id\n' "${svc}" ;;
+            local last="${!#}"
+            printf '%s-id\n' "${last##*service=}" ;;
         stop | rm) printf '%s\n' "$*" ;;
         *) return 9 ;;
     esac
