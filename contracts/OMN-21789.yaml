@@ -1,0 +1,44 @@
+# OMN-21789 contract file for omnibase_infra: the dev broker readiness probe does not judge the gateway forwarder's outbound consumer groups.
+schema_version: "1.0.0"
+ticket_id: "OMN-21789"
+title: "the dev broker readiness probe ignores the gateway forwarder's outbound consumer groups, so a forwarder that cannot reach the cloud no longer holds the dev runtime containers in Created"
+summary: "On 2026-10-31 the dev lane broker read unhealthy from about 14:52Z on group_not_synced for tenant-beta-gateway-canary-79afa7263852-gateway-forwarder-outbound (lag 150078, offsets static, forwarder restarted 106 times, cloud brokers unresolvable). omninode-runtime-effects depends on redpanda service_healthy, so its replacements sat in State=created and the only consumer of onex.cmd.omnimarket.github-repo-write-requested.v1 was absent, so onex scm pr-create and pr-close got no terminal. The probe now reads a declared list of exempt group-name suffixes (sync_exempt_group_suffixes, required, fails closed when absent) and does not judge a group ending in one of them; every other group is judged as before."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21789-probe-skips-relay-groups
+    statement: "The broker readiness probe reads READY while a gateway-forwarder-outbound group is frozen, and still reads NOT READY for a frozen runtime group."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the recorded forwarder group describe (Stable, one member, lag 150078, offsets frozen past the window) reads READY -- falsifier: uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -k forwarder fails at origin/dev aceff4fb1"
+      - id: AC2
+        statement: "AC2: a frozen runtime consumer group is still NOT READY beside a forwarder outbound group, and the verdict names only the runtime group -- falsifier: uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -k frozen fails at origin/dev aceff4fb1"
+      - id: AC3
+        statement: "AC3: sync_exempt_group_suffixes is a declared key and the probe fails closed when it is absent -- falsifier: uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -k declaration fails at origin/dev aceff4fb1"
+evidence_requirements:
+  - kind: tests
+    description: "The recorded forwarder group describe is not judged, the runtime group still is, and the declaration key is required."
+    command: "uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py tests/unit/docker/test_omn18789_broker_readiness_lane_scope.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "A frozen forwarder outbound group is not judged by the probe; the same stub with the exemption removed is NOT READY."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k forwarder'
+  - id: dod-002
+    description: "A frozen runtime group is still NOT READY beside a forwarder group."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k frozen'
+  - id: dod-003
+    description: "The exempt suffixes are declared and required."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_omn18789_broker_readiness_probe.py -q -p no:cacheprovider -k declaration'
