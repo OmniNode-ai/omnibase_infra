@@ -1,0 +1,47 @@
+# OMN-21761 contract file for omnibase_infra: handler-shape burn-down, slice rf1400-s1.
+schema_version: "1.0.0"
+ticket_id: "OMN-21761"
+title: "omnibase_infra handler-shape burn-down, slice rf1400-s1: handlers take one typed request and the runtime owns the envelope"
+summary: "Seven noncanonical_handle findings of core's ValidatorHandlerShape in the chain orchestrator, registry effect and contract loader handlers are cleared: each handle now takes one typed request model (the registry request protocol and models carry correlation_id themselves; ModelContractScanRequest is new). Repo total 104 to 97, no baseline entry or suppression added."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "handle signatures of HandlerChainLearnInitiate, HandlerChainRetrievalComplete, HandlerChainStoreComplete, HandlerPartialRetry, HandlerPostgresUpsert, HandlerPostgresDeactivate and HandlerContractScan"
+requirements:
+  - id: req-omn21761-handle-takes-one-typed-request
+    statement: "The slice handlers take one typed request and ValidatorHandlerShape reports nothing on the slice paths."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the ValidatorHandlerShape count over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the handler-shape reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: touched handlers are definition-B handle(request) with typed request and response models and no envelope inside the handler -- falsifier: uv run pytest tests/unit -q over the touched modules plus the validator re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the validator re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The unit tests of the touched handlers pass with the typed request calls."
+    command: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect tests/unit/nodes/test_node_contract_loader_effect.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The touched handlers' unit tests pass with handle(request) calls."
+    source: generated
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect tests/unit/nodes/test_node_contract_loader_effect.py -q -p no:cacheprovider"
+  - id: dod-002
+    description: "The unit suite passes at the PR head on a lab host."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect tests/unit/nodes/test_node_contract_loader_effect.py -q -p no:cacheprovider"
+  - id: dod-003
+    description: >-
+      Post-deploy probe: the deployed runtime carries the new contract-scan request model, so the contract loader handler it serves takes the typed request. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.nodes.node_contract_loader_effect.models.model_contract_scan_request import ModelContractScanRequest"
+    binds_ac: []

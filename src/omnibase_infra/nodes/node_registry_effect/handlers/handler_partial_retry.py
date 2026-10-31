@@ -75,6 +75,7 @@ class ProtocolPartialRetryRequest(Protocol):
         idempotency_key: Optional key for idempotent retry semantics.
         endpoints: Dict of endpoint type to URL for PostgreSQL.
         metadata: Additional metadata for PostgreSQL registration.
+        correlation_id: Request correlation ID for distributed tracing.
     """
 
     node_id: UUID
@@ -84,6 +85,7 @@ class ProtocolPartialRetryRequest(Protocol):
     idempotency_key: str | None
     endpoints: dict[str, str]
     metadata: dict[str, str]
+    correlation_id: UUID
 
 
 class HandlerPartialRetry:
@@ -108,7 +110,7 @@ class HandlerPartialRetry:
         >>> from unittest.mock import AsyncMock
         >>> postgres_adapter = AsyncMock()
         >>> handler = HandlerPartialRetry(postgres_adapter)
-        >>> # Call handler.handle(request, correlation_id) in async context
+        >>> # Call handler.handle(request) in async context
     """
 
     @property
@@ -133,11 +135,7 @@ class HandlerPartialRetry:
         """
         self._postgres_adapter = postgres_adapter
 
-    async def handle(
-        self,
-        request: ProtocolPartialRetryRequest,
-        correlation_id: UUID,
-    ) -> ModelBackendResult:
+    async def handle(self, request: ProtocolPartialRetryRequest) -> ModelBackendResult:
         """Execute partial failure retry operation.
 
         Routes to PostgreSQL based on target_backend field and executes the
@@ -152,8 +150,7 @@ class HandlerPartialRetry:
                 - idempotency_key: Optional key for safe retry semantics
                 - endpoints: Dict of endpoint URLs (for PostgreSQL)
                 - metadata: Additional metadata (for PostgreSQL)
-
-            correlation_id: Request correlation ID for distributed tracing.
+                - correlation_id: Request correlation ID for distributed tracing
 
         Returns:
             ModelBackendResult with:
@@ -173,7 +170,9 @@ class HandlerPartialRetry:
         target_backend = request.target_backend
 
         if target_backend == EnumBackendType.POSTGRES:
-            return await self._retry_postgres(request, correlation_id, start_time)
+            return await self._retry_postgres(
+                request, request.correlation_id, start_time
+            )
         else:
             # Defensive: This branch handles unexpected enum values that may arise from
             # duck-typed Protocol usage, where callers could pass objects with a
@@ -199,7 +198,7 @@ class HandlerPartialRetry:
                 error_code="INVALID_TARGET_BACKEND",
                 duration_ms=duration_ms,
                 backend_id=sanitized_backend,
-                correlation_id=correlation_id,
+                correlation_id=request.correlation_id,
             )
 
     async def _retry_postgres(

@@ -13,6 +13,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from omnibase_infra.nodes.node_contract_loader_effect.models.model_contract_scan_request import (
+    ModelContractScanRequest,
+)
+
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
     from omnibase_infra.runtime.models.model_runtime_node_graph_config import (
@@ -50,12 +54,13 @@ class HandlerContractScan:
         self._node_graph_config = node_graph_config
         self._default_scan_path = default_scan_path
 
-    async def handle(self, scan_paths: list[str] | None = None) -> dict[str, object]:
+    async def handle(self, request: ModelContractScanRequest) -> dict[str, object]:
         """Execute contract scan across configured directories.
 
         Args:
-            scan_paths: Optional override paths to scan. If None, uses
-                the default_scan_path from constructor.
+            request: Scan request. Its ``scan_paths`` override the paths to
+                scan; when empty, the default_scan_path from the constructor
+                is used.
 
         Returns:
             Summary dict with scan status.
@@ -65,11 +70,7 @@ class HandlerContractScan:
         )
 
         # Resolve scan paths: explicit > default from constructor
-        path_objects = (
-            [Path(p) for p in scan_paths]
-            if scan_paths
-            else [Path(self._default_scan_path)]
-        )
+        scan_paths = request.scan_paths or (self._default_scan_path,)
 
         # Thread scan policies from node_graph_config
         exclude_patterns: tuple[str, ...] = ()
@@ -82,7 +83,7 @@ class HandlerContractScan:
             scan_exclude_patterns=exclude_patterns,
             scan_deny_paths=deny_paths,
         )
-        config = loader.load_all_contracts(path_objects)
+        config = loader.load_all_contracts([Path(p) for p in scan_paths])
         logger.info(
             "Contract scan complete: loaded %d contracts",
             config.total_contracts_loaded,
