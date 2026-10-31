@@ -31,9 +31,9 @@ from scripts.ci.check_deploy_scope_dod import (
     _VERIFIER_PYTHON,
     FAIL_NO_CONTRACT,
     PASS_CONTRACTS,
+    PREREQUISITE_VERIFIER_VERSION,
     classify_ticket_contracts,
     pinned_verifier_judge,
-    read_verifier_version,
 )
 
 pytestmark = pytest.mark.unit
@@ -72,9 +72,9 @@ def _text(name: str) -> str:
 
 @pytest.fixture(scope="module")
 def released_judge(tmp_path_factory: pytest.TempPathFactory):
-    """The released verifier's prerequisite, at the pin the repo-evidence caller uses."""
+    """The released verifier's prerequisite, at the pin the pre-push leg uses."""
     return pinned_verifier_judge(
-        read_verifier_version(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
+        PREREQUISITE_VERIFIER_VERSION, tmp_path_factory.mktemp("judge-cwd")
     )
 
 
@@ -122,7 +122,7 @@ def test_hook_and_pr_create_give_one_verdict_per_fixture_parity(
     """pr-create's own binding of ``contract_prerequisite`` agrees with the hook on every fixture."""
     names = ["accepted_recorded_omn21629.yaml", *_REFUSALS]
     texts = {name: _text(name) for name in names}
-    verifier = read_verifier_version(REPO_ROOT)
+    verifier = PREREQUISITE_VERIFIER_VERSION
 
     ran = subprocess.run(
         [
