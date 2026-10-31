@@ -57,6 +57,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -72,6 +73,7 @@ from omnibase_spi.contracts.delegation.contract_delegation_attribution import (
 
 logger = logging.getLogger(__name__)
 
+
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
@@ -85,12 +87,6 @@ _DEFAULT_MAX_TOKENS: int = 2_048
 # Default temperature -- low for deterministic, structured code generation.
 _DEFAULT_TEMPERATURE: float = 0.1
 
-# Per-request timeout in seconds.  Qwen3-14B is a fast coding model;
-# 90 s gives headroom for a 2 048-token completion without exceeding the
-# transport cap of 180 s.
-# IMPORTANT: Must not exceed TransportHolderLlmHttp(max_timeout_seconds=180.0).
-# If you raise this value, update the transport cap in __init__ accordingly.
-_DEFAULT_TIMEOUT_SECONDS: float = 90.0
 
 # Delegation confidence: test generation is a well-defined coding task.
 _DELEGATION_CONFIDENCE: float = 0.92
@@ -282,7 +278,7 @@ class AdapterTestBoilerplateGeneration:
 
         self._transport = TransportHolderLlmHttp(
             target_name="qwen3-14b-test-boilerplate",
-            max_timeout_seconds=180.0,
+            max_timeout_seconds=_T.llm_long_form_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -394,7 +390,7 @@ class AdapterTestBoilerplateGeneration:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            timeout_seconds=_T.llm_request_seconds,
         )
 
         # --- Call LLM ---

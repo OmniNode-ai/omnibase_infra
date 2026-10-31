@@ -49,13 +49,12 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
 )
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 
 # Metadata dict type for unimplemented create_ticket stub.
 # ONEX_EXCLUDE: dict_str_any - unimplemented stub; no domain type exists yet
 _TicketMetadata = dict[str, object]
 
-# Default timeout for Linear API calls (seconds)
-_DEFAULT_TIMEOUT_SECONDS: float = 15.0
 
 # ---------------------------------------------------------------------------
 # GraphQL queries
@@ -193,7 +192,7 @@ class AdapterTicketLinear:
     def __init__(
         self,
         linear_api_key: str,
-        timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+        timeout: float = _T.linear_ticket_request_seconds,
         done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
         if not linear_api_key:
@@ -467,7 +466,7 @@ class AdapterTicketLinear:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def close(self, timeout_seconds: float = 30.0) -> None:
+    async def close(self, timeout_seconds: float = _T.close_seconds) -> None:
         """Release the httpx client.
 
         Args:

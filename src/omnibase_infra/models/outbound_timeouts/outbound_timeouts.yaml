@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Outbound-call timeouts (OMN-21623).
+#
+# The waits the LLM, Linear and ticket adapters and the bus audit apply to
+# their outbound calls. Read by ModelOutboundTimeouts; the callers hold
+# no timeout literal. Every key is required: a block that omits one fails to load.
+# All values are seconds.
+timeouts:
+  # Subprocess wait for the git diff the code-analysis enrichment reads.
+  git_diff_seconds: 15
+  # LLM adapters: per-request wait, and the ceiling the HTTP transport accepts.
+  # A per-request wait above llm_long_form_max_seconds fails to load.
+  llm_request_seconds: 90
+  llm_documentation_request_seconds: 150
+  llm_coder_max_seconds: 120
+  llm_long_form_max_seconds: 180
+  # Linear adapters and the shared close() grace.
+  linear_graphql_request_seconds: 30
+  linear_graphql_circuit_reset_seconds: 60
+  linear_ticket_request_seconds: 15
+  close_seconds: 30
+  # bus_audit: consumer poll, topic discovery and watermark reads.
+  audit_poll_seconds: 2
+  audit_topic_discovery_seconds: 10
+  audit_offsets_seconds: 5

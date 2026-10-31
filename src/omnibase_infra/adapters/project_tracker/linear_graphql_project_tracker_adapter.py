@@ -47,6 +47,7 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
     is_done_state,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 from omnibase_infra.protocols.protocol_linear_graphql_transport import (
     ProtocolLinearGraphQLTransport,
 )
@@ -54,8 +55,6 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 # Default Linear GraphQL endpoint; overridable via constructor.
 DEFAULT_LINEAR_GRAPHQL_ENDPOINT: Final[str] = "https://api.linear.app/graphql"
-# Default request timeout for Linear API calls.
-DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 # Service identifier for circuit breaker / error context.
 SERVICE_NAME: Final[str] = "linear-graphql"
 
@@ -343,7 +342,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     ``resolve_project_tracker()`` for the Linear backend.
 
     Resilience: wraps ``MixinAsyncCircuitBreaker`` with HTTP transport,
-    threshold=5, reset_timeout=60s. Connection / timeout / auth errors are
+    threshold=5, declared reset_timeout. Connection / timeout / auth errors are
     mapped to the typed ``Infra*Error`` hierarchy with sanitized context
     (the API key is never included in error messages).
     """
@@ -352,7 +351,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         self,
         api_key: str | None = None,
         endpoint: str = DEFAULT_LINEAR_GRAPHQL_ENDPOINT,
-        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        timeout_seconds: float = _T.linear_graphql_request_seconds,
         client: httpx.AsyncClient | None = None,
         done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
@@ -421,7 +420,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
 
         self._init_circuit_breaker(
             threshold=5,
-            reset_timeout=60.0,
+            reset_timeout=_T.linear_graphql_circuit_reset_seconds,
             service_name=SERVICE_NAME,
             transport_type=EnumInfraTransportType.HTTP,
             half_open_successes=1,
@@ -434,7 +433,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     async def graphql_transport(
         cls,
         api_key: str,
-        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        timeout_seconds: float = _T.linear_graphql_request_seconds,
         client: httpx.AsyncClient | None = None,
     ) -> AsyncIterator[ProtocolLinearGraphQLTransport]:
         """Scope a transport to an existing caller's attempt without probing.
@@ -503,7 +502,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     async def get_capabilities(self) -> list[str]:
         return ["read", "write"]
 
-    async def close(self, timeout_seconds: float = 30.0) -> None:
+    async def close(self, timeout_seconds: float = _T.close_seconds) -> None:
         self._connected = False
         # Cancel circuit breaker active recovery task to avoid leaking it.
         await self.cancel_active_recovery()
