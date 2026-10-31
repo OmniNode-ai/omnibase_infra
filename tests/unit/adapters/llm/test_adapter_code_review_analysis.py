@@ -30,7 +30,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.adapters.llm.adapter_code_review_analysis import (
-    _DEFAULT_MODEL,
     _DELEGATION_CONFIDENCE,
     _MAX_DIFF_CHARS,
     _PROMPT_VERSION,
@@ -45,15 +44,20 @@ from omnibase_spi.contracts.delegation.contract_delegated_response import (
     ContractDelegatedResponse,
 )
 
+_TEST_MODEL = "qwen2.5-coder-14b-instruct"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_adapter(**kwargs: object) -> AdapterCodeReviewAnalysis:
+def _make_adapter(
+    model: str = _TEST_MODEL, **kwargs: object
+) -> AdapterCodeReviewAnalysis:
     """Build an AdapterCodeReviewAnalysis with a mocked transport."""
     adapter = AdapterCodeReviewAnalysis(
         base_url="http://localhost:8001",
+        model=model,
         **kwargs,  # type: ignore[arg-type]
     )
     # Replace transport and handler with mocks to avoid HTTP calls.
@@ -286,8 +290,8 @@ class TestAdapterCodeReviewAnalysisAttribution:
         assert result.attribution.model_name == "qwen2.5-coder-7b"
 
     @pytest.mark.asyncio
-    async def test_attribution_model_name_default(self) -> None:
-        """attribution.model_name defaults to _DEFAULT_MODEL when not overridden."""
+    async def test_attribution_model_name_from_fixture(self) -> None:
+        """attribution.model_name matches the model supplied by the test fixture."""
         adapter = _make_adapter()
         adapter._handler.handle = AsyncMock(return_value=_make_llm_response("Content."))  # type: ignore[method-assign]
 
@@ -295,7 +299,7 @@ class TestAdapterCodeReviewAnalysisAttribution:
             review_type=REVIEW_TYPE_NAMING, code_diff="def foo(): pass"
         )
 
-        assert result.attribution.model_name == _DEFAULT_MODEL
+        assert result.attribution.model_name == _TEST_MODEL
 
     @pytest.mark.asyncio
     async def test_attribution_endpoint_url(self) -> None:
@@ -579,6 +583,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """max_tokens=0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 max_tokens=0,
             )
@@ -587,6 +592,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """Negative max_tokens raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 max_tokens=-1,
             )
@@ -595,6 +601,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """max_tokens > 32768 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 max_tokens=32_769,
             )
@@ -602,6 +609,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
     def test_valid_max_tokens_does_not_raise(self) -> None:
         """max_tokens=1024 is valid."""
         adapter = AdapterCodeReviewAnalysis(
+            model="qwen2.5-coder-14b-instruct",
             base_url="http://localhost:8001",
             max_tokens=1024,
         )
@@ -611,6 +619,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """temperature < 0.0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 temperature=-0.1,
             )
@@ -619,6 +628,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """temperature > 2.0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 temperature=2.1,
             )
@@ -627,6 +637,7 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
         """temperature=0.0 and temperature=2.0 are valid boundaries."""
         for t in (0.0, 2.0):
             adapter = AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct",
                 base_url="http://localhost:8001",
                 temperature=t,
             )
@@ -635,17 +646,19 @@ class TestAdapterCodeReviewAnalysisConstructorValidation:
     def test_empty_base_url_raises_protocol_configuration_error(self) -> None:
         """Explicit base_url='' raises ProtocolConfigurationError at construction time."""
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterCodeReviewAnalysis(base_url="")
+            AdapterCodeReviewAnalysis(model="qwen2.5-coder-14b-instruct", base_url="")
 
     def test_empty_base_url_error_message_is_clear(self) -> None:
         """ProtocolConfigurationError for empty base_url contains a helpful message."""
         with pytest.raises(ProtocolConfigurationError, match="non-empty string"):
-            AdapterCodeReviewAnalysis(base_url="")
+            AdapterCodeReviewAnalysis(model="qwen2.5-coder-14b-instruct", base_url="")
 
     def test_whitespace_only_base_url_raises_protocol_configuration_error(self) -> None:
         """Whitespace-only base_url raises ProtocolConfigurationError at construction time."""
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterCodeReviewAnalysis(base_url="   ")
+            AdapterCodeReviewAnalysis(
+                model="qwen2.5-coder-14b-instruct", base_url="   "
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -910,3 +923,10 @@ class TestAdapterCodeReviewAnalysisLlmException:
             )
 
         assert exc_info.value is original_error
+
+
+@pytest.mark.unit
+def test_model_is_required() -> None:
+    """The caller must supply the model from the model-routing policy."""
+    with pytest.raises(TypeError, match="model"):
+        AdapterCodeReviewAnalysis(base_url="http://localhost:8000")

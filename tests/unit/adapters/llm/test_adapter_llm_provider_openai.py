@@ -38,28 +38,29 @@ class TestAdapterLlmProviderOpenaiProperties:
     def test_provider_name(self) -> None:
         """Provider name returns configured value."""
         adapter = AdapterLlmProviderOpenai(
+            default_model="qwen2.5-coder-14b",
             provider_name="vllm-coder",
         )
         assert adapter.provider_name == "vllm-coder"
 
     def test_provider_type_default(self) -> None:
         """Provider type defaults to 'local'."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         assert adapter.provider_type == "local"
 
     def test_is_available_default(self) -> None:
         """Provider starts as available."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         assert adapter.is_available is True
 
     def test_supports_streaming(self) -> None:
         """Streaming is supported (generate_stream implemented via asyncio.new_event_loop)."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         assert adapter.supports_streaming() is True
 
     def test_supports_async(self) -> None:
         """Async is always supported."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         assert adapter.supports_async() is True
 
 
@@ -68,7 +69,7 @@ class TestAdapterLlmProviderOpenaiConfigure:
 
     def test_configure_updates_fields(self) -> None:
         """Configure updates base URL, API key, model, and type."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         config = ModelLlmProviderConfig(
             provider_name="openai",
             api_key="sk-test",
@@ -88,7 +89,7 @@ class TestAdapterLlmProviderOpenaiValidation:
 
     def test_validate_valid_request(self) -> None:
         """Valid request passes validation."""
-        adapter = AdapterLlmProviderOpenai()
+        adapter = AdapterLlmProviderOpenai(default_model="qwen2.5-coder-14b")
         request = ModelLlmAdapterRequest(
             prompt="Hello",
             model_name="qwen2.5-coder-14b",
@@ -101,7 +102,9 @@ class TestAdapterLlmProviderOpenaiCostEstimation:
 
     def test_local_provider_zero_cost(self) -> None:
         """Local providers always estimate zero cost."""
-        adapter = AdapterLlmProviderOpenai(provider_type="local")
+        adapter = AdapterLlmProviderOpenai(
+            default_model="qwen2.5-coder-14b", provider_type="local"
+        )
         request = ModelLlmAdapterRequest(
             prompt="Hello world",
             model_name="qwen2.5-coder-14b",
@@ -116,6 +119,7 @@ class TestAdapterLlmProviderOpenaiCostEstimation:
             cost_per_1k_output_tokens=0.06,
         )
         adapter = AdapterLlmProviderOpenai(
+            default_model="qwen2.5-coder-14b",
             provider_type="external",
             model_capabilities={"gpt-4": caps},
         )
@@ -129,7 +133,9 @@ class TestAdapterLlmProviderOpenaiCostEstimation:
 
     def test_external_provider_unknown_model(self) -> None:
         """Unknown model returns zero cost."""
-        adapter = AdapterLlmProviderOpenai(provider_type="external")
+        adapter = AdapterLlmProviderOpenai(
+            default_model="qwen2.5-coder-14b", provider_type="external"
+        )
         request = ModelLlmAdapterRequest(
             prompt="Hello",
             model_name="unknown-model",
@@ -294,3 +300,10 @@ class TestTransportHolder:
         """Transport holder initializes with LLM HTTP transport."""
         holder = TransportHolderLlmHttp(target_name="test")
         assert holder._llm_target_name == "test"
+
+
+@pytest.mark.unit
+def test_model_is_required() -> None:
+    """The caller must supply the model from the model-routing policy."""
+    with pytest.raises(TypeError, match="default_model"):
+        AdapterLlmProviderOpenai(base_url="http://localhost:8000")

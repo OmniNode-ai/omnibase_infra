@@ -31,7 +31,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_infra.adapters.llm.adapter_test_boilerplate_generation import (
-    _DEFAULT_MODEL,
     _DELEGATION_CONFIDENCE,
     _MAX_SOURCE_CHARS,
     _PROMPT_VERSION,
@@ -50,13 +49,15 @@ from omnibase_spi.contracts.delegation.contract_delegated_response import (
     ContractDelegatedResponse,
 )
 
+_TEST_MODEL = "Qwen/Qwen3-14B-AWQ"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _make_adapter(
-    model: str = _DEFAULT_MODEL,
+    model: str = _TEST_MODEL,
     max_tokens: int = 2_048,
     temperature: float = 0.1,
     api_key: str | None = None,
@@ -320,8 +321,8 @@ class TestAdapterTestBoilerplateGenerationAttribution:
         assert result.attribution.model_name == "qwen3-14b-custom"
 
     @pytest.mark.asyncio
-    async def test_attribution_model_name_default(self) -> None:
-        """attribution.model_name defaults to _DEFAULT_MODEL when not overridden."""
+    async def test_attribution_model_name_from_fixture(self) -> None:
+        """attribution.model_name matches the model supplied by the test fixture."""
         adapter = _make_adapter()
         adapter._handler.handle = AsyncMock(  # type: ignore[method-assign]
             return_value=_make_llm_response("def test_foo(): pass")
@@ -331,7 +332,7 @@ class TestAdapterTestBoilerplateGenerationAttribution:
             task_type=TASK_TYPE_TEST_MODULE, source="def foo(): pass"
         )
 
-        assert result.attribution.model_name == _DEFAULT_MODEL
+        assert result.attribution.model_name == _TEST_MODEL
 
     @pytest.mark.asyncio
     async def test_attribution_endpoint_url(self) -> None:
@@ -650,6 +651,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """max_tokens=0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 max_tokens=0,
             )
@@ -658,6 +660,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """Negative max_tokens raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 max_tokens=-1,
             )
@@ -666,6 +669,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """max_tokens > 32768 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="max_tokens"):
             AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 max_tokens=32_769,
             )
@@ -674,6 +678,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
     async def test_valid_max_tokens_does_not_raise(self) -> None:
         """max_tokens=1024 is valid."""
         async with AdapterTestBoilerplateGeneration(
+            model="Qwen/Qwen3-14B-AWQ",
             base_url="http://localhost:8001",
             max_tokens=1024,
         ) as adapter:
@@ -683,6 +688,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
     async def test_min_max_tokens_boundary_does_not_raise(self) -> None:
         """max_tokens=1 is the minimum valid value and must not raise."""
         async with AdapterTestBoilerplateGeneration(
+            model="Qwen/Qwen3-14B-AWQ",
             base_url="http://localhost:8001",
             max_tokens=1,
         ) as adapter:
@@ -692,6 +698,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """temperature < 0.0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 temperature=-0.1,
             )
@@ -700,6 +707,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """temperature > 2.0 raises ProtocolConfigurationError."""
         with pytest.raises(ProtocolConfigurationError, match="temperature"):
             AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 temperature=2.1,
             )
@@ -709,6 +717,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """temperature=0.0 and temperature=2.0 are valid boundaries."""
         for t in (0.0, 2.0):
             async with AdapterTestBoilerplateGeneration(
+                model="Qwen/Qwen3-14B-AWQ",
                 base_url="http://localhost:8001",
                 temperature=t,
             ) as adapter:
@@ -717,19 +726,19 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
     def test_empty_base_url_raises_protocol_configuration_error(self) -> None:
         """Explicit base_url='' raises ProtocolConfigurationError at construction time."""
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterTestBoilerplateGeneration(base_url="")
+            AdapterTestBoilerplateGeneration(model="Qwen/Qwen3-14B-AWQ", base_url="")
 
     def test_empty_base_url_error_message_is_clear(self) -> None:
         """ProtocolConfigurationError for empty base_url contains a helpful message."""
         with pytest.raises(ProtocolConfigurationError, match="non-empty string"):
-            AdapterTestBoilerplateGeneration(base_url="")
+            AdapterTestBoilerplateGeneration(model="Qwen/Qwen3-14B-AWQ", base_url="")
 
     def test_whitespace_only_base_url_raises_protocol_configuration_error(
         self,
     ) -> None:
         """Whitespace-only base_url raises ProtocolConfigurationError at construction time."""
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterTestBoilerplateGeneration(base_url="   ")
+            AdapterTestBoilerplateGeneration(model="Qwen/Qwen3-14B-AWQ", base_url="   ")
 
     def test_empty_env_var_base_url_raises_protocol_configuration_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -737,7 +746,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """Empty string LLM_CODER_FAST_URL env var raises ProtocolConfigurationError."""
         monkeypatch.setenv("LLM_CODER_FAST_URL", "")
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterTestBoilerplateGeneration(base_url=None)
+            AdapterTestBoilerplateGeneration(model="Qwen/Qwen3-14B-AWQ", base_url=None)
 
     def test_whitespace_env_var_base_url_raises_protocol_configuration_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -745,7 +754,7 @@ class TestAdapterTestBoilerplateGenerationConstructorValidation:
         """Whitespace-only LLM_CODER_FAST_URL env var raises ProtocolConfigurationError."""
         monkeypatch.setenv("LLM_CODER_FAST_URL", "   ")
         with pytest.raises(ProtocolConfigurationError, match="base_url"):
-            AdapterTestBoilerplateGeneration(base_url=None)
+            AdapterTestBoilerplateGeneration(model="Qwen/Qwen3-14B-AWQ", base_url=None)
 
 
 # ---------------------------------------------------------------------------
@@ -1093,3 +1102,10 @@ class TestAdapterTestBoilerplateGenerationAsyncContextManager:
         adapter = _make_adapter()
         result = await adapter.__aexit__(ValueError, ValueError("test"), None)
         assert result is None
+
+
+@pytest.mark.unit
+def test_model_is_required() -> None:
+    """The caller must supply the model from the model-routing policy."""
+    with pytest.raises(TypeError, match="model"):
+        AdapterTestBoilerplateGeneration(base_url="http://localhost:8000")

@@ -40,10 +40,16 @@ from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
 # ---------------------------------------------------------------------------
 
 
-def _make_adapter(**kwargs: object) -> AdapterSummarizationEnrichment:
+def _make_adapter(
+    model: str = "qwen2.5-72b",
+    transport_name: str = "qwen-72b-summarization",
+    **kwargs: object,
+) -> AdapterSummarizationEnrichment:
     """Build an AdapterSummarizationEnrichment with a mocked transport."""
     adapter = AdapterSummarizationEnrichment(
         base_url="http://localhost:8100",
+        model=model,
+        transport_name=transport_name,
         **kwargs,  # type: ignore[arg-type]
     )
     # Replace transport and handler with mocks to avoid HTTP calls.
@@ -683,6 +689,8 @@ class TestAdapterSummarizationEnrichmentConstructorValidation:
         """Constructing with token_threshold=-1 must raise ValueError."""
         with pytest.raises(ValueError, match="token_threshold"):
             AdapterSummarizationEnrichment(
+                model="qwen2.5-72b",
+                transport_name="qwen-72b-summarization",
                 base_url="http://localhost:8100",
                 token_threshold=-1,
             )
@@ -690,6 +698,8 @@ class TestAdapterSummarizationEnrichmentConstructorValidation:
     def test_zero_token_threshold_does_not_raise(self) -> None:
         """token_threshold=0 is valid (every non-empty context triggers LLM)."""
         adapter = AdapterSummarizationEnrichment(
+            model="qwen2.5-72b",
+            transport_name="qwen-72b-summarization",
             base_url="http://localhost:8100",
             token_threshold=0,
         )
@@ -739,3 +749,21 @@ class TestProtocolContextEnrichmentCompliance:
         """enrich() is callable on the adapter."""
         adapter = _make_adapter()
         assert callable(getattr(adapter, "enrich", None))
+
+
+@pytest.mark.unit
+def test_model_is_required() -> None:
+    """The caller must supply the model from the model-routing policy."""
+    with pytest.raises(TypeError, match="model"):
+        AdapterSummarizationEnrichment(
+            base_url="http://localhost:8000", transport_name="test-summarization"
+        )
+
+
+@pytest.mark.unit
+def test_transport_name_is_required() -> None:
+    """The caller must supply the transport label."""
+    with pytest.raises(TypeError, match="transport_name"):
+        AdapterSummarizationEnrichment(
+            base_url="http://localhost:8100", model="test-model"
+        )

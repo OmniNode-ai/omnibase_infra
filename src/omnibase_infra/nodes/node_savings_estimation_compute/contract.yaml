@@ -86,6 +86,25 @@ output_model:
   name: "ModelSavingsEstimate"
   module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
   description: "Computed savings estimate with cost breakdown and confidence."
+config:
+  name: "ModelSavingsCounterfactualPolicy"
+  module: "omnibase_infra.nodes.node_savings_estimation_compute.models"
+  description: "Counterfactual model rules and the fallback model, read by HandlerSavingsCorrelation (OMN-21623)."
+  counterfactual_policy:
+    # The highest-cost configured routing candidate is the counterfactual. Rules
+    # are ordered substring matches on the lower-cased actual model identifier.
+    fallback_model: "claude-opus-4-6"
+    rules:
+      - match: "claude-sonnet-4"
+        counterfactual_model: "claude-opus-4-6"
+      - match: "claude-3-5-sonnet"
+        counterfactual_model: "claude-opus-4-6"
+      - match: "claude-3.5-sonnet"
+        counterfactual_model: "claude-opus-4-6"
+      - match: "claude-opus-4-6"
+        counterfactual_model: "claude-opus-4-6"
+      - match: "claude-3-opus"
+        counterfactual_model: "claude-opus-4-6"
 capabilities:
   - name: "savings.estimate"
     description: "Compute token and cost savings from injection effectiveness data"

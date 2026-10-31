@@ -92,6 +92,7 @@ class TestModelSavingsEstimationInput:
         inp = ModelSavingsEstimationInput(
             session_id="test-session",
             effectiveness_entries=entries,
+            actual_model_id="claude-opus-4-6",
         )
         assert inp.session_id == "test-session"
         assert len(inp.effectiveness_entries) == 1
@@ -108,6 +109,7 @@ class TestModelSavingsEstimationInput:
             ModelSavingsEstimationInput(
                 session_id="",
                 effectiveness_entries=entries,
+                actual_model_id="claude-opus-4-6",
             )
 
     def test_empty_entries_rejected(self) -> None:
@@ -115,6 +117,7 @@ class TestModelSavingsEstimationInput:
             ModelSavingsEstimationInput(
                 session_id="test",
                 effectiveness_entries=(),
+                actual_model_id="claude-opus-4-6",
             )
 
 
