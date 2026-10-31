@@ -1,0 +1,84 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21753
+title: "A folded projection writer resumes from its retired container's committed offsets, so events published during the fold handover are projected exactly once"
+summary: >-
+  A writer contract declares the retired container's consumer under a top-level consumer_group_handover key, and auto-wiring seeds the runtime's per-topic consumer group from that group's committed offsets before subscribe joins it. Kafka does it with two manually assigned consumers; a bus that cannot honour the declaration refuses the contract. The pre-subscribe declarations move into HandlerContractSubscribePreflight (node_contract_subscribe_preflight_effect). The omnimarket writer contracts carry no declaration yet, so no live behaviour changes until they do.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21753-ac1-window-exactly-once
+    statement: "Events published while the retired group is stopped and the runtime group has not joined are projected exactly once after the runtime wires the writer contract."
+    acceptance:
+      - id: AC1
+        statement: |-
+          AC1: a test publishes events while the source group is stopped and the runtime group has not joined, then wires the writer contract, and finds every event projected exactly once on the in-process group-offset substrate and on a Redpanda broker -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py -q
+  - id: req-omn21753-ac2-defect-reproduced
+    statement: "Without the declaration the same scenario loses the window events."
+    acceptance:
+      - id: AC2
+        statement: |-
+          AC2: the same test fails with the handover declaration removed from the contract fixture (events in the window are lost) -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k without_declaration -q
+  - id: req-omn21753-ac3-refusals
+    statement: "A declared handover on a bus that cannot honour it, or a malformed declaration, refuses wiring before anything subscribes."
+    acceptance:
+      - id: AC3
+        statement: |-
+          AC3: wiring refuses a contract that declares a handover on a bus that cannot hand offsets over, and a malformed declaration, instead of starting at latest -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k refuses -q
+  - id: req-omn21753-ac4-idempotent
+    statement: "A second handover into a group that has committed keeps the group's own offsets."
+    acceptance:
+      - id: AC4
+        statement: |-
+          AC4: a second start of the runtime after the handover copies nothing and resumes from the runtime group's own committed offsets -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k idempotent -q
+evidence_requirements:
+  - kind: tests
+    description: "The handover scenario on the in-process group-offset substrate, and the moved consume-concurrency wiring tests."
+    command: |-
+      uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py tests/unit/runtime/test_omn18852_wiring_declares_concurrency.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn21753-ac1-window-exactly-once
+    description: >-
+      The container consumes and commits, leaves, events are published while nobody is joined, then the writer contract is wired through the real wire_from_manifest on the group-offset substrate; every event is projected exactly once across the container and the runtime. The test file is new on this branch, so the check fails at the merge base. The same scenario against Redpanda (three partitions, one never committed by the retired group) is tests/integration/event_bus/test_consumer_group_handover_redpanda_omn21288.py, run on a lab host because hosted dod-verify has no broker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k exactly_once -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21753-ac2-defect-reproduced
+    description: >-
+      The same scenario with no declaration: the runtime projects only the events published after it joined, which is the defect the fold lane measured.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k without_declaration -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21753-ac3-refusals
+    description: >-
+      A declared handover on a bus without the capability raises TypeError before any subscribe, and three malformed declarations raise ValueError before any group joins; the consume-concurrency refusals moved into the same preflight handler keep their behaviour.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k refuses -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/test_omn18852_wiring_declares_concurrency.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21753-ac4-idempotent
+    description: >-
+      After the handover and the runtime's own consumption, a second handover commits nothing, keeps the partition, and leaves the runtime group's committed offset where its own consumption put it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_consumer_group_handover_omn21288.py -k idempotent -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC4]
+context:
+  remaining_after_this_change: "The five folded omnimarket writer contracts (live-events, registration, savings, tenant-credentials, tenant-registry) must declare consumer_group_handover with their retired groups before the fold's deploy retires their containers; that is an omnimarket change."
