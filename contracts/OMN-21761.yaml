@@ -36,3 +36,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "uv run pytest tests/unit/nodes/node_chain_learning tests/unit/nodes/node_registry_effect tests/unit/nodes/test_node_contract_loader_effect.py -q -p no:cacheprovider"
+  - id: dod-003
+    description: >-
+      Post-deploy probe: the deployed runtime carries the new contract-scan request model, so the contract loader handler it serves takes the typed request. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "from omnibase_infra.nodes.node_contract_loader_effect.models.model_contract_scan_request import ModelContractScanRequest"
+    binds_ac: []
