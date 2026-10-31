@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.local_state_paths import load_local_state_paths
+
 
 class ModelScopeCheckCommand(BaseModel):
     """Command payload emitted by bin-shell to trigger scope-check workflow."""
@@ -21,7 +23,7 @@ class ModelScopeCheckCommand(BaseModel):
         ..., description="Absolute path to the plan file to read."
     )
     output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
+        default_factory=lambda: load_local_state_paths().scope_manifest_path,
         description="Path to write the scope manifest JSON.",
     )
     auto_confirm: bool = Field(

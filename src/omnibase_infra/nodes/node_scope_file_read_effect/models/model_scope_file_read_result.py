@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.local_state_paths import load_local_state_paths
+
 
 class ModelScopeFileReadResult(BaseModel):
     """Result of reading a plan file from the filesystem."""
@@ -17,7 +19,7 @@ class ModelScopeFileReadResult(BaseModel):
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     file_path: str = Field(..., description="Path that was read.")
     output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
+        default_factory=lambda: load_local_state_paths().scope_manifest_path,
         description="Path to write the scope manifest JSON.",
     )
     content: str = Field(..., description="File content.")

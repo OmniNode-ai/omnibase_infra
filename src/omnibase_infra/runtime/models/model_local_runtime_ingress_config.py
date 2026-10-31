@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.models.local_state_paths import load_local_state_paths
+
 
 class ModelLocalRuntimeIngressConfig(BaseModel):
     """Configuration for the runtime-owned local command ingress."""
@@ -22,7 +24,7 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
         description="Whether the runtime should bind a local Unix-socket ingress.",
     )
     socket_path: str = Field(
-        default="/tmp/onex-runtime.sock",  # noqa: S108
+        default_factory=lambda: load_local_state_paths().runtime_socket_path,
         min_length=1,
         description="Unix-socket path for local runtime command ingress.",
     )
@@ -64,16 +66,9 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
             raise ValueError("socket_path must be a non-empty string")
         return normalized
 
-    @field_validator("package_names", mode="before")
+    @field_validator("package_names", "enabled_profiles", mode="before")
     @classmethod
-    def _coerce_package_names(cls, value: object) -> object:
-        if isinstance(value, list):
-            return tuple(value)
-        return value
-
-    @field_validator("enabled_profiles", mode="before")
-    @classmethod
-    def _coerce_enabled_profiles(cls, value: object) -> object:
+    def _coerce_tuple_fields(cls, value: object) -> object:
         if isinstance(value, list):
             return tuple(value)
         return value
