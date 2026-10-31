@@ -15,6 +15,7 @@ import ast
 import importlib
 import inspect
 from pathlib import Path
+from typing import get_type_hints
 from uuid import uuid4
 
 import pytest
@@ -97,9 +98,12 @@ def test_routed_handler_takes_its_contract_input_model(
         f"{node}: {handler_name}.handle takes {params}"
     )
     # Handlers import payload types under TYPE_CHECKING, so the annotation is a string
-    # that cannot be resolved at runtime. Pin the name, then pin the module identity
-    # by resolving the handler's own import of that name.
+    # that cannot be resolved by name at runtime. Pin the raw string to the model name,
+    # evaluate it against the contract's own model class and require that class, then
+    # pin the module identity through the handler's own import of that name.
     assert signature.parameters["request"].annotation == model_name
+    hints = get_type_hints(handler_cls.handle, localns={model_name: model_cls})
+    assert hints["request"] is model_cls
     source_module = _imported_from(handler_module, model_name)
     assert source_module is not None
     assert getattr(importlib.import_module(source_module), model_name) is model_cls
