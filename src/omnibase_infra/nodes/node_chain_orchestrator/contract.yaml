@@ -122,6 +122,7 @@ metadata:
   description: "Chain learning orchestrator -- cache and replay verified workflows"
   author: "OmniNode Team"
   created: "2026-04-02"
+  updated: "2026-10-31"
   tags:
     - "orchestrator"
     - "chain-learning"

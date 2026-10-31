@@ -1,0 +1,21 @@
+{
+  "branch_coverage_pct": 13.33,
+  "candidate_count": 3,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate",
+  "handler_module_sha256": "sha256:cebb8438222634593cf052400e8fa58638da99526450831bdf995cacd2546251",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_chain_orchestrator",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T08:53:06.838380+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 1,
+  "selected_input_hashes": [
+    "sha256:6f232ff38855b93365841c0857a99f91829dafabe3135d0c9f05bc7b31f57eaa"
+  ],
+  "uncovered_waiver": {
+    "reason": "Waiver: signature-only flip. The first handler of the node, HandlerChainLearnInitiate.handle, moved its fields into the ModelChainLearnCommand request; the body is a logging call and a dict return, and the three candidates reach the same arcs so one is selected; the remaining uncovered statements are the module-level class and import lines executed before coverage starts.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

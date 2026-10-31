@@ -1,0 +1,30 @@
+{
+  "base_ref": "a409589629e16b3c0d95a3df7c6850a0c0e4170b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert",
+  "legacy_handler_module": "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert",
+  "node_id": "omnibase_infra.nodes.node_registry_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:ddf41ed4e8ee6e293583b84707f91901ca535f088f0a28e06f9e734f69032dfc",
+      "sha256:f44e1ce55a3300ad4eca513897b22c111f41e3044a0bcc41cde1e23433aa1abf",
+      "sha256:f783b986300bf1752f4e0e67214daf8554fc02c773e1de4b3262f430362a2f92",
+      "sha256:99df571a3e44291cea88c18ae99560d13852ba16c670d52244916a4cac8286c7",
+      "sha256:6a8ec41889031a4d9a4d370431eb7e63db482445c0355dad6a29eb7f96a31d08",
+      "sha256:358de07572294e88c679908c638385603d52b3510d1a2f2e79f7071aa90ba5c0"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_runtime_resolves_the_single_typed_request[handle-ModelRegistryRequest0]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_runtime_resolves_the_single_typed_request[handle-ModelRegistryRequest1]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_registry_effect/handlers/handler_partial_retry.py]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_registry_effect/handlers/handler_postgres_deactivate.py]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_registry_effect/handlers/handler_postgres_upsert.py]"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerPostgresUpsert.handler_type",
+    "HandlerPostgresUpsert.handler_category",
+    "HandlerPostgresUpsert.__init__"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

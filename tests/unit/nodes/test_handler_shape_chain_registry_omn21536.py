@@ -10,15 +10,17 @@ model instead of as a second positional parameter (OMN-21536).
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
+from omnibase_core.models.primitives import ModelSemVer
 from omnibase_core.validation.validator_handler_shape import ValidatorHandlerShape
 from omnibase_infra.enums import EnumBackendType
 from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate import (
@@ -42,7 +44,6 @@ from omnibase_infra.nodes.node_registry_effect.handlers import (
 )
 from omnibase_infra.nodes.node_registry_effect.models import (
     ModelBackendResult,
-    ModelPartialRetryRequest,
     ModelRegistryRequest,
 )
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
@@ -50,6 +51,20 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+@dataclass
+class _PartialRetry:
+    """A ProtocolPartialRetryRequest the handler accepts."""
+
+    node_id: UUID
+    node_type: EnumNodeKind
+    node_version: ModelSemVer
+    correlation_id: UUID
+    target_backend: EnumBackendType
+    idempotency_key: str | None = None
+    endpoints: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @pytest.mark.parametrize(
@@ -89,10 +104,10 @@ async def test_partial_retry_reports_the_request_correlation_id() -> None:
         success=True, duration_ms=1.0, backend_id="postgres"
     )
     correlation_id = uuid4()
-    request = ModelPartialRetryRequest(
+    request = _PartialRetry(
         node_id=uuid4(),
         node_type=EnumNodeKind.EFFECT,
-        node_version="1.0.0",
+        node_version=ModelSemVer(major=1, minor=0, patch=0),
         correlation_id=correlation_id,
         target_backend=EnumBackendType.POSTGRES,
     )
@@ -165,4 +180,7 @@ def test_core_handler_shape_validator_reports_nothing_for_the_slice(
 ) -> None:
     result = ValidatorHandlerShape().validate_file(_SRC_ROOT / relative_path)
 
-    assert result.issues == []
+    assert not result.issues, (
+        f"handler_shape reports {[issue.rule_name for issue in result.issues]}"
+        f" on {relative_path}"
+    )

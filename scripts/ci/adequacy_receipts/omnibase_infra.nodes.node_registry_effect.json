@@ -1,0 +1,26 @@
+{
+  "branch_coverage_pct": 62.22,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_registry_effect.handlers.handler_postgres_upsert",
+  "handler_module_sha256": "sha256:179ec5227e52a415a2a654172764e29cf8ca92e26b487905998c0af5b98c1b75",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_registry_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T08:53:06.915495+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 6,
+  "selected_input_hashes": [
+    "sha256:ddf41ed4e8ee6e293583b84707f91901ca535f088f0a28e06f9e734f69032dfc",
+    "sha256:f44e1ce55a3300ad4eca513897b22c111f41e3044a0bcc41cde1e23433aa1abf",
+    "sha256:f783b986300bf1752f4e0e67214daf8554fc02c773e1de4b3262f430362a2f92",
+    "sha256:99df571a3e44291cea88c18ae99560d13852ba16c670d52244916a4cac8286c7",
+    "sha256:6a8ec41889031a4d9a4d370431eb7e63db482445c0355dad6a29eb7f96a31d08",
+    "sha256:358de07572294e88c679908c638385603d52b3510d1a2f2e79f7071aa90ba5c0"
+  ],
+  "uncovered_waiver": {
+    "reason": "Waiver: signature-only flip. HandlerPostgresUpsert.handle reads correlation_id from the ModelRegistryRequest instead of a second positional parameter; the six selected candidates drive the success, failure, timeout, authentication, connection and unknown-error branches; the remaining uncovered statements are the module-level lines executed before coverage starts.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

@@ -1,0 +1,25 @@
+{
+  "base_ref": "a409589629e16b3c0d95a3df7c6850a0c0e4170b",
+  "canonical_handler_module": "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate",
+  "legacy_handler_module": "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate",
+  "node_id": "omnibase_infra.nodes.node_chain_orchestrator",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:6f232ff38855b93365841c0857a99f91829dafabe3135d0c9f05bc7b31f57eaa"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_runtime_resolves_the_single_typed_request[handle-ModelChainLearnCommand]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_runtime_resolves_the_single_typed_request[handle-ModelChainRetrievalResult]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_runtime_resolves_the_single_typed_request[handle-ModelChainStoreResult]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_chain_orchestrator/handlers/handler_chain_learn_initiate.py]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_chain_orchestrator/handlers/handler_chain_retrieval_complete.py]",
+      "tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py::test_core_handler_shape_validator_reports_nothing_for_the_slice[nodes/node_chain_orchestrator/handlers/handler_chain_store_complete.py]"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerChainLearnInitiate.handler_type",
+    "HandlerChainLearnInitiate.handler_category"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}
