@@ -213,3 +213,19 @@ dod_evidence:
       - check_type: command
         check_value: "test \"$(grep -c 'container_name: hp051-ci-runner-' docker/docker-compose.runners-hp051-ci-runner.yml)\" = 4 && grep -q 'cgroup_parent: omnirunners.slice' docker/docker-compose.runners-hp051-ci-runner.yml && grep -q 'MemoryMax=' docker/runners/systemd/pools/hp051-ci-runner/omnirunners.slice && grep -q 'ExecStart=' docker/runners/systemd/pools/hp051-ci-runner/omninode-git-mirror-daemon.service"
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-labels-and-budget-ac10
+    description: Parse the four services, assert the exact labels and runner group, render with Docker Compose to verify merge semantics, and check numeric child and parent memory limits and class-specific fleet counts.
+    source: manual
+    binds_ac: [AC10]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp051_pool_omn17232.py -q --no-cov -p no:randomly -k "label or workflow or inherited_service or declared_limits or multiarch_class"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-hp051-mirror-runtime-ac11
+    description: Execute the shipped listen preflight against absent, wildcard, multicast, unassigned and assigned addresses, verify bridge retry settings, and run a local git daemon that serves reads and refuses write and archive requests even with repository overrides enabled. This hosted-runner probe uses temporary mirrors and loopback sockets and does not require a live runner host.
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/ci/test_hp051_pool_omn17232.py -q --no-cov -p no:randomly -k "git_mirror or daemon or mirror_address"
+        cwd: ${OMNI_HOME}/omnibase_infra

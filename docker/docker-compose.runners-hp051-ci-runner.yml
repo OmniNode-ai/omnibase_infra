@@ -37,10 +37,14 @@
 #   scripts/deploy-runners.sh --host=h051 --relabel
 # The slice and mirror units are not installed by that script for a host row (only for a `pools:` entry), so install
 # them once by hand and read them back:
+#   scripts/deploy-runners.sh --host=h051 --skip-build
+# (run the deploy first: it creates hp051-ci-runner_default before the gateway is read below).
 #   sudo install -m 0644 docker/runners/systemd/pools/hp051-ci-runner/{omnirunners.slice,omninode-git-mirror-daemon.service,omninode-git-mirror-refresh.service,omninode-git-mirror-refresh.timer} /etc/systemd/system/
 #   sudo install -d -o jonah -g jonah /data/scratch/git-mirror
 #   echo "OMNI_GIT_MIRROR_LISTEN=$(docker network inspect hp051-ci-runner_default -f '{{(index .IPAM.Config 0).Gateway}}')" | sudo tee /etc/default/omninode-git-mirror
 #   sudo systemctl daemon-reload && sudo systemctl enable --now omnirunners.slice omninode-git-mirror-refresh.timer omninode-git-mirror-daemon.service
+# If the compose network is deleted and recreated, regenerate the environment file from network inspect above and
+# restart the daemon. Its preflight refuses an unassigned old gateway and keeps retrying; it never falls back to a wildcard.
 # (the refresh script is rsynced by deploy-runners.sh to ~/.omnibase/runners/docker/runners/git-mirror-refresh.sh).
 # Before the first recreate, on the host: create /data/scratch/runners/<N>/{work,tmp} and
 # /data/scratch/cache/runners/<N>/{pip,pre-commit,pnpm,ms-playwright,ci-envs,npm}, owned by uid 1001 (tmp mode 1777),
@@ -58,6 +62,9 @@ x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
   mem_limit: 6g
+  # This is a per-container upper bound (RAM plus swap). The parent slice's 2G swap cap is shared by all four
+  # runners, so aggregate swap can never reach four times this allowance. The 96G/112G parent RAM bounds leave
+  # room for docker-socket job containers in the slice; the four runner containers themselves total at most 24G.
   memswap_limit: 12g
   cpus: "2.0"
   pids_limit: 4096
