@@ -22,15 +22,22 @@ implements ``ProtocolConsumerGroupOffsetHandover`` directly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
 
+from omnibase_core.enums.enum_consumer_group_purpose import EnumConsumerGroupPurpose
 from omnibase_core.event_bus.event_bus_semantic_fake import EventBusSemanticFake
+from omnibase_core.event_bus.protocol_node_identity_like import (
+    ProtocolNodeIdentityLike,
+)
+from omnibase_core.models.event_bus.model_event_message import ModelEventMessage
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
     hand_over_committed_offsets,
@@ -106,7 +113,68 @@ class _ProjectionWriter:
 
 
 class _HandoverSemanticFake(EventBusSemanticFake):
-    """The group-offset substrate, given the handover through the shared rule."""
+    """The group-offset substrate, given the handover through the shared rule.
+
+    ``EventBusSemanticFake`` replays a joining group's backlog inline, inside
+    ``subscribe``. Auto-wiring subscribes before it freezes the dispatch engine,
+    and dispatch waits for the freeze, so an inline replay would wait on
+    itself. A broker delivers from a consume loop, after ``subscribe`` returns;
+    each subscription here gets one such loop. Offsets and group membership
+    stay the fake's own.
+    """
+
+    def __init__(self, environment: str) -> None:
+        super().__init__(environment=environment)
+        self._loops: list[
+            tuple[asyncio.Task[None], asyncio.Queue[ModelEventMessage]]
+        ] = []
+
+    async def subscribe(
+        self,
+        topic: str,
+        node_identity: ProtocolNodeIdentityLike | None = None,
+        on_message: Callable[[ModelEventMessage], Awaitable[None]] | None = None,
+        *,
+        group_id: str | None = None,
+        purpose: EnumConsumerGroupPurpose = EnumConsumerGroupPurpose.CONSUME,
+        required_for_readiness: bool = False,
+        auto_offset_reset: str = "latest",
+    ) -> Callable[[], Awaitable[None]]:
+        assert on_message is not None
+        handler = on_message
+        queue: asyncio.Queue[ModelEventMessage] = asyncio.Queue()
+
+        async def consume_loop() -> None:
+            while True:
+                message = await queue.get()
+                try:
+                    await handler(message)
+                finally:
+                    queue.task_done()
+
+        async def fetch(message: ModelEventMessage) -> None:
+            queue.put_nowait(message)
+
+        self._loops.append((asyncio.create_task(consume_loop()), queue))
+        return await super().subscribe(
+            topic,
+            node_identity,
+            fetch,
+            group_id=group_id,
+            purpose=purpose,
+            required_for_readiness=required_for_readiness,
+            auto_offset_reset=auto_offset_reset,
+        )
+
+    async def settle(self) -> None:
+        """Wait until every consume loop has handled everything it fetched."""
+        for _, queue in self._loops:
+            await queue.join()
+
+    async def stop_loops(self) -> None:
+        for task, _ in self._loops:
+            task.cancel()
+        await asyncio.gather(*(task for task, _ in self._loops), return_exceptions=True)
 
     async def hand_over_committed_offsets(
         self,
@@ -227,12 +295,15 @@ async def _run_the_fold(
         auto_offset_reset="earliest",
     )
     await _publish(bus, ["before-0", "before-1", "before-2"])
+    await bus.settle()
     await leave()  # the fold retires the writer container
 
     await _publish(bus, ["window-0", "window-1"])  # nobody is joined
 
     await _wire(_contract(tmp_path, declaration=declaration), bus)
     await _publish(bus, ["after-0", "after-1"])
+    await bus.settle()
+    await bus.stop_loops()
     return bus, container_projected, list(_projected)
 
 
