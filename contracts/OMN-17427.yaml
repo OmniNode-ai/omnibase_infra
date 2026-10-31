@@ -709,7 +709,7 @@ requirements:
     statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
     acceptance:
       - id: AC17427630002
-        statement: 'The core tag dev-20261030152335-66d35d2283c3, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+        statement: 'The core tag dev-20261031000524-fc6159b98026, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
   - id: req-omn17427-first-party-dev-merge-tags
     statement: 'Stage 0 of the goal: the dev lane boots its composed runtime on first-party dev-merge tags. Every vendored sibling (core, spi, omnimarket) is staged at its newest dev-merge tag with no caller opt-in, a sibling with no tag is refused instead of built from its branch, the image installs spi from the staged tree, and the build fails when any first-party package of the image resolves from a sha, a branch, a release or an exact version.'
     acceptance:
@@ -3258,7 +3258,7 @@ dod_evidence:
       - AC17427004001
       - AC17427004002
   - id: dod-omn17427-core-dev-tag-pin
-    description: Pin identity at dev-20261030152335-66d35d2283c3, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
+    description: Pin identity at dev-20261031000524-fc6159b98026, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
     source: manual
     checks:
       - check_type: test_passes
@@ -3266,7 +3266,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630002]
   - id: dod-omn17427-core-dev-tag-deploy
-    description: Hosted-runner check of tag identity at dev-20261030152335-66d35d2283c3 and moved imports without services, containers or credentials; runtime boot proof is separate.
+    description: Hosted-runner check of tag identity at dev-20261031000524-fc6159b98026 and moved imports without services, containers or credentials; runtime boot proof is separate.
     source: manual
     checks:
       - check_type: command
