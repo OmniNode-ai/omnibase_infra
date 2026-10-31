@@ -401,7 +401,6 @@ _ENSURE_REPOS = (
     "omnibase_infra",
     "omnibase_core",
     "omnibase_spi",
-    "omnibase_compat",
     "omnimarket",
 )
 
