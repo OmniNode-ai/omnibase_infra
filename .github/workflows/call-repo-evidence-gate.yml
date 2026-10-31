@@ -58,6 +58,11 @@
 # check-timeout-seconds (OMN-21433) is the per-check ceiling the pinned reusable passes to the
 # verifier; its 30 s default kills a cold hosted `uv run pytest` before it reports.
 
+# verifier-version 0.4.310 (OMN-19998) is the first release whose classify_dependency_pin_only
+# admits tool.uv.override-dependencies (omnimarket#3694). This repository pins omnibase-core
+# exactly there (OMN-19655), so under 0.4.305 every writer-app core bump was refused the
+# dependency-pin-only exemption and failed dod-verify (omnibase_infra#5453, #5458).
+
 name: Repo Evidence Gate
 
 on:
@@ -78,7 +83,7 @@ jobs:
     uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@66d35d2283c3011c436799eacb9bce1a434ee6c9 # dev-20261030152335-66d35d2283c3; carries the fix-parent control fallback (control_uses_fix_parent), #2085 (check-timeout-seconds) and #2079 (verifies only the evidence a pull request adds or changes) (OMN-20134)
     with:
       evidence-source: caller
-      verifier-version: 0.4.305
+      verifier-version: 0.4.310
       compare-with-occ: "false"
       shadow: "false"
       check-timeout-seconds: "180"
