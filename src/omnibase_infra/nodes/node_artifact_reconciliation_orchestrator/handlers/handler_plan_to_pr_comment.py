@@ -39,6 +39,7 @@ from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
 )
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.models.model_pr_comment_result import (
     ModelPRCommentResult,
 )
@@ -55,7 +56,7 @@ _PR_TRIGGER_TYPES: frozenset[str] = frozenset({"pr_opened", "pr_updated", "pr_me
 _ANCHOR_TEMPLATE: str = "<!-- onex-artifact-plan:{plan_id} -->"
 
 # GitHub API base URL (overridable in tests)
-_GITHUB_API_BASE: str = "https://api.github.com"
+_GITHUB_API_BASE: str = load_third_party_endpoints().github_api_base_url
 
 
 def _build_markdown_table(plan: ModelUpdatePlan) -> str:

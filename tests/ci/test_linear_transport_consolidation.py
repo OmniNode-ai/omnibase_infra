@@ -59,6 +59,11 @@ _OWNER = Path(
 )
 
 
+_ENDPOINTS_FILE = Path(
+    "src/omnibase_infra/models/third_party_endpoints/third_party_endpoints.yaml"
+)
+
+
 def _endpoint_lines(source: str) -> list[int]:
     return [
         node.lineno
@@ -70,15 +75,21 @@ def _endpoint_lines(source: str) -> list[int]:
 
 
 def test_graphql_endpoint_has_one_transport_owner() -> None:
+    """No Python source spells the endpoint; the declared file holds it once and
+    the owning transport reads it from there (OMN-21623)."""
     owners = {
         path.relative_to(_ROOT): lines
         for path in (_ROOT / "src").rglob("*.py")
         if (lines := _endpoint_lines(path.read_text()))
     }
-    assert owners == {_OWNER: _endpoint_lines((_ROOT / _OWNER).read_text())}, owners
+    assert owners == {}, owners
+    declared = (_ROOT / _ENDPOINTS_FILE).read_text().splitlines()
+    assert len([line for line in declared if "api.linear.app/graphql" in line]) == 1
+    # Positive control: the owning transport was scanned and reads the declared value.
     assert (
-        len(owners[_OWNER]) == 1
-    )  # Positive control: the owning transport was scanned.
+        "load_third_party_endpoints().linear_graphql_url"
+        in (_ROOT / _OWNER).read_text()
+    )
 
 
 def test_endpoint_guard_detects_a_reintroduced_caller() -> None:

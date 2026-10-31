@@ -185,6 +185,7 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
     resolve_done_write_receipt_gate,
     run_dod_verify_command,
 )
+from omnibase_infra.models.third_party_endpoints import load_third_party_endpoints
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect import (
     offer_companion_sources,
 )
@@ -329,7 +330,7 @@ _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 # guidance is to request a new client credentials token at the start of each
 # run and use it only for that run, and a 30-day token copied into a secret
 # store is just a second long-lived key with worse properties.
-_LINEAR_OAUTH_TOKEN_URL = "https://api.linear.app/oauth/token"  # url-authority-ok: fixed public OAuth token endpoint, no ONEX routing authority
+_LINEAR_OAUTH_TOKEN_URL = load_third_party_endpoints().linear_oauth_token_url
 _LINEAR_API_KEY_ENV = "LINEAR_API_KEY"
 _LINEAR_CLOSER_CLIENT_ID_ENV = "LINEAR_CLOSER_CLIENT_ID"
 _LINEAR_CLOSER_CLIENT_SECRET_ENV = "LINEAR_CLOSER_CLIENT_SECRET"
