@@ -7,8 +7,9 @@ RuntimeTick events at configurable intervals. Supports environment variable over
 for deployment flexibility and restart-safe behavior through sequence number tracking.
 
 Features:
-    - Strong typing with comprehensive validation and sensible defaults
+    - Strong typing with comprehensive validation
     - Environment variable override support with type conversion
+    - Sensible defaults for production deployment
     - Circuit breaker configuration for publish failure resilience
     - Restart-safe sequence number persistence
 
@@ -105,7 +106,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 logger = logging.getLogger(__name__)
@@ -603,20 +603,20 @@ class ModelRuntimeSchedulerConfig(BaseModel):
             Default configuration instance with environment overrides
         """
         base_config = cls(
-            tick_interval_ms=TIMEOUTS.scheduler_tick_interval_ms,
+            tick_interval_ms=1000,
             scheduler_id="runtime-scheduler-default",
             tick_topic=SUFFIX_RUNTIME_TICK,
             persist_sequence_number=True,
             sequence_number_key="runtime_scheduler_sequence",
             max_tick_jitter_ms=100,
             circuit_breaker_threshold=5,
-            circuit_breaker_reset_timeout_seconds=TIMEOUTS.circuit_breaker_reset_seconds,
+            circuit_breaker_reset_timeout_seconds=60.0,
             enable_metrics=True,
             metrics_prefix="runtime_scheduler",
             valkey_host="localhost",
             valkey_port=6379,
             valkey_password=None,
-            valkey_timeout_seconds=TIMEOUTS.scheduler_valkey_seconds,
+            valkey_timeout_seconds=5.0,
             valkey_connection_retries=3,
         )
         return base_config.apply_environment_overrides()

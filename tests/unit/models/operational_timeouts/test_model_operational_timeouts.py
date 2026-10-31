@@ -28,9 +28,6 @@ from omnibase_infra.models.operational_timeouts import (
     model_operational_timeouts,
 )
 from omnibase_infra.runtime import freshness_monitor, projector_shell
-from omnibase_infra.runtime.models.model_runtime_scheduler_config import (
-    ModelRuntimeSchedulerConfig,
-)
 from omnibase_infra.runtime.transition_notification_outbox import (
     TransitionNotificationOutbox,
 )
@@ -125,16 +122,6 @@ def test_freshness_and_publisher_defaults_are_the_declared_values() -> None:
         _default(AdapterONEXToolExecution.__init__, "default_timeout")
         == TIMEOUTS.tool_execution_seconds
     )
-
-
-def test_scheduler_default_config_carries_the_declared_values() -> None:
-    config = ModelRuntimeSchedulerConfig.default()
-    assert config.tick_interval_ms == TIMEOUTS.scheduler_tick_interval_ms
-    assert (
-        config.circuit_breaker_reset_timeout_seconds
-        == TIMEOUTS.circuit_breaker_reset_seconds
-    )
-    assert config.valkey_timeout_seconds == TIMEOUTS.scheduler_valkey_seconds
 
 
 def test_backoff_defaults_are_the_declared_values() -> None:

@@ -29,9 +29,7 @@ class ModelOperationalTimeouts(BaseModel):
         outbox_shutdown_seconds: Wait for the outbox processor on stop.
         database_query_seconds: Wait of one outbox or projector database query.
         circuit_breaker_reset_seconds: Wait before an open circuit resets.
-        scheduler_tick_interval_ms: Period of the runtime scheduler tick.
         tick_stop_seconds: Wait for the scheduler tick task on stop.
-        scheduler_valkey_seconds: Wait of the scheduler's Valkey connection.
         freshness_interval_seconds: Period of the projection freshness sweep.
         optimistic_retry_initial_backoff_seconds: First backoff after a conflict.
         optimistic_retry_max_backoff_seconds: Ceiling of the conflict backoff.
@@ -55,9 +53,7 @@ class ModelOperationalTimeouts(BaseModel):
     outbox_shutdown_seconds: float = Field(gt=0)
     database_query_seconds: float = Field(gt=0)
     circuit_breaker_reset_seconds: float = Field(gt=0)
-    scheduler_tick_interval_ms: int = Field(gt=0)
     tick_stop_seconds: float = Field(gt=0)
-    scheduler_valkey_seconds: float = Field(gt=0)
     freshness_interval_seconds: float = Field(gt=0)
     optimistic_retry_initial_backoff_seconds: float = Field(gt=0)
     optimistic_retry_max_backoff_seconds: float = Field(gt=0)

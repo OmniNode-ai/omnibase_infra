@@ -14,14 +14,11 @@ timeouts:
   outbox_poll_interval_seconds: 1.0
   outbox_shutdown_seconds: 10.0
   database_query_seconds: 30.0
-  # Circuit breakers of the notification publisher, the runtime scheduler and
-  # the tool execution adapter: wait before an open circuit resets.
+  # Circuit breakers of the notification publisher and the tool execution
+  # adapter: wait before an open circuit resets.
   circuit_breaker_reset_seconds: 60.0
-  # Runtime scheduler: tick period, wait for the tick task on stop, and the
-  # Valkey connection wait.
-  scheduler_tick_interval_ms: 1000
+  # Runtime scheduler: wait for the tick task on stop.
   tick_stop_seconds: 5.0
-  scheduler_valkey_seconds: 5.0
   # Projection freshness monitor: period between freshness sweeps.
   freshness_interval_seconds: 60.0
   # Optimistic-conflict retry backoff.

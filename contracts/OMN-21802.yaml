@@ -1,13 +1,13 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21802
-title: Thirty runtime timeouts in the outbox, projector shell, scheduler, retry and restart helpers, demo reset CLI, dev-lane handlers, receipt guard and tool execution adapter are read from a declared file, not from literals
-summary: The contracts_and_di check reported 399 literal_timeout findings among 1229 in src/omnibase_infra at dev aceff4fb1. This change declares 30 of them in models/operational_timeouts/operational_timeouts.yaml, loads them through ModelOperationalTimeouts (no field defaults, so an omitted value fails to load; an initial backoff above its ceiling fails to load), and binds each call site to the loaded value. The literal_timeout rule reports zero findings over the thirteen edited files and the model, and 369 over src/omnibase_infra.
+title: Twenty-seven runtime timeouts in the outbox, projector shell, scheduler, retry and restart helpers, demo reset CLI, dev-lane handlers, receipt guard and tool execution adapter are read from a declared file, not from literals
+summary: The contracts_and_di check reported 399 literal_timeout findings among 1229 in src/omnibase_infra at dev aceff4fb1. This change declares 27 of them in models/operational_timeouts/operational_timeouts.yaml, loads them through ModelOperationalTimeouts (no field defaults, so an omitted value fails to load; an initial backoff above its ceiling fails to load), and binds each call site to the loaded value. The literal_timeout rule reports zero findings over the twelve edited files and the model, and 372 over src/omnibase_infra.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn21802-slice-service-timeouts
-    statement: The transition-notification outbox and publisher, projector shell, runtime scheduler and its config, freshness monitor, optimistic-conflict retry, consumer restart loop, demo reset CLI, dev-lane handlers, done-write receipt guard and tool execution adapter take 30 timeouts from the declared timeouts file, and a block that omits a value fails to load.
+    statement: The transition-notification outbox and publisher, projector shell, runtime scheduler, freshness monitor, optimistic-conflict retry, consumer restart loop, demo reset CLI, dev-lane handlers, done-write receipt guard and tool execution adapter take 27 timeouts from the declared timeouts file, and a block that omits a value fails to load.
     acceptance:
       - id: AC1
         statement: 'AC1: the contracts_and_di count for literal_timeout over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule'
@@ -20,19 +20,19 @@ evidence_requirements:
     description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited call site carries the declared value.
     command: uv run --frozen pytest tests/unit/models/operational_timeouts -q
   - kind: command
-    description: The contracts_and_di check reports no literal_timeout finding over the thirteen edited files and the settings model; at the merge base the same run reports 30.
-    command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/models/model_runtime_scheduler_config.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts
+    description: The contracts_and_di check reports no literal_timeout finding over the twelve edited files and the settings model; at the merge base the same run reports 27.
+    command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn21802-ac1-literal-timeout-clean
-    description: The literal_timeout rule reports no finding over the thirteen edited files and the settings model. Fails at the merge base, where the same run reports 30.
+    description: The literal_timeout rule reports no finding over the twelve edited files and the settings model. Fails at the merge base, where the same run reports 27.
     source: manual
     checks:
       - check_type: command
-        check_value: "bash -c '! uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/models/model_runtime_scheduler_config.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts | grep -q literal_timeout'"
+        check_value: "bash -c '! uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts | grep -q literal_timeout'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
