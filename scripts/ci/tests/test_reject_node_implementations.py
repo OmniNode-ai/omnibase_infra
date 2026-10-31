@@ -66,6 +66,17 @@ def test_all_mode_rejects_unallowlisted_handler(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "Node handlers belong in omnimarket" in result.stderr
     assert handler_path in result.stderr
+    assert "bind an infra handler" in result.stderr
+    assert "src/omnibase_infra/handlers/" in result.stderr
+    assert "The allowlist only shrinks" in result.stderr
+    assert "add a justified" not in result.stderr
+
+
+def test_allowlist_header_names_the_handler_home_and_shrink_only() -> None:
+    lines = (REPO_ROOT / ALLOWLIST).read_text(encoding="utf-8").splitlines()
+    header = "\n".join(line for line in lines if line.startswith("#"))
+    assert "src/omnibase_infra/handlers/" in header
+    assert "only shrinks" in header
 
 
 def test_all_mode_rejects_stale_allowlist_entry(tmp_path: Path) -> None:
