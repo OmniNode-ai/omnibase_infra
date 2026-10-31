@@ -57,6 +57,30 @@ def test_an_unknown_key_fails_to_load() -> None:
         ModelNetworkBindingSettings.model_validate(block)
 
 
+@pytest.mark.parametrize(
+    ("minimum", "maximum"),
+    [(0, 65535), (1, 65536), (65536, 65535), (1, 0), (60000, 50000)],
+)
+def test_invalid_port_bounds_fail_to_load(
+    tmp_path: Path, minimum: int, maximum: int
+) -> None:
+    block = {**_declared_block(), "tcp_port_min": minimum, "tcp_port_max": maximum}
+    path = tmp_path / "network_binding_settings.yaml"
+    path.write_text(yaml.safe_dump({"settings": block}), encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        ModelNetworkBindingSettings.from_file(path)
+
+
+@pytest.mark.parametrize(("minimum", "maximum"), [(1, 65535), (1, 1), (65535, 65535)])
+def test_valid_port_bounds_load(minimum: int, maximum: int) -> None:
+    block = {**_declared_block(), "tcp_port_min": minimum, "tcp_port_max": maximum}
+
+    settings = ModelNetworkBindingSettings.model_validate(block)
+
+    assert (settings.tcp_port_min, settings.tcp_port_max) == (minimum, maximum)
+
+
 def test_a_file_without_a_settings_mapping_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "network_binding_settings.yaml"
     path.write_text("other: {}\n", encoding="utf-8")

@@ -7,10 +7,10 @@ node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "1.0.0"
+  patch: 1
+node_version: "1.0.1"
 description: >
-  EFFECT node that validates all prerequisites before platform provisioning. Checks Docker version, Compose version, Python version, POSTGRES_PASSWORD env var, Docker daemon status, omnibase directory, and local service port availability.
+  EFFECT node that validates all prerequisites before platform provisioning. Checks Docker version, Compose version, Python version, POSTGRES_PASSWORD env var, Docker daemon status, omnibase directory, and local service port availability at the local_host declared in models/network_binding/network_binding_settings.yaml.
 
 input_model:
   name: "ModelPreflightEffectInput"

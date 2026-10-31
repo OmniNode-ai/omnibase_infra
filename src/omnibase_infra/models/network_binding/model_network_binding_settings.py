@@ -13,7 +13,7 @@ from functools import cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -39,8 +39,15 @@ class ModelNetworkBindingSettings(BaseModel):
     bind_all_address: str = Field(min_length=1)
     local_host: str = Field(min_length=1)
     postgres_port: int = Field(ge=1, le=65535)
-    tcp_port_min: int = Field(ge=1)
-    tcp_port_max: int = Field(le=65535)
+    tcp_port_min: int = Field(ge=1, le=65535)
+    tcp_port_max: int = Field(ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_port_bounds(self) -> ModelNetworkBindingSettings:
+        """Refuse a port interval that cannot contain any valid port."""
+        if self.tcp_port_min > self.tcp_port_max:
+            raise ValueError("tcp_port_min must not exceed tcp_port_max")
+        return self
 
     @classmethod
     def from_file(cls, settings_path: Path) -> ModelNetworkBindingSettings:

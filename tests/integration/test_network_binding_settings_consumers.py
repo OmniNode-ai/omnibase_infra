@@ -91,16 +91,30 @@ def test_container_facing_servers_bind_the_declared_bind_all_address(
     assert default == load_network_binding_settings().bind_all_address
 
 
+@pytest.mark.parametrize(
+    ("module_name", "class_name"),
+    [*_LOOPBACK_BOUND_CONFIGS, *(item[:2] for item in _BIND_ALL_CONFIGS[:2])],
+)
 def test_a_health_host_environment_override_still_wins(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, module_name: str, class_name: str
 ) -> None:
-    from omnibase_infra.services.post_merge.config import ConfigPostMergeConsumer
+    model = getattr(importlib.import_module(module_name), class_name)
 
-    prefix = ConfigPostMergeConsumer.model_config["env_prefix"]
+    prefix = model.model_config["env_prefix"]
     monkeypatch.setenv(f"{prefix}KAFKA_BOOTSTRAP_SERVERS", "broker.test:9092")
+    monkeypatch.setenv(f"{prefix}POSTGRES_DSN", "postgresql://db.test/observability")
+    monkeypatch.delenv(f"{prefix}HEALTH_CHECK_HOST", raising=False)
+    assert (
+        model(_env_file=None).health_check_host
+        == model.model_fields["health_check_host"].default
+    )
     monkeypatch.setenv(f"{prefix}HEALTH_CHECK_HOST", "health-probe.test")
 
-    assert ConfigPostMergeConsumer().health_check_host == "health-probe.test"
+    assert model(_env_file=None).health_check_host == "health-probe.test"
+    assert (
+        model(health_check_host="explicit.test", _env_file=None).health_check_host
+        == "explicit.test"
+    )
 
 
 def test_the_registration_storage_port_default_is_the_declared_port() -> None:
