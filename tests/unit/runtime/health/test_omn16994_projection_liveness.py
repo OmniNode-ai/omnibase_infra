@@ -44,6 +44,9 @@ from omnibase_core.models.contracts.subcontracts.model_db_table_declaration impo
 )
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.event_bus.models.model_publish_receipt import ModelPublishReceipt
+from omnibase_infra.models.health.model_runtime_health_check_event import (
+    ModelRuntimeHealthCheckEvent,
+)
 from omnibase_infra.models.observability import (
     ModelConsumerFlowDelta,
     ModelNodeFlowWindow,
@@ -91,6 +94,7 @@ def _projection_contract(
     *,
     name: str = "node_projection_session_replay",
     topic: str = PROJECTION_TOPIC,
+    topics: tuple[str, ...] | None = None,
     package_name: str = "omnimarket",
     consumer_purpose: str | None = None,
     plugin_managed: bool = False,
@@ -106,7 +110,7 @@ def _projection_contract(
         package_name=package_name,
         requires_cloud_gateway=requires_cloud_gateway,
         event_bus=ModelEventBusWiring(
-            subscribe_topics=(topic,),
+            subscribe_topics=(topic,) if topics is None else topics,
             publish_topics=(),
             consumer_purpose=consumer_purpose,
             plugin_managed=plugin_managed,
@@ -616,6 +620,103 @@ class TestMonitorFoldsProjectionLiveness:
         )
         assert dimension.status == "DEGRADED"
         assert "node_projection_session_replay" in dimension.detail
+
+    async def _run_with_idle(
+        self, projection: ModelDiscoveredContract, idle: frozenset[str]
+    ) -> ModelRuntimeHealthCheckEvent:
+        """Run the monitor over one projection and the orchestrator-only live registry."""
+        manifest = ModelAutoWiringManifest(
+            contracts=(projection, _non_projection_contract()),
+            errors=(),
+        )
+        live_group = f"runtime.sweep.consume.v1.__t.{ORCHESTRATOR_TOPIC}"
+        bus = MagicMock(spec=ProtocolEventBusLike)
+        bus.get_consumer_groups.return_value = {
+            (ORCHESTRATOR_TOPIC, "runtime.sweep.consume.v1"): live_group
+        }
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=bus, bootstrap_servers="localhost:9092"
+        )
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=self._snapshots([live_group]),
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor.idle_watched_topics",
+                return_value=idle,
+            ),
+        ):
+            return await monitor.run_once()
+
+    @pytest.mark.asyncio
+    async def test_a_projection_waiting_for_its_first_record_is_not_unattached(
+        self,
+    ) -> None:
+        """OMN-21629: OMN-18087 defers a contract whose topics hold no record.
+
+        Its topics stay out of the live registry until a first record starts
+        it. Counting it unattached made every boot read DEGRADED (11 of 18
+        projections on the dev effects runtime, 2026-10-31). The same manifest
+        and registry as the test above, with the projection's topic watched.
+        """
+        event = await self._run_with_idle(
+            _projection_contract(), frozenset({PROJECTION_TOPIC})
+        )
+
+        assert event.unattached_projection_count == 0
+        dimension = next(
+            d for d in event.dimensions if d.name == "projection_attachment"
+        )
+        assert dimension.status == "HEALTHY"
+
+    @pytest.mark.asyncio
+    async def test_a_projection_with_only_some_topics_idle_still_degrades(
+        self,
+    ) -> None:
+        """One topic already started and unattached is a real finding."""
+        other_topic = "onex.evt.omniclaude.prompt-submitted.v1"
+        event = await self._run_with_idle(
+            _projection_contract(topics=(PROJECTION_TOPIC, other_topic)),
+            frozenset({PROJECTION_TOPIC}),
+        )
+
+        assert event.unattached_projection_count == 1
+        dimension = next(
+            d for d in event.dimensions if d.name == "projection_attachment"
+        )
+        assert dimension.status == "DEGRADED"
+
+    @pytest.mark.asyncio
+    async def test_a_projection_off_the_idle_set_degrades(self) -> None:
+        """Once a record has started it (or the watch ended), the registry decides."""
+        event = await self._run_with_idle(_projection_contract(), frozenset())
+
+        assert event.unattached_projection_count == 1
+
+    @pytest.mark.asyncio
+    async def test_the_idle_set_does_not_change_the_verdict_of_a_topicless_projection(
+        self,
+    ) -> None:
+        """An empty subscription is vacuously inside every set; it is not idle.
+
+        Such a contract has no topic to be unattached on, so the verdict is the
+        same with and without watched topics.
+        """
+        projection = _projection_contract(topics=())
+        unmasked = await self._run_with_idle(projection, frozenset())
+        masked = await self._run_with_idle(projection, frozenset({PROJECTION_TOPIC}))
+
+        assert masked.unattached_projection_count == (
+            unmasked.unattached_projection_count
+        )
+        assert [d.status for d in masked.dimensions] == [
+            d.status for d in unmasked.dimensions
+        ]
 
     @pytest.mark.asyncio
     async def test_fully_dlqing_projection_degrades_the_verdict(self) -> None:
