@@ -59,15 +59,22 @@ PR that missed them. This leg refuses the same two classes at ``git push``:
   * ``FAIL_NO_CONTRACT`` -- a ticket cited in the branch's commit subjects (the
     local stand-in for the PR title the hosted job reads) has no
     ``contracts/<ticket>.yaml`` in the pushed HEAD commit. The file is named.
-  * ``FAIL_CHECK_NOT_A_COMMAND`` -- a ``command`` / ``test_passes`` check in a
-    head-side contract is judged prose by the verifier's own shape guard. The
-    check is named by contract and evidence id.
+  * ``FAIL_CONTRACT_REFUSED`` -- a head-side contract is one the PR writer's
+    own prerequisite refuses: ``contracts/<ticket>.yaml`` has an empty or missing
+    ``dod_evidence[]``, a check value the verifier's shape guard calls prose
+    (``INVALID_CHECK_VALUE_NOT_A_COMMAND``), or an acceptance criterion no
+    ``dod_evidence`` item binds (``binds_ac``). The refusal text is the writer's
+    own, naming the contract.
 
-The shape verdict is not re-implemented here. It is the released verifier's
-``_invalid_check_value_reason``, run from ``omnimarket==<verifier-version>``,
-where the version is read from the caller workflow so the local and hosted
-verdicts use one pin. The leg runs no bound check: it only judges shape. Bot
-authorship is not consulted -- a push has no GitHub-verified author, and the
+The verdict is not re-implemented here. It is ``contract_prerequisite`` from the
+released ``omnimarket==<verifier-version>`` (``node_dod_verify`` services), the
+one function ``onex scm pr-create`` (``node_github_repo_write_effect``) calls
+before it opens a pull request, so a contract this leg passes is one pr-create
+accepts (OMN-21642; FRICTION 2026-10-31T01:38:58Z, where the earlier shape-only
+judge passed a contract pr-create then refused twice). The version is read from
+the caller workflow, so the local and hosted verdicts use one pin. The leg runs
+no bound check: ``contract_prerequisite`` only judges presence and static shape.
+Bot authorship is not consulted -- a push has no GitHub-verified author, and the
 hosted job's bot exemptions are derived from that metadata alone, so they stay
 CI-only.
 
@@ -89,7 +96,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -454,28 +461,27 @@ def render(decision: DeployScopeDecision, validator: ModuleType) -> None:
 _REPO_EVIDENCE_CALLER_RELPATH = Path(".github/workflows/call-repo-evidence-gate.yml")
 #: The same ticket pattern the hosted job greps out of the PR title.
 _CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
-#: The check types the verifier hands to its shape guard before running them.
-_COMMAND_CHECK_TYPES = ("command", "test_passes")
 #: The Python the hosted job installs the verifier into.
 _VERIFIER_PYTHON = "3.13"
-#: Runs inside the released verifier's environment: reads a JSON list of
-#: check values on stdin, writes the guard's reason (or null) for each.
-_VERIFIER_SHAPE_PROGRAM = (
+#: Runs inside the released verifier's environment: reads a JSON map of
+#: ticket to contract text on stdin and writes ``contract_prerequisite``'s
+#: refusal (or null) for each, the call ``onex scm pr-create`` makes.
+_VERIFIER_PREREQUISITE_PROGRAM = (
     "import json, sys\n"
-    "from omnimarket.nodes.node_dod_verify.services.evidence_collector "
-    "import _invalid_check_value_reason\n"
-    "request = json.load(sys.stdin)\n"
-    "json.dump([_invalid_check_value_reason(v, cwd=request['cwd']) "
-    "for v in request['values']], sys.stdout)\n"
+    "from omnimarket.nodes.node_dod_verify.services.contract_prerequisite "
+    "import contract_prerequisite\n"
+    "contracts = json.load(sys.stdin)\n"
+    "json.dump({t: contract_prerequisite(t, text) "
+    "for t, text in contracts.items()}, sys.stdout)\n"
 )
 
 PASS_CONTRACTS = "PASS_CONTRACTS"
 NOTICE_NO_TICKET_CITED = "NOTICE_NO_TICKET_CITED"
 FAIL_NO_CONTRACT = "FAIL_NO_CONTRACT"
-FAIL_CHECK_NOT_A_COMMAND = "FAIL_CHECK_NOT_A_COMMAND"
+FAIL_CONTRACT_REFUSED = "FAIL_CONTRACT_REFUSED"
 
-#: Judges a batch of check values; returns one reason (or ``None``) per value.
-ShapeJudge = Callable[[Sequence[str]], list[str | None]]
+#: Judges contracts by ticket; returns the PR writer's refusal (or ``None``) per ticket.
+ContractJudge = Callable[[Mapping[str, str]], dict[str, str | None]]
 
 
 @dataclass(frozen=True)
@@ -523,42 +529,12 @@ def read_head_contract(repo_root: Path, ticket: str) -> str | None:
     return result.stdout
 
 
-def command_checks(contract_text: str) -> list[tuple[str, str]]:
-    """``(evidence id, check value)`` for every check the verifier shape-guards.
-
-    Mirrors the verifier's selection: ``check_type`` in ``command`` /
-    ``test_passes``, value from ``command`` else ``check_value``.
-    """
-    try:
-        contract = yaml.safe_load(contract_text)
-    except yaml.YAMLError as exc:
-        raise DeployScopeHookError(f"contract is not valid YAML: {exc}") from exc
-    if not isinstance(contract, dict):
-        raise DeployScopeHookError("contract is not a YAML mapping")
-    items = contract.get("dod_evidence") or []
-    if not isinstance(items, list):
-        raise DeployScopeHookError("dod_evidence is not a list")
-    found: list[tuple[str, str]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        evidence_id = str(item.get("id", "unknown"))
-        for check in item.get("checks") or []:
-            if not isinstance(check, dict):
-                continue
-            if check.get("check_type") not in _COMMAND_CHECK_TYPES:
-                continue
-            value = check.get("command") or check.get("check_value") or ""
-            found.append((evidence_id, str(value)))
-    return found
-
-
 def classify_ticket_contracts(
     tickets: Sequence[str],
     read_contract: Callable[[str], str | None],
-    judge: ShapeJudge,
+    judge: ContractJudge,
 ) -> TicketContractDecision:
-    """Pure decision core: presence first, then the verifier's shape guard."""
+    """Pure decision core: presence first, then the PR writer's own prerequisite."""
     if not tickets:
         return TicketContractDecision(
             outcome=NOTICE_NO_TICKET_CITED,
@@ -589,37 +565,17 @@ def classify_ticket_contracts(
             ),
         )
 
-    labelled: list[tuple[str, str]] = []
-    values: list[str] = []
-    for ticket, text in contracts.items():
-        try:
-            checks = command_checks(text)
-        except DeployScopeHookError as exc:
-            return TicketContractDecision(
-                outcome=FAIL_CHECK_NOT_A_COMMAND,
-                exit_code=1,
-                tickets=tuple(tickets),
-                findings=(f"contracts/{ticket}.yaml: {exc}",),
-            )
-        for evidence_id, value in checks:
-            labelled.append(
-                (f"contracts/{ticket}.yaml dod_evidence {evidence_id}", value)
-            )
-            values.append(value)
-
-    reasons = judge(values) if values else []
-    if len(reasons) != len(values):
+    verdicts = judge(contracts)
+    if set(verdicts) != set(contracts):
         raise DeployScopeHookError(
-            f"the verifier judged {len(reasons)} of {len(values)} check values"
+            f"the verifier judged {sorted(verdicts)} of {sorted(contracts)}"
         )
     findings = [
-        f"{label}: INVALID_CHECK_VALUE_NOT_A_COMMAND: {reason} (check value: {value!r})"
-        for (label, value), reason in zip(labelled, reasons, strict=True)
-        if reason is not None
+        failure for ticket in contracts if (failure := verdicts[ticket]) is not None
     ]
     if findings:
         return TicketContractDecision(
-            outcome=FAIL_CHECK_NOT_A_COMMAND,
+            outcome=FAIL_CONTRACT_REFUSED,
             exit_code=1,
             tickets=tuple(tickets),
             findings=tuple(findings),
@@ -649,8 +605,8 @@ def read_verifier_version(repo_root: Path) -> str:
     return version.strip()
 
 
-def verifier_shape_argv(verifier_version: str) -> list[str]:
-    """The command that runs the released verifier's shape guard."""
+def verifier_prerequisite_argv(verifier_version: str) -> list[str]:
+    """The command that runs the released verifier's ``contract_prerequisite``."""
     return [
         "uv",
         "run",
@@ -662,17 +618,17 @@ def verifier_shape_argv(verifier_version: str) -> list[str]:
         "python",
         "-I",
         "-c",
-        _VERIFIER_SHAPE_PROGRAM,
+        _VERIFIER_PREREQUISITE_PROGRAM,
     ]
 
 
-def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ShapeJudge:
+def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ContractJudge:
     """A judge that asks the pinned released verifier, failing loud if it cannot."""
 
-    def judge(values: Sequence[str]) -> list[str | None]:
+    def judge(contracts: Mapping[str, str]) -> dict[str, str | None]:
         result = subprocess.run(
-            verifier_shape_argv(verifier_version),
-            input=json.dumps({"values": list(values), "cwd": str(cwd)}),
+            verifier_prerequisite_argv(verifier_version),
+            input=json.dumps(dict(contracts)),
             check=False,
             capture_output=True,
             text=True,
@@ -680,22 +636,25 @@ def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ShapeJudge:
         )
         if result.returncode != 0:
             raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} shape guard did not run "
+                f"omnimarket=={verifier_version} contract_prerequisite did not run "
                 f"(rc={result.returncode}): {result.stderr.strip()[-2000:]}"
             )
         try:
-            reasons = json.loads(result.stdout)
+            verdicts = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} shape guard returned no JSON: {exc}"
+                f"omnimarket=={verifier_version} contract_prerequisite returned "
+                f"no JSON: {exc}"
             ) from exc
-        if not isinstance(reasons, list) or not all(
-            r is None or isinstance(r, str) for r in reasons
+        if not isinstance(verdicts, dict) or not all(
+            isinstance(t, str) and (v is None or isinstance(v, str))
+            for t, v in verdicts.items()
         ):
             raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} shape guard returned {reasons!r}"
+                f"omnimarket=={verifier_version} contract_prerequisite "
+                f"returned {verdicts!r}"
             )
-        return list(reasons)
+        return dict(verdicts)
 
     return judge
 
@@ -703,7 +662,9 @@ def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ShapeJudge:
 def render_ticket_contracts(decision: TicketContractDecision) -> None:
     """Print the ticket-contract leg's verdict to stderr."""
     if decision.outcome == PASS_CONTRACTS:
-        _log(f"ticket contracts: {list(decision.tickets)} present and command-shaped")
+        _log(
+            f"ticket contracts: {list(decision.tickets)} present and accepted by the PR writer's prerequisite"
+        )
         return
     _log(f"outcome={decision.outcome}")
     for finding in decision.findings:
@@ -712,7 +673,8 @@ def render_ticket_contracts(decision: TicketContractDecision) -> None:
         _log(
             "This is the LOCAL mirror of the required hosted `repo-evidence / "
             "dod-verify` check, which refuses the same head. Commit "
-            "contracts/<ticket>.yaml with command-shaped check values before pushing."
+            "contracts/<ticket>.yaml with dod_evidence bound to every acceptance "
+            "criterion and command-shaped check values before pushing."
         )
 
 
@@ -721,7 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Local pre-push mirror of the hosted deploy-gate deploy-scope DoD "
             "check (OMN-14681) and of repo-evidence / dod-verify's ticket-contract "
-            "presence and check-shape refusals (OMN-20870)."
+            "presence and prerequisite refusals (OMN-20870, OMN-21642)."
         )
     )
     parser.add_argument(
