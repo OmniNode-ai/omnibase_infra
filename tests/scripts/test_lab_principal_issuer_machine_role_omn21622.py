@@ -91,7 +91,7 @@ class FakeBroker(lpi.Broker):
         return self.listings[principal]
 
 
-def _overlay(tmp_path: Path, *rows: dict[str, str]) -> Path:
+def _overlay(tmp_path: Path, *rows: dict[str, object]) -> Path:
     path = tmp_path / "developer-principal-overlay.yaml"
     path.write_text(
         yaml.safe_dump(
@@ -191,6 +191,41 @@ def test_a_row_still_cannot_carry_a_grant(
     with pytest.raises(lpi.DeclarationError, match="a grant cannot be typed here"):
         lpi.load_overlay(
             _overlay(tmp_path, {**MACHINE_ROW, "grants": "x"}), declaration
+        )
+
+
+def test_a_machine_row_may_bind_grant_roles_the_issuer_does_not_grant(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    """OMN-21622: a machine row names the grant roles it holds beyond the profile.
+
+    The roles' grant sets are declared and applied by the deployment's own broker ACL
+    declaration, so the issuer reads the binding as part of a valid row and issues the
+    same profile with or without it.
+    """
+    bound = {**MACHINE_ROW, "grant_roles": ["host-drift-fleet"]}
+    overlay = lpi.load_overlay(_overlay(tmp_path, bound, DEVELOPER_ROW), declaration)
+    assert overlay.principals == {"dev-ops-lab-host", "dev-ana-ana-laptop"}
+    granted = []
+    for row in (MACHINE_ROW, bound):
+        broker = FakeBroker()
+        lpi.Issuer(
+            declaration,
+            broker,
+            lpi.Ledger(tmp_path / f"{len(granted)}.jsonl"),
+            lpi.load_overlay(_overlay(tmp_path, row), declaration),
+        ).issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
+        granted.append(sorted(broker.granted))
+    assert granted[0] == granted[1]
+
+
+def test_only_a_machine_row_binds_grant_roles(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    with pytest.raises(lpi.DeclarationError, match="only a machine binds grant_roles"):
+        lpi.load_overlay(
+            _overlay(tmp_path, {**DEVELOPER_ROW, "grant_roles": ["host-drift-fleet"]}),
+            declaration,
         )
 
 

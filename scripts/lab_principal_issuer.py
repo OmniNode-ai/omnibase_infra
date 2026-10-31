@@ -514,18 +514,18 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
     rows: list[OverlayRow] = []
     for index, raw in enumerate(raw_rows):
         where = f"{path}: principals[{index}]"
-        if not isinstance(raw, dict) or set(raw) - {"role"} != {
+        if not isinstance(raw, dict) or set(raw) - {"role", "grant_roles"} != {
             "principal",
             "login",
             "device",
         }:
             raise DeclarationError(
-                f"{where} holds exactly principal, login, device and an optional role; "
-                "a grant cannot be typed here"
+                f"{where} holds principal, login, device, role, grant_roles: a grant cannot be typed here"
             )
-        if (role := raw.get("role", "developer")) not in OVERLAY_ROLES:
+        role = raw.get("role", "developer")
+        if role not in OVERLAY_ROLES or ("grant_roles" in raw and role != "machine"):
             raise DeclarationError(
-                f"{where}: role must be one of {sorted(OVERLAY_ROLES)}"
+                f"{where}: role must be one of {sorted(OVERLAY_ROLES)}; only a machine binds grant_roles"
             )
         principal, login, device = raw["principal"], raw["login"], raw["device"]
         if not all(isinstance(v, str) for v in (principal, login, device)):
