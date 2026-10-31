@@ -889,8 +889,7 @@ class TestHandlerGraphHealthCheck:
             await handler.initialize(connection_uri="bolt://localhost:7687")
 
             # Clear cache to force actual health check
-            handler._cached_health = None
-            handler._health_cache_time = 0.0
+            handler._health_cache.discard()
 
             result = await handler.health_check()
 
@@ -928,8 +927,7 @@ class TestHandlerGraphHealthCheck:
             await handler.initialize(connection_uri="bolt://localhost:7687")
 
             # Clear cache to force actual health check
-            handler._cached_health = None
-            handler._health_cache_time = 0.0
+            handler._health_cache.discard()
 
             result = await handler.health_check()
 

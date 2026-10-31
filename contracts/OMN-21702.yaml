@@ -1,0 +1,77 @@
+schema_version: 1.0.0
+ticket_id: OMN-21702
+title: >-
+  Handler shape burn-down in omnibase_infra: public handler methods stop mutating handler state
+summary: >-
+  Core's handler-shape validator (omnibase_core.validation.validator_handler_shape, plan task T2.4a) reports mutating_public_method for a public handler method that assigns to the receiver or calls a mutating method on one of its attributes. Fifteen findings in eleven handler files (dev boot guard, Infisical, declared-state lease, Gmail, graph, MCP, Qdrant, topic catalog, work-ledger query, DLQ replay, handler pool) keep that state in a collaborator under models/ the handler owns: a TTL cell, a version-keyed cache, a name-keyed table, a value holder, a secret cache, a lease table, a rotation cursor and a pool checkout counter. The handlers' behavior and public signatures are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21702-handler-state-collaborators
+    statement: >-
+      In the eleven handler files of this slice no public method other than handle mutates handler state, and the handlers behave as before.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the public handler methods touched by omnibase_infra#5504 stop mutating handler state and the handler-shape count over them drops as the PR states -- falsifier: uv run pytest tests/unit -q over the touched handlers plus the handler-shape checker re-run on the PR paths
+  - id: req-omn21702-contract-location
+    statement: >-
+      The acceptance items of omnibase_infra#5504 live in contracts/OMN-21702.yaml and the PR leaves contracts/OMN-21536.yaml as the base branch has it.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the PR's acceptance items live in contracts/OMN-21702.yaml and the PR does not edit contracts/OMN-21536.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21702.yaml and not contracts/OMN-21536.yaml
+evidence_requirements:
+  - kind: tests
+    description: The handler tests of the eleven files pass.
+    command: >-
+      uv run pytest tests/unit/handlers/test_handler_graph.py tests/unit/handlers/test_handler_gmail_api.py tests/unit/handlers/test_handler_mcp.py tests/unit/handlers/test_handler_infisical.py tests/unit/test_handler_topic_catalog_postgres.py tests/unit/runtime/test_handler_pool.py tests/unit/cli/test_work_ledger_query_session_omn20740.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21702-ac11-handler-tests
+    description: The handler tests of the eleven files pass against the collaborators.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/handlers/test_handler_graph.py tests/unit/handlers/test_handler_gmail_api.py tests/unit/handlers/test_handler_mcp.py tests/unit/handlers/test_handler_infisical.py tests/unit/test_handler_topic_catalog_postgres.py tests/unit/runtime/test_handler_pool.py tests/unit/cli/test_work_ledger_query_session_omn20740.py tests/integration/handlers/test_handler_dev_boot_guard_omn21279.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21702-ac12-no-mutating-public-method
+    description: >-
+      Core's handler-shape validator names none of the eleven files for mutating_public_method.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/handlers/handler_infisical.py src/omnibase_infra/handlers/handler_graph.py src/omnibase_infra/runtime/handler_pool.py --report-json /tmp/handler-shape-state-collaborators.json
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21702-deploy-state-collaborators
+    description: >-
+      Post-deploy probe: the running runtime image carries the handler state collaborators and the pool handler uses one. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec omninode-runtime python -c "from omnibase_infra.models.handlers.model_pool_checkout_metrics import ModelPoolCheckoutMetrics as M; from omnibase_infra.runtime.handler_pool import HandlerPool; m = M(); m.record_checkout(2.0); assert m.checkout_count == 1 and m.average_wait_ms == 2.0"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21702-ac2-contract-location
+    description: >-
+      The PR diff against origin/dev lists contracts/OMN-21702.yaml and does not list contracts/OMN-21536.yaml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'files=$(git diff --name-only origin/dev...HEAD) && printf "%s\n" "$files" | grep -Fx contracts/OMN-21702.yaml && ! printf "%s\n" "$files" | grep -Fx contracts/OMN-21536.yaml'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

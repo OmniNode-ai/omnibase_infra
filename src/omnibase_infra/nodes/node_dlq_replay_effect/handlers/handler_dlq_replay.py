@@ -45,6 +45,7 @@ from omnibase_infra.errors import (
     DlqDependencyLifecycleTimeoutError,
     DlqTopicFixedPointError,
 )
+from omnibase_infra.models.handlers.model_rotation_cursor import ModelRotationCursor
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQConsumer,
     DLQProducer,
@@ -282,7 +283,7 @@ class HandlerDlqReplay:
         self._config: ModelDlqReplayEngineConfig = next(
             iter(self._consumers.values())
         ).config
-        self._start_index = 0
+        self._rotation = ModelRotationCursor()
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -420,8 +421,7 @@ class HandlerDlqReplay:
         """
         results: list[ModelDlqReplayResult] = []
         topics = list(self._consumers)
-        start = self._start_index % len(topics)
-        self._start_index = (start + 1) % len(topics)
+        start = self._rotation.next_start(len(topics))
         order = topics[start:] + topics[:start]
 
         deadline = time.monotonic() + self._config.max_run_duration_seconds

@@ -45,6 +45,7 @@ import httpx
 
 from omnibase_core.types import JsonType
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.models.handlers.model_ttl_value_cell import ModelTtlValueCell
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +97,7 @@ class HandlerGmailApi:
         _refresh_token: OAuth2 refresh token from env.
         _access_token: Current access token (empty until first refresh).
         _token_expiry: Unix timestamp when current token expires.
-        _label_cache: Cached {name: id} mapping.
-        _label_cache_expires_at: Unix timestamp when label cache expires.
+        _label_cache: Cell holding the {name: id} mapping for its TTL.
         _http_client: Optional shared httpx.AsyncClient.
 
     Example:
@@ -140,8 +140,9 @@ class HandlerGmailApi:
         )
         self._access_token: str = ""
         self._token_expiry: float = 0.0
-        self._label_cache: dict[str, str] = {}
-        self._label_cache_expires_at: float = 0.0
+        self._label_cache: ModelTtlValueCell[dict[str, str]] = ModelTtlValueCell(
+            ttl_seconds=_LABEL_CACHE_TTL_SECONDS
+        )
         self._http_client = http_client
 
     @property
@@ -491,7 +492,8 @@ class HandlerGmailApi:
             Names that don't match any label are omitted from the result.
         """
         now = time.monotonic()
-        if not self._label_cache or now >= self._label_cache_expires_at:
+        labels = self._label_cache.fresh(now)
+        if not labels:
             # Refresh cache
             raw_labels = await self.list_labels()
             cache: dict[str, str] = {}
@@ -500,18 +502,14 @@ class HandlerGmailApi:
                 label_id = str(label.get("id", ""))
                 if name and label_id:
                     cache[name] = label_id
-            self._label_cache = cache
-            self._label_cache_expires_at = now + _LABEL_CACHE_TTL_SECONDS
+            self._label_cache.store(cache, now)
+            labels = cache
             logger.debug(
                 "Gmail label cache refreshed",
                 extra={"label_count": len(cache)},
             )
 
-        return {
-            name: self._label_cache[name]
-            for name in label_names
-            if name in self._label_cache
-        }
+        return {name: labels[name] for name in label_names if name in labels}
 
     # ------------------------------------------------------------------
     # HTTP helpers

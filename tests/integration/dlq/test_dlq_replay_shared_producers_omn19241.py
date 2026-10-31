@@ -160,7 +160,7 @@ async def test_kernel_wired_dispatchers_never_stop_a_producer_a_peer_is_using(
     commands_run = HandlerDlqReplay(**mapping)
     # Dispatchers rotate independently; on the lane the two were draining
     # different topics at once. Start this one on the commands DLQ.
-    commands_run._start_index = list(mapping["consumers"]).index(_COMMANDS)
+    commands_run._rotation.position = list(mapping["consumers"]).index(_COMMANDS)
 
     first = asyncio.create_task(events_run.run())
     await asyncio.wait_for(broker.entered[_EVENTS].wait(), _TIMEOUT)

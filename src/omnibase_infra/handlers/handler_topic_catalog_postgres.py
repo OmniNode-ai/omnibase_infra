@@ -60,6 +60,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_entry import (
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
 )
+from omnibase_infra.models.handlers.model_version_keyed_cache import (
+    ModelVersionKeyedCache,
+)
 from omnibase_infra.topics.topic_namespace import create_topic_resolver
 from omnibase_infra.topics.topic_resolver import TopicResolutionError, TopicResolver
 
@@ -152,7 +155,7 @@ class HandlerTopicCatalogPostgres:
         self._query_timeout_seconds = query_timeout_seconds
 
         # in-process cache: catalog_version (int) -> ModelTopicCatalogResponse
-        self._cache: dict[int, ModelTopicCatalogResponse] = {}
+        self._cache = ModelVersionKeyedCache[ModelTopicCatalogResponse]()
 
         logger.info(
             "HandlerTopicCatalogPostgres initialised",
@@ -211,7 +214,7 @@ class HandlerTopicCatalogPostgres:
         Clears the in-process cache. The pool itself is owned externally
         (passed in at construction), so it is not closed here.
         """
-        self._cache.clear()
+        self._cache.discard_all()
         logger.debug("HandlerTopicCatalogPostgres shut down — cache cleared")
 
     # ------------------------------------------------------------------
@@ -259,8 +262,8 @@ class HandlerTopicCatalogPostgres:
         catalog_version = await self._get_catalog_version(correlation_id)
 
         # Step 2: cache hit
-        if catalog_version != -1 and catalog_version in self._cache:
-            cached = self._cache[catalog_version]
+        cached = self._cache.lookup(catalog_version)
+        if catalog_version != -1 and cached is not None:
             return self._filter_response(
                 cached,
                 correlation_id=correlation_id,
@@ -347,10 +350,7 @@ class HandlerTopicCatalogPostgres:
 
         # Cache result (skip when version unknown)
         if catalog_version != -1:
-            self._cache[catalog_version] = full_response
-            stale = [v for v in list(self._cache) if v < catalog_version]
-            for v in stale:
-                del self._cache[v]
+            self._cache.keep(catalog_version, full_response)
 
         return self._filter_response(
             full_response,

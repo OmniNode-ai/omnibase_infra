@@ -120,7 +120,7 @@ class TestHandlerMCPInitialization:
         """
         assert handler._initialized is False
         assert handler._config is None
-        assert handler._tool_registry == {}
+        assert handler._tool_registry.entries == {}
 
     def test_handler_stores_container(
         self, handler: HandlerMCP, mock_container: MagicMock
@@ -222,7 +222,7 @@ class TestHandlerMCPInitialization:
 
         assert handler._initialized is False
         assert handler._config is None
-        assert handler._tool_registry == {}
+        assert handler._tool_registry.entries == {}
 
 
 class TestHandlerMCPDescribe:
@@ -759,7 +759,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="needs_model_name",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["needs_model_name"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("needs_model_name", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -787,7 +787,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="type_check_tool",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["type_check_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("type_check_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -814,7 +814,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="enum_tool",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["enum_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("enum_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -850,7 +850,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="valid_tool",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["valid_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("valid_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -886,7 +886,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="no_schema_tool",
             input_schema=None,  # explicitly no schema
         )
-        handler._tool_registry["no_schema_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("no_schema_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -916,7 +916,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="traceback_check_tool",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["traceback_check_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("traceback_check_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
@@ -951,7 +951,7 @@ class TestHandlerMCPInputSchemaValidation:
             name="field_naming_tool",
             input_schema=_SCHEMA_WITH_REQUIRED_STRING,
         )
-        handler._tool_registry["field_naming_tool"] = tool  # type: ignore[assignment]
+        handler._tool_registry.register("field_naming_tool", tool)  # type: ignore[arg-type]
 
         envelope = {
             "operation": EnumMcpOperationType.CALL_TOOL.value,
