@@ -48,6 +48,7 @@ from omnibase_infra.enums import (
     EnumHandlerTypeCategory,
     EnumLlmOperationType,
 )
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -59,6 +60,7 @@ from omnibase_spi.contracts.enrichment.contract_enrichment_result import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 # Prompt version -- bump this when the system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
@@ -81,8 +83,6 @@ _CHARS_PER_TOKEN: int = 4
 # leave room for the prompt, system message, and completion.
 _MAX_DIFF_CHARS: int = 32_000
 
-# Timeout for the git subprocess (seconds).
-_GIT_TIMEOUT_SECONDS: float = 15.0
 
 # Relevance score assigned when the diff is non-empty and analysis succeeds.
 _ANALYSIS_RELEVANCE_SCORE: float = 0.85
@@ -164,7 +164,7 @@ class AdapterCodeAnalysisEnrichment:
 
         self._transport = TransportHolderLlmHttp(
             target_name="coder-14b-enrichment",
-            max_timeout_seconds=120.0,
+            max_timeout_seconds=_T.llm_coder_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -322,7 +322,7 @@ class AdapterCodeAnalysisEnrichment:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=_GIT_TIMEOUT_SECONDS
+                proc.communicate(), timeout=_T.git_diff_seconds
             )
             if proc.returncode != 0:
                 logger.debug(
@@ -336,7 +336,7 @@ class AdapterCodeAnalysisEnrichment:
             if proc is not None:
                 proc.kill()
                 await proc.wait()
-            logger.debug("git diff HEAD timed out after %.0fs", _GIT_TIMEOUT_SECONDS)
+            logger.debug("git diff HEAD timed out after %.0fs", _T.git_diff_seconds)
             return ""
         except asyncio.CancelledError:
             if proc is not None:

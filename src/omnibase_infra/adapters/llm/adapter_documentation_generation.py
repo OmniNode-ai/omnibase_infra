@@ -56,6 +56,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
     HandlerLlmOpenaiCompatible,
 )
@@ -71,6 +72,7 @@ from omnibase_spi.contracts.delegation.contract_delegation_attribution import (
 
 logger = logging.getLogger(__name__)
 
+
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
@@ -84,10 +86,6 @@ _DEFAULT_MAX_TOKENS: int = 2_048
 # Default temperature -- low for deterministic, high-quality documentation.
 _DEFAULT_TEMPERATURE: float = 0.2
 
-# Per-request timeout in seconds.  DeepSeek-R1-32B can take 60-120 s for a
-# 2 048-token completion; 150 s gives headroom without exceeding the transport
-# cap of 180 s.
-_DEFAULT_TIMEOUT_SECONDS: float = 150.0
 
 # Delegation confidence: documentation is a well-defined task for Qwen-72B.
 _DELEGATION_CONFIDENCE: float = 0.95
@@ -254,7 +252,7 @@ class AdapterDocumentationGeneration:
 
         self._transport = TransportHolderLlmHttp(
             target_name="deepseek-r1-documentation",
-            max_timeout_seconds=180.0,
+            max_timeout_seconds=_T.llm_long_form_max_seconds,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)
 
@@ -367,7 +365,7 @@ class AdapterDocumentationGeneration:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             api_key=self._api_key,
-            timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            timeout_seconds=_T.llm_documentation_request_seconds,
         )
 
         try:

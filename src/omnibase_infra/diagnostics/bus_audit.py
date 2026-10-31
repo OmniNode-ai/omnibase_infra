@@ -59,8 +59,10 @@ from omnibase_infra.diagnostics.models import (
     EnvelopeStats,
     TopicHealth,
 )
+from omnibase_infra.models.outbound_timeouts import OUTBOUND_TIMEOUTS as _T
 
 logger = logging.getLogger(__name__)
+
 
 # Maximum error string length stored per schema validation failure.
 _MAX_ERROR_LEN = 300
@@ -71,8 +73,6 @@ _MAX_SCHEMA_ERRORS = 20
 # Default number of messages to sample per partition.
 _DEFAULT_SAMPLE_PER_PARTITION = 50
 
-# Default consumer poll timeout in seconds.
-_DEFAULT_POLL_TIMEOUT = 2.0
 
 # JSON parse failure rate threshold above which verdict is FAIL.
 _JSON_FAILURE_THRESHOLD = 0.10
@@ -106,7 +106,7 @@ class AuditConfig:
         default_factory=lambda: MappingProxyType({})
     )
     sample_per_partition: int = _DEFAULT_SAMPLE_PER_PARTITION
-    poll_timeout: float = _DEFAULT_POLL_TIMEOUT
+    poll_timeout: float = _T.audit_poll_seconds
     envelope_exempt_topics: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
@@ -148,7 +148,7 @@ def run_audit(config: AuditConfig) -> AuditReport:
     """
     # Phase 1: Topic discovery
     admin = AdminClient({"bootstrap.servers": config.broker})
-    cluster_metadata = admin.list_topics(timeout=10)
+    cluster_metadata = admin.list_topics(timeout=_T.audit_topic_discovery_seconds)
     broker_topics: set[str] = set(cluster_metadata.topics.keys())
 
     # Collect all topics to audit (expected + any discovered)
@@ -222,7 +222,7 @@ def _collect_watermarks(
             for pid in partitions:
                 try:
                     low, high = consumer.get_watermark_offsets(
-                        TopicPartition(topic, pid), timeout=5
+                        TopicPartition(topic, pid), timeout=_T.audit_offsets_seconds
                     )
                     topic_offsets.append((pid, low, high))
                 except Exception:  # noqa: BLE001 — boundary: returns degraded response
