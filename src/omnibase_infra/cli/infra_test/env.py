@@ -13,7 +13,14 @@ import time
 import click
 from rich.console import Console
 
+from omnibase_infra.models.infra_test import load_infra_test_settings
+
 console = Console()
+
+
+def compose_command(compose_file: str, project_name: str, *args: str) -> list[str]:
+    """Build a ``docker compose -f <file> -p <project>`` command line."""
+    return ["docker", "compose", "-f", compose_file, "-p", project_name, *args]
 
 
 def _run_compose(
@@ -37,21 +44,12 @@ def _run_compose(
     Raises:
         SystemExit: If the command fails.
     """
-    cmd = [
-        "docker",
-        "compose",
-        "-f",
-        compose_file,
-        "-p",
-        project_name,
-        *args,
-    ]
     result = subprocess.run(
-        cmd,
+        compose_command(compose_file, project_name, *args),
         capture_output=capture,
         text=True,
         check=False,
-        timeout=300,
+        timeout=load_infra_test_settings().compose_command_timeout_seconds,
     )
     if result.returncode != 0:
         if capture and result.stderr:
@@ -63,46 +61,45 @@ def _run_compose(
 def _wait_for_healthy(
     compose_file: str,
     project_name: str,
-    timeout_seconds: int = 120,
+    timeout_seconds: float | None = None,
 ) -> bool:
     """Poll ``docker compose ps`` until all services are healthy.
 
     Args:
         compose_file: Path to the Docker Compose file.
         project_name: Docker Compose project name.
-        timeout_seconds: Maximum time to wait.
+        timeout_seconds: Maximum time to wait; the declared health wait when omitted.
 
     Returns:
         True if all services healthy, False on timeout.
     """
+    settings = load_infra_test_settings()
+    if timeout_seconds is None:
+        timeout_seconds = settings.health_wait_timeout_seconds
     start = time.monotonic()
     while time.monotonic() - start < timeout_seconds:
         result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "-f",
+            compose_command(
                 compose_file,
-                "-p",
                 project_name,
                 "ps",
                 "--format",
                 "{{.Service}}\t{{.Health}}",
-            ],
+            ),
             capture_output=True,
             text=True,
             check=False,
-            timeout=30,
+            timeout=settings.docker_query_timeout_seconds,
         )
         if result.returncode != 0:
-            time.sleep(2)
+            time.sleep(settings.health_poll_interval_seconds)
             continue
 
         lines = [
             line.strip() for line in result.stdout.strip().splitlines() if line.strip()
         ]
         if not lines:
-            time.sleep(2)
+            time.sleep(settings.health_poll_interval_seconds)
             continue
 
         # Check health status for each service
@@ -122,7 +119,7 @@ def _wait_for_healthy(
         if services_checked > 0 and all_healthy:
             return True
 
-        time.sleep(2)
+        time.sleep(settings.health_poll_interval_seconds)
 
     return False
 
@@ -146,7 +143,8 @@ def env() -> None:  # stub-ok: click group
 )
 @click.option(
     "--timeout",
-    default=120,
+    default=lambda: load_infra_test_settings().health_wait_timeout_seconds,
+    type=int,
     help="Timeout in seconds for health checks.",
     show_default=True,
 )
@@ -210,9 +208,7 @@ def env_down(ctx: click.Context, volumes: bool) -> None:
 
     console.print("[bold blue]Stopping E2E infrastructure...[/bold blue]")
 
-    args = ["down"]
-    if volumes:
-        args.append("-v")
+    args = ["down", "-v"] if volumes else ["down"]
 
     _run_compose(compose_file, project_name, args)
     console.print("[bold green]Infrastructure stopped.[/bold green]")

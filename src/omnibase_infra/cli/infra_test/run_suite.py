@@ -18,6 +18,11 @@ from rich.console import Console
 from rich.panel import Panel
 
 from omnibase_infra.cli.infra_test._helpers import get_broker, get_postgres_dsn
+from omnibase_infra.cli.infra_test.env import compose_command
+from omnibase_infra.models.discovery.model_introspection_config import (
+    DEFAULT_INTROSPECTION_TOPIC,
+)
+from omnibase_infra.models.infra_test import load_infra_test_settings
 
 console = Console()
 
@@ -44,7 +49,11 @@ def _run_cli_command(args: list[str]) -> int:
         Exit code.
     """
     cmd = ["onex-infra-test", *args]
-    result = subprocess.run(cmd, check=False, timeout=120)
+    result = subprocess.run(
+        cmd,
+        check=False,
+        timeout=load_infra_test_settings().cli_subcommand_timeout_seconds,
+    )
     return result.returncode
 
 
@@ -55,21 +64,11 @@ def _verify_env_running(compose_file: str, project_name: str) -> None:
         SystemExit: If no running containers are found.
     """
     result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "ps",
-            "--status",
-            "running",
-        ],
+        compose_command(compose_file, project_name, "ps", "--status", "running"),
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=load_infra_test_settings().docker_query_timeout_seconds,
     )
     if result.returncode != 0 or not result.stdout.strip():
         console.print(
@@ -122,28 +121,32 @@ def _publish_introspection(
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=load_infra_test_settings().rpk_command_timeout_seconds,
     )
     return result.returncode == 0
 
 
-def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
+def _wait_for_registration(dsn: str, node_id: str, timeout: float) -> bool:
     """Wait for a registration projection to appear in PostgreSQL.
 
     Args:
         dsn: PostgreSQL connection string.
         node_id: Node UUID to look for.
-        timeout: Seconds to wait.
+        timeout: Seconds to wait; callers pass a declared registration wait.
 
     Returns:
         True if found within timeout.
     """
     import psycopg2
 
+    settings = load_infra_test_settings()
     start = time.monotonic()
     while time.monotonic() - start < timeout:
         try:
-            conn = psycopg2.connect(dsn, connect_timeout=5)
+            conn = psycopg2.connect(
+                dsn,
+                connect_timeout=load_infra_test_settings().postgres_connect_timeout_seconds,
+            )
             try:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -159,7 +162,7 @@ def _wait_for_registration(dsn: str, node_id: str, timeout: int = 30) -> bool:
         except psycopg2.Error as e:
             # Transient database errors during polling -- log and retry
             console.print(f"  [dim]Poll error: {type(e).__name__}: {e}[/dim]")
-        time.sleep(2)
+        time.sleep(settings.registration_poll_interval_seconds)
 
     return False
 
@@ -213,7 +216,7 @@ def _run_smoke_suite(compose_file: str, project_name: str) -> None:
     """
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
+    topic = DEFAULT_INTROSPECTION_TOPIC
     node_id = str(uuid4())
     failures: list[str] = []
 
@@ -228,8 +231,11 @@ def _run_smoke_suite(compose_file: str, project_name: str) -> None:
     console.print("  [green]Published.[/green]")
 
     _step("3. Wait for registration")
-    if not _wait_for_registration(dsn, node_id, timeout=30):
-        console.print("[bold red]Registration not found within 30s.[/bold red]")
+    registration_wait = load_infra_test_settings().registration_wait_seconds
+    if not _wait_for_registration(dsn, node_id, timeout=registration_wait):
+        console.print(
+            f"[bold red]Registration not found within {registration_wait}s.[/bold red]"
+        )
         failures.append("Registration not found in PostgreSQL")
 
     _step("4. Verify registry state")
@@ -274,7 +280,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
 
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
+    topic = DEFAULT_INTROSPECTION_TOPIC
     node_id = str(uuid4())
     repetitions = 3
 
@@ -298,7 +304,7 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
         console.print(f"  Published {i + 1}/{repetitions}")
 
     # Allow time for Kafka consumer lag to clear after rapid-fire publishes.
-    idempotency_settle_seconds = 5
+    idempotency_settle_seconds = load_infra_test_settings().idempotency_settle_seconds
     _step(f"3. Wait for processing ({idempotency_settle_seconds}s)")
     time.sleep(idempotency_settle_seconds)
 
@@ -306,7 +312,10 @@ def _run_idempotency_suite(compose_file: str, project_name: str) -> None:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
+        conn = psycopg2.connect(
+            dsn,
+            connect_timeout=load_infra_test_settings().postgres_connect_timeout_seconds,
+        )
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -355,26 +364,18 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     """
     broker = get_broker()
     dsn = get_postgres_dsn()
-    topic = "onex.evt.platform.node-introspection.v1"  # onex-topic-allow: pending contract auto-wiring
+    topic = DEFAULT_INTROSPECTION_TOPIC
     node_a = str(uuid4())
     node_b = str(uuid4())
+    settings = load_infra_test_settings()
 
     _step("1. Verify environment with runtime profile")
     result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "ps",
-            "--services",
-        ],
+        compose_command(compose_file, project_name, "ps", "--services"),
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=settings.docker_query_timeout_seconds,
     )
     services = result.stdout.strip().splitlines()
     if "runtime" not in services:
@@ -391,27 +392,20 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         console.print("[bold red]Failed to publish for node A.[/bold red]")
         raise SystemExit(1)
 
-    if not _wait_for_registration(dsn, node_a, timeout=30):
+    if not _wait_for_registration(
+        dsn, node_a, timeout=settings.registration_wait_seconds
+    ):
         console.print("[bold red]Node A registration not found.[/bold red]")
         raise SystemExit(1)
     console.print("  [green]Node A registered.[/green]")
 
     _step("3. Kill runtime process")
     kill_result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "kill",
-            "runtime",
-        ],
+        compose_command(compose_file, project_name, "kill", "runtime"),
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=settings.docker_query_timeout_seconds,
     )
     if kill_result.returncode != 0:
         console.print(
@@ -429,20 +423,11 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
 
     _step("5. Restart runtime")
     restart_result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            compose_file,
-            "-p",
-            project_name,
-            "start",
-            "runtime",
-        ],
+        compose_command(compose_file, project_name, "start", "runtime"),
         capture_output=True,
         text=True,
         check=False,
-        timeout=60,
+        timeout=settings.compose_start_timeout_seconds,
     )
     if restart_result.returncode != 0:
         console.print(
@@ -451,12 +436,16 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
         raise SystemExit(1)
 
     # Wait for runtime to become healthy
-    console.print("  [yellow]Waiting for runtime health (10s)...[/yellow]")
-    time.sleep(10)  # Give it time to start
+    console.print(
+        f"  [yellow]Waiting for runtime health ({settings.runtime_restart_wait_seconds:g}s)...[/yellow]"
+    )
+    time.sleep(settings.runtime_restart_wait_seconds)  # Give it time to start
     console.print("  [green]Runtime restarted.[/green]")
 
     _step("6. Verify node B registration (backfill)")
-    if not _wait_for_registration(dsn, node_b, timeout=60):
+    if not _wait_for_registration(
+        dsn, node_b, timeout=settings.registration_backfill_wait_seconds
+    ):
         console.print(
             "[bold red]Node B registration not found after recovery.[/bold red]"
         )
@@ -468,7 +457,10 @@ def _run_failure_suite(compose_file: str, project_name: str) -> None:
     import psycopg2
 
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=5)
+        conn = psycopg2.connect(
+            dsn,
+            connect_timeout=load_infra_test_settings().postgres_connect_timeout_seconds,
+        )
         try:
             with conn.cursor() as cur:
                 cur.execute(
