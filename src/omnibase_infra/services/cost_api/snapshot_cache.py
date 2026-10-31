@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# onex-topic-sot: canonical registry for cost-snapshot projection topic constants consumed by snapshot_cache callers (OMN-13944)
-"""Process-local cache for latest cost projection snapshots."""
+"""Process-local cache for latest cost projection snapshots; topics from cost_api_topics.yaml."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Final
+
+from omnibase_infra.models.cost_api import load_cost_api_topics
 
 SnapshotPayload = Mapping[str, object]
 
-TOPIC_COST_SUMMARY: Final[str] = "onex.snapshot.projection.cost.summary.v1"  # noqa: topic-naming-lint
-TOPIC_COST_BY_REPO: Final[str] = "onex.snapshot.projection.cost.by_repo.v1"  # noqa: topic-naming-lint
-TOPIC_COST_TOKEN_USAGE: Final[str] = "onex.snapshot.projection.cost.token_usage.v1"  # noqa: topic-naming-lint
+TOPIC_COST_SUMMARY = load_cost_api_topics().summary
+TOPIC_COST_BY_REPO = load_cost_api_topics().by_repo
+TOPIC_COST_TOKEN_USAGE = load_cost_api_topics().token_usage
 
 _LATEST: dict[tuple[str, str], dict[str, object]] = {}
 
