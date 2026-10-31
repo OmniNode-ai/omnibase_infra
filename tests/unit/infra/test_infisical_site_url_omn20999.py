@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -43,25 +44,32 @@ _CATALOG = _REPO_ROOT / "docker" / "catalog" / "services" / "infisical.yaml"
 _ENV_EXAMPLE = _REPO_ROOT / "docker" / "env-example-full.txt"
 
 _DEV_LANE_PORT = 8881
-_OVERRIDE = re.compile(r"^\$\{INFISICAL_SITE_URL:-(http://[^}]+)\}$")
+_OVERRIDE = re.compile(r"^\$\{INFISICAL_SITE_URL:-(https?://[^}]+)\}$")
 
 
 def _port_of(url: str) -> int:
-    match = re.search(r":(\d+)/?$", url)
-    assert match, f"SITE_URL default {url!r} names no port"
-    return int(match.group(1))
+    port = urlsplit(url).port
+    assert port is not None, f"SITE_URL default {url!r} names no port"
+    return port
 
 
 def _compose_site_url() -> str:
+    """SITE_URL from the ``environment:`` block of the infisical service only."""
     lines = _COMPOSE.read_text(encoding="utf-8").splitlines()
     start = lines.index("  infisical:")
+    in_environment = False
     for line in lines[start + 1 :]:
         if re.match(r"^  [a-z]", line):
             break
-        found = re.match(r"^\s+SITE_URL:\s*(.+?)\s*$", line)
-        if found:
-            return found.group(1)
-    raise AssertionError("infisical service passes no SITE_URL")
+        if line.lstrip().startswith("#"):
+            continue
+        if re.match(r"^    [a-z_]+:", line):
+            in_environment = line.strip() == "environment:"
+            continue
+        found = re.match(r"^      SITE_URL:\s*(.+?)\s*$", line)
+        if in_environment and found:
+            return found.group(1).strip("'\"")
+    raise AssertionError("infisical service environment passes no SITE_URL")
 
 
 def test_compose_site_url_is_override_backed_on_the_dev_lane_port() -> None:
@@ -79,7 +87,12 @@ def test_catalog_site_url_is_override_backed_on_its_published_port() -> None:
         f"catalog SITE_URL {value!r} is a literal, so INFISICAL_SITE_URL is ignored "
         "and an invite link can never point off-box"
     )
-    assert _port_of(match.group(1)) == manifest["ports"]["external"] == _DEV_LANE_PORT
+    published = manifest.get("ports", {}).get("external")
+    assert published == _DEV_LANE_PORT, f"catalog publishes infisical on {published!r}"
+    default_port = _port_of(match.group(1))
+    assert default_port == published, (
+        f"catalog SITE_URL defaults to port {default_port}, published port is {published}"
+    )
 
 
 def test_env_example_documents_the_dev_lane_port() -> None:
