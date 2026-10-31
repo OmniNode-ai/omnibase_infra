@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXED_FLOORS = {
     "msgpack": (1, 2, 3),
     "dnspython": (2, 9, 0),
+    "pyasn1": (0, 6, 5),
 }
 
 
