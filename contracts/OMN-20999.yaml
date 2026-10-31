@@ -22,7 +22,7 @@ evidence_requirements:
   - kind: ci
     description: The compose service passes the SMTP variables at the pinned commit, read through the API rather than from the working tree.
     command: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -cE '^      SMTP_[A-Z_]+: [$][{]INFISICAL_SMTP_'"
-  - kind: test
+  - kind: tests
     description: The catalog schema and runtime-validation suites accept the manifest.
     command: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q
 emergency_bypass:
@@ -57,8 +57,8 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q
-  - id: dod-omn-20999-ac2-site-url-override-on-dev-lane-port
-    description: 'AC2, red-first. tests/unit/infra/test_infisical_site_url_omn20999.py asserts the compose service, the catalog manifest and the env example all give SITE_URL as an INFISICAL_SITE_URL override defaulting to the dev-lane port 8881. At the merge base the catalog SITE_URL is a literal that discards the override and the env example documents port 8880 of the other lane, the value the live container was found advertising, so two of three tests fail there and all three pass at this head.'
+  - id: dod-omn-20999-ac2-site-url-override
+    description: 'AC2, red-first. tests/unit/infra/test_infisical_site_url_omn20999.py asserts the compose service, the catalog manifest and the env example all give SITE_URL as an INFISICAL_SITE_URL override defaulting to the dev-lane port 8881. At the merge base the catalog SITE_URL is a literal that discards the override and the env example documents port 8880 of the other lane, the value the live container was found advertising, and the core bundle the catalog generator renders carries that literal, so three of four tests fail there and all four pass at this head. The compose test passes at both and guards against regression.'
     source: generated
     checks:
       - check_type: test_passes
