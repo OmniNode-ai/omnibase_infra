@@ -302,8 +302,8 @@ async def _send_slack_alert(
     try:
         import aiohttp
 
-        from omnibase_infra.handlers.handler_slack_webhook import (
-            HandlerSlackWebhook,
+        from omnibase_infra.handlers.container.container_slack import (
+            bind_slack_webhook,
         )
         from omnibase_infra.handlers.models.enum_alert_severity import (
             EnumAlertSeverity,
@@ -322,7 +322,7 @@ async def _send_slack_alert(
             return
 
         async with aiohttp.ClientSession() as session:
-            slack = HandlerSlackWebhook(
+            slack = bind_slack_webhook(
                 http_session=session,
                 bot_token=bot_token,
                 default_channel=channel_id,

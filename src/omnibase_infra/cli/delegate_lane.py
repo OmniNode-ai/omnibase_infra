@@ -110,13 +110,13 @@ def resolve_lane_declaration_path(workspace_root: Path | None) -> Path:
             "address is never taken from the environment (OMN-16871)."
         )
 
-    from omnibase_infra.handlers.handler_workspace_config_root_resolve import (
-        HandlerWorkspaceConfigRootResolve,
+    from omnibase_infra.handlers.container.container_config_root import (
+        bind_root_resolve,
     )
     from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 
     request = ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
-    config_root = HandlerWorkspaceConfigRootResolve().handle(request).config_root
+    config_root = bind_root_resolve().handle(request).config_root
     declaration = config_root and config_root / LANE_DECLARATION_RELATIVE_PATH
     if not declaration or not declaration.is_file():
         raise DelegateLaneSelectionError(

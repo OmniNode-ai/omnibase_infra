@@ -38,7 +38,6 @@ from omnibase_infra.enums.enum_auth_source import EnumAuthSource
 from omnibase_infra.nodes.node_auth_gate_compute import (
     HandlerAuthGate,
     NodeAuthGateCompute,
-    RegistryInfraAuthGateCompute,
 )
 from omnibase_infra.nodes.node_auth_gate_compute.models import (
     ModelAuthGateDecision,
@@ -1094,25 +1093,6 @@ class TestNodeDeclarativePattern:
         node = NodeAuthGateCompute(mock_container)
         assert not hasattr(node, "evaluate")
         assert not hasattr(node, "_is_whitelisted_path")
-
-
-# =============================================================================
-# TestRegistryInfraAuthGateCompute
-# =============================================================================
-
-
-class TestRegistryInfraAuthGateCompute:
-    """Test registry factory methods."""
-
-    def test_get_node_class(self) -> None:
-        """get_node_class returns the node class."""
-        cls = RegistryInfraAuthGateCompute.get_node_class()
-        assert cls is NodeAuthGateCompute
-
-    def test_create_node(self, mock_container: MagicMock) -> None:
-        """create_node creates instance."""
-        node = RegistryInfraAuthGateCompute.create_node(mock_container)
-        assert isinstance(node, NodeAuthGateCompute)
 
 
 # =============================================================================

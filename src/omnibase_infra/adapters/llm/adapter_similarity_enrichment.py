@@ -53,6 +53,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ProtocolConfigurationError,
 )
+from omnibase_infra.handlers.container.container_qdrant import bind_handler_qdrant
 from omnibase_infra.handlers.handler_qdrant import HandlerQdrant
 from omnibase_infra.nodes.node_llm_embedding_effect.handlers.handler_embedding_openai_compatible import (
     HandlerEmbeddingOpenaiCompatible,
@@ -376,8 +377,7 @@ class AdapterSimilarityEnrichment:
             if self._qdrant_handler is not None:
                 return
 
-            container = ModelONEXContainer()
-            handler = HandlerQdrant(container)
+            handler = bind_handler_qdrant(ModelONEXContainer())
             config = ModelVectorConnectionConfig(url=self._qdrant_url)
             await handler.initialize(config)
             self._qdrant_handler = handler

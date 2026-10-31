@@ -21,9 +21,7 @@ Available Classes:
 - NodeRegistryEffect: Effect node for dual-backend registration execution
 - NodeRegistrationOrchestrator: Workflow orchestrator for registration
 - NodeAuthGateCompute: Work authorization decision compute node
-- RegistryInfraAuthGateCompute: Registry for auth gate compute node
 - NodeLedgerProjectionCompute: Event ledger projection compute node
-- RegistryInfraLedgerProjection: Registry for ledger projection node
 """
 
 import importlib
@@ -33,11 +31,9 @@ if TYPE_CHECKING:
     from omnibase_infra.models import ModelBackendResult
     from omnibase_infra.nodes.node_auth_gate_compute import (
         NodeAuthGateCompute,
-        RegistryInfraAuthGateCompute,
     )
     from omnibase_infra.nodes.node_ledger_projection_compute import (
         NodeLedgerProjectionCompute,
-        RegistryInfraLedgerProjection,
     )
     from omnibase_infra.nodes.node_registration_orchestrator import (
         NodeRegistrationOrchestrator,
@@ -55,14 +51,12 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_session_lifecycle_reducer import (
         ModelSessionLifecycleState,
         NodeSessionLifecycleReducer,
-        RegistryInfraSessionLifecycle,
     )
     from omnibase_infra.nodes.node_session_state_effect import (
         ModelRunContext,
         ModelSessionIndex,
         ModelSessionStateResult,
         NodeSessionStateEffect,
-        RegistryInfraSessionState,
     )
 
 # OMN-19444: Lazy imports keep `onex <cmd> --help` fast.
@@ -82,11 +76,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "NodeSessionLifecycleReducer": "omnibase_infra.nodes.node_session_lifecycle_reducer",
     "NodeSessionStateEffect": "omnibase_infra.nodes.node_session_state_effect",
     "RegistrationReducer": "omnibase_infra.nodes.node_registration_reducer",
-    "RegistryInfraAuthGateCompute": "omnibase_infra.nodes.node_auth_gate_compute",
-    "RegistryInfraLedgerProjection": "omnibase_infra.nodes.node_ledger_projection_compute",
     "RegistryInfraNodeRegistrationReducer": "omnibase_infra.nodes.node_registration_reducer",
-    "RegistryInfraSessionLifecycle": "omnibase_infra.nodes.node_session_lifecycle_reducer",
-    "RegistryInfraSessionState": "omnibase_infra.nodes.node_session_state_effect",
 }
 
 __all__: list[str] = [
@@ -105,11 +95,7 @@ __all__: list[str] = [
     "NodeSessionLifecycleReducer",
     "NodeSessionStateEffect",
     "RegistrationReducer",
-    "RegistryInfraAuthGateCompute",
-    "RegistryInfraLedgerProjection",
     "RegistryInfraNodeRegistrationReducer",
-    "RegistryInfraSessionLifecycle",
-    "RegistryInfraSessionState",
 ]
 
 

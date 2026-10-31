@@ -14,7 +14,6 @@ Available Exports:
     - ModelCheckResult: Individual check result
     - ModelExecutorResult: Aggregated executor result
     - HandlerRunChecks: Handler that executes planned checks
-    - RegistryInfraValidationExecutor: DI registry
 
 Tracking:
     - OMN-2147: Validation Executor Effect Node
@@ -26,9 +25,6 @@ from omnibase_infra.nodes.node_validation_executor.models import (
     ModelExecutorResult,
 )
 from omnibase_infra.nodes.node_validation_executor.node import NodeValidationExecutor
-from omnibase_infra.nodes.node_validation_executor.registry import (
-    RegistryInfraValidationExecutor,
-)
 
 __all__: list[str] = [
     # Node
@@ -38,6 +34,4 @@ __all__: list[str] = [
     # Models
     "ModelCheckResult",
     "ModelExecutorResult",
-    # Registry
-    "RegistryInfraValidationExecutor",
 ]

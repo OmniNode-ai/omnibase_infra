@@ -17,9 +17,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-import omnibase_infra.handlers.handler_workspace_config_root_resolve as resolver
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.handlers.container.container_config_root import bind_root_resolve
 from omnibase_infra.models.workspace import (
     ModelMaterializedWorkspaceRuntimeConfig,
     ModelWorkspaceConfigRootRequest,
@@ -63,7 +63,7 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
         try:
             root = workspace_root.resolve()
             request = ModelWorkspaceConfigRootRequest(workspace_root=root)
-            source_root = resolver.HandlerWorkspaceConfigRootResolve().require(request)
+            source_root = bind_root_resolve().require(request)
             toplevel = self._git(source_root, "rev-parse", "--show-toplevel")
             if Path(os.fsdecode(toplevel).strip()).resolve() != source_root:
                 return ModelWorkspaceRuntimeConfigMaterialization(
@@ -132,7 +132,7 @@ class HandlerWorkspaceRuntimeConfigMaterializer:
             )
             return None
         request = ModelWorkspaceConfigRootRequest(workspace_root=workspace_root)
-        resolution = resolver.HandlerWorkspaceConfigRootResolve().handle(request)
+        resolution = bind_root_resolve().handle(request)
         if (
             Path(sidecar.source_repository) != resolution.config_root
             or sidecar.source_ref != SOURCE_REF

@@ -415,7 +415,7 @@ def test_node_parity_migration_append_only_parity_comparison_detects_broken_node
     args = ["--repo-root", str(root), "--base", "base-marker", "--staged"]
     expected = _run_main(old.main, args, capsys)
     monkeypatch.setattr(
-        node_runtime, "NodeMigrationAppendOnlyCheckCompute", _BrokenNode
+        node_runtime, "bind_node_migration_append_only_check", _BrokenNode
     )
     actual = _run_main(node_runtime.main, args, capsys)
     assert expected.exit_code == 1 and expected.violations

@@ -37,7 +37,6 @@ Example:
     >>> from omnibase_infra.nodes.node_auth_gate_compute import (
     ...     HandlerAuthGate,
     ...     NodeAuthGateCompute,
-    ...     RegistryInfraAuthGateCompute,
     ... )
     >>>
     >>> container = MagicMock()
@@ -50,12 +49,8 @@ from omnibase_infra.nodes.node_auth_gate_compute.handlers import (
 from omnibase_infra.nodes.node_auth_gate_compute.node import (
     NodeAuthGateCompute,
 )
-from omnibase_infra.nodes.node_auth_gate_compute.registry import (
-    RegistryInfraAuthGateCompute,
-)
 
 __all__: list[str] = [
     "HandlerAuthGate",
     "NodeAuthGateCompute",
-    "RegistryInfraAuthGateCompute",
 ]

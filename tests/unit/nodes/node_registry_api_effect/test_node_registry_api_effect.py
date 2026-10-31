@@ -17,10 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from omnibase_infra.nodes.node_registry_api_effect import (
-    RegistryInfraRegistryApiEffect,
-    load_registry_api_config,
-)
+from omnibase_infra.nodes.node_registry_api_effect import load_registry_api_config
 
 
 @pytest.mark.unit
@@ -113,48 +110,3 @@ class TestServiceModuleConstants:
         assert DEFAULT_WIDGET_MAPPING_PATH.exists(), (
             f"widget_mapping.yaml not found at {DEFAULT_WIDGET_MAPPING_PATH}"
         )
-
-
-@pytest.mark.unit
-class TestRegistryInfraRegistryApiEffect:
-    """Tests for the infrastructure registry factory."""
-
-    def test_get_node_type(self) -> None:
-        """Node type must be EFFECT."""
-        assert RegistryInfraRegistryApiEffect.get_node_type() == "EFFECT"
-
-    def test_get_node_name(self) -> None:
-        """Node name must match contract.yaml."""
-        assert (
-            RegistryInfraRegistryApiEffect.get_node_name() == "node_registry_api_effect"
-        )
-
-    def test_get_required_protocols_is_empty(self) -> None:
-        """All deps are optional (partial-success semantics); required list is empty."""
-        assert RegistryInfraRegistryApiEffect.get_required_protocols() == []
-
-    def test_get_optional_protocols_non_empty(self) -> None:
-        """Optional protocols list must be non-empty."""
-        protocols = RegistryInfraRegistryApiEffect.get_optional_protocols()
-        assert len(protocols) > 0
-
-    def test_get_capabilities_includes_discovery(self) -> None:
-        """Capabilities must include registry.discovery."""
-        caps = RegistryInfraRegistryApiEffect.get_capabilities()
-        assert "registry.discovery" in caps
-
-    def test_get_supported_operations_complete(self) -> None:
-        """All 9 operations declared in contract.yaml must be listed (OMN-9545 removed list_instances)."""
-        ops = RegistryInfraRegistryApiEffect.get_supported_operations()
-        expected = {
-            "list_nodes",
-            "get_node",
-            "get_widget_mapping",
-            "get_discovery",
-            "get_health",
-            "list_contracts",
-            "get_contract",
-            "list_topics",
-            "get_topic",
-        }
-        assert set(ops) == expected

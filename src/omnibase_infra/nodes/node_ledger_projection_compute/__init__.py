@@ -40,11 +40,10 @@ Example:
     >>> from omnibase_infra.nodes.node_ledger_projection_compute import (
     ...     NodeLedgerProjectionCompute,
     ...     HandlerLedgerProjection,
-    ...     RegistryInfraLedgerProjection,
     ... )
     >>>
     >>> container = ModelONEXContainer()
-    >>> node = RegistryInfraLedgerProjection.create_node(container)
+    >>> node = NodeLedgerProjectionCompute(container)
     >>> # Handler can be used directly for unit testing
     >>> handler = HandlerLedgerProjection(container)
 """
@@ -55,12 +54,8 @@ from omnibase_infra.nodes.node_ledger_projection_compute.handlers import (
 from omnibase_infra.nodes.node_ledger_projection_compute.node import (
     NodeLedgerProjectionCompute,
 )
-from omnibase_infra.nodes.node_ledger_projection_compute.registry import (
-    RegistryInfraLedgerProjection,
-)
 
 __all__ = [
     "HandlerLedgerProjection",
     "NodeLedgerProjectionCompute",
-    "RegistryInfraLedgerProjection",
 ]

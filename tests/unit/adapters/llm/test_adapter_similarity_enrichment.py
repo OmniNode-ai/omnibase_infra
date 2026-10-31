@@ -365,7 +365,7 @@ class TestAdapterSimilarityEnrichmentQdrantInit:
         mock_handler.query_similar = AsyncMock(return_value=_make_search_results([]))
 
         with patch(
-            "omnibase_infra.adapters.llm.adapter_similarity_enrichment.HandlerQdrant",
+            "omnibase_infra.adapters.llm.adapter_similarity_enrichment.bind_handler_qdrant",
             return_value=mock_handler,
         ):
             with patch.object(mock_handler, "initialize", new=AsyncMock()):
@@ -406,7 +406,7 @@ class TestAdapterSimilarityEnrichmentQdrantInit:
         mock_handler.query_similar = AsyncMock(return_value=_make_search_results([]))
 
         with patch(
-            "omnibase_infra.adapters.llm.adapter_similarity_enrichment.HandlerQdrant",
+            "omnibase_infra.adapters.llm.adapter_similarity_enrichment.bind_handler_qdrant",
             return_value=mock_handler,
         ):
             await asyncio.gather(

@@ -18,9 +18,11 @@ import sys
 from pathlib import Path
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.container.container_node_sibling_sha_pin_ratchet import (
+    bind_node_sibling_sha_pin_ratchet,
+)
 from omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.handler import (
     SHA_TOKEN,
-    NodeSiblingShaPinRatchetCompute,
     count_pins,
 )
 from omnibase_infra.nodes.node_sibling_sha_pin_ratchet_compute.models import (
@@ -100,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{sum(counts.values()):4d} total in {len(counts)} files\n"
             )
             return 0
-        report = NodeSiblingShaPinRatchetCompute().handle(
+        report = bind_node_sibling_sha_pin_ratchet().handle(
             collect_request(args.repo_root, args.base)
         )
     except ShaPinRatchetError as exc:

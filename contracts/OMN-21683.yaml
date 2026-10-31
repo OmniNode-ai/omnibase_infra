@@ -1,0 +1,50 @@
+# OMN-21683 contract file for omnibase_infra: slice rf1140-c1 of the handler_hand_construction burn-down.
+schema_version: "1.0.0"
+ticket_id: "OMN-21683"
+title: "omnibase_infra contracts_and_di handler_hand_construction burn-down, slice rf1140-c1: hand-built handler dependencies are injected through DI from the node contract"
+summary: "The contracts_and_di check reported 133 handler_hand_construction findings in src/omnibase_infra. This slice deletes nine node registry factories that nothing called, moves the handlers that callers built by hand onto binding sites under container/ directories (the check's allowed sites), and renames a topic-extractor dataclass that only looked like a node. The check reports 108 findings after and no finding changes in any other rule."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21683-slice-handler-construction
+    statement: "The files of this slice build no handler or node by hand: their callers take the handler from a binding site, and the registry factories nothing called are gone."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for handler_hand_construction over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every hand-built dependency is taken through an injected parameter bound from the node contract and no hand construction remains in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The checker reports a planted construction, reports none in the slice files and none in the binding sites, and the nine registry directories are gone."
+    command: "uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21683.py -q -p no:cacheprovider"
+  - kind: tests
+    description: "The modules that took a handler from a binding site keep their behaviour."
+    command: "uv run --frozen pytest tests/unit/adapters/llm/test_adapter_similarity_enrichment.py tests/unit/topics/test_contract_topic_extractor.py tests/unit/handlers/test_handler_workspace_runtime_config_materializer.py tests/unit/handlers/test_handler_slack_webhook.py tests/ci/test_node_parity_migration_append_only_parity_omn20568.py -q -p no:cacheprovider"
+  - kind: manual
+    description: "Deploy check: the runtime container imports the binding site the waitlist notifier and the runner-health alert take their Slack handler from."
+    command: "deploy: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.container.container_slack import bind_slack_webhook; bind_slack_webhook()'"
+dod_evidence:
+  - id: dod-001
+    description: "The checker reports no handler_hand_construction finding in the slice files or in the binding sites, reports a planted construction, and the nine registry directories are gone."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21683.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "The touched modules keep their behaviour with the handler taken from its binding site."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/unit/adapters/llm/test_adapter_similarity_enrichment.py tests/unit/topics/test_contract_topic_extractor.py tests/unit/handlers/test_handler_workspace_runtime_config_materializer.py tests/unit/handlers/test_handler_slack_webhook.py tests/ci/test_node_parity_migration_append_only_parity_omn20568.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "The slice tests pass at the PR head; the lab receipt path is in the PR body."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run --frozen pytest tests/unit/handlers/container tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_contract_resolver_bridge -q -p no:cacheprovider'

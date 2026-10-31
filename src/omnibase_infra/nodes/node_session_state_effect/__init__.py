@@ -24,7 +24,6 @@ Available Exports:
     - HandlerRunContextRead: Read run context
     - HandlerRunContextWrite: Atomic write run context
     - HandlerStaleRunGC: GC stale run documents
-    - RegistryInfraSessionState: DI registry
 
 Tracking:
     - OMN-2117: Canonical State Nodes
@@ -43,9 +42,6 @@ from omnibase_infra.nodes.node_session_state_effect.models import (
     ModelSessionStateResult,
 )
 from omnibase_infra.nodes.node_session_state_effect.node import NodeSessionStateEffect
-from omnibase_infra.nodes.node_session_state_effect.registry import (
-    RegistryInfraSessionState,
-)
 
 __all__: list[str] = [
     # Node
@@ -60,6 +56,4 @@ __all__: list[str] = [
     "ModelRunContext",
     "ModelSessionIndex",
     "ModelSessionStateResult",
-    # Registry
-    "RegistryInfraSessionState",
 ]

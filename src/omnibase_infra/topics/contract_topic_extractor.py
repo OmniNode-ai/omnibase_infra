@@ -8,7 +8,7 @@ topic directionality.
 
 Canonical topic extraction and validation lives in
 :mod:`omnibase_infra.tools.contract_topic_extractor`.  The dataclass
-models here (``NodeTopics``, ``TopicManifest``, ``ExtractedTopic``)
+models here (``ExtractedNodeTopics``, ``TopicManifest``, ``ExtractedTopic``)
 additionally track subscribe/publish direction and Schema B structured
 entries (``success_topic``, ``failure_topic``).
 
@@ -80,7 +80,7 @@ class ExtractedTopic:
 
 
 @dataclass  # internal-dataclass-ok: topic-extractor-internal
-class NodeTopics:
+class ExtractedNodeTopics:
     """All topics declared by a single node contract.
 
     Attributes:
@@ -101,10 +101,10 @@ class TopicManifest:
     """Aggregate manifest of all topics across all scanned contracts.
 
     Attributes:
-        nodes: Mapping of node_name to NodeTopics.
+        nodes: Mapping of node_name to ExtractedNodeTopics.
     """
 
-    nodes: dict[str, NodeTopics] = field(default_factory=dict)
+    nodes: dict[str, ExtractedNodeTopics] = field(default_factory=dict)
 
     @property
     def all_topics(self) -> list[ExtractedTopic]:
@@ -140,14 +140,14 @@ class TopicManifest:
             topics.update(nt.publish_topics)
         return topics
 
-    def get_node_topics(self, node_name: str) -> NodeTopics | None:
-        """Look up NodeTopics by node name.
+    def get_node_topics(self, node_name: str) -> ExtractedNodeTopics | None:
+        """Look up ExtractedNodeTopics by node name.
 
         Args:
             node_name: The node name to look up.
 
         Returns:
-            NodeTopics if found, None otherwise.
+            ExtractedNodeTopics if found, None otherwise.
         """
         return self.nodes.get(node_name)
 
@@ -198,20 +198,20 @@ class ContractTopicExtractor:
         canonical tools/ extractor for installed-package discovery.
     """
 
-    def extract_from_file(self, path: Path) -> NodeTopics:
+    def extract_from_file(self, path: Path) -> ExtractedNodeTopics:
         """Extract topic declarations from a single contract YAML file.
 
         Args:
             path: Path to a contract.yaml file.
 
         Returns:
-            NodeTopics with all subscribe and publish topics found.
+            ExtractedNodeTopics with all subscribe and publish topics found.
         """
         with open(path) as f:
             data = yaml.safe_load(f)
 
         if not isinstance(data, dict):
-            return NodeTopics(
+            return ExtractedNodeTopics(
                 node_name="unknown",
                 contract_path=path,
             )
@@ -242,7 +242,7 @@ class ContractTopicExtractor:
                     existing.add(topic)
                     subscribe_topics.append(topic)
 
-        return NodeTopics(
+        return ExtractedNodeTopics(
             node_name=node_name,
             contract_path=path,
             subscribe_topics=subscribe_topics,
@@ -328,6 +328,6 @@ class ContractTopicExtractor:
 __all__: list[str] = [
     "ContractTopicExtractor",
     "ExtractedTopic",
-    "NodeTopics",
+    "ExtractedNodeTopics",
     "TopicManifest",
 ]

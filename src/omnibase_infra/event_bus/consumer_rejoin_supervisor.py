@@ -54,8 +54,8 @@ from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
     evaluate_consumer_stall,
 )
-from omnibase_infra.handlers.handler_consumer_coordinator_rejoin import (
-    HandlerConsumerCoordinatorRejoin,
+from omnibase_infra.handlers.container.container_handler_consumer_coordinator_rejoin import (
+    bind_handler_consumer_coordinator_rejoin,
 )
 from omnibase_infra.models.health.enum_consumer_stall_reason import (
     EnumConsumerStallReason,
@@ -691,7 +691,7 @@ class ConsumerRejoinSupervisor:
             else max(0.0, now - self._coordinator_lost_at)
         )
         request = self._coordinator_request(known, reachable, unavailable, now)
-        handler = HandlerConsumerCoordinatorRejoin()
+        handler = bind_handler_consumer_coordinator_rejoin()
         decision = handler.handle(request)
         if decision.rejoin and self._episode_rejoin_pending:
             # A started replacement that needs another rebuild did not restore
@@ -955,7 +955,7 @@ class ConsumerRejoinSupervisor:
                 verdict.reason
                 is EnumConsumerStallReason.STALLED_COORDINATOR_UNAVAILABLE
             ):
-                decision = HandlerConsumerCoordinatorRejoin().handle(
+                decision = bind_handler_consumer_coordinator_rejoin().handle(
                     self._coordinator_request(False, True, unavailable, self._clock())
                 )
                 await self._raise_alarm(

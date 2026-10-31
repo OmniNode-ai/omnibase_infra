@@ -252,8 +252,8 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
     ModelKafkaConnectRetryPolicy,
 )
-from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
-    HandlerWorkspaceRuntimeConfigMaterializer,
+from omnibase_infra.handlers.container.container_config_materializer import (
+    bind_workspace_runtime_config_materializer,
 )
 from omnibase_infra.models.delegation.model_delegate_lineage import (
     LINEAGE_KINDS,
@@ -4202,7 +4202,7 @@ def run_delegate(
         except ModelOnexError as exc:
             raise click.ClickException(str(exc)) from exc
         if omni_home is not None:
-            materialization = HandlerWorkspaceRuntimeConfigMaterializer().materialize(
+            materialization = bind_workspace_runtime_config_materializer().materialize(
                 omni_home
             )
             if materialization.ok:

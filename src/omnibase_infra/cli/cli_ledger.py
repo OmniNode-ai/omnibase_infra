@@ -42,8 +42,8 @@ from omnibase_infra.gateway.client.store_gateway_credential import (
     StoreGatewayCredential,
 )
 from omnibase_infra.gateway.models.model_cloud_ledger_read import ModelCloudLedgerRead
+from omnibase_infra.handlers.container.container_ledger_query import bind_ledger_query
 from omnibase_infra.handlers.handler_work_ledger_query import (
-    HandlerWorkLedgerQuery,
     load_work_ledger_query_client_config,
 )
 from omnibase_infra.models.model_work_ledger_query_cli_options import (
@@ -94,7 +94,7 @@ def resolve_work_ledger_query_transport(lane: str) -> ModelKafkaEventBusConfig:
 async def run_work_ledger_read(
     request: dict[str, JsonValue], *, bus_lane: str, timeout_s: float
 ) -> dict[str, JsonValue]:
-    client = HandlerWorkLedgerQuery(resolve_work_ledger_query_transport(bus_lane))
+    client = bind_ledger_query(resolve_work_ledger_query_transport(bus_lane))
     return await client.query(request, timeout_s=timeout_s)
 
 

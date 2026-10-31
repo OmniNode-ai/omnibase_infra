@@ -32,9 +32,11 @@ from pathlib import Path
 from omnibase_core.models.validation.model_validation_report import (
     ModelValidationReport,
 )
+from omnibase_infra.nodes.node_migration_freeze_check_compute.container.container_node_migration_freeze_check import (
+    bind_node_migration_freeze_check,
+)
 from omnibase_infra.nodes.node_migration_freeze_check_compute.handler import (
     FREEZE_EXPIRE_DAYS,
-    NodeMigrationFreezeCheckCompute,
 )
 from omnibase_infra.nodes.node_migration_freeze_check_compute.models.model_migration_freeze_check_input import (
     ModelMigrationFreezeCheckInput,
@@ -111,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
 
-    report = NodeMigrationFreezeCheckCompute().handle(
+    report = bind_node_migration_freeze_check().handle(
         ModelMigrationFreezeCheckInput(
             freeze_active=True,
             freeze_text=freeze.read_text(encoding="utf-8"),

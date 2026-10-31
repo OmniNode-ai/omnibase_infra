@@ -33,7 +33,7 @@ from aiohttp import web
 from aiokafka import AIOKafkaConsumer
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
-from omnibase_infra.handlers.handler_slack_webhook import HandlerSlackWebhook
+from omnibase_infra.handlers.container.container_slack import bind_slack_webhook
 from omnibase_infra.handlers.models.model_slack_alert import (
     EnumAlertSeverity,
     ModelSlackAlert,
@@ -57,7 +57,7 @@ class WaitlistSignupNotifier:
         self._last_message_at: float | None = None
         self._health_runner: web.AppRunner | None = None
 
-        self._slack_handler = HandlerSlackWebhook(
+        self._slack_handler = bind_slack_webhook(
             bot_token=config.slack_bot_token or None,
             default_channel=config.slack_channel_id or None,
         )

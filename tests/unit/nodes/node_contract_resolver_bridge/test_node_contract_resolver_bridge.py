@@ -9,12 +9,11 @@ Ticket: OMN-2756 — Phase 2: Transitional node-shaped HTTP bridge for contract.
 Verifies:
 1. Node is properly declarative (extends NodeEffect)
 2. load_contract_resolver_bridge_config() returns expected keys from contract.yaml
-3. RegistryInfraContractResolverBridge metadata matches contract.yaml
-4. FastAPI app creates successfully with cors_origins parameter
-5. GET /health returns 200 with expected body
-6. POST /api/nodes/contract.resolve returns 200 with resolved output
-7. POST /api/nodes/contract.resolve returns 422 on invalid input
-8. Resolved hash is deterministic for the same input
+3. FastAPI app creates successfully with cors_origins parameter
+4. GET /health returns 200 with expected body
+5. POST /api/nodes/contract.resolve returns 200 with resolved output
+6. POST /api/nodes/contract.resolve returns 422 on invalid input
+7. Resolved hash is deterministic for the same input
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import pytest
 
 from omnibase_infra.nodes.node_contract_resolver_bridge import (
     NodeContractResolverBridge,
-    RegistryInfraContractResolverBridge,
     load_contract_resolver_bridge_config,
 )
 
@@ -75,56 +73,6 @@ class TestLoadContractResolverBridgeConfig:
         cfg1 = load_contract_resolver_bridge_config()
         cfg2 = load_contract_resolver_bridge_config()
         assert cfg1 is cfg2
-
-
-# ---------------------------------------------------------------------------
-# Registry tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-class TestRegistryInfraContractResolverBridge:
-    """Tests for the infrastructure registry factory."""
-
-    def test_get_node_type(self) -> None:
-        """Node type must be EFFECT."""
-        assert RegistryInfraContractResolverBridge.get_node_type() == "EFFECT"
-
-    def test_get_node_name(self) -> None:
-        """Node name must match contract.yaml."""
-        assert (
-            RegistryInfraContractResolverBridge.get_node_name()
-            == "node_contract_resolver_bridge"
-        )
-
-    def test_get_required_protocols_is_empty(self) -> None:
-        """All deps are optional; required list must be empty."""
-        assert RegistryInfraContractResolverBridge.get_required_protocols() == []
-
-    def test_get_optional_protocols_includes_event_bus(self) -> None:
-        """Optional protocols must include ProtocolEventBus."""
-        protocols = RegistryInfraContractResolverBridge.get_optional_protocols()
-        assert "ProtocolEventBus" in protocols
-
-    def test_get_capabilities_includes_contract_resolve(self) -> None:
-        """Capabilities must include contract.resolve."""
-        caps = RegistryInfraContractResolverBridge.get_capabilities()
-        assert "contract.resolve" in caps
-        assert "contract.health" in caps
-
-    def test_get_supported_operations(self) -> None:
-        """Supported operations must match contract.yaml io_operations."""
-        ops = RegistryInfraContractResolverBridge.get_supported_operations()
-        assert "contract_resolve" in ops
-        assert "health_check" in ops
-
-    def test_create_returns_node_instance(self) -> None:
-        """create() must return a NodeContractResolverBridge instance."""
-        from unittest.mock import MagicMock
-
-        container = MagicMock()
-        node = RegistryInfraContractResolverBridge.create(container)
-        assert isinstance(node, NodeContractResolverBridge)
 
 
 # ---------------------------------------------------------------------------

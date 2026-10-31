@@ -11,7 +11,7 @@ import pytest
 
 from omnibase_infra.topics.contract_topic_extractor import (
     ContractTopicExtractor,
-    NodeTopics,
+    ExtractedNodeTopics,
     TopicManifest,
 )
 
@@ -46,7 +46,7 @@ class TestExtractFromFile:
         assert result.publish_topics == ["onex.evt.platform.node-registered.v1"]
 
     def test_no_event_bus_returns_empty(self, tmp_path: Path) -> None:
-        """Contract with no event_bus block returns empty NodeTopics."""
+        """Contract with no event_bus block returns empty ExtractedNodeTopics."""
         contract = tmp_path / "contract.yaml"
         contract.write_text(
             textwrap.dedent("""\
@@ -234,13 +234,13 @@ class TestTopicManifest:
         """all_unique_topics returns deduplicated set of all topic strings."""
         manifest = TopicManifest(
             nodes={
-                "node_a": NodeTopics(
+                "node_a": ExtractedNodeTopics(
                     node_name="node_a",
                     contract_path=Path("/a/contract.yaml"),
                     subscribe_topics=["onex.evt.platform.node-registration.v1"],
                     publish_topics=["onex.evt.platform.node-registered.v1"],
                 ),
-                "node_b": NodeTopics(
+                "node_b": ExtractedNodeTopics(
                     node_name="node_b",
                     contract_path=Path("/b/contract.yaml"),
                     subscribe_topics=[
@@ -260,8 +260,8 @@ class TestTopicManifest:
         }
 
     def test_get_node_topics(self) -> None:
-        """get_node_topics returns NodeTopics for a known node."""
-        nt = NodeTopics(
+        """get_node_topics returns ExtractedNodeTopics for a known node."""
+        nt = ExtractedNodeTopics(
             node_name="node_x",
             contract_path=Path("/x/contract.yaml"),
             subscribe_topics=["onex.evt.test.x.v1"],
@@ -276,7 +276,7 @@ class TestTopicManifest:
         """all_topics returns a flat list of all ExtractedTopic entries."""
         manifest = TopicManifest(
             nodes={
-                "node_a": NodeTopics(
+                "node_a": ExtractedNodeTopics(
                     node_name="node_a",
                     contract_path=Path("/a/contract.yaml"),
                     subscribe_topics=["onex.evt.test.a.v1"],

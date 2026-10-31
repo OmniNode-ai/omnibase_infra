@@ -21,12 +21,14 @@ from pathlib import Path
 from typing import Final
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.nodes.node_migration_append_only_check_compute.container.container_node_migration_append_only_check import (
+    bind_node_migration_append_only_check,
+)
 from omnibase_infra.nodes.node_migration_append_only_check_compute.handler import (
     FORWARD_PREFIX,
     MANIFEST_REPO_PATH,
     SUPERSESSIONS_REPO_PATH,
     AppendOnlyViolationError,
-    NodeMigrationAppendOnlyCheckCompute,
     validate_base_manifest,
 )
 from omnibase_infra.nodes.node_migration_append_only_check_compute.models import (
@@ -194,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        report = NodeMigrationAppendOnlyCheckCompute().handle(
+        report = bind_node_migration_append_only_check().handle(
             collect_request(args.repo_root, base=args.base, staged=args.staged)
         )
     except AppendOnlyViolationError as exc:

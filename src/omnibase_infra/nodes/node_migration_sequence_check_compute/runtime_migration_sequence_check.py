@@ -19,8 +19,10 @@ from omnibase_core.models.validation.model_validation_report import (
     ModelValidationReport,
 )
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.nodes.node_migration_sequence_check_compute.container.container_node_migration_sequence_check import (
+    bind_node_migration_sequence_check,
+)
 from omnibase_infra.nodes.node_migration_sequence_check_compute.handler import (
-    NodeMigrationSequenceCheckCompute,
     migration_scan_paths,
 )
 from omnibase_infra.nodes.node_migration_sequence_check_compute.models import (
@@ -107,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_path = Path(args.repo_path).resolve()
     try:
         request = collect_input(repo_path)
-        report = NodeMigrationSequenceCheckCompute().handle(request)
+        report = bind_node_migration_sequence_check().handle(request)
         if (
             args.verbose
             or report.overall_status == "FAIL"

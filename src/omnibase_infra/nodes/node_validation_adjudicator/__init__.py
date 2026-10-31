@@ -15,7 +15,6 @@ events the pipeline's other nodes exchange; the dispatch handler is
 
 Available Exports:
     - NodeValidationAdjudicator: The declarative reducer node
-    - RegistryInfraValidationAdjudicator: DI registry
 
 Tracking:
     - OMN-2147: Validation Skeleton -- Orchestrator + Executor
@@ -25,11 +24,7 @@ Tracking:
 from omnibase_infra.nodes.node_validation_adjudicator.node import (
     NodeValidationAdjudicator,
 )
-from omnibase_infra.nodes.node_validation_adjudicator.registry import (
-    RegistryInfraValidationAdjudicator,
-)
 
 __all__: list[str] = [
     "NodeValidationAdjudicator",
-    "RegistryInfraValidationAdjudicator",
 ]
