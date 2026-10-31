@@ -699,15 +699,24 @@ class TestMonitorFoldsProjectionLiveness:
         assert event.unattached_projection_count == 1
 
     @pytest.mark.asyncio
-    async def test_a_projection_with_no_topics_is_never_masked_by_the_idle_set(
+    async def test_the_idle_set_does_not_change_the_verdict_of_a_topicless_projection(
         self,
     ) -> None:
-        """An empty subscription is vacuously inside every set; it is not idle."""
-        event = await self._run_with_idle(
-            _projection_contract(topics=()), frozenset({PROJECTION_TOPIC})
-        )
+        """An empty subscription is vacuously inside every set; it is not idle.
 
-        assert event.unattached_projection_count == 1
+        Such a contract has no topic to be unattached on, so the verdict is the
+        same with and without watched topics.
+        """
+        projection = _projection_contract(topics=())
+        unmasked = await self._run_with_idle(projection, frozenset())
+        masked = await self._run_with_idle(projection, frozenset({PROJECTION_TOPIC}))
+
+        assert masked.unattached_projection_count == (
+            unmasked.unattached_projection_count
+        )
+        assert [d.status for d in masked.dimensions] == [
+            d.status for d in unmasked.dimensions
+        ]
 
     @pytest.mark.asyncio
     async def test_fully_dlqing_projection_degrades_the_verdict(self) -> None:
