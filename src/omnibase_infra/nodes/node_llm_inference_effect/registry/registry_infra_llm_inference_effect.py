@@ -185,7 +185,6 @@ class RegistryInfraLlmInferenceEffect:
         )
 
         transport = _create_transport_adapter(target_name=target_name)
-        handler = HandlerLlmOpenaiCompatible(transport=transport)
 
         if container.service_registry is None:
             logger.warning(
@@ -197,7 +196,7 @@ class RegistryInfraLlmInferenceEffect:
 
         await container.service_registry.register_instance(
             interface=HandlerLlmOpenaiCompatible,
-            instance=handler,
+            instance=HandlerLlmOpenaiCompatible(transport=transport),
             scope=EnumInjectionScope.GLOBAL,
         )
         await container.service_registry.register_instance(
@@ -269,14 +268,14 @@ class RegistryInfraLlmInferenceEffect:
             return
 
         transport = _create_transport_adapter(target_name=target_name)
-        handler = HandlerLlmOpenaiCompatible(transport=transport)
-        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
 
         await container.service_registry.register_instance(
             interface=HandlerLlmOpenaiCompatible,
-            instance=handler,
+            instance=HandlerLlmOpenaiCompatible(transport=transport),
             scope=EnumInjectionScope.GLOBAL,
         )
+        handler = container.get_service(HandlerLlmOpenaiCompatible)
+        service = ServiceLlmMetricsPublisher(handler=handler, publisher=publisher)
         await container.service_registry.register_instance(
             interface=MixinLlmHttpTransport,
             instance=transport,
