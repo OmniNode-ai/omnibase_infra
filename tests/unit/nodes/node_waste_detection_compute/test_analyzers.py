@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import pytest
 
@@ -34,10 +35,12 @@ from omnibase_infra.nodes.node_waste_detection_compute.analyzers.analyzer_utils 
 from omnibase_infra.nodes.node_waste_detection_compute.models import (
     ModelWasteCall,
     ModelWasteFinding,
+    ModelWastePremiumModelPolicy,
 )
 
 BASE_TIME = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
 DETECTED_AT = datetime(2026, 4, 29, 12, 1, 0, tzinfo=UTC)
+PREMIUM_MARKERS = ModelWastePremiumModelPolicy.from_node_contract().markers
 
 
 def _call(**overrides: object) -> ModelWasteCall:
@@ -210,6 +213,7 @@ def test_model_overkill_rule_detects_premium_model_on_simple_work() -> None:
             ),
         ),
         DETECTED_AT,
+        PREMIUM_MARKERS,
     )
 
     assert len(findings) == 1
@@ -270,7 +274,7 @@ def test_low_cache_rule_detects_large_uncached_prompt() -> None:
             ),
         ),
         (
-            analyze_model_overkill,
+            partial(analyze_model_overkill, premium_model_markers=PREMIUM_MARKERS),
             (
                 _call(
                     correlation_id="overkill-b",

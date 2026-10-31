@@ -1,0 +1,74 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: omnibase_infra model names leave the code; the node contracts declare them and the LLM adapters take them by injection (contracts_and_di burn-down, literal_model_name slice)
+summary: >-
+  The literal_model_name slice of the contracts_and_di burn-down (omnibase_core#2175) for omnibase_infra. The savings estimation node held a counterfactual model map and a fallback model in its handler and input model; the waste detection analyzer held its premium-model markers; the five LLM enrichment and generation adapters, the OpenAI-compatible provider adapter and the decision search client held default model names. The two nodes now declare their model policy in the contract config block, parsed into frozen models with every field required; the adapters and the search client take the model from their caller, which resolves it from the model-routing policy.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-model-name-infra
+    statement: >-
+      The savings estimation node, the waste detection analyzer, the LLM adapters and the decision search client hold no model name in code.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the savings counterfactual rules and fallback model and the waste premium-model markers load from their node contracts, and a contract missing any of them fails to load -- falsifier: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q in omnibase_infra, where the contract tests drop each field and expect a validation error
+      - id: AC2
+        statement: >-
+          AC2: the LLM adapters and the decision search client take the model from the caller and refuse construction or use without it -- falsifier: uv run pytest tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q in omnibase_infra, where each adapter raises TypeError when built without a model and the search client raises ValueError when asked to embed with none
+      - id: AC3
+        statement: >-
+          AC3: the contracts_and_di check reports no literal_model_name finding in those paths -- falsifier: the runtime_validator_run of ValidatorContractsAndDi over src/omnibase_infra/adapters/llm, src/omnibase_infra/nodes/node_savings_estimation_compute, src/omnibase_infra/nodes/node_waste_detection_compute and src/omnibase_infra/services/session_registry/decision_search.py, filtered for literal_model_name reports no literal_model_name finding where it reported twenty-three before (findings of other rules in those paths are out of this slice)
+evidence_requirements:
+  - kind: tests
+    description: The savings, waste detection, LLM adapter and decision search tests, including the contract completeness tests.
+    command: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-model-name-ac1-node-policy-tests
+    description: The node model policies load from the contracts and a contract missing a field fails to load.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_savings_estimation_compute tests/unit/nodes/node_waste_detection_compute -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21623-model-name-ac2-injection-tests
+    description: The adapters and the search client refuse to run without an injected model.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC2
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/adapters/llm tests/unit/services/session_registry/test_decision_search.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21623-model-name-ac3-check
+    description: The contracts_and_di check judges the slice's paths free of literal_model_name findings.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC3
+    checks:
+      - check_type: command
+        check_value: bash -c "! uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/llm src/omnibase_infra/nodes/node_savings_estimation_compute src/omnibase_infra/nodes/node_waste_detection_compute src/omnibase_infra/services/session_registry/decision_search.py | grep -q literal_model_name"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21623-model-name-deploy-policy-on-dev
+    description: The deploy-scoped node contracts on the dev branch carry the model policy blocks, so the models the nodes read are declared where the runtime loads them.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_waste_detection_compute/contract.yaml?ref=dev --jq .content | base64 -d | grep -qF 'premium_model_policy'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_savings_estimation_compute/contract.yaml?ref=dev --jq .content | base64 -d | grep -qF 'counterfactual_policy'
+        cwd: ${OMNI_HOME}/omnibase_infra

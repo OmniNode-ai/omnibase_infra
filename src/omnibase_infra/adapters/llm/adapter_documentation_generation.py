@@ -74,10 +74,6 @@ logger = logging.getLogger(__name__)
 # Prompt version -- bump when system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
-# Default model identifier sent to the DeepSeek-R1 endpoint.
-# Must match the model ID returned by /v1/models (full HuggingFace path).
-_DEFAULT_MODEL: str = "mlx-community/DeepSeek-R1-Distill-Qwen-32B-bf16"
-
 # Default maximum tokens for the documentation response.
 _DEFAULT_MAX_TOKENS: int = 2_048
 
@@ -184,7 +180,7 @@ class AdapterDocumentationGeneration:
         handler_category: ``EFFECT`` -- performs external I/O (HTTP call).
 
     Example:
-        >>> adapter = AdapterDocumentationGeneration()
+        >>> adapter = AdapterDocumentationGeneration(model=routed_model)
         >>> result = await adapter.generate(
         ...     task_type="docstring",
         ...     source="def add(a: int, b: int) -> int:\\n    return a + b",
@@ -196,7 +192,8 @@ class AdapterDocumentationGeneration:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
@@ -207,7 +204,7 @@ class AdapterDocumentationGeneration:
             base_url: Base URL of the DeepSeek-R1 endpoint.  Defaults to the
                 ``LLM_DEEPSEEK_R1_URL`` environment variable, falling back to
                 ``http://localhost:8001``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             max_tokens: Maximum tokens for the documentation completion.
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
@@ -253,7 +250,7 @@ class AdapterDocumentationGeneration:
         self._api_key: str | None = api_key
 
         self._transport = TransportHolderLlmHttp(
-            target_name="deepseek-r1-documentation",
+            target_name=f"{model}-documentation",
             max_timeout_seconds=180.0,
         )
         self._handler = HandlerLlmOpenaiCompatible(self._transport)

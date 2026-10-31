@@ -63,9 +63,6 @@ logger = logging.getLogger(__name__)
 # Prompt version -- bump this when the system/user prompt template changes.
 _PROMPT_VERSION: str = "v1.0"
 
-# Default model identifier sent to the Coder-14B endpoint.
-_DEFAULT_MODEL: str = "qwen2.5-coder-14b"
-
 # Default maximum tokens for the analysis response.
 _DEFAULT_MAX_TOKENS: int = 1024
 
@@ -129,7 +126,7 @@ class AdapterCodeAnalysisEnrichment:
         handler_category: ``EFFECT`` -- performs external I/O (git + LLM HTTP).
 
     Example:
-        >>> adapter = AdapterCodeAnalysisEnrichment()
+        >>> adapter = AdapterCodeAnalysisEnrichment(model=routed_model)
         >>> result = await adapter.enrich(
         ...     prompt="What functions were affected?",
         ...     context="diff --git a/foo.py ...",
@@ -140,7 +137,8 @@ class AdapterCodeAnalysisEnrichment:
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = _DEFAULT_MODEL,
+        *,
+        model: str,
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = _DEFAULT_TEMPERATURE,
         api_key: str | None = None,
@@ -151,7 +149,7 @@ class AdapterCodeAnalysisEnrichment:
             base_url: Base URL of the Coder-14B endpoint.  Defaults to the
                 ``LLM_CODER_URL`` environment variable, falling back to
                 ``http://localhost:8000``.
-            model: Model identifier string sent in inference requests.
+            model: Model identifier from the model-routing policy.
             max_tokens: Maximum tokens for the LLM completion.
             temperature: Sampling temperature (lower = more deterministic).
             api_key: Optional Bearer token for authenticated endpoints.
