@@ -14,7 +14,9 @@ They assert static file contents only — no Docker build, no network.
 
 from __future__ import annotations
 
+import ast
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -144,6 +146,43 @@ class TestWorkspaceCandidateWorkflow:
 
     def test_workflow_stages_siblings(self, workflow_text: str) -> None:
         assert "scripts/runtime_build/stage_workspace.sh" in workflow_text
+
+    def test_stage_step_host_python_has_every_third_party_import(
+        self, workflow: dict[object, object]
+    ) -> None:
+        """Install every host-side staging dependency before staging (OMN-19998)."""
+        steps = _candidate_steps(workflow)
+        install_idx = _step_index(
+            steps, "Install stage_workspace.sh host deps (pydantic, pyyaml)"
+        )
+        stage_idx = _step_index(
+            steps, "Stage workspace sibling trees into the build context"
+        )
+        assert install_idx < stage_idx
+        install_run = steps[install_idx]["run"].lower()
+        import_to_distribution = {"yaml": "pyyaml"}
+        for relative_path in (
+            "scripts/runtime_build/check_sibling_lock_pins.py",
+            "src/omnibase_infra/validation/checker_first_party_sources.py",
+        ):
+            path = _REPO_ROOT / relative_path
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            imports: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports.update(alias.name.split(".")[0] for alias in node.names)
+                elif (
+                    isinstance(node, ast.ImportFrom)
+                    and node.level == 0
+                    and node.module
+                    and node.module != "__future__"
+                ):
+                    imports.add(node.module.split(".")[0])
+            for name in sorted(imports - sys.stdlib_module_names):
+                distribution = import_to_distribution.get(name, name)
+                assert distribution.lower() in install_run, (
+                    f"missing host dependency {distribution!r} imported by {relative_path}"
+                )
 
     def test_workflow_runs_unweakened_trivy_scan(self, workflow_text: str) -> None:
         # SAME scan as the prod path: CRITICAL,HIGH, --ignore-unfixed, exit 1.

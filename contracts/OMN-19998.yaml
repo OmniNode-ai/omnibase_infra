@@ -140,6 +140,11 @@ requirements:
     acceptance:
       - id: AC30
         statement: 'AC30: build-workspace-candidate-runtime.yml builds omnimarket''s Dockerfile.runtime from the staged omnimarket tree on the infra candidate tag, with INFRA_RUNTIME_IMAGE and OMNIMARKET_VCS_REF build args and an import omnimarket probe, after the infra build and before the Trivy scan, config-path check and push -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k composes fails at the merge base, where the step does not exist'
+  - id: req-omn19998-stage-host-pyyaml
+    statement: "The workspace stability-candidate build installs PyYAML on the host interpreter that runs stage_workspace.sh, because the dev-merge-tag stamp #5472 added loads checker_first_party_sources.py there, which imports yaml, and job 124359950934 failed with No module named 'yaml'."
+    acceptance:
+      - id: AC31
+        statement: 'AC31: the build-workspace-candidate-runtime.yml install step before the Stage workspace sibling trees step installs every third-party package that check_sibling_lock_pins.py and checker_first_party_sources.py import, pyyaml included -- falsifier: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party fails against the merge-base workflow, which installs pydantic only'
 evidence_requirements:
   - kind: tests
     description: The routing audit controls exercise paginated REST inventory, sparse default-branch Git reads, credential selection and fail-closed infrastructure reporting.
@@ -574,3 +579,12 @@ dod_evidence:
         cwd: .
     binds_ac:
       - AC30
+  - id: dod-omn19998-ac31-stage-host-pyyaml
+    description: AC31 tests read the imports of the two host-side staging modules with ast and look for each third-party package in the install step that runs before staging.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party
+        cwd: .
+    binds_ac:
+      - AC31
