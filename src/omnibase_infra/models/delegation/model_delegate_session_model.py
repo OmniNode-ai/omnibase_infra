@@ -55,13 +55,14 @@ class ModelDelegateSessionModel(BaseModel):
         """The checked ``--session-model`` value; None when the flag is absent."""
         if value is None:
             return None
-        if _SESSION_MODEL_PATTERN.fullmatch(value) is None:
+        try:
+            return cls(model=value)
+        except ValueError as exc:
             raise ValueError(
                 f"--session-model {value!r} is not a model id: expected a letter "
                 "or digit, then letters, digits or . _ : / @ [ ] + -, at most "
                 "128 characters and no whitespace, as Claude Code names its model."
-            )
-        return cls(model=value)
+            ) from exc
 
     def as_metadata(self) -> dict[str, str]:
         """The request ``metadata`` entry the consumer reads."""
