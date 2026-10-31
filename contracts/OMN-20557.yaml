@@ -46,4 +46,4 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: |-
-          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/cli/cli_delegate.py" | grep -q '"--session-model",' && curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/models/delegation/model_delegate_session_model.py" | grep -q 'SESSION_MODEL_METADATA_KEY = "session_model"'
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/cli/cli_delegate.py" | grep -c '"--session-model",' >/dev/null && curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/models/delegation/model_delegate_session_model.py" | grep -c 'SESSION_MODEL_METADATA_KEY = "session_model"' >/dev/null
