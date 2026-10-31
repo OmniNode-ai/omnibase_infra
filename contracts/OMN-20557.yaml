@@ -14,7 +14,7 @@ requirements:
       - id: AC1
         statement: "AC1: a delegation started with --session-model carries the session's model string on the delegate request, in process and on the deployed lane -- falsifier: uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'metadata or payload_file or golden_chain' fails at origin/dev a409589629, which has no --session-model option"
       - id: AC3
-        statement: "AC3: a request with no session model writes no session_model key, so the consumer resolves the fixed default -- falsifier: uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k no_session_model fails at origin/dev a409589629"
+        statement: "AC3: a request with no session model writes no session_model key, so the consumer resolves the fixed default -- falsifier: uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'no_session_model or without_the_flag' fails at origin/dev a409589629"
 evidence_requirements:
   - kind: tests
     description: "The option writes the metadata key only when named, refuses a malformed value, and the real command hands the payload to the run in process and on the deployed lane."
@@ -33,7 +33,7 @@ dod_evidence:
     binds_ac: [AC3]
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'no_session_model or malformed' -q -p no:cacheprovider"
+        check_value: "uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'no_session_model or without_the_flag or malformed' -q -p no:cacheprovider"
   - id: dod-omn20557-cli-deploy-published-source-readback
     description: |-
       Hosted-runner source-artifact readback: fetch the delegate CLI and the
