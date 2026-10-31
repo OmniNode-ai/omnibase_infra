@@ -225,7 +225,9 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "apply": True,
     }
     defaults.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**defaults)
+    return ModelEvidenceAutocloseSweepRequest(
+        **{"demotion_window_hours": 0, **defaults}
+    )
 
 
 async def test_an_excluded_candidate_is_refused_under_apply_and_never_mutated() -> None:

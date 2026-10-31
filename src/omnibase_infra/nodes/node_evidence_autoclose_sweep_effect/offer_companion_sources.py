@@ -400,10 +400,42 @@ def find_product_contract(
     return (holders[0] if holders else None), ""
 
 
+def list_contract_tickets(
+    root: Path | None, excluded_repository: str, run_git: TypeRunGit
+) -> set[str]:
+    """Every ticket id with a ``contracts/<ticket>.yaml`` on a clone's default branch.
+
+    OMN-21731. The ticket-contract arm enumerates tickets, not merge windows.
+    Reads the same clones ``find_product_contract`` reads (every clone under
+    ``root`` except the change-control repository's own) with ``git ls-tree``
+    on the default branch, so no file content is fetched. A clone that git
+    cannot answer for contributes nothing; the caller's per-ticket resolution
+    still decides what each listed ticket's evidence is.
+    """
+    if root is None or not root.is_dir():
+        return set()
+    tickets: set[str] = set()
+    for clone in sorted(root.iterdir()):
+        if clone.name == excluded_repository or not (clone / ".git").exists():
+            continue
+        ref = _default_ref(clone, run_git)
+        if not ref:
+            continue
+        listing = run_git(clone, ("ls-tree", "--name-only", ref, "--", "contracts/"))
+        if listing is None:
+            continue
+        for line in listing.splitlines():
+            name = line.strip().removeprefix("contracts/").removesuffix(".yaml")
+            if line.strip().endswith(".yaml") and _TICKET.match(name):
+                tickets.add(name)
+    return tickets
+
+
 __all__ = [
     "TypeRunGateway",
     "TypeRunGit",
     "find_product_contract",
+    "list_contract_tickets",
     "merge_candidates",
     "read_clone_candidates",
     "read_gateway_candidates",
