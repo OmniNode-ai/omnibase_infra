@@ -279,17 +279,18 @@ def test_roll_one_runner_refuses_rather_than_recreates_without_a_token(
     assert "export RUNNER_TOKEN=''" not in body
 
 
-def test_the_recreate_token_crosses_the_ssh_boundary_base64_encoded(
+def test_the_recreate_token_crosses_the_ssh_boundary_on_stdin(
     script_text: str,
 ) -> None:
+    """OMN-21765: not in the ssh command string, which `ps` shows to every login."""
     assert "--token-file=*) TOKEN_FILE=" in script_text
     start = script_text.index("roll_one_runner() {")
     end = script_text.index("rolling_deploy() {")
     body = script_text[start:end]
     assert 'mig_token=$(<"${TOKEN_FILE}")' in body
-    # The token must never be interpolated bare into a logged/echoed line.
-    assert 'mig_token_b64=$(encode_token "${mig_token}")' in body
-    assert "RUNNER_TOKEN=\\$(echo '${mig_token_b64}' | base64 -d)" in body
+    assert 'ssh_token_stdin "${mig_token}"' in body
+    assert "${REMOTE_READ_TOKEN}" in body
+    assert "base64" not in body
 
 
 def test_rolling_deploy_refuses_before_any_remote_action_without_a_token(

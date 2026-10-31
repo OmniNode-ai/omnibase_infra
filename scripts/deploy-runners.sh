@@ -37,7 +37,7 @@
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
-#   2. Base64-encode token for safe SSH passing
+#   2. Hand the token to the host on ssh stdin (never in the ssh command string)
 #   3. Rsync runner artifacts to 192.168.86.201:~/.omnibase/runners/
 #   4. Build the versioned runner image via scripts/ci/build_runner_image.sh
 #   5. Deploy via SSH: docker compose up -d --force-recreate --remove-orphans
@@ -658,13 +658,29 @@ fetch_registration_token() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: Base64-encode token for safe SSH passing
+# Step 2: Hand the token to the host on ssh stdin (OMN-21765)
 # ---------------------------------------------------------------------------
+# The command string given to `ssh` becomes the argv of the remote shell, and
+# `ps` shows every argv to every login on the host for as long as the process
+# lives. A registration token (or a base64 of it, which is the same secret)
+# inside that string was therefore readable for the whole image build and
+# compose up. The token now travels on ssh stdin, which is not in any argv, and
+# is read into the remote shell's environment, where /proc/<pid>/environ is
+# mode 400 for its owner. printf is a builtin, so it is not in the local argv
+# either. The remote script text carries only the read, never a value.
 
-encode_token() {
-    local token="${1}"
-    # -w 0 prevents line wrapping (macOS base64 wraps at 76 chars by default)
-    echo -n "${token}" | base64 -w 0 2>/dev/null || echo -n "${token}" | base64 -b 0 2>/dev/null || echo -n "${token}" | base64
+# Remote shell fragment: read the token from stdin into RUNNER_TOKEN and export
+# it. Single-quoted on purpose: it is expanded by the REMOTE shell.
+REMOTE_READ_TOKEN='RUNNER_TOKEN=$(cat); if [ -z "${RUNNER_TOKEN}" ]; then echo "[deploy-runners] no registration token arrived on stdin" >&2; exit 64; fi; export RUNNER_TOKEN'
+
+# ssh_token_stdin <token> <remote script> [<prefix for the remote script>]
+ssh_token_stdin() {
+    local token="${1}" script="${2}" prefix="${3:-}"
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] ssh ${RUNNER_HOST}: ${script} (registration token on stdin)"
+        return 0
+    fi
+    printf '%s' "${token}" | ssh "${RUNNER_HOST}" "${prefix}${script}"
 }
 
 # ---------------------------------------------------------------------------
@@ -859,8 +875,7 @@ install_runner_slice() {
 # ---------------------------------------------------------------------------
 
 deploy_runners() {
-    local token_b64="${1}"
-    local remote_token_b64="${token_b64}"
+    local token="${1}"
 
     # Keep the inactive candidate overlay on the normal deploy path as well as
     # the monitor repair path. Its defaults preserve the generic fleet, while
@@ -872,15 +887,11 @@ deploy_runners() {
 
     log "Deploying runners on ${RUNNER_HOST} (force-recreate ensures fresh env)..."
 
-    if "${DRY_RUN}"; then
-        remote_token_b64="<redacted-token-b64>"
-    fi
-
-    # Decode token on remote side to avoid shell metacharacter issues
-    run_ssh "
+    # The token arrives on stdin (see ssh_token_stdin); no metacharacter in it
+    # can reach a shell parser, so no encoding is needed either.
+    ssh_token_stdin "${token}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         cd ${RUNNER_HOST_DIR}
         if [ '${SKIP_BUILD}' = 'false' ]; then
             bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest
@@ -1131,12 +1142,10 @@ deploy_with_retry() {
         else
             token=$(fetch_registration_token)
         fi
-        local token_b64
-        token_b64=$(encode_token "${token}")
 
         rsync_artifacts
         install_runner_slice
-        deploy_runners "${token_b64}"
+        deploy_runners "${token}"
         install_prune_cron
         install_monitor_timers
         install_health_cron
@@ -1380,7 +1389,7 @@ add_services_deploy() {
     log "=== Additive deploy of: ${ADD_SERVICES} ==="
     validate_add_services
 
-    local reg_handle token_b64
+    local reg_handle
     if "${DRY_RUN}"; then
         reg_handle="dry-run-handle"
     else
@@ -1388,7 +1397,6 @@ add_services_deploy() {
         # unlike --rolling this path does need a real handle.
         reg_handle="$(fetch_registration_token)"
     fi
-    token_b64=$(encode_token "${reg_handle}")
 
     rsync_artifacts
 
@@ -1401,10 +1409,6 @@ add_services_deploy() {
     fi
 
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
-    local remote_token_b64="${token_b64}"
-    if "${DRY_RUN}"; then
-        remote_token_b64="<redacted-token-b64>"
-    fi
 
     # No --force-recreate: additive means a converged container is left running.
     # No --remove-orphans: compose evaluates it against the WHOLE project even
@@ -1448,10 +1452,9 @@ add_services_deploy() {
             flags="${flags} --force-recreate"
         fi
 
-        run_ssh "
+        ssh_token_stdin "${reg_handle}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${remote_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         # The non-general-pool services interpolate DEPLOY_RUNNER_TOKEN, not
         # RUNNER_TOKEN. Both are ORG registration tokens for the same org.
         DEPLOY_RUNNER_TOKEN=\"\${RUNNER_TOKEN}\"
@@ -1636,7 +1639,7 @@ wait_for_runner_online() {
 roll_one_runner() {
     local name="${1}"
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
-    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}" mig_token_b64
+    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}"
     if [[ -z "${2:-}" && -n "${TOKEN_FILE}" ]]; then
         mig_token=$(<"${TOKEN_FILE}") || return 3
     fi
@@ -1690,11 +1693,9 @@ roll_one_runner() {
     # would delete containers this pass has not reached yet.
     # Pass the supplied handle at recreate time, without obtaining or persisting
     # one. The entrypoint can register even when its cache cannot be restored.
-    mig_token_b64=$(encode_token "${mig_token}")
-    ssh "${RUNNER_HOST}" "
+    ssh_token_stdin "${mig_token}" "
         set -euo pipefail
-        RUNNER_TOKEN=\$(echo '${mig_token_b64}' | base64 -d)
-        export RUNNER_TOKEN
+        ${REMOTE_READ_TOKEN}
         cd ${RUNNER_HOST_DIR}
         ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
     " || return 1
@@ -2061,15 +2062,12 @@ secondary_deploy() {
         [[ -n "${states}" ]] || err "the org runner registry read came back empty; refusing to decide what to create"
     fi
 
-    local reg_handle token_b64 remote_token_b64
+    local reg_handle
     if "${DRY_RUN}"; then
         reg_handle="dry-run-handle"
     else
         reg_handle="$(fetch_registration_token)"
     fi
-    token_b64=$(encode_token "${reg_handle}")
-    remote_token_b64="${token_b64}"
-    "${DRY_RUN}" && remote_token_b64="<redacted-token-b64>"
     local exports=""
     local v
     for v in ${token_vars}; do
@@ -2091,12 +2089,15 @@ secondary_deploy() {
         fi
         log "  ${name} is ${status} -- creating it so it registers with a fresh token."
         flags="--no-deps --force-recreate"
-        secondary_ssh "
+        # stdin carries the token, so the here-string loop's own stdin is not
+        # inherited by this ssh (see secondary_ssh for why that matters).
+        ssh_token_stdin "${reg_handle}" "
             set -euo pipefail
-            handle=\$(echo '${remote_token_b64}' | base64 -d)
+            handle=\$(cat)
+            if [ -z \"\${handle}\" ]; then echo '[deploy-runners] no registration token arrived on stdin' >&2; exit 64; fi
             ${exports}
             ${compose_cmd} up -d ${flags} ${name}
-        " || err "compose up failed for ${name} on ${RUNNER_HOST}"
+        " "${SECONDARY_PATH_PREAMBLE} " || err "compose up failed for ${name} on ${RUNNER_HOST}"
     done <<< "${states}"
 
     if "${DRY_RUN}"; then
