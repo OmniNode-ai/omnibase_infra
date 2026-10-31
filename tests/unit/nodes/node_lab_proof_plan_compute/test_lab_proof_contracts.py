@@ -16,8 +16,11 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_infra.lab_proof.model_lab_proof_bundle_policy import (
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
     ModelLabProofBundlePolicy,
+)
+from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
+    ModelLabProofStepTimeouts,
 )
 
 pytestmark = pytest.mark.unit
@@ -74,6 +77,19 @@ def test_plan_contract_bundle_block_is_a_complete_policy() -> None:
     assert policy.compose_project == "omnibase-infra-local"
     for key in list(config):
         broken = {k: v for k, v in config.items() if k != key}
+        with pytest.raises(ValueError, match=key):
+            ModelLabProofBundlePolicy.model_validate(broken)
+
+
+def test_plan_contract_names_every_step_timeout_and_each_is_required() -> None:
+    config = _contract("node_lab_proof_plan_compute")["config"]["local_bundle"]
+    timeouts = config["step_timeouts"]
+    assert set(timeouts) == set(ModelLabProofStepTimeouts.model_fields)
+    for key in list(timeouts):
+        broken = {
+            **config,
+            "step_timeouts": {k: v for k, v in timeouts.items() if k != key},
+        }
         with pytest.raises(ValueError, match=key):
             ModelLabProofBundlePolicy.model_validate(broken)
 

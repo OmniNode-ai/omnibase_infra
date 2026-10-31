@@ -55,9 +55,6 @@ from omnibase_infra.lab_proof.enum_lab_proof_outcome import (
 from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
 )
-from omnibase_infra.lab_proof.model_lab_proof_bundle_policy import (
-    ModelLabProofBundlePolicy,
-)
 from omnibase_infra.lab_proof.model_lab_proof_plan import (
     ModelLabProofPlan,
 )
@@ -75,6 +72,9 @@ from omnibase_infra.lab_proof.model_lab_proof_subject import (
 )
 from omnibase_infra.lab_proof.model_lab_proof_verdict_request import (
     ModelLabProofVerdictRequest,
+)
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
+    ModelLabProofBundlePolicy,
 )
 from omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan import (
     HandlerLabProofPlan,

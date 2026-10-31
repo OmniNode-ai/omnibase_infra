@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from omnibase_infra.lab_proof.model_lab_proof_bundle_policy import (
-    ModelLabProofBundlePolicy,
-)
 from omnibase_infra.lab_proof.model_lab_proof_profile_variant import (
     ModelLabProofProfileVariant,
 )
 from omnibase_infra.lab_proof.model_lab_proof_subject import (
     SHA_PATTERN,
     ModelLabProofSubject,
+)
+from omnibase_infra.models.lab_proof.model_lab_proof_bundle_policy import (
+    ModelLabProofBundlePolicy,
 )
 
 

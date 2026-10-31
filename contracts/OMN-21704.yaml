@@ -1,0 +1,69 @@
+schema_version: 1.0.0
+ticket_id: OMN-21704
+title: >-
+  omnibase_infra lab proof plan reads its step timeouts and bus address from its node contract (contracts_and_di burn-down, slice 1)
+summary: >-
+  The first omnibase_infra slice of the contracts_and_di burn-down (omnibase_core#2175). HandlerLabProofPlan fixed sixteen step timeouts and the bundle's bus bootstrap address in code. They are now declared in the node's contract bundle block, parsed into ModelLabProofStepTimeouts and ModelLabProofBundlePolicy with every field required, and the handler holds no number. The bundle policy moves from the baselined lab_proof package into the node's models directory, which shrinks the canonical-file-shape baseline by one entry.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21704-infra-timeouts
+    statement: >-
+      The lab proof plan handler holds no timeout and no bus address; each is read from the node contract through the bundle policy.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the lab proof plan of omnibase_infra#5491 reads its step timeouts and bus address from the contract and the contracts_and_di count drops as the PR states -- falsifier: uv run pytest tests/unit -q over the touched modules plus the contracts_and_di checker re-run on the PR paths
+  - id: req-omn21704-contract-location
+    statement: >-
+      The acceptance items of omnibase_infra#5491 live in contracts/OMN-21704.yaml and the PR leaves contracts/OMN-21623.yaml as the base branch has it.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the PR's acceptance items live in contracts/OMN-21704.yaml and the PR does not edit contracts/OMN-21623.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21704.yaml and not contracts/OMN-21623.yaml
+evidence_requirements:
+  - kind: tests
+    description: >-
+      The lab proof plan node tests, including the policy-supplied timeouts and the contract completeness tests.
+    command: >-
+      uv run pytest tests/unit/nodes/node_lab_proof_plan_compute/test_handler_lab_proof_plan.py tests/unit/nodes/node_lab_proof_plan_compute/test_lab_proof_contracts.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21704-infra-ac1-plan-tests
+    description: >-
+      Each step of the plan carries the timeout the bundle policy gives it, the delegation step carries the policy's bus address, and a contract missing any step timeout fails to load.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          uv run pytest tests/unit/nodes/node_lab_proof_plan_compute/test_handler_lab_proof_plan.py tests/unit/nodes/node_lab_proof_plan_compute/test_lab_proof_contracts.py -q -o addopts=''
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21704-infra-ac2-check
+    description: The contracts_and_di check judges the handler clean.
+    source: manual
+    execution_scope: hosted_and_local
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/nodes/node_lab_proof_plan_compute/handlers/handler_lab_proof_plan.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn21704-ac2-contract-location
+    description: >-
+      The PR diff against origin/dev lists contracts/OMN-21704.yaml and does not list contracts/OMN-21623.yaml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'files=$(git diff --name-only origin/dev...HEAD) && printf "%s\n" "$files" | grep -Fx contracts/OMN-21704.yaml && ! printf "%s\n" "$files" | grep -Fx contracts/OMN-21623.yaml'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
