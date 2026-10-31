@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: Verification probe timeouts and the check-catalog executors are declared in contracts, not built or timed in code
+summary: The contracts_and_di check reported 23 findings in src/omnibase_infra/verification and src/omnibase_infra/validation, among 1228 in src. This change declares the rpk probe timeouts in verification/contract.yaml, builds the check registry's executors from a declared check_catalog.yaml, takes the node-introspection topic from the platform topic suffixes, and deletes the handler-execution probe, which nothing in src calls. 20 findings clear; three remain. The evidence is unit tests that read the contract and the catalog.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-slice-probe-timeouts
+    statement: The verification probes read their rpk timeouts from the verification contract, and a contract block that omits one fails to load.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the verification probe timeouts come from config.probe_settings in verification/contract.yaml -- falsifier: a probe module without ModelVerificationProbeSettings, or a settings block missing a timeout that still loads'
+  - id: req-omn21623-slice-check-catalog
+    statement: The check registry builds its executors from the declared check catalog and refuses a handler outside the checks namespace or whose code disagrees with its entry.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: CHECK_REGISTRY and CHECK_CATALOG_ORDER are built from validation/checks/check_catalog.yaml -- falsifier: a registry that constructs a handler class by name, or a catalog entry naming a handler outside omnibase_infra.validation.checks that loads'
+evidence_requirements:
+  - kind: tests
+    description: The probe settings equal the contract block, a missing timeout fails to load, and the rpk call carries the declared timeout.
+    command: uv run --frozen pytest tests/unit/verification/test_probe_settings.py -q
+  - kind: tests
+    description: The registry holds one executor per declared entry and refuses a stray, non-executor or mismatched handler.
+    command: uv run --frozen pytest tests/unit/validation/test_check_catalog_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-ac1-probe-timeouts
+    description: The probe settings load from the verification contract, a block missing a timeout is refused, and the rpk call carries the declared timeout. Fails at the merge base, where the settings model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/verification/test_probe_settings.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21623-ac2-check-catalog
+    description: The check registry is built from the declared catalog and refuses a stray handler. Fails at the merge base, where the catalog entry model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_check_catalog_contract.py tests/unit/validation/test_check_catalog.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
