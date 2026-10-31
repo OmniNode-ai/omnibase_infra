@@ -12,19 +12,20 @@ does NOT check freshness (timestamp-based recency).
 from __future__ import annotations
 
 import logging
-import subprocess
 from collections.abc import Callable
 
 from omnibase_infra.enums.enum_check_severity import EnumCheckSeverity
 from omnibase_infra.enums.enum_contract_check_type import EnumContractCheckType
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
+from omnibase_infra.models.verification.model_verification_probe_settings import (
+    load_probe_settings,
+)
 from omnibase_infra.verification.contract_parser import (
     ModelParsedContractForVerification,
 )
 from omnibase_infra.verification.models.model_contract_check_result import (
     ModelContractCheckResult,
 )
-from omnibase_infra.verification.probes.util_rpk_env import rpk_env
 
 logger = logging.getLogger(__name__)
 
@@ -54,21 +55,8 @@ def _rpk_watermark_fallback(topic: str) -> tuple[int, int]:
         RuntimeError: If rpk is not available or returns an error.
     """
     try:
-        result = subprocess.run(
-            [
-                "rpk",
-                "topic",
-                "describe",
-                topic,
-                "--print-partitions",
-                "--format",
-                "json",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            env=rpk_env(),
+        result = load_probe_settings().run_rpk(
+            ["topic", "describe", topic, "--print-partitions", "--format", "json"]
         )
     except FileNotFoundError as exc:
         raise RuntimeError("rpk not found on PATH") from exc

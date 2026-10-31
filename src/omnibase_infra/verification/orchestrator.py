@@ -52,7 +52,6 @@ class VerificationConfig:
         kafka_admin_fn: Callable(group_id) -> set[str] for subscription checks.
         watermark_fn: Callable(topic) -> (low, high) for publication checks.
         runtime_target: Runtime endpoint being verified.
-        probe_timeout: Per-probe timeout in seconds.
     """
 
     db_query_fn: DbQueryFn | None = None
@@ -61,7 +60,6 @@ class VerificationConfig:
     runtime_target: str = field(
         default_factory=lambda: os.environ["ONEX_RUNTIME_TARGET"]
     )
-    probe_timeout: float = 5.0
 
 
 def _compute_overall_verdict(

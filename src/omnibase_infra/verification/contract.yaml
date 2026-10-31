@@ -16,3 +16,9 @@ event_bus:
   subscribe_topics: []
   publish_topics:
     - "onex.evt.platform.contract-verification-result.v1"
+# Probe timeouts for the rpk subprocess calls (OMN-21623). Read by
+# ModelVerificationProbeSettings; the Python code holds no timeout literal.
+config:
+  probe_settings:
+    rpk_command_timeout_seconds: 10
+    rpk_discovery_timeout_seconds: 5
