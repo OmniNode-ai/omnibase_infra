@@ -41,10 +41,14 @@ _SOURCE = Path(inspect.getsourcefile(monitor) or "")
 def test_discover_contracts_refuses_an_unregistered_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The exact shape that empties a manifest while the process stays Ready."""
+    """The exact shape that empties a manifest while the process stays Ready.
+
+    OMN-21629: the discovery shim no longer filters (the monitor filtered twice),
+    so the refusal is asserted on the composed call each health check runs.
+    """
     monkeypatch.setenv(_ENV_VAR, "projection-writer-delegation-typo")
     with pytest.raises(ProtocolConfigurationError):
-        monitor._discover_contracts()
+        monitor._discover_contracts_for_runtime_profile()
 
 
 def test_filter_manifest_refuses_an_unregistered_profile(

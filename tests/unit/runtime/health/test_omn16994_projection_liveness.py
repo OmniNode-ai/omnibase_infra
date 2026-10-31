@@ -618,6 +618,52 @@ class TestMonitorFoldsProjectionLiveness:
         assert "node_projection_session_replay" in dimension.detail
 
     @pytest.mark.asyncio
+    async def test_a_projection_waiting_for_its_first_record_is_not_unattached(
+        self,
+    ) -> None:
+        """OMN-21629: OMN-18087 defers a contract whose topics hold no record.
+
+        Its topics stay out of the live registry until a first record starts
+        it. Counting it unattached made every boot read DEGRADED (11 of 18
+        projections on the dev effects runtime, 2026-10-31). The same manifest
+        and registry as the test above, with the projection's topic watched.
+        """
+        manifest = ModelAutoWiringManifest(
+            contracts=(_projection_contract(), _non_projection_contract()),
+            errors=(),
+        )
+        live_group = f"runtime.sweep.consume.v1.__t.{ORCHESTRATOR_TOPIC}"
+        bus = MagicMock(spec=ProtocolEventBusLike)
+        bus.get_consumer_groups.return_value = {
+            (ORCHESTRATOR_TOPIC, "runtime.sweep.consume.v1"): live_group
+        }
+        monitor = ServiceRuntimeHealthMonitor(
+            event_bus=bus, bootstrap_servers="localhost:9092"
+        )
+
+        with (
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._discover_contracts",
+                return_value=manifest,
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor._list_consumer_group_snapshots",
+                return_value=self._snapshots([live_group]),
+            ),
+            patch(
+                "omnibase_infra.services.service_runtime_health_monitor.IDLE_WATCHED_TOPICS",
+                {PROJECTION_TOPIC},
+            ),
+        ):
+            event = await monitor.run_once()
+
+        assert event.unattached_projection_count == 0
+        dimension = next(
+            d for d in event.dimensions if d.name == "projection_attachment"
+        )
+        assert dimension.status == "HEALTHY"
+
+    @pytest.mark.asyncio
     async def test_fully_dlqing_projection_degrades_the_verdict(self) -> None:
         """The hop-6 mask: attached, lag 0, 100% quarantined, verdict HEALTHY."""
         manifest = ModelAutoWiringManifest(

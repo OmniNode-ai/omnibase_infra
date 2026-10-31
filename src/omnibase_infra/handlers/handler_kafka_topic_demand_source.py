@@ -37,8 +37,26 @@ _POLL_TIMEOUT_MS = 1000
 _OFFSET_CHUNK = 100
 
 
+# OMN-21629: the contract topics this process watches for a first record that
+# has not arrived yet. Their contracts are deferred to that record, so their
+# topics are absent from the live bus registry by design; the runtime health
+# monitor reads this to keep them out of projection_attachment. A topic leaves
+# the set when its first record starts its contracts and is judged by the live
+# registry from then on, so a demand start that fails is still reported.
+IDLE_WATCHED_TOPICS: set[str] = set()
+
+
 async def _nothing_to_stop() -> None:
     return None
+
+
+async def _start_one(
+    on_first_record: Callable[[str], Awaitable[None]], topic: str
+) -> None:
+    try:
+        await on_first_record(topic)
+    except Exception:  # boundary: one topic's start never ends the watch
+        logger.exception("Demand start failed for topic %s (OMN-18087)", topic)
 
 
 class HandlerKafkaTopicDemandSource:
@@ -144,7 +162,10 @@ class HandlerKafkaTopicDemandSource:
         for tp in watched:
             consumer.seek(tp, high[tp])
 
+        IDLE_WATCHED_TOPICS.update(logical_of[tp.topic] for tp in watched)
+
         async def on_first_physical_record(physical: str) -> None:
+            IDLE_WATCHED_TOPICS.discard(logical_of[physical])
             await on_first_record(logical_of[physical])
 
         task = asyncio.create_task(
@@ -189,12 +210,7 @@ class HandlerKafkaTopicDemandSource:
                     "deferred contract now (OMN-18087)"
                 )
                 for topic in sorted({tp.topic for tp in remaining}):
-                    try:
-                        await on_first_record(topic)
-                    except Exception:  # boundary: one topic's start never ends it
-                        logger.exception(
-                            "Demand start failed for topic %s (OMN-18087)", topic
-                        )
+                    await _start_one(on_first_record, topic)
                 return
             waiting = {tp.topic for tp in remaining}
             arrived = sorted(
@@ -208,12 +224,7 @@ class HandlerKafkaTopicDemandSource:
             remaining = [tp for tp in remaining if tp.topic not in arrived]
             consumer.pause(*started)
             for topic in arrived:
-                try:
-                    await on_first_record(topic)
-                except Exception:  # boundary: one topic's start never ends the watch
-                    logger.exception(
-                        "Demand start failed for topic %s (OMN-18087)", topic
-                    )
+                await _start_one(on_first_record, topic)
 
 
 __all__: list[str] = ["HandlerKafkaTopicDemandSource"]

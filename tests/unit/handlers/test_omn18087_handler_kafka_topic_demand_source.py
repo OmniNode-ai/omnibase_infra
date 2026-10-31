@@ -13,6 +13,7 @@ from omnibase_infra.event_bus import kafka_transport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers import handler_kafka_topic_demand_source as module
 from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
+    IDLE_WATCHED_TOPICS,
     HandlerKafkaTopicDemandSource,
 )
 
@@ -150,6 +151,30 @@ async def test_split_watches_only_empty_readable_topics(
     finally:
         await stop()
     assert consumer.stopped
+
+
+async def test_a_watched_topic_is_idle_until_its_first_record(
+    broker: dict[str, tuple[int, int]],
+) -> None:
+    """OMN-21629: the health monitor reads which topics still wait for a record."""
+    broker.update({BUSY: (0, 5), IDLE: (3, 3)})
+    started: list[str] = []
+
+    async def on_first(topic: str) -> None:
+        started.append(topic)
+
+    IDLE_WATCHED_TOPICS.clear()
+    _in_use, stop = await _source().watch_idle_topics({BUSY, IDLE}, on_first)
+    consumer = FakeConsumer.instances[0]
+    try:
+        assert {IDLE} == IDLE_WATCHED_TOPICS
+        await consumer.arrivals.put(IDLE)
+        async with asyncio.timeout(2):
+            while not started:
+                await asyncio.sleep(0.01)
+        assert set() == IDLE_WATCHED_TOPICS
+    finally:
+        await stop()
 
 
 async def test_namespaced_lane_reads_physical_topics_and_reports_contract_names(

@@ -37,6 +37,9 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
+from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
+    IDLE_WATCHED_TOPICS,
+)
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
@@ -108,26 +111,19 @@ def _discover_contracts() -> ProtocolAutoWiringManifestLike:
     circular import of ``ModelAutoWiringManifest`` at module parse time while
     still providing accurate type information to callers.
     """
+    # OMN-21629: this returns the UNFILTERED manifest. The runtime-profile
+    # ownership filter runs exactly once, in _filter_manifest_for_runtime_profile.
+    # This shim used to filter as well, so the monitor filtered twice. That was
+    # harmless while the filter was idempotent; OMN-19513 made it refuse an
+    # ONEX_RUNTIME_NODE_EXCLUSION naming a contract the manifest lacks, and the
+    # second pass always lacks the contract the first pass excluded. On the dev
+    # lane (exclusion projection_claude_hook_events) every check then reported
+    # discovery_errors CRITICAL ("discover_contracts() raised: RuntimeHostError")
+    # while startup, which filters once, wired cleanly.
     from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
-    from omnibase_infra.runtime.auto_wiring.profile_ownership import (
-        filter_manifest_for_runtime_profile,
-    )
-    from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
 
-    manifest = discover_contracts()
-    # OMN-17985: the ONE validated read of RUNTIME_PROFILE for an ownership
-    # decision. The raw environment read this replaces spelled the same "main"
-    # default but skipped the registry check, so an unregistered role name was
-    # filtered against a list no contract declares -- every contract skipped,
-    # the manifest empty -- and this monitor would report that as a finding
-    # about the FLEET rather than as the misconfiguration it is.
-    runtime_profile = resolve_runtime_profile_name()
-    ownership_result = filter_manifest_for_runtime_profile(
-        manifest=manifest,
-        runtime_profile=runtime_profile,
-    )
     # Why: Runtime validation guarantees the returned value matches the contract.
-    return ownership_result.manifest  # type: ignore[return-value]
+    return discover_contracts()  # type: ignore[return-value]
 
 
 def _filter_manifest_for_runtime_profile(
@@ -145,9 +141,12 @@ def _filter_manifest_for_runtime_profile(
     if not isinstance(manifest, ModelAutoWiringManifest):
         return manifest
 
-    # OMN-17985: same validated read as `_discover_contracts` above. Unset and
-    # blank still resolve to "main" -- consolidating adds the registry check,
-    # it does not move the ownership default.
+    # OMN-17985: the ONE validated read of RUNTIME_PROFILE for an ownership
+    # decision. Unset and blank still resolve to "main" -- consolidating adds
+    # the registry check, it does not move the ownership default. An
+    # unregistered role name is refused here rather than filtered against a
+    # list no contract declares, which would empty the manifest and be
+    # reported as a finding about the fleet.
     ownership_result = filter_manifest_for_runtime_profile(
         manifest=manifest,
         runtime_profile=resolve_runtime_profile_name(),
@@ -779,8 +778,17 @@ class ServiceRuntimeHealthMonitor:
             # excluded half is resolved back to refs so the write-path leg can
             # still name it and can still detect one that is STILL attached.
             kernel_nonwriting = projections_with_no_live_dispatcher()
-            projections = select_projection_contracts(
-                manifest, kernel_nonwriting=kernel_nonwriting
+            # OMN-21629: a projection whose topics all wait for a first record
+            # is deferred to that record (OMN-18087), not unattached. Selecting
+            # it made every boot read DEGRADED: 11 of 18 projections on the dev
+            # effects runtime, 2026-10-31, each on a watched topic.
+            idle = frozenset(IDLE_WATCHED_TOPICS)
+            projections = tuple(
+                ref
+                for ref in select_projection_contracts(
+                    manifest, kernel_nonwriting=kernel_nonwriting
+                )
+                if not ref.subscribe_topics or not idle.issuperset(ref.subscribe_topics)
             )
             nonwriting_projections = select_kernel_nonwriting_projections(
                 manifest, kernel_nonwriting
