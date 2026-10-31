@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_contract_subscribe_preflight_effect
+contract_name: node_contract_subscribe_preflight_effect
+node_name: node_contract_subscribe_preflight_effect
+node_type: EFFECT_GENERIC
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: >-
+  Applies a contract's pre-subscribe declarations to the bus for one topic, strictly before auto-wiring subscribes it: the declared consume concurrency bound, and the consumer-group handover that seeds a folded writer's group from its retired container's committed offsets. Invoked in-process by auto-wiring; it subscribes to no topic.
+input_model:
+  name: ModelContractSubscribePreflightRequest
+  module: omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request
+  description: The topic about to be subscribed.
+output_model:
+  name: ModelContractSubscribePreflightResult
+  module: omnibase_infra.models.event_bus.model_contract_subscribe_preflight_result
+  description: The bound declared and the offsets handed over for that topic.
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: contract_subscribe.preflight
+      handler:
+        name: HandlerContractSubscribePreflight
+        module: omnibase_infra.handlers.handler_contract_subscribe_preflight
+      description: Declare the consume bound and hand consumer-group offsets over.
+      supported_operations: [contract_subscribe.preflight]
+      input_model:
+        name: ModelContractSubscribePreflightRequest
+        module: omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request
+        description: The topic about to be subscribed.
+capabilities:
+  - name: contract_subscribe.preflight
+    description: Prepare a contract's consumer before its group joins.
+metadata:
+  ticket: OMN-21753
+  author: OmniNode Team
+  description: In-process effect called by auto-wiring before each subscribe; no bus subscription of its own.
+  tags: [effect, event_bus, consumer_group, auto_wiring]
+  related_tickets: [OMN-21753, OMN-21288, OMN-18852]
