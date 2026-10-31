@@ -1,0 +1,44 @@
+# OMN-21758 contract file for omnibase_infra: RSD model ids come from a contract pin.
+schema_version: "1.0.0"
+ticket_id: "OMN-21758"
+title: "omnibase_infra contracts_and_di literal_model_name burn-down, slice rf1400-c2: model ids come from contracts and overlays"
+summary: "The twelve literal_model_name findings in the RSD runtime models (pinned Literal model ids) are replaced by str fields checked against a contract-declared pin, src/omnibase_infra/contracts/rsd_pinned_model_identity.yaml, read through ModelRsdPinnedModelIdentity. The checker count over src/omnibase_infra/runtime goes from 13 to 1 (service_kernel.py, out of this slice)."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21758-rsd-model-ids-from-contract
+    statement: "No RSD runtime model names a model id in code; each takes it from the pinned contract and refuses a differing value."
+    acceptance:
+      - id: AC1
+        statement: "AC1: the contracts_and_di count for literal_model_name over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule"
+      - id: AC2
+        statement: "AC2: every model id comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths"
+      - id: AC3
+        statement: "AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body"
+evidence_requirements:
+  - kind: tests
+    description: "The RSD pinned-identity tests and the existing provenance tests pass."
+    command: "uv run pytest tests/unit/runtime/test_rsd_pinned_model_identity_omn21758.py tests/unit/runtime/test_rsd_model_artifact_provenance.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "The pinned identity is read from the contract, and each model refuses a substituted id."
+    source: generated
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_rsd_pinned_model_identity_omn21758.py tests/unit/runtime/test_rsd_model_artifact_provenance.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "The slice lands as one PR with lab proof of the tests at its head."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_rsd_pinned_model_identity_omn21758.py -q -p no:cacheprovider'
+  - id: dod-003
+    description: "Deploy-scope probe: the pinned model identity contract is served from the pushed commit on GitHub and the pinned RSD model class reads it."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/models/rsd/model_rsd_pinned_model_identity.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'rsd_pinned_model_identity.yaml'"

@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Fixed operator facts for the inert RSD live delegation overlay."""
 
-from __future__ import annotations
-
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from omnibase_infra.models.rsd import model_rsd_pinned_model_identity as pin
 from omnibase_infra.runtime.models.model_rsd_live_delegation_authority_envelope import (
     ModelRsdLiveDelegationAuthorityEnvelope,
 )
@@ -34,7 +33,7 @@ class ModelRsdLiveDelegationOverlay(BaseModel):
     claim_binding_schema: Literal["rsd.delegation-claim-binding.v1"]
     route_ref: Literal["logical://delegation/qwen3.8-27b"]
     backend_id: Literal["local-coder"]
-    model_id: Literal["Qwen/Qwen3.8-27B"]
+    model_id: pin.ServedModelId
     dispatch_policy: Literal["backend-pinned-single-attempt.v1"]
     one_shot_endpoint_capability_ref: CanonicalCapabilityRef
     root_authority_capability_ref: CanonicalCapabilityRef
@@ -47,7 +46,7 @@ class ModelRsdLiveDelegationOverlay(BaseModel):
     result_attestor_public_key_fingerprint_sha256: CanonicalSha256
     postgres_capability_ref: Literal["capability://rsd/postgres/acceptance"]
     observed_model_attestation_capability_ref: CanonicalCapabilityRef
-    observed_model_id: Literal["Qwen3.6-35B-A3B"]
+    observed_model_id: pin.ObservedModelId
     observed_model_attestation_sha256: CanonicalSha256
     model_match_status: Literal["model_id_mismatch"]
     authority_envelope: ModelRsdLiveDelegationAuthorityEnvelope

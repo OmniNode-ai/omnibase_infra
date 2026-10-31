@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Non-secret availability facts for inert RSD delegation preflight."""
 
-from __future__ import annotations
-
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from omnibase_infra.models.rsd import model_rsd_pinned_model_identity as pin
 from omnibase_infra.runtime.models.rsd_live_delegation_schema import (
     _RFC3339_UTC,
     CanonicalCapabilityRef,
@@ -35,7 +34,7 @@ class ModelRsdLiveDelegationObservation(BaseModel):
         None
     )
     verified_overlay_digest_sha256: CanonicalSha256 | None = None
-    observed_model_id: Literal["Qwen3.6-35B-A3B"] | None = None
+    observed_model_id: pin.ObservedModelId | None = None
     observed_model_attestation_sha256: CanonicalSha256 | None = None
     observed_model_match_status: Literal["model_id_mismatch"] | None = None
 
