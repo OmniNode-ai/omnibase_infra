@@ -75,7 +75,10 @@ WHO HOLDS A PRINCIPAL (OMN-19975)
     The grant declaration's ``principal_grants_from`` selects additional derived
     read grants by exact principal, on dev only, and a write only on the topics named
     in ``SCOPED_WRITE_TOPICS``. Apply, issuance and audit resolve
-    the same shared plus principal-specific set; the digest covers both sources.
+    the same shared plus principal-specific set. ``machine_grants_from`` supplies
+    a supplement only for trusted overlay rows whose role is ``machine``; a missing
+    overlay or role selects developer grants. Request fields cannot select that
+    supplement. The digest covers all referenced sources.
 
     With ``check --overlay FILE --ledger FILE`` the issuer names every machine its
     ledger issued that the overlay does not declare and exits 1. Run this check
@@ -105,7 +108,7 @@ Usage::
     lab_principal_issuer.py check --grants FILE [--overlay FILE [--ledger FILE]]
     lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N [--overlay FILE]
     lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--scoped-only] [--rpk-container NAME]
-    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--rpk-container NAME]
+    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--overlay FILE] [--principal NAME ...] [--role ROLE] [--rpk-container NAME]
     lab_principal_issuer.py health --socket PATH
 """
 
@@ -171,13 +174,8 @@ class Grant:
 
     def for_principal(self, principal: str) -> Grant:
         """Resolve this principal's literal resource name before applying the grant."""
-        return dataclasses.replace(
-            self,
-            name=self.name.replace("{principal}", principal)
-            if self.templated
-            else self.name,
-            templated=False,
-        )
+        name = self.name.replace("{principal}", principal)
+        return dataclasses.replace(self, name=name, templated=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -189,21 +187,22 @@ class Declaration:
     grants: tuple[Grant, ...]
     digest: str
     principal_grants: tuple[tuple[str, tuple[Grant, ...]], ...] = ()
+    machine_grants: tuple[Grant, ...] = ()
 
     def scoped_grants_for(self, principal: str) -> tuple[Grant, ...]:
         """Only this exact principal's declared additions, none of the shared set."""
-        return tuple(
-            dict.fromkeys(
-                grant
-                for owner, grants in self.principal_grants
-                if owner == principal
-                for grant in grants
-            )
-        )
+        # The loader reads a mapping of unique owners and folds duplicate grant rows.
+        return dict(self.principal_grants).get(principal, ())
 
-    def grants_for(self, principal: str) -> tuple[Grant, ...]:
-        """Shared grants plus only this exact principal's declared additions."""
-        return tuple(dict.fromkeys((*self.grants, *self.scoped_grants_for(principal))))
+    def grants_for(
+        self, principal: str, overlay: Overlay | None = None
+    ) -> tuple[Grant, ...]:
+        """Select machine additions only from a trusted overlay's declared role."""
+        roles = {r.principal: r.role for r in overlay.rows} if overlay else {}
+        machine = self.machine_grants if roles.get(principal) == "machine" else ()
+        return tuple(
+            dict.fromkeys((*self.grants, *machine, *self.scoped_grants_for(principal)))
+        )
 
 
 def load_declaration(path: Path) -> Declaration:
@@ -249,6 +248,15 @@ def load_declaration(path: Path) -> Declaration:
     if not isinstance(grants_raw, list) or not grants_raw:
         raise DeclarationError(f"{path}: grants must be a non-empty list")
     grants = tuple(_grant(path, i, g) for i, g in enumerate(grants_raw))
+    machine_grants: tuple[Grant, ...] = ()
+    if "machine_grants_from" in doc:
+        if lane != "dev":
+            raise DeclarationError(f"{path}: machine additions are dev-only")
+        rows, derived = _derived_grants(path, doc["machine_grants_from"], lane)
+        machine_grants = tuple(_grant(path, i, row) for i, row in enumerate(rows))
+        if not machine_grants:
+            raise DeclarationError(f"{path}: machine grants must be non-empty")
+        digest.update(derived)
     scoped = doc.get("principal_grants_from", {})
     if not isinstance(scoped, dict):
         raise DeclarationError(f"{path}: principal_grants_from must be a mapping")
@@ -284,6 +292,7 @@ def load_declaration(path: Path) -> Declaration:
         grants=grants,
         digest=digest.hexdigest(),
         principal_grants=tuple(principal_grants),
+        machine_grants=machine_grants,
     )
 
 
@@ -455,6 +464,8 @@ def principal_name(declaration: Declaration, login: str, device: str) -> str:
 OVERLAY_SCHEMA_VERSION = "developer_principal.v1"
 OVERLAY_GRANTS_SOURCE = "omnibase_infra:deploy/lab/developer-principal-grants.yaml"
 _OVERLAY_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
+# The roles the overlay admits; the omnibase_core enum is not yet in a pinned release (OMN-21622).
+OVERLAY_ROLES = frozenset({"developer", "machine"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -462,6 +473,7 @@ class OverlayRow:
     principal: str
     login: str
     device: str
+    role: str = "developer"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -485,7 +497,7 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
     name this issuer's grant file as its ``grants_source``, and each row's
     principal must be the name the issuer derives from the row's login and device.
     Mirrors omnibase_core ``ModelDeveloperPrincipalOverlay``; the issuer image
-    carries no omnibase_core, so the unit tests hold the two together.
+    carries no omnibase_core.
     """
     doc = yaml.safe_load(path.read_bytes())
     if not isinstance(doc, dict) or set(doc) != {
@@ -511,9 +523,21 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
     rows: list[OverlayRow] = []
     for index, raw in enumerate(raw_rows):
         where = f"{path}: principals[{index}]"
-        if not isinstance(raw, dict) or set(raw) != {"principal", "login", "device"}:
+        if not isinstance(raw, dict) or set(raw) - {"role", "grant_roles"} != {
+            "principal",
+            "login",
+            "device",
+        }:
             raise DeclarationError(
-                f"{where} holds exactly principal, login and device; a grant cannot be typed here"
+                f"{where} holds principal, login, device, role, grant_roles: a grant cannot be typed here"
+            )
+        if (
+            not isinstance(role := raw.get("role", "developer"), str)
+            or role not in OVERLAY_ROLES
+            or ("grant_roles" in raw and role != "machine")
+        ):
+            raise DeclarationError(
+                f"{where}: role must be one of {sorted(OVERLAY_ROLES)}; only a machine binds grant_roles"
             )
         principal, login, device = raw["principal"], raw["login"], raw["device"]
         if not all(isinstance(v, str) for v in (principal, login, device)):
@@ -532,7 +556,7 @@ def load_overlay(path: Path, declaration: Declaration) -> Overlay:
                 f"{where}: principal {principal} is not the name this issuer derives "
                 f"from its login and device ({derived})"
             )
-        rows.append(OverlayRow(principal, login.strip().lower(), device))
+        rows.append(OverlayRow(principal, login.strip().lower(), device, role))
     if len({row.principal for row in rows}) != len(rows):
         raise DeclarationError(f"{path}: principal names must be unique")
     if len({(row.login, row.device) for row in rows}) != len(rows):
@@ -560,11 +584,13 @@ class AclRow:
     host: str = "*"
 
 
-def expected_acl_rows(declaration: Declaration, principal: str) -> frozenset[AclRow]:
+def expected_acl_rows(
+    declaration: Declaration, principal: str, overlay: Overlay | None = None
+) -> frozenset[AclRow]:
     """The exact rows the grant file derives for one principal."""
     return frozenset(
         AclRow(grant.resource, grant.name, grant.pattern, operation)
-        for declared in declaration.grants_for(principal)
+        for declared in declaration.grants_for(principal, overlay)
         for grant in [declared.for_principal(principal)]
         for operation in grant.operations
     )
@@ -617,10 +643,13 @@ def parse_acl_listing(text: str, principal: str) -> frozenset[AclRow]:
 
 
 def audit_acl_rows(
-    declaration: Declaration, principal: str, live: frozenset[AclRow]
+    declaration: Declaration,
+    principal: str,
+    live: frozenset[AclRow],
+    overlay: Overlay | None = None,
 ) -> tuple[tuple[AclRow, ...], tuple[AclRow, ...]]:
     """Return (derived rows the broker lacks, live rows the file does not derive)."""
-    expected = expected_acl_rows(declaration, principal)
+    expected = expected_acl_rows(declaration, principal, overlay)
     return tuple(sorted(expected - live)), tuple(sorted(live - expected))
 
 
@@ -770,18 +799,23 @@ class Ledger:
     def __init__(self, path: Path) -> None:
         self._path = path
 
-    def principals_for(self, login: str) -> set[str]:
+    def _rows(self) -> list[dict[str, object]]:
         if not self._path.exists():
-            return set()
-        held: set[str] = set()
+            return []
+        rows = []
         for line in self._path.read_text(encoding="utf-8").splitlines():
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if row.get("login") == login:
-                held.add(str(row.get("principal")))
-        return held
+            if isinstance(row, dict) and isinstance(row.get("principal"), str):
+                rows.append(row)
+        return rows
+
+    def principals_for(self, login: str) -> set[str]:
+        return {
+            str(row["principal"]) for row in self._rows() if row.get("login") == login
+        }
 
     def append(self, row: dict[str, str]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -790,40 +824,17 @@ class Ledger:
 
     def principals_in_lane(self, lane: str) -> set[str]:
         """Find every principal recorded for this declaration's lane."""
-        if not self._path.exists():
-            return set()
-        held: set[str] = set()
-        for line in self._path.read_text(encoding="utf-8").splitlines():
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (
-                isinstance(row, dict)
-                and row.get("lane") == lane
-                and isinstance(row.get("principal"), str)
-            ):
-                held.add(row["principal"])
-        return held
+        return {
+            str(row["principal"]) for row in self._rows() if row.get("lane") == lane
+        }
 
     def issued_in_lane(self, lane: str) -> set[tuple[str, str]]:
         """Find every principal and login issued in this declaration's lane."""
-        if not self._path.exists():
-            return set()
-        issued: set[tuple[str, str]] = set()
-        for line in self._path.read_text(encoding="utf-8").splitlines():
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (
-                isinstance(row, dict)
-                and row.get("lane") == lane
-                and isinstance(row.get("principal"), str)
-                and isinstance(row.get("login"), str)
-            ):
-                issued.add((row["principal"], row["login"].strip().lower()))
-        return issued
+        return {
+            (str(row["principal"]), str(row["login"]).strip().lower())
+            for row in self._rows()
+            if row.get("lane") == lane and isinstance(row.get("login"), str)
+        }
 
 
 def _apply_grants(broker: Broker, principal: str, grants: tuple[Grant, ...]) -> None:
@@ -899,7 +910,9 @@ class Issuer:
                 exists = self._broker.user_exists(principal)
                 self._broker.set_user(principal, password, exists=exists)
                 _apply_grants(
-                    self._broker, principal, self._declaration.grants_for(principal)
+                    self._broker,
+                    principal,
+                    self._declaration.grants_for(principal, self._overlay),
                 )
             except urllib.error.URLError as exc:
                 raise IssuerError(
@@ -1088,71 +1101,69 @@ def _selected_principals(
     declaration: Declaration,
     overlay: Overlay | None,
     ledger: Ledger,
+    broker: Broker,
 ) -> list[str]:
-    """The overlay's principals when one is given, else those the ledger recorded."""
+    """The overlay's principals (of ``--role``) when one is given, else those the ledger
+    recorded. An empty selection, and a principal the broker lacks, are refused."""
     if overlay is None:
-        principals = sorted(
-            set(args.principal or ledger.principals_in_lane(declaration.lane))
-        )
-        if not principals:
+        held = ledger.principals_in_lane(declaration.lane)
+    else:
+        role = getattr(args, "role", None)
+        held = {r.principal for r in overlay.rows if role in (None, r.role)}
+        undeclared = sorted(set(args.principal or ()) - held)
+        if undeclared:
             raise IssuerError(
                 HTTPStatus.BAD_REQUEST,
-                "no developer principals selected; name --overlay, --principal, "
-                "or a ledger recording principals in this lane",
+                f"not declared in the developer.principal overlay: {', '.join(undeclared)}",
             )
-        return principals
-    undeclared = sorted(set(args.principal or ()) - overlay.principals)
-    if undeclared:
+    principals = sorted(set(args.principal or held))
+    if not principals:
         raise IssuerError(
             HTTPStatus.BAD_REQUEST,
-            f"not declared in the developer.principal overlay: {', '.join(undeclared)}",
+            "no developer principals selected; name --overlay, --principal, "
+            "or a ledger recording principals in this lane",
         )
-    return sorted(set(args.principal or overlay.principals))
+    for principal in principals:
+        if not broker.user_exists(principal):
+            raise IssuerError(
+                HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
+            )
+    return principals
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check", help="validate the grant file and exit")
-    check.add_argument("--grants", type=Path, required=True)
-    check.add_argument("--overlay", type=Path)
-    check.add_argument("--ledger", type=Path)
     serve = sub.add_parser("serve", help="serve issuance requests")
-    serve.add_argument("--grants", type=Path, required=True)
-    serve.add_argument("--ledger", type=Path, required=True)
     serve.add_argument("--socket", type=Path, required=True)
     serve.add_argument("--proxy-uid", type=int, required=True)
-    serve.add_argument("--overlay", type=Path)
     apply = sub.add_parser(
         "apply-grants", help="re-apply grants without rotating passwords"
     )
-    apply.add_argument("--grants", type=Path, required=True)
-    apply.add_argument("--ledger", type=Path, required=True)
-    apply.add_argument("--principal", action="extend", nargs="+")
-    apply.add_argument("--overlay", type=Path)
     apply.add_argument(
         "--scoped-only",
         action="store_true",
         help="apply only each principal's principal_grants_from additions, not the shared set",
     )
-    apply.add_argument(
-        "--rpk-container",
-        metavar="NAME",
-        help="run every rpk call inside this running issuer container, which holds the broker identity",
-    )
     audit = sub.add_parser(
         "audit-grants",
         help="compare each principal's live ACLs with the rows the grant file derives",
     )
-    audit.add_argument("--grants", type=Path, required=True)
-    audit.add_argument("--ledger", type=Path, required=True)
-    audit.add_argument("--principal", action="extend", nargs="+")
-    audit.add_argument("--overlay", type=Path)
     audit.add_argument(
-        "--rpk-container",
-        metavar="NAME",
-        help="run every rpk call inside this running issuer container, which holds the broker identity",
+        "--role", help="only the overlay's rows of this role; fail on missing only"
     )
+    for command in (check, serve, apply, audit):
+        command.add_argument("--grants", type=Path, required=True)
+        command.add_argument("--overlay", type=Path)
+        command.add_argument("--ledger", type=Path, required=command is not check)
+    for command in (apply, audit):
+        command.add_argument("--principal", action="extend", nargs="+")
+        command.add_argument(
+            "--rpk-container",
+            metavar="NAME",
+            help="run every rpk call inside this running issuer container, which holds the broker identity",
+        )
     health_parser = sub.add_parser(
         "health", help="check the Unix socket health endpoint"
     )
@@ -1171,6 +1182,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except (OSError, DeclarationError, yaml.YAMLError) as exc:
         print(f"lab_principal_issuer: {exc}", file=sys.stderr)
+        return 2
+    if getattr(args, "role", None) and overlay is None:
+        print("lab_principal_issuer: --role needs --overlay", file=sys.stderr)
         return 2
     if args.command == "check":
         if args.ledger is not None and overlay is None:
@@ -1217,64 +1231,51 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"lab_principal_issuer: {exc}", file=sys.stderr)
         return 2
     ledger = Ledger(args.ledger)
-    if args.command == "apply-grants":
+    if args.command in {"apply-grants", "audit-grants"}:
         try:
-            principals = _selected_principals(args, declaration, overlay, ledger)
-            for principal in principals:
-                if not broker.user_exists(principal):
-                    raise IssuerError(
-                        HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
-                    )
-            for principal in principals:
-                grants = (
-                    declaration.scoped_grants_for(principal)
-                    if args.scoped_only
-                    else declaration.grants_for(principal)
-                )
-                if not grants:
-                    raise IssuerError(
-                        HTTPStatus.NOT_FOUND,
-                        f"{principal} has no principal_grants_from additions",
-                    )
-                _apply_grants(broker, principal, grants)
-                ledger.append(
-                    {
-                        "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-                        "principal": principal,
-                        "lane": declaration.lane,
-                        "action": "grants-applied",
-                        "grants_sha256": declaration.digest,
-                    }
-                )
-                print(f"applied {len(grants)} grants to {principal}")
-        except (OSError, IssuerError, urllib.error.URLError) as exc:
-            print(f"lab_principal_issuer: {exc}", file=sys.stderr)
-            return 2
-        return 0
-
-    if args.command == "audit-grants":
-        try:
-            principals = _selected_principals(args, declaration, overlay, ledger)
-            for principal in principals:
-                if not broker.user_exists(principal):
-                    raise IssuerError(
-                        HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
-                    )
+            principals = _selected_principals(
+                args, declaration, overlay, ledger, broker
+            )
             drifted = False
             for principal in principals:
-                live = parse_acl_listing(broker.list_acls(principal), principal)
-                missing, extra = audit_acl_rows(declaration, principal, live)
-                print(
-                    f"principal={principal} expected={len(expected_acl_rows(declaration, principal))} "
-                    f"live={len(live)} missing={len(missing)} extra={len(extra)}"
-                )
-                for label, rows in (("MISSING", missing), ("EXTRA", extra)):
-                    for row in rows:
-                        print(
-                            f"{label} {principal} {row.resource} {row.pattern} {row.name} {row.operation}"
-                            + ("" if row.host == "*" else f" host={row.host}")
+                if args.command == "apply-grants":
+                    grants = (
+                        declaration.scoped_grants_for(principal)
+                        if args.scoped_only
+                        else declaration.grants_for(principal, overlay)
+                    )
+                    if not grants:
+                        raise IssuerError(
+                            HTTPStatus.NOT_FOUND,
+                            f"{principal} has no principal_grants_from additions",
                         )
-                drifted = drifted or bool(missing or extra)
+                    _apply_grants(broker, principal, grants)
+                    ledger.append(
+                        {
+                            "at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+                            "principal": principal,
+                            "lane": declaration.lane,
+                            "action": "grants-applied",
+                            "grants_sha256": declaration.digest,
+                        }
+                    )
+                    print(f"applied {len(grants)} grants to {principal}")
+                else:
+                    live = parse_acl_listing(broker.list_acls(principal), principal)
+                    missing, extra = audit_acl_rows(
+                        declaration, principal, live, overlay
+                    )
+                    print(
+                        f"principal={principal} expected={len(expected_acl_rows(declaration, principal, overlay))} "
+                        f"live={len(live)} missing={len(missing)} extra={len(extra)}"
+                    )
+                    for label, rows in (("MISSING", missing), ("EXTRA", extra)):
+                        for row in rows:
+                            print(
+                                f"{label} {principal} {row.resource} {row.pattern} {row.name} {row.operation}"
+                                + ("" if row.host == "*" else f" host={row.host}")
+                            )
+                    drifted = drifted or bool(missing or (extra and not args.role))
         except (OSError, IssuerError, urllib.error.URLError) as exc:
             print(f"lab_principal_issuer: {exc}", file=sys.stderr)
             return 2

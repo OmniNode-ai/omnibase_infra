@@ -12,7 +12,7 @@ class ModelDeveloperPrincipalPlanRequest(BaseModel):
 
     ``declaration_yaml`` is the grants declaration's exact text, so its digest is
     the digest of the file the caller read. ``derived_documents`` maps each file
-    name the declaration names in ``grants_from`` or ``principal_grants_from`` to
+    name the declaration names in ``grants_from``, ``machine_grants_from`` or ``principal_grants_from`` to
     that file's exact JSON text.
     """
 

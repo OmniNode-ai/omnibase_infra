@@ -107,6 +107,10 @@ def apply_broker(broker: FakeBroker, monkeypatch: pytest.MonkeyPatch) -> FakeBro
 
 def _grant_file(tmp_path: Path, grants: list[dict[str, object]]) -> Path:
     doc = yaml.safe_load(GRANTS.read_text())
+    shutil.copy(
+        GRANTS.parent / doc["machine_grants_from"],
+        tmp_path / doc["machine_grants_from"],
+    )
     del doc["grants_from"]
     del doc["principal_grants_from"]
     doc["grants"] = grants
@@ -247,11 +251,27 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
     # The Claude Code hook edge (OMN-17427) adds write on the 29 `onex.evt.omniclaude.*`
     # hook topics the operator's hook principal holds, and on no command topic.
     # The compaction receipt-mode client (OMN-21099) adds write on its request topic only.
+    # The machine profile (OMN-21622) adds write on the twelve work-ledger row events the
+    # hook-emit drainer publishes and on credential registration, and on no command topic.
     writable = [g for g in declaration.grants if "write" in g.operations]
     hook_edge = {g.name for g in writable if g.name.startswith("onex.evt.omniclaude.")}
     assert len(hook_edge) == 29
     assert "onex.evt.omniclaude.hook-event.v1" in hook_edge
-    assert {g.name for g in writable} - hook_edge == {
+    machine = {
+        g.name
+        for g in writable
+        if g.name.startswith("onex.evt.omnimarket.work-ledger-")
+        or g.name == "onex.evt.omnimarket.credential-registered.v1"
+    }
+    assert machine == set()
+    machine_grants = declaration.machine_grants
+    assert len(machine_grants) == 13
+    assert all(g.operations == ("describe", "write") for g in machine_grants)
+    assert not {g.name for g in machine_grants} & {g.name for g in writable}
+    assert all(
+        g.operations == ("describe", "write") for g in writable if g.name in machine
+    )
+    assert {g.name for g in writable} - hook_edge - machine == {
         "onex.cmd.omnimarket.delegate-skill.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",
@@ -517,6 +537,10 @@ def test_a_login_outside_the_allowed_domains_is_refused(
 ) -> None:
     doc = yaml.safe_load(GRANTS.read_text())
     doc["allowed_login_domains"] = ["omninode.ai"]
+    shutil.copy(
+        GRANTS.parent / doc["machine_grants_from"],
+        tmp_path / doc["machine_grants_from"],
+    )
     shutil.copy(DERIVED, tmp_path / DERIVED.name)
     for source in doc["principal_grants_from"].values():
         shutil.copy(GRANTS.parent / source, tmp_path / source)
@@ -1839,7 +1863,11 @@ def test_h105_scoped_only_apply_refuses_a_principal_without_additions(
 
 def _h105_policy_copy(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     doc = yaml.safe_load(GRANTS.read_text())
-    for source in [doc["grants_from"], *doc["principal_grants_from"].values()]:
+    for source in [
+        doc["grants_from"],
+        doc["machine_grants_from"],
+        *doc["principal_grants_from"].values(),
+    ]:
         shutil.copy(GRANTS.parent / source, tmp_path / source)
     path = tmp_path / GRANTS.name
     path.write_text(yaml.safe_dump(doc))
