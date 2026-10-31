@@ -1,0 +1,49 @@
+# OMN-20557 contract file for omnibase_infra: onex delegate carries the caller's session model.
+schema_version: "1.0.0"
+ticket_id: "OMN-20557"
+title: "The savings baseline uses the developer's Claude Code session model, sent by the /onex:delegate plugin"
+summary: "onex delegate gains --session-model. The checked value rides in the delegate request's metadata map under session_model, the key omnimarket's delegate-skill handler resolves the savings baseline from, in process and on the deployed lane. A malformed value is a usage error naming the flag; an absent one writes no key, so the fixed default baseline still applies. stderr names the session model beside the ticket and caller lines."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "public_api"
+requirements:
+  - id: req-omn20557-cli-session-model
+    statement: "onex delegate --session-model writes the caller's session model to the delegate request's metadata map under session_model, only when named, and refuses a malformed value as a usage error."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a delegation started with --session-model carries the session's model string on the delegate request, in process and on the deployed lane -- falsifier: uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'metadata or payload_file or golden_chain' fails at origin/dev a409589629, which has no --session-model option"
+      - id: AC3
+        statement: "AC3: a request with no session model writes no session_model key, so the consumer resolves the fixed default -- falsifier: uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k no_session_model fails at origin/dev a409589629"
+evidence_requirements:
+  - kind: tests
+    description: "The option writes the metadata key only when named, refuses a malformed value, and the real command hands the payload to the run in process and on the deployed lane."
+    command: "uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-omn20557-cli-request-carries-session-model
+    description: "The delegate request carries the session model in its metadata, in process and on the deployed lane."
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'metadata or payload_file or golden_chain' -q -p no:cacheprovider"
+  - id: dod-omn20557-cli-no-session-model
+    description: "No session model writes no key, and a malformed one is a usage error naming the flag."
+    source: manual
+    binds_ac: [AC3]
+    checks:
+      - check_type: command
+        check_value: "uv run pytest tests/unit/cli/test_delegate_session_model_omn20557.py -k 'no_session_model or malformed' -q -p no:cacheprovider"
+  - id: dod-omn20557-cli-deploy-published-source-readback
+    description: |-
+      Hosted-runner source-artifact readback: fetch the delegate CLI and the
+      session-model model at the evaluated published commit and confirm the
+      option and the metadata key are in them. A missing file or symbol fails
+      the command. No lab service, credentials or broker is required. This
+      checks the published source artifact and does not assert a live runtime
+      rollout.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/cli/cli_delegate.py" | grep -q '"--session-model",' && curl --fail --silent --show-error --location --max-time 15 "https://raw.githubusercontent.com/OmniNode-ai/omnibase_infra/$(git rev-parse HEAD)/src/omnibase_infra/models/delegation/model_delegate_session_model.py" | grep -q 'SESSION_MODEL_METADATA_KEY = "session_model"'
