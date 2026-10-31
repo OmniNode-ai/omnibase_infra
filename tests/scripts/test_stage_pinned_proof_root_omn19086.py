@@ -412,20 +412,17 @@ def test_cut_lab_ref_refuses_a_dirty_proof_root_and_proceeds_after_revert(
     _, canonical = _make_upstream_and_canonical(tmp_path)
     root = tmp_path / "proof-root"
     pinned = _stage(root, canonical)
-    (root / "omnibase_compat" / "module_1.py").write_text(
-        "VALUE = -1\n", encoding="utf-8"
-    )
+    (root / "omnibase_spi" / "module_1.py").write_text("VALUE = -1\n", encoding="utf-8")
 
     refused = _run_cut_lab_ref(root, "--lane", "dogfood", "--hotpatch")
     assert refused.returncode == 1
     assert (
-        f"REFUSE omnibase_compat: working tree not clean at HEAD "
-        f"{pinned['omnibase_compat']}, pinned {pinned['omnibase_compat']}"
-        in refused.stderr
+        f"REFUSE omnibase_spi: working tree not clean at HEAD "
+        f"{pinned['omnibase_spi']}, pinned {pinned['omnibase_spi']}" in refused.stderr
     )
     assert "deploy command" not in refused.stderr
 
-    _git(root / "omnibase_compat", "checkout", "--", "module_1.py")
+    _git(root / "omnibase_spi", "checkout", "--", "module_1.py")
     proceeds = _run_cut_lab_ref(root, "--lane", "dogfood", "--hotpatch")
     assert proceeds.returncode == 0, proceeds.stderr
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra-dogfood" in proceeds.stderr

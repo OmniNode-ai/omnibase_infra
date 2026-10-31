@@ -41,7 +41,6 @@ DEV_TAG = "dev-20261025205951-5bb5f11404ae"
 RELEASE = {
     "omnibase_infra": "v0.38.74",
     "omnibase_core": "v0.47.46",
-    "omnibase_compat": "v0.5.7",
     "omnimarket": "v0.4.316",
 }
 
@@ -291,11 +290,11 @@ def test_stability_release_only_plans_the_pinned_release_set(
     assert "release-tag-only" not in result.stderr
     assert (
         'DEPLOY_REF=v0.38.74 DEPLOY_SIBLING_REFS="omnibase_core=v0.47.46 '
-        'omnibase_compat=v0.5.7 omnimarket=v0.4.316"'
+        'omnimarket=v0.4.316"'
     ) in result.stderr
     assert (
         "ref             : v0.38.74 (siblings: omnibase_core=v0.47.46 "
-        "omnibase_compat=v0.5.7 omnimarket=v0.4.316)"
+        "omnimarket=v0.4.316)"
     ) in result.stderr
 
 
@@ -427,10 +426,7 @@ def _run_stage(
 
 
 def _sibling_refs(tags: dict[str, str]) -> str:
-    return " ".join(
-        f"{repo}={tags[repo]}"
-        for repo in ("omnibase_core", "omnibase_compat", "omnimarket")
-    )
+    return " ".join(f"{repo}={tags[repo]}" for repo in ("omnibase_core", "omnimarket"))
 
 
 def test_stability_release_only_stage_checks_each_sibling_out_at_its_tag(
@@ -451,7 +447,7 @@ def test_stability_release_only_stage_checks_each_sibling_out_at_its_tag(
         (build_ctx / "workspace" / "sibling-vcs-provenance.json").read_text()
     )
     expected = json.loads((tmp_path / "refs" / "expected.json").read_text())
-    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+    for repo in ("omnibase_core", "omnimarket"):
         assert vcs["siblings"][repo]["vcs_ref"] == tagged[repo], repo
         row = expected["repos"][repo]
         assert row["ref"] == tags[repo]
