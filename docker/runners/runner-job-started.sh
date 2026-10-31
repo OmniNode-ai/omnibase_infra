@@ -1091,7 +1091,15 @@ disk_admission_self_pause() {
 # ROLLOUT CONTROL. _C1_PYPI_RUNNERS is a space-separated RUNNER_NAME allowlist or
 # ALL or NONE. Staged rollouts edit it on the host copy of this file; no container
 # is touched. OMNI_PYPI_CACHE_DISABLE=1 is the kill switch.
-_C1_PYPI_INDEX="${OMNI_PYPI_CACHE_INDEX:-http://omninode-pc.tail75df5e.ts.net:3141/root/pypi/+simple/}"
+#
+# WHICH CACHE (OMN-21685). This public script names no cache host. The index URL
+# arrives as OMNI_PYPI_CACHE_INDEX in the runner container's environment, which
+# docker-compose.runners.yml passes through from the runner host's docker/.env; the
+# lab's value is kept in the private lab overlay, not in this repository. With the
+# variable unset or empty no cache is declared for the host: the probe below counts
+# that as a failed probe, records a DEGRADE naming the variable and the job runs on
+# direct pypi.org egress, the same fail-open result as a cache that does not answer.
+_C1_PYPI_INDEX="${OMNI_PYPI_CACHE_INDEX:-}"
 _C1_PYPI_FALLBACK="${OMNI_PYPI_CACHE_FALLBACK:-https://pypi.org/simple/}"
 _C1_PYPI_RUNNERS="${OMNI_PYPI_CACHE_RUNNERS:-ALL}"
 _C1_PYPI_PROBE_TIMEOUT="${OMNI_PYPI_CACHE_PROBE_TIMEOUT:-5}"
@@ -1149,8 +1157,8 @@ wire_pypi_cache() {
 
     # Liveness probe. HEAD, not GET: a GET of the index root is a 41MB body and
     # would cost more than it saves, 72x per job.
-    if ! curl -fsS -I --max-time "${_C1_PYPI_PROBE_TIMEOUT}" -o /dev/null "${_C1_PYPI_INDEX}" 2>/dev/null; then
-        _c1_audit "${ctx} DEGRADE cache-probe-failed index=${_C1_PYPI_INDEX} -- job runs on direct pypi.org egress (fail-open)"
+    if [[ -z "${_C1_PYPI_INDEX}" ]] || ! curl -fsS -I --max-time "${_C1_PYPI_PROBE_TIMEOUT}" -o /dev/null "${_C1_PYPI_INDEX}" 2>/dev/null; then
+        _c1_audit "${ctx} DEGRADE cache-probe-failed index=${_C1_PYPI_INDEX:-<OMNI_PYPI_CACHE_INDEX unset>} -- job runs on direct pypi.org egress (fail-open)"
         return 0
     fi
 
