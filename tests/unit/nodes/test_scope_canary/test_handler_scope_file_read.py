@@ -28,7 +28,11 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("# My Plan\n\nSome content.", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            file_path=str(plan_file),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
+        )
 
         assert result.success is True
         assert result.content == "# My Plan\n\nSome content."
@@ -41,7 +45,9 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(tmp_path / "missing.md"), correlation_id=cid
+            file_path=str(tmp_path / "missing.md"),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
         )
 
         assert result.success is False
@@ -57,6 +63,10 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("content", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            file_path=str(plan_file),
+            correlation_id=cid,
+            output_path=str(tmp_path / "scope-manifest.json"),
+        )
 
         assert result.correlation_id == cid

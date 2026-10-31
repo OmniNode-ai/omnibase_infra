@@ -7,10 +7,16 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extract_input import (
+    ModelScopeExtractInput,
+)
 from omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted import (
     ModelScopeExtracted,
+)
+from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request import (
+    ModelScopeFileReadRequest,
 )
 from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result import (
     ModelScopeFileReadResult,
@@ -36,15 +42,46 @@ class TestScopeModels:
         cmd = ModelScopeCheckCommand(
             correlation_id=cid,
             plan_file_path="/var/data/plan.md",
+            output_path="scope-manifest.json",
         )
         assert cmd.correlation_id == cid
-        assert cmd.output_path == "~/.claude/scope-manifest.json"
+        assert cmd.output_path == "scope-manifest.json"
         assert cmd.auto_confirm is False
+
+    @pytest.mark.parametrize(
+        ("model", "fields"),
+        [
+            (ModelScopeCheckCommand, {"plan_file_path": "plan.md"}),
+            (ModelScopeFileReadRequest, {"file_path": "plan.md"}),
+            (ModelScopeFileReadResult, {"file_path": "plan.md", "content": ""}),
+            (ModelScopeExtractInput, {"plan_file_path": "plan.md", "content": ""}),
+            (ModelScopeExtracted, {"plan_file_path": "plan.md"}),
+        ],
+    )
+    @pytest.mark.parametrize("output_path", [None, ""])
+    def test_output_path_is_required(
+        self, model: type[BaseModel], fields: dict[str, str], output_path: str | None
+    ) -> None:
+        """No scope model carries a default manifest location (OMN-21799).
+
+        The command producer supplies ``output_path`` and each hop carries it
+        forward; a missing or empty value is refused instead of resolving to a
+        location hard-coded in code.
+        """
+        kwargs: dict[str, object] = {"correlation_id": uuid4(), **fields}
+        if output_path is not None:
+            kwargs["output_path"] = output_path
+        with pytest.raises(ValidationError, match="output_path"):
+            model(**kwargs)
+        kwargs["output_path"] = "scope-manifest.json"
+        assert model(**kwargs).output_path == "scope-manifest.json"
 
     def test_scope_check_command_frozen(self):
         """ModelScopeCheckCommand is immutable."""
         cmd = ModelScopeCheckCommand(
-            correlation_id=uuid4(), plan_file_path="/var/data/plan.md"
+            correlation_id=uuid4(),
+            plan_file_path="/var/data/plan.md",
+            output_path="scope-manifest.json",
         )
         with pytest.raises(ValidationError):
             cmd.plan_file_path = "/other"  # type: ignore[misc]
@@ -55,6 +92,7 @@ class TestScopeModels:
             ModelScopeCheckCommand(
                 correlation_id=uuid4(),
                 plan_file_path="/var/data/plan.md",
+                output_path="scope-manifest.json",
                 unknown_field="bad",  # type: ignore[call-arg]
             )
 
@@ -64,6 +102,7 @@ class TestScopeModels:
         result = ModelScopeFileReadResult(
             correlation_id=cid,
             file_path="/var/data/plan.md",
+            output_path="scope-manifest.json",
             content="hello",
         )
         assert result.success is True
@@ -75,6 +114,7 @@ class TestScopeModels:
         extracted = ModelScopeExtracted(
             correlation_id=cid,
             plan_file_path="plan.md",
+            output_path="scope-manifest.json",
             files=("a.py", "b.py"),
             repos=("omniclaude",),
         )

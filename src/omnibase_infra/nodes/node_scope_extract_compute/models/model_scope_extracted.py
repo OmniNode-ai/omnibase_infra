@@ -17,8 +17,13 @@ class ModelScopeExtracted(BaseModel):
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     plan_file_path: str = Field(..., description="Source plan file path.")
     output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
-        description="Path to write the scope manifest JSON.",
+        ...,
+        min_length=1,
+        description=(
+            "Path to write the scope manifest JSON. Required: the command"
+            " producer supplies it and every hop carries it forward; code holds"
+            " no default location (OMN-21799)."
+        ),
     )
     files: tuple[str, ...] = Field(default_factory=tuple, description="Files in scope.")
     directories: tuple[str, ...] = Field(

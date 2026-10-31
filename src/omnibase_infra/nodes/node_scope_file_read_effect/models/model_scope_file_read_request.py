@@ -17,6 +17,11 @@ class ModelScopeFileReadRequest(BaseModel):
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     file_path: str = Field(..., description="Absolute path to the plan file.")
     output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
-        description="Path to write the scope manifest JSON.",
+        ...,
+        min_length=1,
+        description=(
+            "Path to write the scope manifest JSON. Required: the command"
+            " producer supplies it and every hop carries it forward; code holds"
+            " no default location (OMN-21799)."
+        ),
     )
