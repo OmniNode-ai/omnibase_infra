@@ -30,6 +30,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors.error_infra import WorkLedgerQueryError
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.models.handlers.model_value_holder import ModelValueHolder
 from omnibase_infra.models.model_work_ledger_query_client_config import (
     ModelWorkLedgerQueryClientConfig,
 )
@@ -63,9 +64,11 @@ class HandlerWorkLedgerQuery:
     """
 
     def __init__(self, transport: ModelKafkaEventBusConfig) -> None:
-        self._transport = transport
+        self._transport = transport.model_copy(
+            update={"acks": EnumKafkaAcks.ALL, "enable_idempotence": False}
+        )
         self._contract = load_work_ledger_query_client_config()
-        self._client: KafkaTransport | None = None
+        self._client = ModelValueHolder[KafkaTransport]()
         self._session_open = False
         self._query_lock = asyncio.Lock()
 
@@ -92,7 +95,7 @@ class HandlerWorkLedgerQuery:
             await self._close_transport()
 
     async def _close_transport(self) -> None:
-        transport, self._client = self._client, None
+        transport = self._client.release()
         if transport is not None:
             await transport.close()
 
@@ -139,21 +142,17 @@ class HandlerWorkLedgerQuery:
         async with asyncio.timeout(timeout_s):
             async with self._query_lock:
                 try:
-                    if self._client is None:
-                        self._client = KafkaTransport(
-                            config=self._transport.model_copy(
-                                update={
-                                    "acks": EnumKafkaAcks.ALL,
-                                    "enable_idempotence": False,
-                                }
-                            ),
+                    transport = self._client.current
+                    if transport is None:
+                        transport = KafkaTransport(
+                            config=self._transport,
                             group=self._contract.consumer_group_prefix + uuid4().hex,
                             topics=(completed,),
                             auto_offset_reset="latest",
                         )
+                        self._client.hold(transport)
                         # Establish reply offsets before the first publish.
-                        await self._client.start()
-                    transport = self._client
+                        await transport.start()
                     await transport.send(
                         command,
                         key=str(correlation_id).encode("utf-8"),

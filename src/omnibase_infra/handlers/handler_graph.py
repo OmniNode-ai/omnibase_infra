@@ -87,6 +87,7 @@ from omnibase_infra.handlers.models.model_graph_handler_response import (
     ModelGraphHandlerResponse,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.models.handlers.model_ttl_value_cell import ModelTtlValueCell
 from omnibase_infra.utils.util_env_parsing import parse_env_float
 from omnibase_spi.protocols.storage import ProtocolGraphDatabaseHandler
 
@@ -186,8 +187,9 @@ class HandlerGraph(
         self._timeout: float = _DEFAULT_TIMEOUT_SECONDS
         self._pool_size: int = _DEFAULT_POOL_SIZE
         self._initialized: bool = False
-        self._cached_health: ModelGraphHealthStatus | None = None
-        self._health_cache_time: float = 0.0
+        self._health_cache: ModelTtlValueCell[ModelGraphHealthStatus] = (
+            ModelTtlValueCell(ttl_seconds=_HEALTH_CACHE_SECONDS)
+        )
 
     @property
     def handler_type(self) -> str:
@@ -410,7 +412,7 @@ class HandlerGraph(
             self._driver = None
 
         self._initialized = False
-        self._cached_health = None
+        self._health_cache.discard()
         logger.info(
             "%s shutdown complete",
             self.__class__.__name__,
@@ -1271,11 +1273,9 @@ class HandlerGraph(
 
         # Return cached result if recent
         current_time = time.time()
-        if (
-            self._cached_health is not None
-            and current_time - self._health_cache_time < _HEALTH_CACHE_SECONDS
-        ):
-            return self._cached_health
+        cached = self._health_cache.fresh(current_time)
+        if cached is not None:
+            return cached
 
         if not self._initialized or self._driver is None:
             return ModelGraphHealthStatus(
@@ -1310,8 +1310,7 @@ class HandlerGraph(
             )
 
             # Cache the result
-            self._cached_health = health
-            self._health_cache_time = current_time
+            self._health_cache.store(health, current_time)
 
             return health
         except Exception as e:  # noqa: BLE001 — boundary: logs warning and degrades

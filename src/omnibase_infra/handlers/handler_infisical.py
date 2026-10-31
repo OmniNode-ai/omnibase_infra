@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from uuid import UUID, uuid4
 
 from pydantic import SecretStr
@@ -57,6 +56,7 @@ from omnibase_infra.errors import (
 )
 from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker, MixinEnvelopeExtraction
+from omnibase_infra.models.handlers.model_secret_cache import ModelSecretCache
 
 logger = logging.getLogger(__name__)
 
@@ -69,20 +69,6 @@ SUPPORTED_OPERATIONS: frozenset[str] = frozenset(
         "infisical.get_secrets_batch",
     }
 )
-
-
-class CacheEntry:
-    """Internal TTL cache entry for a single secret."""
-
-    __slots__ = ("expires_at", "value")
-
-    def __init__(self, value: SecretStr, ttl: float) -> None:
-        self.value = value
-        self.expires_at = time.monotonic() + ttl
-
-    @property
-    def is_expired(self) -> bool:
-        return time.monotonic() >= self.expires_at
 
 
 class HandlerInfisical(
@@ -122,13 +108,9 @@ class HandlerInfisical(
         self._config: ModelInfisicalHandlerConfig | None = None
         self._initialized: bool = False
         self._circuit_breaker_initialized: bool = False
-        # Handler-owned cache: secret_key -> CacheEntry
-        self._cache: dict[str, CacheEntry] = {}
+        # Handler-owned cache and metrics, guarded by the handler's lock
+        self._cache = ModelSecretCache(max_size=self.MAX_CACHE_SIZE)
         self._cache_lock = threading.Lock()
-        # Metrics
-        self._cache_hits: int = 0
-        self._cache_misses: int = 0
-        self._total_fetches: int = 0
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -263,7 +245,7 @@ class HandlerInfisical(
                 await self._reset_circuit_breaker()
 
         with self._cache_lock:
-            self._cache.clear()
+            self._cache.discard_all()
         self._initialized = False
         self._config = None
         self._circuit_breaker_initialized = False
@@ -433,9 +415,8 @@ class HandlerInfisical(
         )
 
         with self._cache_lock:
-            cached = self._cache.get(cache_key)
-            if cached is not None and not cached.is_expired:
-                self._cache_hits += 1
+            cached = self._cache.lookup(cache_key)
+            if cached is not None:
                 logger.debug(
                     "Cache hit for secret",
                     extra={
@@ -452,13 +433,12 @@ class HandlerInfisical(
                     input_envelope_id=input_envelope_id,
                     result={
                         "secret_name": secret_name,
-                        "value": cached.value.get_secret_value(),
+                        "value": cached.get_secret_value(),
                         "source": "cache",
                     },
                 )
 
-            self._cache_misses += 1
-            self._total_fetches += 1
+            self._cache.record_fetch()
 
         # Fetch from Infisical - extract optional overrides with type narrowing
         raw_project = payload.get("project_id")
@@ -475,10 +455,8 @@ class HandlerInfisical(
         # Cache the result (with eviction if over limit)
         if self._config.cache_ttl_seconds > 0:
             with self._cache_lock:
-                self._maybe_evict_cache()
-                self._cache[cache_key] = CacheEntry(
-                    value=result.value,
-                    ttl=self._config.cache_ttl_seconds,
+                self._cache.store(
+                    cache_key, result.value, self._config.cache_ttl_seconds
                 )
 
         # Audit log (no secret values)
@@ -517,7 +495,7 @@ class HandlerInfisical(
             raise RuntimeError("Adapter not initialized - call initialize() first")
 
         with self._cache_lock:
-            self._total_fetches += 1
+            self._cache.record_fetch()
 
         raw_project = payload.get("project_id")
         raw_env = payload.get("environment_slug")
@@ -593,19 +571,17 @@ class HandlerInfisical(
                     payload.get("environment_slug"),
                     payload.get("secret_path"),
                 )
-                cached = self._cache.get(cache_key)
-                if cached is not None and not cached.is_expired:
-                    self._cache_hits += 1
-                    results[name] = cached.value.get_secret_value()
+                cached = self._cache.lookup(cache_key)
+                if cached is not None:
+                    results[name] = cached.get_secret_value()
                     from_cache.append(name)
                 else:
-                    self._cache_misses += 1
                     to_fetch.append(name)
 
         # Fetch remaining from Infisical
         if to_fetch:
             with self._cache_lock:
-                self._total_fetches += 1
+                self._cache.record_fetch()
             raw_project = payload.get("project_id")
             raw_env = payload.get("environment_slug")
             raw_path = payload.get("secret_path")
@@ -630,10 +606,10 @@ class HandlerInfisical(
                         payload.get("secret_path"),
                     )
                     with self._cache_lock:
-                        self._maybe_evict_cache()
-                        self._cache[cache_key] = CacheEntry(
-                            value=secret_result.value,
-                            ttl=self._config.cache_ttl_seconds,
+                        self._cache.store(
+                            cache_key,
+                            secret_result.value,
+                            self._config.cache_ttl_seconds,
                         )
 
             errors = batch_result.errors
@@ -686,31 +662,6 @@ class HandlerInfisical(
         ]
         return "::".join(parts)
 
-    def _maybe_evict_cache(self) -> None:
-        """Evict cache entries if the cache exceeds ``MAX_CACHE_SIZE``.
-
-        Eviction strategy (minimal, not a full LRU):
-        1. Remove all expired entries.
-        2. If still over limit, remove entries with the earliest ``expires_at``
-           until the cache is back under the limit.
-        """
-        if len(self._cache) < self.MAX_CACHE_SIZE:
-            return
-
-        # Phase 1: purge expired entries
-        expired_keys = [k for k, v in self._cache.items() if v.is_expired]
-        for k in expired_keys:
-            del self._cache[k]
-
-        if len(self._cache) < self.MAX_CACHE_SIZE:
-            return
-
-        # Phase 2: evict oldest (earliest expiry) entries
-        sorted_keys = sorted(self._cache, key=lambda k: self._cache[k].expires_at)
-        to_remove = len(self._cache) - self.MAX_CACHE_SIZE + 1  # +1 for incoming entry
-        for k in sorted_keys[:to_remove]:
-            del self._cache[k]
-
     def describe(self) -> dict[str, object]:
         """Return handler metadata and capabilities.
 
@@ -719,9 +670,9 @@ class HandlerInfisical(
             Never exposes credentials.
         """
         with self._cache_lock:
-            cache_hits = self._cache_hits
-            cache_misses = self._cache_misses
-            total_fetches = self._total_fetches
+            cache_hits = self._cache.hits
+            cache_misses = self._cache.misses
+            total_fetches = self._cache.fetches
         return {
             "handler_type": self.handler_type.value,
             "handler_category": self.handler_category.value,
@@ -769,13 +720,10 @@ class HandlerInfisical(
             secret_name, project_id, environment_slug, secret_path
         )
         with self._cache_lock:
-            cached = self._cache.get(cache_key)
-            if cached is not None and not cached.is_expired:
-                self._cache_hits += 1
-                return cached.value
-
-            self._cache_misses += 1
-            self._total_fetches += 1
+            cached = self._cache.lookup(cache_key)
+            if cached is not None:
+                return cached
+            self._cache.record_fetch()
 
         result = self._adapter.get_secret(
             secret_name=secret_name,
@@ -787,10 +735,8 @@ class HandlerInfisical(
         # Cache the result (with eviction if over limit)
         if self._config.cache_ttl_seconds > 0:
             with self._cache_lock:
-                self._maybe_evict_cache()
-                self._cache[cache_key] = CacheEntry(
-                    value=result.value,
-                    ttl=self._config.cache_ttl_seconds,
+                self._cache.store(
+                    cache_key, result.value, self._config.cache_ttl_seconds
                 )
 
         return result.value
@@ -806,15 +752,7 @@ class HandlerInfisical(
             Number of cache entries invalidated.
         """
         with self._cache_lock:
-            if secret_name is None:
-                count = len(self._cache)
-                self._cache.clear()
-                return count
-
-            to_remove = [k for k in self._cache if k.endswith(f"::{secret_name}")]
-            for k in to_remove:
-                del self._cache[k]
-            return len(to_remove)
+            return self._cache.invalidate(secret_name)
 
 
 __all__: list[str] = ["HandlerInfisical", "HANDLER_ID_INFISICAL"]
