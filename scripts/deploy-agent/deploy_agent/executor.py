@@ -109,7 +109,7 @@ from deploy_agent.ref_fence import (
     ModelRefLineageFacts,
     assert_ref_not_stale_branch,
 )
-from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
+from deploy_agent.routing import AGENT_CLONE_ROOT, lane_flags_for_instance
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
@@ -742,13 +742,11 @@ class ProdStabilityDigestMissingError(RuntimeError):
 
 
 class EnumInstancePhase(StrEnum):
-    """The deploy phases that exist on the .201 dev lane's host only (OMN-19522).
+    """The deploy phases an instance's ``disabled_phases`` can turn off (OMN-19522).
 
-    Each one reaches something .202 does not have: the ``omninode-gateway``
-    compose project and its systemd forwarder, the k3s onex-lab overlay (and its
-    failing-path repair build), the omninode_infra cloud image that the onex-api
-    pin delivers, and the Infisical container that the seed writes to (which the
-    dev-202 overlay disables, as the roles plan rules for that host).
+    The ``omninode-gateway`` compose project and its systemd forwarder, the k3s
+    lab overlay (and its failing-path repair build), the cloud image the
+    onex-api pin delivers, and the Infisical container the seed writes to.
     """
 
     GATEWAY_DEPLOY = "gateway-deploy"
@@ -775,10 +773,11 @@ class ModelLaneConfig(BaseModel):
       the running build (the lineage fence reads it). On the .201 dev lane the
       first health target's service name is also its container name; on a lane
       that renames containers it is not.
-    * ``disabled_phases`` -- the .201-only phases this lane never runs.
-    * ``disabled_services`` -- services the lane's overlay disables by profile.
-      Naming one in a compose argv would auto-activate its profile and start
-      it, so they are never compose arguments on this lane.
+    * ``disabled_phases`` -- the phases this lane never runs (``lane:`` block
+      and ``flags:``).
+    * ``disabled_services`` -- services the lane's overlay disables by profile
+      (never compose arguments: naming one would start it) and, with the gateway
+      phase off, the gateway project's.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -872,32 +871,29 @@ _LANE_CONFIGS: dict[EnumRuntimeLane, ModelLaneConfig] = {
 DEFAULT_DEV_INSTANCE = "dev-201"
 
 
+def lane_with_phases_off(
+    config: ModelLaneConfig, names: tuple[str, ...]
+) -> ModelLaneConfig:
+    """``config`` with the phases ``names`` spell off (OMN-21629)."""
+    phases = config.disabled_phases | {EnumInstancePhase(p) for p in names}
+    services = config.disabled_services
+    if EnumInstancePhase.GATEWAY_DEPLOY in phases:
+        services |= frozenset(DEV_LANE_GATEWAY_SERVICES)
+    return config.model_copy(
+        update={"disabled_phases": phases, "disabled_services": services}
+    )
+
+
 def dev_instance_lane_config(
     spec: ModelInstanceLane, *, repo_dir: str = REPO_DIR
 ) -> ModelLaneConfig:
     """An instance's dev-lane composition, from its routing-table ``lane:`` block.
 
-    OMN-19543: this replaces the per-instance literal OMN-19522 wrote for
-    dev-202. The instance's overlay is layered on the .201 dev lane's pair and
-    replaces everything that identifies a lane on a host (project, container
-    names, network, volumes, ports); the table names the rest. The health
-    targets keep the SERVICE names, as on the .201 dev lane: the verify
-    recreate (VERIFY_RECREATE_LANES) looks them up by compose label, and the
-    ports are the host ports the overlay publishes them on. Disabling the
-    gateway phase also disables the gateway project's services, which have no
-    lane on a host without that phase.
+    OMN-19543: its overlay layers on the default dev lane's pair. The health targets
+    keep the SERVICE names (the verify recreate looks them up by compose label)
+    on the host ports the overlay publishes.
     """
-    try:
-        phases = frozenset(EnumInstancePhase(p) for p in spec.disabled_phases)
-    except ValueError as exc:
-        raise RoutingTableError(
-            f"unknown disabled phase in {spec.disabled_phases!r} (known: "
-            f"{', '.join(p.value for p in EnumInstancePhase)})"
-        ) from exc
-    services = set(spec.disabled_services)
-    if EnumInstancePhase.GATEWAY_DEPLOY in phases:
-        services.update(DEV_LANE_GATEWAY_SERVICES)
-    return ModelLaneConfig(
+    config = ModelLaneConfig(
         lane=EnumRuntimeLane.DEV,
         compose_files=(
             COMPOSE_FILE,
@@ -912,9 +908,9 @@ def dev_instance_lane_config(
             ("runtime-effects", spec.health_ports.effects),
         ),
         runtime_container=spec.runtime_container,
-        disabled_phases=phases,
-        disabled_services=frozenset(services),
+        disabled_services=frozenset(spec.disabled_services),
     )
+    return lane_with_phases_off(config, spec.disabled_phases)
 
 
 def build_dev_instance_lane_configs(
@@ -923,7 +919,14 @@ def build_dev_instance_lane_configs(
     """Every dev instance's composition: the default's historical one, plus one
     per ``lane:`` block."""
     return {
-        DEFAULT_DEV_INSTANCE: _LANE_CONFIGS[EnumRuntimeLane.DEV],
+        # The default declares no ``lane:`` block, so its phases are the table's
+        # ``flags:`` (OMN-21629).
+        DEFAULT_DEV_INSTANCE: lane_with_phases_off(
+            _LANE_CONFIGS[EnumRuntimeLane.DEV],
+            lane_flags_for_instance(
+                AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE
+            ).disabled_phases,
+        ),
         **{
             name: dev_instance_lane_config(spec, repo_dir=repo_dir)
             for name, spec in specs.items()

@@ -467,6 +467,26 @@ def _derive_gateway_deploy_budget_from_this_checkout(
 
 
 @pytest.fixture(autouse=True)
+def _no_host_runtime_policy_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """OMN-21629: no test reads the runtime policy env of the host it runs on.
+
+    The file is read from the host checkout the agent runs from (REPO_DIR), so a
+    lab host that carries one (the tenant fold) made a dozen composition tests
+    red there while CI, which has none, stayed green. An absent file reads as
+    empty; the tests that want values patch the loader.
+    """
+    from deploy_agent import executor as executor_mod
+
+    monkeypatch.setattr(
+        executor_mod,
+        "RUNTIME_POLICY_ENV_FILE",
+        tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
+    )
+
+
+@pytest.fixture(autouse=True)
 def _resolve_gateway_lane_from_this_checkout(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -518,6 +538,25 @@ def _resolve_gateway_lane_from_this_checkout(
         executor_mod.DeployExecutor,
         "_deploy_gateway_lane",
         lambda self, *args, **kwargs: None,
+    )
+
+
+@pytest.fixture
+def gateway_phase_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the composition no ``disabled_phases`` flag touches in dev-201's slot.
+
+    The shipped routing table declares ``gateway-deploy`` off for dev-201
+    (OMN-21629), so a test that drives the gateway deploy itself asks for this
+    fixture by name and runs it on the composition of an instance that does not
+    carry that flag, the one the phase stays available to. The shipped slot is
+    otherwise left alone.
+    """
+    from deploy_agent import executor as executor_mod
+
+    monkeypatch.setitem(
+        executor_mod.DEV_INSTANCE_LANE_CONFIGS,
+        executor_mod.DEFAULT_DEV_INSTANCE,
+        executor_mod._LANE_CONFIGS[executor_mod.EnumRuntimeLane.DEV],
     )
 
 

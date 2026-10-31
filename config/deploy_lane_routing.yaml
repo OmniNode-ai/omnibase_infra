@@ -121,6 +121,16 @@ instances:
     consumer_group: onex-deploy-agent
     flags:
       max_dev_lag_minutes: 20
+      # OMN-21629. The lab dev lane has no cloud edge. The cloud dev broker the
+      # gateway forwarder dialled has been deleted by the cloud owner, the
+      # forwarder failed TLS on every deploy, the gateway-deploy phase raised
+      # GATEWAY_DEPLOY_FAILED and the dev boot guard rolled the lane back for a
+      # fault outside the lab runtime. Standing ruling 2026-10-30T13:23:48Z:
+      # cloud delegation does not work and nothing is tied to the cloud. The
+      # phase and the gateway-forwarder service are off here, so the guard
+      # judges only the lab runtime. The phase stays available to any instance
+      # that omits this entry: remove the line to turn it back on.
+      disabled_phases: [gateway-deploy]
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]
