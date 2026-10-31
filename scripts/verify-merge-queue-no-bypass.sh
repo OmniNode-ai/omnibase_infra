@@ -10,7 +10,6 @@ REPOS=(
   omnibase_core
   omnibase_infra
   omnibase_spi
-  omnibase_compat
   omnidash
   omniintelligence
   omnimemory

@@ -237,7 +237,9 @@ def test_vendored_set_is_an_ordered_subset_matching_the_provenance_check() -> No
     assert vendored == [repo for repo in manifest if repo in vendored]
     assert vendored[0] == "omnibase_core"
     assert "omnibase_infra" not in vendored  # the Docker build context itself
-    assert "omnibase_spi" not in vendored  # installed from the wheel
+    # OMN-17427 stage 0: spi is staged at its dev-merge tag and installed from the
+    # staged tree, not from the package index at an exact version.
+    assert vendored.index("omnibase_spi") == 1
 
     result = subprocess.run(
         [

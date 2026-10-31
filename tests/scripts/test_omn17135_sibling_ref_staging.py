@@ -41,7 +41,7 @@ STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 
 # The repos RT-1 clean-checks-out (stage_workspace.sh SIBLING_REPOS) plus the
 # ones the lock-pin preflight resolves out of SIBLING_CLONE_MANIFEST.
-_STAGED_SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
+_STAGED_SIBLINGS = ("omnibase_core", "omnimarket")
 _DIST_NAME = {
     "omnibase_core": "omnibase-core",
     "omnibase_compat": "omnibase-compat",
