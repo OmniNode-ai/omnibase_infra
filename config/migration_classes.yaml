@@ -499,3 +499,5 @@ migrations:
   intelligence/026_create_code_entities.sql: expand-only
   forward/nodes/node_context_install_confirm_trigger_effect/0000_create_compaction_activations.sql: forward-only
   forward/nodes/node_context_install_confirm_trigger_effect/0001_grant_compaction_activations.sql: expand-only
+  forward/nodes/node_projection_delegation_budget_readings/0000_create_delegation_budget_readings.sql: forward-only
+  forward/nodes/node_projection_delegation_budget_readings/0001_grant_omninode_runtime_delegation_budget_readings.sql: expand-only

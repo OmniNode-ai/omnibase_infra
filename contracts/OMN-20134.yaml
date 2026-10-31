@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20134"
+title: "omnibase_infra's Repo Evidence Gate caller pins the omnibase_core dev-merge tag whose receipt-gate carries the fix-parent fallback"
+summary: "No receipt-gate caller pin carried the fix-parent control fallback (control_uses_fix_parent); omnibase_infra's pull_request_target caller is held to a full-SHA pin by scripts/audit-runner-routing.py, so the pin stays the commit sha with the dev-merge tag named beside it and checked against it. The caller moves to the omnibase_core dev-merge tag dev-20261030152335-66d35d2283c3, whose receipt-gate.yml carries the fallback, and tests/ci/receipt_gate_pin.py holds that pin as the one test-side constant."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-caller-pins-fix-parent-dev-tag"
+    statement: "omnibase_infra's Repo Evidence Gate caller pins the omnibase_core receipt-gate reusable at a dev-merge tag whose receipt-gate.yml carries the fix-parent control fallback, keeping its job id and inputs."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: .github/workflows/call-repo-evidence-gate.yml pins receipt-gate.yml at 66d35d2283c3011c436799eacb9bce1a434ee6c9, the commit of the dev-merge tag dev-20261030152335-66d35d2283c3 named beside it -- falsifier: uv run pytest tests/ci/test_receipt_gate_caller_pin_omn20134.py -q -p no:randomly --no-cov -k caller_pins fails at the merge base, where the caller pins 1088a7b0303059c035ecc0e3ea33580f9556fe41"
+      - id: "AC2"
+        statement: "AC2: every required-checks.yaml cross_repo_ref that names the omnibase_core receipt-gate reusable carries the same commit and tag -- falsifier: uv run pytest tests/ci/test_receipt_gate_caller_pin_omn20134.py -q -p no:randomly --no-cov -k required_checks fails at the merge base, where the ref is 1088a7b0303059c035ecc0e3ea33580f9556fe41"
+evidence_requirements:
+  - kind: "tests"
+    description: "The caller's reusable pin is the dev-merge tag."
+    command: "uv run pytest tests/ci/test_receipt_gate_caller_pin_omn20134.py -q -p no:randomly --no-cov"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20134-caller-pins-dev-tag"
+    description: "AC1: the Repo Evidence Gate caller pins the omnibase_core receipt-gate reusable at the dev-merge tag dev-20261030152335-66d35d2283c3."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_receipt_gate_caller_pin_omn20134.py -q -p no:randomly --no-cov"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20134-required-checks-ref"
+    description: "AC2: required-checks.yaml names the same commit and dev-merge tag for the receipt-gate reusable."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_receipt_gate_caller_pin_omn20134.py -q -p no:randomly --no-cov -k required_checks"
+    binds_ac: ["AC2"]

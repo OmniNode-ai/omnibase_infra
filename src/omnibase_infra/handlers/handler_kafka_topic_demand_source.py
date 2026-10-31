@@ -27,6 +27,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import create_groupless_consumer
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.handlers.kafka_idle_topic_watches import IdleTopicWatch
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,13 @@ _OFFSET_CHUNK = 100
 
 async def _nothing_to_stop() -> None:
     return None
+
+
+async def _start_one(start: Callable[[str], Awaitable[None]], topic: str) -> None:
+    try:
+        await start(topic)
+    except Exception:  # boundary: one topic's start never ends the watch
+        logger.exception("Demand start failed for topic %s (OMN-18087)", topic)
 
 
 class HandlerKafkaTopicDemandSource:
@@ -144,8 +152,12 @@ class HandlerKafkaTopicDemandSource:
         for tp in watched:
             consumer.seek(tp, high[tp])
 
+        idle = IdleTopicWatch(logical_of[tp.topic] for tp in watched)
+
         async def on_first_physical_record(physical: str) -> None:
-            await on_first_record(logical_of[physical])
+            # _watch reports PHYSICAL (lane-namespaced) names on both its arrival
+            # path and its fallback path; map them back to the contract names.
+            await idle.start(logical_of[physical], on_first_record)
 
         task = asyncio.create_task(
             self._watch(consumer, watched, on_first_physical_record),
@@ -153,6 +165,7 @@ class HandlerKafkaTopicDemandSource:
         )
 
         def _log_watch_death(done: asyncio.Task[None]) -> None:
+            idle.release()
             if not done.cancelled() and done.exception() is not None:
                 logger.error(
                     "Boot subscription demand watch died; deferred contracts "
@@ -177,7 +190,7 @@ class HandlerKafkaTopicDemandSource:
         self,
         consumer: AIOKafkaConsumer,
         watched: list[TopicPartition],
-        on_first_record: Callable[[str], Awaitable[None]],
+        on_first_physical_record: Callable[[str], Awaitable[None]],
     ) -> None:
         remaining = list(watched)
         while remaining:
@@ -189,12 +202,7 @@ class HandlerKafkaTopicDemandSource:
                     "deferred contract now (OMN-18087)"
                 )
                 for topic in sorted({tp.topic for tp in remaining}):
-                    try:
-                        await on_first_record(topic)
-                    except Exception:  # boundary: one topic's start never ends it
-                        logger.exception(
-                            "Demand start failed for topic %s (OMN-18087)", topic
-                        )
+                    await _start_one(on_first_physical_record, topic)
                 return
             waiting = {tp.topic for tp in remaining}
             arrived = sorted(
@@ -208,12 +216,7 @@ class HandlerKafkaTopicDemandSource:
             remaining = [tp for tp in remaining if tp.topic not in arrived]
             consumer.pause(*started)
             for topic in arrived:
-                try:
-                    await on_first_record(topic)
-                except Exception:  # boundary: one topic's start never ends the watch
-                    logger.exception(
-                        "Demand start failed for topic %s (OMN-18087)", topic
-                    )
+                await _start_one(on_first_physical_record, topic)
 
 
 __all__: list[str] = ["HandlerKafkaTopicDemandSource"]
