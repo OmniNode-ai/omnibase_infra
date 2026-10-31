@@ -8,8 +8,10 @@ request model declares ``extra="forbid"``, so a null would be a shape change on
 every existing caller's payload. Keys a released consumer may not declare ride
 in the ``metadata`` map, which every released request consumer accepts.
 
-Moved out of ``omnibase_infra.cli.cli_delegate`` unchanged when the session
-model joined the metadata (OMN-20557), so the command line module only shrinks.
+Moved out of ``omnibase_infra.cli.cli_delegate`` when the session model joined
+the metadata (OMN-20557), so the command line module only shrinks. The caller
+parameter is now typed by a Protocol rather than the command line's model, and
+every metadata write is collision-checked.
 """
 
 from __future__ import annotations
@@ -33,10 +35,10 @@ __all__ = [
 #: (OMN-19514). omnimarket's delegate-skill handler reads the same key.
 DELEGATE_TICKET_METADATA_KEY = "ticket_id"
 
-#: The request ``metadata`` key naming the caller's lane (OMN-19860). The same
-#: value as ``omnibase_infra.cli.delegate_caller.DELEGATE_CALLER_LANE_METADATA_KEY``,
-#: declared here so this module depends on nothing in the command line package;
-#: a test pins the two equal.
+#: The request ``metadata`` key naming the caller's lane (OMN-19860). The one
+#: definition: ``omnibase_infra.cli.delegate_caller`` imports it from here, so
+#: this module depends on nothing in the command line package and the key cannot
+#: drift. omnimarket's delegate-skill handler and projection read the same key.
 DELEGATE_CALLER_LANE_METADATA_KEY = "caller_lane"
 
 
@@ -48,6 +50,23 @@ class ProtocolDelegateRequestCaller(Protocol):
 
     @property
     def session_id(self) -> str | None: ...
+
+
+def _merge_metadata(
+    metadata: dict[str, str], entries: Mapping[str, str], source: str
+) -> None:
+    """Add ``entries`` to ``metadata``; refuse a key already written.
+
+    Every metadata source goes through here, so ticket, caller lane, lineage,
+    named tests and the session model are each written once, never overwritten.
+    """
+    clash = sorted(entries.keys() & metadata.keys())
+    if clash:
+        raise ValueError(
+            f"request metadata already names {clash}; {source} is written once, "
+            "never overwritten"
+        )
+    metadata.update(entries)
 
 
 def build_delegate_request_payload(
@@ -115,25 +134,24 @@ def build_delegate_request_payload(
     # the session rides in the declared ``session_id`` field, only ever as a
     # UUID. Each is omitted entirely when unresolved.
     if caller is not None and caller.lane is not None:
-        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+        _merge_metadata(
+            metadata,
+            {DELEGATE_CALLER_LANE_METADATA_KEY: caller.lane},
+            "the caller lane",
+        )
     # OMN-20606: the delegation this run falls back or escalates from, already
     # validated by resolve_delegate_lineage. Omitted entirely when unnamed.
     if lineage:
-        metadata.update(lineage)
+        _merge_metadata(metadata, lineage, "the lineage")
     # OMN-17427: the tests a code answer is graded by, under the metadata keys
     # omnimarket's delegation port reads. Omitted entirely when none are named.
     if named_tests:
-        metadata.update(named_tests)
+        _merge_metadata(metadata, named_tests, "the named tests")
     # OMN-20557: the caller's session model, the run's savings baseline, under
     # the metadata key omnimarket's handler reads. Omitted entirely when unset.
     if session_model is not None:
         entry = ModelDelegateSessionModel(model=session_model).as_metadata()
-        if entry.keys() & metadata.keys():
-            raise ValueError(
-                f"request metadata already names {sorted(entry.keys() & metadata.keys())}; "
-                "the session model is written once, never overwritten"
-            )
-        metadata.update(entry)
+        _merge_metadata(metadata, entry, "the session model")
     if metadata:
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:

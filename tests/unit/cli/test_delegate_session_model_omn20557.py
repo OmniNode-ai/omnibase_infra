@@ -239,12 +239,39 @@ def test_golden_chain_without_the_flag_writes_no_key_and_says_none(
     assert "session model: none" in result.stderr
 
 
-def test_the_caller_lane_key_matches_the_command_lines() -> None:
-    from omnibase_infra.cli.delegate_caller import (
-        DELEGATE_CALLER_LANE_METADATA_KEY as CLI_KEY,
-    )
+def test_the_caller_lane_key_has_one_definition() -> None:
+    from omnibase_infra.cli import delegate_caller
+    from omnibase_infra.models.delegation import delegate_request_payload
+
+    assert delegate_request_payload.DELEGATE_CALLER_LANE_METADATA_KEY == "caller_lane"
+    assert not hasattr(delegate_caller, "DELEGATE_CALLER_LANE_METADATA_KEY")
+
+
+def _build(**kwargs: Any) -> dict[str, object]:
     from omnibase_infra.models.delegation.delegate_request_payload import (
-        DELEGATE_CALLER_LANE_METADATA_KEY,
+        build_delegate_request_payload,
     )
 
-    assert DELEGATE_CALLER_LANE_METADATA_KEY == CLI_KEY
+    return build_delegate_request_payload(
+        prompt="p",
+        task_type="document",
+        source="cli",
+        max_tokens=None,
+        correlation_id=uuid4(),
+        **kwargs,
+    )
+
+
+def test_lineage_refuses_to_overwrite_the_ticket() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(ticket_id="OMN-1", lineage={"ticket_id": "x"})
+
+
+def test_named_tests_refuse_to_overwrite_the_ticket() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(ticket_id="OMN-1", named_tests={"ticket_id": "x"})
+
+
+def test_named_tests_refuse_to_overwrite_lineage() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _build(lineage={"a": "1"}, named_tests={"a": "2"})
