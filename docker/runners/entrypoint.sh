@@ -318,13 +318,18 @@ _as_runner() {
 # Registration
 # ---------------------------------------------------------------------------
 
+# OMN-21765: the registration token is handed to config.sh in the environment
+# (ACTIONS_RUNNER_INPUT_TOKEN, which the runner reads for any input it is not
+# given as a flag), never as --token. A container process is listed in the HOST's
+# ps with its whole argv, so `config.sh --token <value>` showed the token to
+# every login on the host for as long as registration took. The variable is set
+# for the one config.sh call and is not exported to the listener.
 _register() {
     echo "[entrypoint] Registering runner: ${RUNNER_NAME} @ ${GITHUB_ORG_URL}"
     echo "[entrypoint] Labels: ${RUNNER_LABELS} | Group: ${RUNNER_GROUP:-<none: repo-scoped>}"
 
     local config_args=(
         --url "${GITHUB_ORG_URL}"
-        --token "${RUNNER_TOKEN}"
         --name "${RUNNER_NAME}"
         --labels "${RUNNER_LABELS}"
         --work "${RUNNER_WORK_DIR}"
@@ -339,7 +344,7 @@ _register() {
         config_args+=(--runnergroup "${RUNNER_GROUP}")
     fi
 
-    _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
+    ACTIONS_RUNNER_INPUT_TOKEN="${RUNNER_TOKEN}" _as_runner "${RUNNER_HOME}/config.sh" "${config_args[@]}"
 }
 
 _deregister() {
@@ -348,7 +353,7 @@ _deregister() {
         return 0
     fi
     echo "[entrypoint] Attempting graceful de-registration..."
-    _as_runner "${RUNNER_HOME}/config.sh" remove --token "${RUNNER_TOKEN}" 2>/dev/null || true
+    ACTIONS_RUNNER_INPUT_TOKEN="${RUNNER_TOKEN}" _as_runner "${RUNNER_HOME}/config.sh" remove 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
