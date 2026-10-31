@@ -27,6 +27,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import create_groupless_consumer
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
+from omnibase_infra.handlers.kafka_idle_topic_watches import IdleTopicWatch
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
@@ -37,24 +38,13 @@ _POLL_TIMEOUT_MS = 1000
 _OFFSET_CHUNK = 100
 
 
-# OMN-21629: the contract topics this process watches for a first record that
-# has not arrived yet. Their contracts are deferred to that record, so their
-# topics are absent from the live bus registry by design; the runtime health
-# monitor reads this to keep them out of projection_attachment. A topic leaves
-# the set when its first record starts its contracts and is judged by the live
-# registry from then on, so a demand start that fails is still reported.
-IDLE_WATCHED_TOPICS: set[str] = set()
-
-
 async def _nothing_to_stop() -> None:
     return None
 
 
-async def _start_one(
-    on_first_record: Callable[[str], Awaitable[None]], topic: str
-) -> None:
+async def _start_one(start: Callable[[str], Awaitable[None]], topic: str) -> None:
     try:
-        await on_first_record(topic)
+        await start(topic)
     except Exception:  # boundary: one topic's start never ends the watch
         logger.exception("Demand start failed for topic %s (OMN-18087)", topic)
 
@@ -162,11 +152,12 @@ class HandlerKafkaTopicDemandSource:
         for tp in watched:
             consumer.seek(tp, high[tp])
 
-        IDLE_WATCHED_TOPICS.update(logical_of[tp.topic] for tp in watched)
+        idle = IdleTopicWatch(logical_of[tp.topic] for tp in watched)
 
         async def on_first_physical_record(physical: str) -> None:
-            IDLE_WATCHED_TOPICS.discard(logical_of[physical])
-            await on_first_record(logical_of[physical])
+            # _watch reports PHYSICAL (lane-namespaced) names on both its arrival
+            # path and its fallback path; map them back to the contract names.
+            await idle.start(logical_of[physical], on_first_record)
 
         task = asyncio.create_task(
             self._watch(consumer, watched, on_first_physical_record),
@@ -174,6 +165,7 @@ class HandlerKafkaTopicDemandSource:
         )
 
         def _log_watch_death(done: asyncio.Task[None]) -> None:
+            idle.release()
             if not done.cancelled() and done.exception() is not None:
                 logger.error(
                     "Boot subscription demand watch died; deferred contracts "
@@ -198,7 +190,7 @@ class HandlerKafkaTopicDemandSource:
         self,
         consumer: AIOKafkaConsumer,
         watched: list[TopicPartition],
-        on_first_record: Callable[[str], Awaitable[None]],
+        on_first_physical_record: Callable[[str], Awaitable[None]],
     ) -> None:
         remaining = list(watched)
         while remaining:
@@ -210,7 +202,7 @@ class HandlerKafkaTopicDemandSource:
                     "deferred contract now (OMN-18087)"
                 )
                 for topic in sorted({tp.topic for tp in remaining}):
-                    await _start_one(on_first_record, topic)
+                    await _start_one(on_first_physical_record, topic)
                 return
             waiting = {tp.topic for tp in remaining}
             arrived = sorted(
@@ -224,7 +216,7 @@ class HandlerKafkaTopicDemandSource:
             remaining = [tp for tp in remaining if tp.topic not in arrived]
             consumer.pause(*started)
             for topic in arrived:
-                await _start_one(on_first_record, topic)
+                await _start_one(on_first_physical_record, topic)
 
 
 __all__: list[str] = ["HandlerKafkaTopicDemandSource"]

@@ -37,9 +37,7 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumConsumerGroupPurpose
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
 from omnibase_infra.errors import InfraConnectionError, ModelInfraErrorContext
-from omnibase_infra.handlers.handler_kafka_topic_demand_source import (
-    IDLE_WATCHED_TOPICS,
-)
+from omnibase_infra.handlers.kafka_idle_topic_watches import idle_watched_topics
 from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_consumer_sync_status import (
     ModelConsumerSyncStatus,
@@ -782,7 +780,7 @@ class ServiceRuntimeHealthMonitor:
             # is deferred to that record (OMN-18087), not unattached. Selecting
             # it made every boot read DEGRADED: 11 of 18 projections on the dev
             # effects runtime, 2026-10-31, each on a watched topic.
-            idle = frozenset(IDLE_WATCHED_TOPICS)
+            idle = idle_watched_topics()
             projections = tuple(
                 ref
                 for ref in select_projection_contracts(
