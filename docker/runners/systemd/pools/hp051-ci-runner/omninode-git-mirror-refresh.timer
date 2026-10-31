@@ -1,0 +1,12 @@
+# OMN-17232 -- refresh cadence for the h051 pool's git mirrors (the fleet's 2 minutes, OMN-14027 C2).
+[Unit]
+Description=OmniNode h051 runner pool git mirror refresh timer (OMN-17232)
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+AccuracySec=15s
+Unit=omninode-git-mirror-refresh.service
+
+[Install]
+WantedBy=timers.target

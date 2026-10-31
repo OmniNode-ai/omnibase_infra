@@ -1,0 +1,52 @@
+# OMN-17232 -- the git mirror daemon of the h051 pool (OMN-14027 C2, one copy per runner host).
+#
+# Same shape as docker/runners/systemd/omninode-git-mirror-daemon.service with the mirror root on the data volume
+# (/data/scratch/git-mirror) instead of the boot volume. Bound to the docker bridge gateway of the pool's compose
+# project, never the LAN or the tailnet: git:// is unauthenticated and the private mirrors must stay reachable only
+# from containers that already hold an authenticated checkout of the same code. The address is host configuration,
+# read from the required file /etc/default/omninode-git-mirror (OMNI_GIT_MIRROR_LISTEN=<the gateway>, which is the
+# address the runners' pre-seed already defaults to), so this public file names no address and the unit refuses to
+# start without it. Read-only: the daemon is never given receive-pack.
+[Unit]
+Description=OmniNode h051 runner pool git mirror daemon (OMN-17232)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/runners/systemd/pools/hp051-ci-runner
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+# The compose bridge can appear after boot. Keep retrying the preflight until it exists;
+# do not exhaust systemd's start limit before the first runner deployment creates it.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=jonah
+Group=jonah
+Environment=HOME=/home/jonah
+EnvironmentFile=/etc/default/omninode-git-mirror
+# Refuse an absent bridge, an empty/wildcard address, or a gateway not assigned to this host.
+# A missing bridge leaves a failed preflight in the journal and retries after RestartSec.
+ExecStartPre=/bin/sh -ec 'gateway=$$(docker network inspect hp051-ci-runner_default --format "{{(index .IPAM.Config 0).Gateway}}"); test -n "$${gateway}"; test "$${gateway}" = "$${OMNI_GIT_MIRROR_LISTEN}"'
+ExecStartPre=/usr/bin/python3 -c 'import ipaddress, os, socket, sys; address = ipaddress.ip_address(os.environ["OMNI_GIT_MIRROR_LISTEN"]); sys.exit("mirror listen address must be unicast") if address.is_unspecified or address.is_multicast else None; probe = socket.socket(socket.AF_INET6 if address.version == 6 else socket.AF_INET); probe.bind((str(address), 0)); probe.close()'
+ExecStart=/usr/lib/git-core/git-daemon \
+    --verbose \
+    --reuseaddr \
+    --export-all \
+    --disable=receive-pack \
+    --forbid-override=receive-pack \
+    --disable=upload-archive \
+    --forbid-override=upload-archive \
+    --base-path=/data/scratch/git-mirror \
+    --listen=${OMNI_GIT_MIRROR_LISTEN} \
+    --port=9418 \
+    --timeout=60 \
+    --max-connections=24 \
+    /data/scratch/git-mirror
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/data/scratch/git-mirror
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

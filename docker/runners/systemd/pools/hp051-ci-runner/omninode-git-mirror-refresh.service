@@ -1,0 +1,25 @@
+# OMN-17232 -- one upstream fetch per repo per interval for the h051 pool (OMN-14027 C2).
+#
+# Type=oneshot is load-bearing (no overlapping run), together with the flock inside the script. The mirror root is
+# set by OMNI_GIT_MIRROR_ROOT, so the script is the fleet's unchanged git-mirror-refresh.sh, as rsynced to the host.
+[Unit]
+Description=OmniNode h051 runner pool git mirror refresh (OMN-17232)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/tree/dev/docker/runners/systemd/pools/hp051-ci-runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jonah
+Group=jonah
+Environment=HOME=/home/jonah
+Environment=OMNI_GIT_MIRROR_ROOT=/data/scratch/git-mirror
+ExecStart=/home/jonah/.omnibase/runners/docker/runners/git-mirror-refresh.sh
+# No SuccessExitStatus: the script exits 1 on a failed fetch, clone or pack step, and the unit must then read failed so a
+# persistently stale mirror is visible. Runners stay fail-open (the pre-seed tolerates a stale mirror); the timer keeps firing.
+TimeoutStartSec=900
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
