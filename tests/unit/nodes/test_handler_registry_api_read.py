@@ -68,10 +68,12 @@ class TestHandlerRegistryApiListNodes:
         service.list_nodes = AsyncMock(return_value=([], _make_pagination(), []))
         handler = HandlerRegistryApiListNodes(service=service)
 
-        request = ModelRegistryApiRequest(operation="list_nodes", limit=10, offset=0)
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id, operation="list_nodes", limit=10, offset=0
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.list_nodes.assert_called_once_with(
             limit=10,
@@ -82,6 +84,7 @@ class TestHandlerRegistryApiListNodes:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert "results" in response.data
 
 
@@ -99,10 +102,12 @@ class TestHandlerRegistryApiGetNode:
         service.get_node = AsyncMock(return_value=(mock_node, []))
         handler = HandlerRegistryApiGetNode(service=service)
 
-        request = ModelRegistryApiRequest(operation="get_node", node_id=node_id)
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id, operation="get_node", node_id=node_id
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.get_node.assert_called_once_with(
             node_id=node_id,
@@ -110,6 +115,7 @@ class TestHandlerRegistryApiGetNode:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert response.data["result"] is not None
 
 
@@ -124,12 +130,15 @@ class TestHandlerRegistryApiListContracts:
         service.list_contracts = AsyncMock(return_value=([], _make_pagination(), []))
         handler = HandlerRegistryApiListContracts(service=service)
 
-        request = ModelRegistryApiRequest(
-            operation="list_contracts", limit=50, offset=0
-        )
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id,
+            operation="list_contracts",
+            limit=50,
+            offset=0,
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.list_contracts.assert_called_once_with(
             limit=50,
@@ -138,6 +147,7 @@ class TestHandlerRegistryApiListContracts:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert "results" in response.data
 
 
@@ -158,12 +168,14 @@ class TestHandlerRegistryApiGetContract:
         service.get_contract = AsyncMock(return_value=(mock_contract, []))
         handler = HandlerRegistryApiGetContract(service=service)
 
-        request = ModelRegistryApiRequest(
-            operation="get_contract", contract_id=contract_id
-        )
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id,
+            operation="get_contract",
+            contract_id=contract_id,
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.get_contract.assert_called_once_with(
             contract_id=str(contract_id),
@@ -171,6 +183,7 @@ class TestHandlerRegistryApiGetContract:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert response.data["result"] is not None
 
 
@@ -185,10 +198,12 @@ class TestHandlerRegistryApiListTopics:
         service.list_topics = AsyncMock(return_value=([], _make_pagination(), []))
         handler = HandlerRegistryApiListTopics(service=service)
 
-        request = ModelRegistryApiRequest(operation="list_topics", limit=25, offset=5)
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id, operation="list_topics", limit=25, offset=5
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.list_topics.assert_called_once_with(
             limit=25,
@@ -197,6 +212,7 @@ class TestHandlerRegistryApiListTopics:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert "results" in response.data
 
 
@@ -216,12 +232,14 @@ class TestHandlerRegistryApiGetTopic:
         service.get_topic_detail = AsyncMock(return_value=(mock_topic, []))
         handler = HandlerRegistryApiGetTopic(service=service)
 
-        request = ModelRegistryApiRequest(
-            operation="get_topic", topic_suffix="agent.routing.v1"
-        )
         correlation_id = uuid4()
+        request = ModelRegistryApiRequest(
+            correlation_id=correlation_id,
+            operation="get_topic",
+            topic_suffix="agent.routing.v1",
+        )
 
-        response = await handler.handle(request.model_dump(), correlation_id)
+        response = await handler.handle(request)
 
         service.get_topic_detail.assert_called_once_with(
             topic_suffix="agent.routing.v1",
@@ -229,4 +247,5 @@ class TestHandlerRegistryApiGetTopic:
         )
         assert isinstance(response, ModelRegistryApiResponse)
         assert response.success is True
+        assert response.correlation_id == correlation_id
         assert response.data["result"] is not None

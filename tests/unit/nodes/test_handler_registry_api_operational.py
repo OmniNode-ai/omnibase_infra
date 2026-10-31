@@ -31,6 +31,7 @@ from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api
     HandlerRegistryApiGetWidgetMapping,
 )
 from omnibase_infra.nodes.node_registry_api_effect.models import (
+    ModelRegistryApiRequest,
     ModelRegistryApiResponse,
 )
 
@@ -58,10 +59,15 @@ class TestHandlerRegistryApiGetHealth:
             pass
 
         # Simply call handle — all components will fail gracefully in test env
-        result = await handler.handle(request=object(), correlation_id=correlation_id)
+        result = await handler.handle(
+            ModelRegistryApiRequest(
+                operation="get_health", correlation_id=correlation_id
+            )
+        )
 
         assert isinstance(result, ModelRegistryApiResponse)
         assert result.operation == "get_health"
+        assert result.correlation_id == correlation_id
         assert result.success is True
         assert "status" in result.data
         assert "components" in result.data
@@ -88,7 +94,9 @@ class TestHandlerRegistryApiGetHealth:
         with patch(
             "aiokafka.admin.AIOKafkaAdminClient", return_value=mock_admin
         ) as admin_cls:
-            result = await handler.handle(request=object(), correlation_id=uuid4())
+            result = await handler.handle(
+                ModelRegistryApiRequest(operation="get_health", correlation_id=uuid4())
+            )
 
         from omnibase_infra.event_bus.kafka_auth import MSKTokenProvider
 
@@ -116,11 +124,14 @@ class TestHandlerRegistryApiGetWidgetMapping:
             handler = HandlerRegistryApiGetWidgetMapping(mapping_path=tmp_path)
             correlation_id = uuid4()
             result = await handler.handle(
-                request=object(), correlation_id=correlation_id
+                ModelRegistryApiRequest(
+                    operation="get_widget_mapping", correlation_id=correlation_id
+                )
             )
 
             assert isinstance(result, ModelRegistryApiResponse)
             assert result.operation == "get_widget_mapping"
+            assert result.correlation_id == correlation_id
             assert result.success is True
             assert "widget_mapping" in result.data
             mapping = result.data["widget_mapping"]
@@ -135,7 +146,11 @@ class TestHandlerRegistryApiGetWidgetMapping:
         handler = HandlerRegistryApiGetWidgetMapping(
             mapping_path=Path("/nonexistent/widget_mapping.yaml")
         )
-        result = await handler.handle(request=object(), correlation_id=uuid4())
+        result = await handler.handle(
+            ModelRegistryApiRequest(
+                operation="get_widget_mapping", correlation_id=uuid4()
+            )
+        )
 
         assert isinstance(result, ModelRegistryApiResponse)
         assert result.success is False
@@ -171,13 +186,26 @@ class TestHandlerRegistryApiGetDiscovery:
             get_widget_mapping=mock_get_widget_mapping,
         )
         correlation_id = uuid4()
-        result = await handler.handle(request=object(), correlation_id=correlation_id)
+        result = await handler.handle(
+            ModelRegistryApiRequest(
+                operation="get_discovery", correlation_id=correlation_id
+            )
+        )
 
-        mock_list_nodes.handle.assert_awaited_once()
-        mock_get_widget_mapping.handle.assert_awaited_once()
+        mock_list_nodes.handle.assert_awaited_once_with(
+            ModelRegistryApiRequest(
+                operation="list_nodes", correlation_id=correlation_id
+            )
+        )
+        mock_get_widget_mapping.handle.assert_awaited_once_with(
+            ModelRegistryApiRequest(
+                operation="get_widget_mapping", correlation_id=correlation_id
+            )
+        )
 
         assert isinstance(result, ModelRegistryApiResponse)
         assert result.operation == "get_discovery"
+        assert result.correlation_id == correlation_id
         assert result.success is True
         assert result.data["nodes"] == ["node-a"]
         assert "instances" not in result.data

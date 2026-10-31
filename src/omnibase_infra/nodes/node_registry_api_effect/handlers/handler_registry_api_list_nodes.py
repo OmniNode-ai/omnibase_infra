@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -57,26 +56,27 @@ class HandlerRegistryApiListNodes:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle list_nodes operation.
 
-        Deserialises the request, calls ServiceRegistryDiscovery.list_nodes(),
+        Calls ServiceRegistryDiscovery.list_nodes(),
         and returns a ModelRegistryApiResponse containing paginated node data.
 
         Args:
-            request: ModelRegistryApiRequest (or mapping-compatible object).
-            correlation_id: Distributed tracing identifier.
+            request: Typed registry API request with a correlation ID.
 
         Returns:
             ModelRegistryApiResponse with nodes list, pagination info, and
             any warnings from the service layer.
         """
-        req = ModelRegistryApiRequest.model_validate(request)
+        correlation_id = request.correlation_id
         nodes, pagination, warnings = await self._service.list_nodes(
-            limit=req.limit,
-            offset=req.offset,
-            state=req.state,
-            node_type=req.node_type,
+            limit=request.limit,
+            offset=request.offset,
+            state=request.state,
+            node_type=request.node_type,
             correlation_id=correlation_id,
         )
         logger.debug(
@@ -85,7 +85,7 @@ class HandlerRegistryApiListNodes:
             extra={"correlation_id": str(correlation_id)},
         )
         return ModelRegistryApiResponse(
-            operation=req.operation,
+            operation=request.operation,
             correlation_id=correlation_id,
             success=True,
             data={

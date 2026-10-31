@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -73,26 +72,32 @@ class HandlerRegistryApiGetDiscovery:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_discovery operation.
 
         Calls list_nodes and get_widget_mapping and merges their data payloads
         into a single projection-based discovery response.
 
         Args:
-            request: ModelRegistryApiRequest (or compatible mapping).
-            correlation_id: Distributed tracing identifier.
+            request: Typed registry API request with a correlation ID.
 
         Returns:
             ModelRegistryApiResponse with aggregated discovery payload.
         """
+        correlation_id = request.correlation_id
         nodes_request = ModelRegistryApiRequest(
             operation="list_nodes",
             correlation_id=correlation_id,
         )
 
-        nodes_resp = await self._list_nodes.handle(nodes_request, correlation_id)
-        mapping_resp = await self._get_widget_mapping.handle(object(), correlation_id)
+        nodes_resp = await self._list_nodes.handle(nodes_request)
+        mapping_request = ModelRegistryApiRequest(
+            operation="get_widget_mapping",
+            correlation_id=correlation_id,
+        )
+        mapping_resp = await self._get_widget_mapping.handle(mapping_request)
 
         warnings: list[str] = []
         nodes_data: dict = {}
