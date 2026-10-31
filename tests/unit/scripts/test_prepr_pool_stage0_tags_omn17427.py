@@ -163,6 +163,7 @@ def test_pool_clone_selects_infra_tag_and_only_current_siblings(
     assert done.returncode == 0, done.stdout + done.stderr
     root = tmp_path / "work/root"
     assert {path.name for path in root.iterdir()} == set(REPOS)
+    assert "omnibase_compat" not in done.stdout + done.stderr
     expected = (
         commits["omnibase_infra"]
         if use_tag
@@ -209,6 +210,10 @@ def test_pool_staging_passes_spi_pins_or_selects_dev_tags(
     record = json.loads((workspace / "sibling-vcs-provenance.json").read_text())
     assert set(record["siblings"]) == set(SIBLINGS)
     assert set(refs["repos"]) == set(SIBLINGS)
+    assert "omnibase_compat" not in cloned.stdout + cloned.stderr
+    assert "omnibase_compat" not in done.stdout + done.stderr
+    assert "omnibase_compat" not in json.dumps(refs) + json.dumps(record)
+    assert "compat" not in (tmp_path / "make.log").read_text()
     for repo in SIBLINGS:
         expected = commits[repo] if stage_tags else before[repo]
         entry = record["siblings"][repo]
