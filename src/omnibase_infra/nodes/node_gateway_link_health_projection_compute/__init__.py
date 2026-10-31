@@ -20,13 +20,9 @@ from omnibase_infra.nodes.node_gateway_link_health_projection_compute.models imp
 from omnibase_infra.nodes.node_gateway_link_health_projection_compute.node import (
     NodeGatewayLinkHealthProjectionCompute,
 )
-from omnibase_infra.nodes.node_gateway_link_health_projection_compute.registry import (
-    RegistryInfraGatewayLinkHealthProjection,
-)
 
 __all__ = [
     "HandlerGatewayLinkHealthProjection",
     "ModelPayloadGatewayLinkHealthUpsert",
     "NodeGatewayLinkHealthProjectionCompute",
-    "RegistryInfraGatewayLinkHealthProjection",
 ]

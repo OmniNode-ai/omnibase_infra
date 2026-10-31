@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: Handlers and nodes in omnibase_infra are built at a binding site or not at all; dead node registry factories are deleted
+summary: The contracts_and_di check reported 133 handler_hand_construction findings in src/omnibase_infra. This change deletes 24 node registry factories that nothing called (their only references were re-exports in the node's own package), and moves the six handlers that composed a HandlerDb by hand onto one binding site, handlers/container/container_handler_db.py. The check reports 103 findings after, with no finding added in any other rule.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-slice-handler-construction
+    statement: No node registry factory that nothing calls remains in the 24 node packages, and the handlers that composed a HandlerDb obtain it from the binding site.
+    acceptance:
+      - id: AC41
+        statement: 'AC41: the 24 node packages hold no registry directory and their package exports name no registry class -- falsifier: a registry directory that is still present in one of the 24 node packages'
+      - id: AC42
+        statement: 'AC42: the contracts_and_di check reports no handler_hand_construction finding in the six handlers that composed a HandlerDb, reports a planted construction as the positive control, and the binding site builds a HandlerDb -- falsifier: a finding from one of the six handlers, or none from the planted module'
+evidence_requirements:
+  - kind: tests
+    description: The registry directories are gone, the six handlers hold no hand construction, the binding site builds a HandlerDb, and the planted construction is reported.
+    command: uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -q
+  - kind: tests
+    description: The handlers that compose a HandlerDb keep their behaviour.
+    command: uv run --frozen pytest tests/unit/nodes/node_ledger_write_effect tests/unit/nodes/node_validation_ledger_write_effect tests/unit/nodes/node_gateway_link_health_write_effect -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-ac41-no-dead-registry
+    description: The 24 node packages hold no registry directory. Fails at the merge base, where each held one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k dead_registry_factory -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC41
+  - id: dod-omn21623-ac42-no-hand-construction
+    description: The check reports no handler_hand_construction finding in the six handlers and reports the planted construction. Fails at the merge base, where each of the six held one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/handlers/container/test_handler_hand_construction_omn21623.py -k 'planted or binding_site or builds_nothing_by_hand' -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC42
+  - id: dod-omn21623-deploy-binding-site
+    description: >-
+      Post-deploy probe: the runtime container builds a HandlerDb through the binding site. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.container.container_handler_db import bind_handler_db'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

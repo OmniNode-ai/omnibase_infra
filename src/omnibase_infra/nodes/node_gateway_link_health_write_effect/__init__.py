@@ -19,13 +19,9 @@ from omnibase_infra.nodes.node_gateway_link_health_write_effect.models import (
 from omnibase_infra.nodes.node_gateway_link_health_write_effect.node import (
     NodeGatewayLinkHealthWriteEffect,
 )
-from omnibase_infra.nodes.node_gateway_link_health_write_effect.registry import (
-    RegistryInfraGatewayLinkHealthWrite,
-)
 
 __all__ = [
     "HandlerGatewayLinkHealthUpsert",
     "ModelGatewayLinkHealthUpsertResult",
     "NodeGatewayLinkHealthWriteEffect",
-    "RegistryInfraGatewayLinkHealthWrite",
 ]

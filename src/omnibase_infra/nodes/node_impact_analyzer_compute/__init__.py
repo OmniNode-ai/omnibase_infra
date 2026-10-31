@@ -18,7 +18,6 @@ Available Exports:
     - ModelImpactAnalysisRequest: Typed def-B request payload
     - ModelImpactedArtifact: Per-artifact impact model
     - ModelImpactAnalysisResult: Aggregated result model
-    - RegistryInfraImpactAnalyzer: DI registry
 
 Tracking:
     - OMN-3935: Task 3 - Impact Analyzer COMPUTE Node
@@ -40,9 +39,6 @@ from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impacted_art
 from omnibase_infra.nodes.node_impact_analyzer_compute.node import (
     NodeImpactAnalyzerCompute,
 )
-from omnibase_infra.nodes.node_impact_analyzer_compute.registry import (
-    RegistryInfraImpactAnalyzer,
-)
 
 __all__: list[str] = [
     # Node
@@ -53,6 +49,4 @@ __all__: list[str] = [
     "ModelImpactAnalysisRequest",
     "ModelImpactedArtifact",
     "ModelImpactAnalysisResult",
-    # Registry
-    "RegistryInfraImpactAnalyzer",
 ]

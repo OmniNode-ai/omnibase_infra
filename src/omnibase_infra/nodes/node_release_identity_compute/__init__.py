@@ -30,14 +30,10 @@ from omnibase_infra.nodes.node_release_identity_compute.models import (
 from omnibase_infra.nodes.node_release_identity_compute.node import (
     NodeReleaseIdentityCompute,
 )
-from omnibase_infra.nodes.node_release_identity_compute.registry import (
-    RegistryInfraReleaseIdentityCompute,
-)
 
 __all__: list[str] = [
     "HandlerReleaseIdentity",
     "ModelReleaseIdentityDecision",
     "ModelReleaseIdentityRequest",
     "NodeReleaseIdentityCompute",
-    "RegistryInfraReleaseIdentityCompute",
 ]

@@ -11,7 +11,6 @@ Architecture:
     - node.py: Declarative node shell extending NodeCompute
     - handlers/: Cursor-paginated query handler with dynamic WHERE
     - models/: Payload (filters+cursor) and result (decisions+cursor) models
-    - registry/: Infrastructure registry for dependency injection
     - contract.yaml: Capability definitions and IO routing
 
 Node Type: COMPUTE_GENERIC
@@ -45,9 +44,6 @@ from omnibase_infra.nodes.node_decision_store_query_compute.models import (
 from omnibase_infra.nodes.node_decision_store_query_compute.node import (
     NodeDecisionStoreQueryCompute,
 )
-from omnibase_infra.nodes.node_decision_store_query_compute.registry import (
-    RegistryInfraDecisionStoreQuery,
-)
 
 __all__: list[str] = [
     # Node
@@ -60,6 +56,4 @@ __all__: list[str] = [
     # Models
     "ModelPayloadQueryDecisions",
     "ModelResultDecisionList",
-    # Registry
-    "RegistryInfraDecisionStoreQuery",
 ]
