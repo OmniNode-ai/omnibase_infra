@@ -12,17 +12,17 @@ Computes the tier transition by delegating to
 from __future__ import annotations
 
 import logging
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumLifecycleTier,
-    EnumValidationVerdict,
 )
 from omnibase_infra.nodes.node_pattern_lifecycle_effect.models import (
     ModelLifecycleResult,
     ModelLifecycleState,
+    ModelLifecycleUpdateRequest,
 )
 from omnibase_infra.utils import sanitize_error_message
 
@@ -79,10 +79,7 @@ class HandlerLifecycleUpdate:
 
     async def handle(
         self,
-        pattern_id: UUID,
-        verdict: EnumValidationVerdict,
-        correlation_id: UUID | None = None,
-        current_state: ModelLifecycleState | None = None,
+        request: ModelLifecycleUpdateRequest,
     ) -> ModelLifecycleResult:
         """Apply a validation verdict to pattern lifecycle state.
 
@@ -90,16 +87,15 @@ class HandlerLifecycleUpdate:
         ``OBSERVED`` tier for the given ``pattern_id``.
 
         Args:
-            pattern_id: Identifier of the pattern being evaluated.
-            verdict: The validation verdict to apply.
-            correlation_id: Correlation ID for distributed tracing.  Auto-
-                generated when ``None``.
-            current_state: Current lifecycle state, or None for first-time
-                patterns.
+            request: Pattern, verdict, optional correlation ID and current state.
 
         Returns:
             A ``ModelLifecycleResult`` describing the tier transition.
         """
+        pattern_id = request.pattern_id
+        verdict = request.verdict
+        correlation_id = request.correlation_id
+        current_state = request.current_state
         correlation_id = correlation_id or uuid4()
         try:
             state = current_state or ModelLifecycleState(pattern_id=pattern_id)

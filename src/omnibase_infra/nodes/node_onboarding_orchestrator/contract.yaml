@@ -29,6 +29,9 @@ handler_routing:
       handler:
         name: "HandlerOnboarding"
         module: "omnibase_infra.nodes.node_onboarding_orchestrator.handlers.handler_onboarding"
+      input_model:
+        name: "ModelOnboardingInput"
+        module: "omnibase_infra.nodes.node_onboarding_orchestrator.models.model_onboarding_input"
 capabilities:
   - "onboarding.orchestrate"
   - "onboarding.policy.resolve"

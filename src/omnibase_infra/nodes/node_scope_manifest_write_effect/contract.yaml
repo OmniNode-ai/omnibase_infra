@@ -25,6 +25,9 @@ handler_routing:
       handler:
         name: "HandlerScopeManifestWrite"
         module: "omnibase_infra.nodes.node_scope_manifest_write_effect.handlers.handler_scope_manifest_write"
+      input_model:
+        name: "ModelScopeManifestWriteRequest"
+        module: "omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_write_request"
 metadata:
   description: "Manifest write effect for scope-check workflow"
   author: "OmniNode Team"

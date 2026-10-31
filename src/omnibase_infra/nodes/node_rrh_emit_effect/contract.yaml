@@ -32,6 +32,9 @@ handler_routing:
       handler:
         name: "HandlerRepoStateCollect"
         module: "omnibase_infra.nodes.node_rrh_emit_effect.handlers.handler_repo_state_collect"
+      input_model:
+        name: "ModelRepoStateCollectRequest"
+        module: "omnibase_infra.nodes.node_rrh_emit_effect.models.model_repo_state_collect_request"
       supported_operations:
         - "rrh.collect.repo_state"
       description: "Collect git repository state (branch, SHA, dirty flag)."

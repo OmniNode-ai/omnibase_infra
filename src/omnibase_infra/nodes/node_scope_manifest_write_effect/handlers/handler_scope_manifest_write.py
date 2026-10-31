@@ -11,9 +11,11 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_write_request import (
+    ModelScopeManifestWriteRequest,
+)
 from omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_written import (
     ModelScopeManifestWritten,
 )
@@ -34,30 +36,25 @@ class HandlerScopeManifestWrite:
 
     async def handle(
         self,
-        output_path: str,
-        plan_file_path: str,
-        files: tuple[str, ...],
-        directories: tuple[str, ...],
-        repos: tuple[str, ...],
-        systems: tuple[str, ...],
-        adjacent_files: tuple[str, ...],
-        correlation_id: UUID,
+        request: ModelScopeManifestWriteRequest,
     ) -> ModelScopeManifestWritten:
         """Write scope manifest to a JSON file.
 
         Args:
-            output_path: Path to write the manifest.
-            plan_file_path: Source plan file path.
-            files: Files in scope.
-            directories: Directories in scope.
-            repos: Repos in scope.
-            systems: Systems in scope.
-            adjacent_files: Adjacent files.
-            correlation_id: Workflow correlation ID.
+            request: Manifest destination, scope collections, source plan path,
+                and workflow correlation ID.
 
         Returns:
             ModelScopeManifestWritten with write confirmation.
         """
+        output_path = request.output_path
+        plan_file_path = request.plan_file_path
+        files = request.files
+        directories = request.directories
+        repos = request.repos
+        systems = request.systems
+        adjacent_files = request.adjacent_files
+        correlation_id = request.correlation_id
         resolved = Path(output_path).expanduser().resolve()
         logger.info(
             "Writing scope manifest to %s (correlation_id=%s)",

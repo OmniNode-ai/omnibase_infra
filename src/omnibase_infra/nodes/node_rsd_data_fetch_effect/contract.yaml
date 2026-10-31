@@ -25,6 +25,9 @@ handler_routing:
       handler:
         name: "HandlerRsdDataFetch"
         module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.handlers.handler_rsd_data_fetch"
+      input_model:
+        name: "ModelRsdDataFetchRequest"
+        module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_request"
 metadata:
   description: "Data fetch effect for RSD priority scoring workflow"
   author: "OmniNode Team"

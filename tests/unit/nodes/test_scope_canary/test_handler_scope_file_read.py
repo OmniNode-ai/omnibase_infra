@@ -11,6 +11,9 @@ import pytest
 from omnibase_infra.nodes.node_scope_file_read_effect.handlers.handler_scope_file_read import (
     HandlerScopeFileRead,
 )
+from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request import (
+    ModelScopeFileReadRequest,
+)
 
 
 @pytest.mark.unit
@@ -28,7 +31,9 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("# My Plan\n\nSome content.", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            ModelScopeFileReadRequest(file_path=str(plan_file), correlation_id=cid)
+        )
 
         assert result.success is True
         assert result.content == "# My Plan\n\nSome content."
@@ -41,7 +46,9 @@ class TestHandlerScopeFileRead:
         cid = uuid4()
 
         result = await handler.handle(
-            file_path=str(tmp_path / "missing.md"), correlation_id=cid
+            ModelScopeFileReadRequest(
+                file_path=str(tmp_path / "missing.md"), correlation_id=cid
+            )
         )
 
         assert result.success is False
@@ -57,6 +64,8 @@ class TestHandlerScopeFileRead:
         plan_file.write_text("content", encoding="utf-8")
         cid = uuid4()
 
-        result = await handler.handle(file_path=str(plan_file), correlation_id=cid)
+        result = await handler.handle(
+            ModelScopeFileReadRequest(file_path=str(plan_file), correlation_id=cid)
+        )
 
         assert result.correlation_id == cid

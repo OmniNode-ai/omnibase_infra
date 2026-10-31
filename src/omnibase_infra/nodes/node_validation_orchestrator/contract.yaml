@@ -86,6 +86,9 @@ handler_routing:
       handler:
         name: "HandlerBuildPlan"
         module: "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan"
+      input_model:
+        name: "ModelPatternCandidate"
+        module: "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate"
       output_events:
         - "ModelValidationPlan"
       description: "Build validation plan from pattern candidate using MVP check catalog."

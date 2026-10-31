@@ -26,7 +26,7 @@ from omnibase_infra.models.validation import (
     ModelCheckResult,
     ModelExecutorResult,
     ModelPlannedCheck,
-    ModelValidationPlan,
+    ModelValidationExecutionRequested,
 )
 from omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks import (
     HandlerRunChecks,
@@ -58,9 +58,9 @@ def _make_planned_check(
 
 def _make_plan(
     checks: tuple[ModelPlannedCheck, ...] = (),
-) -> ModelValidationPlan:
+) -> ModelValidationExecutionRequested:
     """Create a validation plan for testing."""
-    return ModelValidationPlan(
+    return ModelValidationExecutionRequested(
         plan_id=uuid4(),
         candidate_id=uuid4(),
         checks=checks,
@@ -121,7 +121,7 @@ class TestHandlerRunChecksHandle:
     @pytest.mark.asyncio
     async def test_handle_enabled_checks_pass(self) -> None:
         """Enabled checks produce passed results in MVP skeleton."""
-        handler = HandlerRunChecks()
+        handler = HandlerRunChecks(correlation_id=uuid4())
         checks = tuple(
             _make_planned_check(
                 check_code=f"CHECK-{i}",
@@ -132,7 +132,7 @@ class TestHandlerRunChecksHandle:
         )
         plan = _make_plan(checks=checks)
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 3
         assert all(r.passed for r in result.check_results)
@@ -141,7 +141,7 @@ class TestHandlerRunChecksHandle:
     @pytest.mark.asyncio
     async def test_handle_disabled_checks_are_skipped(self) -> None:
         """Disabled checks produce skipped results."""
-        handler = HandlerRunChecks()
+        handler = HandlerRunChecks(correlation_id=uuid4())
         checks = (
             _make_planned_check(check_code="C-1", enabled=True),
             _make_planned_check(check_code="C-2", enabled=False),
@@ -149,7 +149,7 @@ class TestHandlerRunChecksHandle:
         )
         plan = _make_plan(checks=checks)
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 3
         # First check: enabled -> passed
@@ -164,10 +164,10 @@ class TestHandlerRunChecksHandle:
     @pytest.mark.asyncio
     async def test_handle_empty_plan(self) -> None:
         """Empty plan produces an empty result with no check_results."""
-        handler = HandlerRunChecks()
+        handler = HandlerRunChecks(correlation_id=uuid4())
         plan = _make_plan(checks=())
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert len(result.check_results) == 0
         assert result.pass_count == 0
@@ -176,10 +176,10 @@ class TestHandlerRunChecksHandle:
     @pytest.mark.asyncio
     async def test_handle_result_references_plan(self) -> None:
         """Result references the plan_id and candidate_id from input."""
-        handler = HandlerRunChecks()
+        handler = HandlerRunChecks(correlation_id=uuid4())
         plan = _make_plan(checks=())
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert result.plan_id == plan.plan_id
         assert result.candidate_id == plan.candidate_id
@@ -187,12 +187,12 @@ class TestHandlerRunChecksHandle:
     @pytest.mark.asyncio
     async def test_handle_records_total_duration(self) -> None:
         """Result has a non-negative total_duration_ms."""
-        handler = HandlerRunChecks()
+        handler = HandlerRunChecks(correlation_id=uuid4())
         plan = _make_plan(
             checks=(_make_planned_check(),),
         )
 
-        result = await handler.handle(plan, correlation_id=uuid4())
+        result = await handler.handle(plan)
 
         assert result.total_duration_ms >= 0.0
 

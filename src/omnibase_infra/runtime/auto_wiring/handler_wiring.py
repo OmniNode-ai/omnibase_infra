@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import cache, lru_cache
+from functools import cache, lru_cache, partial
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -126,6 +126,7 @@ from omnibase_infra.handlers.handler_projection_derived_write import (
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.projection import ModelProjectionDerivedWriteRequest
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
 )
@@ -3836,14 +3837,15 @@ class ProjectionDatabaseOperations:
         column DEFAULT is consulted only on INSERT -- an existing row would
         otherwise wear its first writer's stamp forever.
         """
-        plan = build_upsert_plan(
+        plan_for = partial(
+            build_upsert_plan,
             table=target.table.name,
             conflict_key=conflict_key,
             row=row,
             insert_only_columns=insert_only_columns,
             sql_expression_columns=sql_expression_columns,
-            returning=returning,
         )
+        plan = plan_for(returning=returning)
         if derive is not None:
             internal_returning = HandlerProjectionDerivedWrite.returning_columns(
                 row=row,
@@ -3854,14 +3856,7 @@ class ProjectionDatabaseOperations:
                 expression_columns=sql_expression_columns,
                 returning=returning,
             )
-            plan = build_upsert_plan(
-                table=target.table.name,
-                conflict_key=conflict_key,
-                row=row,
-                insert_only_columns=insert_only_columns,
-                sql_expression_columns=sql_expression_columns,
-                returning=internal_returning,
-            )
+            plan = plan_for(returning=internal_returning)
         # The plan validated every identifier against its own rule; this
         # adapter's rule is narrower and is applied on top rather than
         # replaced, so relaxing one never silently relaxes the other.
@@ -3915,16 +3910,18 @@ class ProjectionDatabaseOperations:
                         insert_sql, adapted_row, returning=plan.returning
                     )
                     final_rows = HandlerProjectionDerivedWrite.handle(
-                        write_cursor,
-                        schema=target.physical_schema,
-                        table=target.table.name,
-                        stored_rows=stored_rows,
-                        conflict_columns=plan.conflict_keys,
-                        input_columns=input_columns,
-                        derived_columns=derived_columns,
-                        returning=returning,
-                        derive=derive,
-                        adapt=self._adapt_row,
+                        ModelProjectionDerivedWriteRequest(
+                            cursor=write_cursor,
+                            physical_schema=target.physical_schema,
+                            table=target.table.name,
+                            stored_rows=tuple(stored_rows),
+                            conflict_columns=tuple(plan.conflict_keys),
+                            input_columns=tuple(input_columns),
+                            derived_columns=tuple(derived_columns),
+                            returning=tuple(returning),
+                            derive=derive,
+                            adapt=self._adapt_row,
+                        )
                     )
             # The transaction has committed before any caller can publish.
             return final_rows

@@ -44,6 +44,9 @@ handler_routing:
       handler:
         name: "HandlerSetupOrchestrator"
         module: "omnibase_infra.nodes.node_setup_orchestrator.handlers.handler_setup_orchestrator"
+      input_model:
+        name: "ModelSetupOrchestratorRequest"
+        module: "omnibase_infra.nodes.node_setup_orchestrator.models.model_setup_orchestrator_request"
 capabilities:
   - "setup.orchestrate"
   - "setup.cloud.gate"

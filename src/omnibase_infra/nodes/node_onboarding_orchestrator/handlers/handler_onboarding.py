@@ -11,8 +11,8 @@ Two execution paths:
   write env config via ``ConfigWriter`` and the 0600 JSON credentials
   artifact via ``CredentialsWriter`` (OMN-16035, OMN-16038).
 
-The ``input_adapter`` is a function parameter injected by the caller,
-NOT part of the Pydantic model (DI outside models — OMN-10784 GPT #1).
+The ``input_adapter`` is injected through the handler constructor (or the
+implementation function), outside the Pydantic model.
 """
 
 from __future__ import annotations
@@ -488,18 +488,29 @@ class HandlerOnboarding:
 
     The auto-wiring framework requires a class (not a bare function) so it can
     inspect the constructor signature. This wrapper delegates to
-    ``handle_onboarding`` and requires no constructor arguments.
+    ``handle_onboarding`` and accepts an optional input adapter.
     """
 
-    def __init__(self) -> None:  # stub-ok: stateless init
-        """Initialize the handler (stateless)."""
+    def __init__(self, input_adapter: ProtocolInputAdapter | None = None) -> None:
+        """Initialize the handler with its optional interactive input adapter."""
+        self._input_adapter = input_adapter
+
+    @property
+    def input_adapter(self) -> ProtocolInputAdapter | None:
+        """Interactive input adapter supplied at construction."""
+        return self._input_adapter
 
     async def handle(
         self,
-        input_model: ModelOnboardingInput,
-        input_adapter: ProtocolInputAdapter | None = None,
+        request: ModelOnboardingInput,
     ) -> ModelOnboardingOutput:
-        """Execute the onboarding orchestration."""
+        """Execute the onboarding orchestration.
+
+        Args:
+            request: Onboarding policy, capabilities and output settings.
+        """
+        input_model = request
+        input_adapter = self.input_adapter
         return await handle_onboarding(input_model, input_adapter=input_adapter)
 
 

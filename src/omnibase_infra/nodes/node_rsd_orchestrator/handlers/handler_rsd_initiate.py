@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_request import (
     ModelRsdDataFetchRequest,
 )
-from omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_factor_weights import (
-    ModelRsdFactorWeights,
+from omnibase_infra.nodes.node_rsd_orchestrator.models.model_rsd_command import (
+    ModelRsdCommand,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,26 +30,22 @@ class HandlerRsdInitiate:
 
     async def handle(
         self,
-        correlation_id: UUID,
-        ticket_ids: tuple[str, ...],
-        weights: ModelRsdFactorWeights,
-        include_dependencies: bool = True,
-        include_agent_requests: bool = True,
-        include_plan_overrides: bool = True,
+        request: ModelRsdCommand,
     ) -> ModelRsdDataFetchRequest:
         """Transform RSD command into a data fetch request.
 
         Args:
-            correlation_id: Workflow correlation ID.
-            ticket_ids: Tickets to score.
-            weights: Factor weights.
-            include_dependencies: Whether to fetch dependency data.
-            include_agent_requests: Whether to fetch agent requests.
-            include_plan_overrides: Whether to fetch plan overrides.
+            request: Workflow correlation ID, tickets, weights and inclusion flags.
 
         Returns:
             ModelRsdDataFetchRequest to dispatch to the effect node.
         """
+        correlation_id = request.correlation_id
+        ticket_ids = request.ticket_ids
+        weights = request.weights
+        include_dependencies = request.include_dependencies
+        include_agent_requests = request.include_agent_requests
+        include_plan_overrides = request.include_plan_overrides
         logger.info(
             "RSD scoring initiated for %d tickets (correlation_id=%s)",
             len(ticket_ids),

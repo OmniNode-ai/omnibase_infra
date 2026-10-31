@@ -25,7 +25,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation.model_adjudicator_state import (
@@ -65,19 +64,14 @@ class HandlerAdjudicate:
     async def handle(
         self,
         request: ModelValidationAdjudicationRequested,
-        correlation_id: UUID | None = None,
     ) -> ModelValidationAdjudicationCompleted:
         """Return the verdict for ``request``'s check results.
 
-        The runtime hands the handler the typed request alone, so
-        ``correlation_id`` is optional; it is only used to tag error context.
         The request's plan id is the FSM event id: a redelivered request is
         the same event.
 
         Args:
             request: Check results of one executed validation plan.
-            correlation_id: Correlation ID for error context, when the caller
-                has one.
 
         Returns:
             The verdict, published as ``validation-adjudication-completed``.
@@ -90,13 +84,11 @@ class HandlerAdjudicate:
             plan_id=request.plan_id,
             check_results=request.check_results,
         )
-        adjudicating = collecting.with_adjudication_started(
-            request.plan_id, correlation_id
-        )
+        adjudicating = collecting.with_adjudication_started(request.plan_id, None)
         verdict = ModelVerdict.from_state(
             adjudicating,
             score_threshold=request.score_threshold,
-            correlation_id=correlation_id,
+            correlation_id=None,
         )
         logger.info(
             "Adjudicated plan %s for candidate %s: %s (score=%.2f)",

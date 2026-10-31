@@ -8,13 +8,13 @@ pricing, baseline resolution, money arithmetic, connections or publication.
 """
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
 from psycopg2 import sql
 
-from omnibase_infra.protocols.protocol_projection_write_cursor import (
-    ProtocolProjectionWriteCursor,
+from omnibase_infra.models.projection.model_projection_derived_write_request import (
+    ModelProjectionDerivedWriteRequest,
 )
 
 _COLUMN = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -67,17 +67,7 @@ class HandlerProjectionDerivedWrite:
 
     @staticmethod
     def handle(
-        cursor: ProtocolProjectionWriteCursor,
-        *,
-        schema: str,
-        table: str,
-        stored_rows: list[dict[str, object]],
-        conflict_columns: Sequence[str],
-        input_columns: Sequence[str],
-        derived_columns: Sequence[str],
-        returning: Sequence[str],
-        derive: Callable[[Mapping[str, object]], Mapping[str, object]],
-        adapt: Callable[[dict[str, object]], dict[str, object]],
+        request: ModelProjectionDerivedWriteRequest,
     ) -> list[dict[str, object]]:
         """Update only derived columns if RETURNING inputs still match, or raise.
 
@@ -85,7 +75,15 @@ class HandlerProjectionDerivedWrite:
         caller keeps that transaction open through this update, then commits before
         returning anything. A callback exception or unexpected update count rolls
         back the UPSERT too; no intermediate row is returned for publication.
+
+        Args:
+            request: Cursor, SQL target, stored inputs, and derivation callbacks.
         """
+        stored_rows = request.stored_rows
+        conflict_columns = request.conflict_columns
+        input_columns = request.input_columns
+        derived_columns = request.derived_columns
+        returning = request.returning
         if len(stored_rows) != 1:
             raise RuntimeError("derived write UPSERT did not return exactly one row")
         stored = stored_rows[0]
@@ -93,12 +91,12 @@ class HandlerProjectionDerivedWrite:
             column: stored[column]
             for column in dict.fromkeys((*conflict_columns, *input_columns))
         }
-        derived = derive(MappingProxyType(callback_inputs))
+        derived = request.derive(MappingProxyType(callback_inputs))
         if not isinstance(derived, Mapping) or set(derived) != set(derived_columns):
             raise ValueError(
                 "callback must return exactly the declared derived columns"
             )
-        values = adapt(dict(derived))
+        values = request.adapt(dict(derived))
         parameters = {
             f"derived_{index}": values[column]
             for index, column in enumerate(derived_columns)
@@ -121,10 +119,10 @@ class HandlerProjectionDerivedWrite:
             )
         readback = tuple(returning) or tuple(conflict_columns)
         columns = sql.SQL(", ").join(sql.Identifier(column) for column in readback)
-        rows = cursor.run_guarded_derived_update(
+        rows = request.cursor.run_guarded_derived_update(
             sql.SQL("UPDATE {}.{} SET {} WHERE {} RETURNING {}").format(
-                sql.Identifier(schema),
-                sql.Identifier(table),
+                sql.Identifier(request.physical_schema),
+                sql.Identifier(request.table),
                 assignments,
                 sql.SQL(" AND ").join(predicates),
                 columns,

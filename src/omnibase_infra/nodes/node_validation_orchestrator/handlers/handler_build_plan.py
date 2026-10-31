@@ -40,7 +40,6 @@ Related Tickets:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from omnibase_infra.enums import (
@@ -68,9 +67,6 @@ from omnibase_infra.nodes.node_validation_orchestrator.models import (
     ModelPlannedCheck,
     ModelValidationPlan,
 )
-
-if TYPE_CHECKING:
-    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +140,7 @@ class HandlerBuildPlan:
 
     async def handle(
         self,
-        candidate: ModelPatternCandidate,
-        correlation_id: UUID | None = None,
+        request: ModelPatternCandidate,
     ) -> ModelValidationPlan:
         """Build a validation plan from a pattern candidate.
 
@@ -153,14 +148,13 @@ class HandlerBuildPlan:
         catalog. All 12 checks are included; each is enabled by default.
 
         Args:
-            candidate: The pattern candidate to build a plan for.
-            correlation_id: Correlation ID for tracing. Auto-generated
-                via ``uuid4()`` when ``None``.
+            request: The pattern candidate to build a plan for.
 
         Returns:
             ModelValidationPlan with ordered checks from the MVP catalog.
         """
-        correlation_id = correlation_id or uuid4()
+        candidate = request
+        correlation_id = uuid4()
         plan_id = uuid4()
 
         checks = tuple(

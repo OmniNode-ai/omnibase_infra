@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_request import (
+    ModelScopeFileReadRequest,
+)
 from omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result import (
     ModelScopeFileReadResult,
 )
@@ -32,20 +34,20 @@ class HandlerScopeFileRead:
 
     async def handle(
         self,
-        file_path: str,
-        correlation_id: UUID,
-        output_path: str = "~/.claude/scope-manifest.json",
+        request: ModelScopeFileReadRequest,
     ) -> ModelScopeFileReadResult:
         """Read a file from disk and return its content.
 
         Args:
-            file_path: Absolute path to the plan file.
-            correlation_id: Workflow correlation ID.
-            output_path: Caller-specified output path to carry forward.
+            request: Plan file path, workflow correlation ID, and output path
+                to carry forward.
 
         Returns:
             ModelScopeFileReadResult with file content or error.
         """
+        file_path = request.file_path
+        correlation_id = request.correlation_id
+        output_path = request.output_path
         resolved = Path(file_path).expanduser().resolve()
         logger.info(
             "Reading plan file: %s (correlation_id=%s)",
