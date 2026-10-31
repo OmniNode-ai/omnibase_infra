@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -57,24 +56,25 @@ class HandlerRegistryApiListContracts:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle list_contracts operation.
 
-        Deserialises the request, calls ServiceRegistryDiscovery.list_contracts(),
+        Calls ServiceRegistryDiscovery.list_contracts(),
         and returns a ModelRegistryApiResponse with paginated contract data.
 
         Args:
-            request: ModelRegistryApiRequest (or mapping-compatible object).
-            correlation_id: Distributed tracing identifier.
+            request: Typed registry API request with a correlation ID.
 
         Returns:
             ModelRegistryApiResponse with contracts list, pagination info, and
             any warnings from the service layer.
         """
-        req = ModelRegistryApiRequest.model_validate(request)
+        correlation_id = request.correlation_id
         contracts, pagination, warnings = await self._service.list_contracts(
-            limit=req.limit,
-            offset=req.offset,
+            limit=request.limit,
+            offset=request.offset,
             correlation_id=correlation_id,
         )
         logger.debug(
@@ -83,7 +83,7 @@ class HandlerRegistryApiListContracts:
             extra={"correlation_id": str(correlation_id)},
         )
         return ModelRegistryApiResponse(
-            operation=req.operation,
+            operation=request.operation,
             correlation_id=correlation_id,
             success=True,
             data={

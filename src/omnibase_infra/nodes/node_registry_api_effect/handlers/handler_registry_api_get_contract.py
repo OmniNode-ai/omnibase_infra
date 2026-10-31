@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -57,17 +56,18 @@ class HandlerRegistryApiGetContract:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_contract operation.
 
-        Deserialises the request, calls ServiceRegistryDiscovery.get_contract(),
+        Calls ServiceRegistryDiscovery.get_contract(),
         and returns a ModelRegistryApiResponse with the contract data or
         success=False if not found.
 
         Args:
-            request: ModelRegistryApiRequest (or mapping-compatible object).
+            request: Typed registry API request with a correlation ID.
                 Must include contract_id.
-            correlation_id: Distributed tracing identifier.
 
         Returns:
             ModelRegistryApiResponse with contract data or success=False if not found.
@@ -75,21 +75,21 @@ class HandlerRegistryApiGetContract:
         Raises:
             ValueError: If contract_id is not provided in the request.
         """
-        req = ModelRegistryApiRequest.model_validate(request)
-        if req.contract_id is None:
+        correlation_id = request.correlation_id
+        if request.contract_id is None:
             raise ValueError("contract_id is required for get_contract operation")
         contract, warnings = await self._service.get_contract(
-            contract_id=str(req.contract_id),
+            contract_id=str(request.contract_id),
             correlation_id=correlation_id,
         )
         logger.debug(
             "get_contract for %s found=%s",
-            req.contract_id,
+            request.contract_id,
             contract is not None,
             extra={"correlation_id": str(correlation_id)},
         )
         return ModelRegistryApiResponse(
-            operation=req.operation,
+            operation=request.operation,
             correlation_id=correlation_id,
             success=contract is not None,
             data={

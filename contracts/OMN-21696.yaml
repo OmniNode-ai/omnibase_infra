@@ -1,0 +1,77 @@
+schema_version: 1.0.0
+ticket_id: OMN-21696
+title: 'Handler shape burn-down in omnibase_infra: registry API handlers take one typed request'
+summary: >-
+  Core's handler-shape validator (omnibase_core.validation.validator_handler_shape, plan task T2.4a) found 104 findings in omnibase_infra src at origin/dev 4284f5bf5, 54 of them noncanonical_handle. The nine node_registry_api_effect handlers declared handle(request: object, correlation_id: UUID) and re-validated the request inside; ModelRegistryApiRequest already carries correlation_id, so each handle is now handle(request: ModelRegistryApiRequest) -> ModelRegistryApiResponse. This slice clears those nine findings.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21696-registry-api-handle-shape
+    statement: >-
+      Every handler of node_registry_api_effect takes one typed request and reads the correlation id from it, and core's handler-shape validator reports no noncanonical_handle finding for that directory.
+    acceptance:
+      - id: AC1
+        statement: >-
+          AC1: the registry API handlers of omnibase_infra#5488 take one typed request model and the handler-shape count over them drops as the PR states -- falsifier: uv run pytest tests/unit -q over the touched handlers plus the handler-shape checker re-run on the PR paths
+  - id: req-omn21696-contract-location
+    statement: >-
+      The acceptance items of omnibase_infra#5488 live in contracts/OMN-21696.yaml and the PR leaves contracts/OMN-21536.yaml as the base branch has it.
+    acceptance:
+      - id: AC2
+        statement: >-
+          AC2: the PR's acceptance items live in contracts/OMN-21696.yaml and the PR does not edit contracts/OMN-21536.yaml -- falsifier: git diff --stat origin/dev...HEAD on the PR head lists contracts/OMN-21696.yaml and not contracts/OMN-21536.yaml
+evidence_requirements:
+  - kind: tests
+    description: The registry API handlers answer a typed request and the handler invariants hold.
+    command: >-
+      uv run pytest tests/unit/nodes/test_handler_registry_api_read.py tests/unit/nodes/test_handler_registry_api_operational.py tests/unit/nodes/test_registry_api_effect_handler_stubs.py tests/ci/test_handler_architecture_invariants.py -q -n 0 -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21696-ac1-typed-request
+    description: >-
+      The nine registry API handlers take one ModelRegistryApiRequest; the chained discovery handler builds typed requests for the two handlers it calls.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/unit/nodes/test_handler_registry_api_read.py tests/unit/nodes/test_handler_registry_api_operational.py tests/unit/nodes/test_registry_api_effect_handler_stubs.py -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21696-ac2-validator-clean
+    description: Core's handler-shape validator reports nothing for the node directory.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_handler_shape:ValidatorHandlerShape src/omnibase_infra/nodes/node_registry_api_effect --report-json /tmp/handler-shape-registry-api.json
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21696-deploy-handle-signature
+    description: >-
+      Post-deploy probe: the running runtime image carries the one-parameter handle on the get_node registry API handler. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec omninode-runtime python -c "import inspect; from omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node import HandlerRegistryApiGetNode as H; assert list(inspect.signature(H.handle).parameters) == ['self', 'request']"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
+  - id: dod-omn21696-ac2-contract-location
+    description: >-
+      The PR diff against origin/dev lists contracts/OMN-21696.yaml and does not list contracts/OMN-21536.yaml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          sh -c 'files=$(git diff --name-only origin/dev...HEAD) && printf "%s\n" "$files" | grep -Fx contracts/OMN-21696.yaml && ! printf "%s\n" "$files" | grep -Fx contracts/OMN-21536.yaml'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

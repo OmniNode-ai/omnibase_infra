@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_registry_api_effect.models import (
@@ -57,17 +56,18 @@ class HandlerRegistryApiGetNode:
         """Return the behavioral classification: EFFECT (external I/O)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(self, request: object, correlation_id: UUID) -> object:
+    async def handle(
+        self, request: ModelRegistryApiRequest
+    ) -> ModelRegistryApiResponse:
         """Handle get_node operation.
 
-        Deserialises the request, calls ServiceRegistryDiscovery.get_node(),
+        Calls ServiceRegistryDiscovery.get_node(),
         and returns a ModelRegistryApiResponse with the node data or
         success=False if not found.
 
         Args:
-            request: ModelRegistryApiRequest (or mapping-compatible object).
+            request: Typed registry API request with a correlation ID.
                 Must include node_id.
-            correlation_id: Distributed tracing identifier.
 
         Returns:
             ModelRegistryApiResponse with node data or success=False if not found.
@@ -75,21 +75,21 @@ class HandlerRegistryApiGetNode:
         Raises:
             ValueError: If node_id is not provided in the request.
         """
-        req = ModelRegistryApiRequest.model_validate(request)
-        if req.node_id is None:
+        correlation_id = request.correlation_id
+        if request.node_id is None:
             raise ValueError("node_id is required for get_node operation")
         node, warnings = await self._service.get_node(
-            node_id=req.node_id,
+            node_id=request.node_id,
             correlation_id=correlation_id,
         )
         logger.debug(
             "get_node for %s found=%s",
-            req.node_id,
+            request.node_id,
             node is not None,
             extra={"correlation_id": str(correlation_id)},
         )
         return ModelRegistryApiResponse(
-            operation=req.operation,
+            operation=request.operation,
             correlation_id=correlation_id,
             success=node is not None,
             data={"result": node.model_dump(mode="json") if node is not None else None},
