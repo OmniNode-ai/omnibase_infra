@@ -40,13 +40,15 @@ from uuid import uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.events.model_node_liveness_expired import (
     ModelNodeLivenessExpired,
 )
@@ -120,7 +122,7 @@ class HandlerRuntimeTick:
         ...     tick_interval_ms=1000,
         ... )
         >>> handler = HandlerRuntimeTick(projection_reader, reducer)
-        >>> output = await handler.handle(envelope)
+        >>> output = await handler.handle(request)
         >>> # Output events use injected `now` for emitted_at:
         >>> # ModelNodeRegistrationAckTimedOut(emitted_at=tick_time, ...)
         >>> # ModelNodeLivenessExpired(emitted_at=tick_time, last_heartbeat_at=<datetime|None>, ...)
@@ -194,7 +196,7 @@ class HandlerRuntimeTick:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelRuntimeTick],
+        request: ModelInjectedRequest[ModelRuntimeTick],
     ) -> ModelHandlerOutput[object]:
         """Process runtime tick and emit timeout events.
 
@@ -202,7 +204,8 @@ class HandlerRuntimeTick:
         to the reducer, and publishes tombstones for expired nodes.
 
         Args:
-            envelope: The event envelope containing the runtime tick event.
+            request: Injected request carrying the runtime tick event, the
+                runtime's clock reading, the input id and the correlation id.
 
         Returns:
             ModelHandlerOutput containing timeout events (ModelNodeRegistrationAckTimedOut,
@@ -210,14 +213,13 @@ class HandlerRuntimeTick:
 
         Raises:
             RuntimeHostError: If projection queries fail (propagated from reader).
-            ProtocolConfigurationError: If envelope_timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If the injected clock reading is naive (no timezone info).
         """
         start_time = time.perf_counter()
 
-        # Extract from envelope
-        tick = envelope.payload
-        now = envelope.envelope_timestamp
-        correlation_id = envelope.correlation_id or uuid4()
+        tick = request.event
+        now = request.now
+        correlation_id = request.correlation_id or uuid4()
 
         # Validate timezone-awareness for time injection pattern
         ctx = ModelInfraErrorContext(
@@ -237,7 +239,7 @@ class HandlerRuntimeTick:
             )
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(
-                input_envelope_id=envelope.envelope_id,
+                input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
                 handler_id=self.handler_id,
                 node_kind=self.node_kind,
@@ -257,7 +259,7 @@ class HandlerRuntimeTick:
             await self._timeout_coordinator.coordinate(tick, domain="registration")
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(
-                input_envelope_id=envelope.envelope_id,
+                input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
                 handler_id=self.handler_id,
                 node_kind=self.node_kind,
@@ -326,7 +328,7 @@ class HandlerRuntimeTick:
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
         return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
+            input_envelope_id=request.input_id,
             correlation_id=correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,

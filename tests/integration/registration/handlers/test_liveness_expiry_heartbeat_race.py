@@ -32,9 +32,11 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.enums import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.projection import ModelRegistrationProjection
 from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
@@ -105,14 +107,13 @@ def make_heartbeat_event(node_id, *, timestamp=None) -> ModelNodeHeartbeatEvent:
 
 def make_envelope(
     event: ModelNodeHeartbeatEvent,
-) -> ModelEventEnvelope[ModelNodeHeartbeatEvent]:
+) -> ModelInjectedRequest[ModelNodeHeartbeatEvent]:
     """Wrap a heartbeat event in an event envelope."""
-    return ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=event,
-        envelope_timestamp=event.timestamp,
+    return ModelInjectedRequest(
+        event=event,
+        now=event.timestamp,
+        input_id=uuid4(),
         correlation_id=event.correlation_id or uuid4(),
-        source_tool="test",
     )
 
 

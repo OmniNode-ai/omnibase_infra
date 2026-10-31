@@ -38,13 +38,15 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
@@ -115,7 +117,7 @@ class HandlerNodeIntrospected:
         >>> from uuid import uuid4
         >>> reducer = RegistrationReducerService()
         >>> handler = HandlerNodeIntrospected(projection_reader, reducer)
-        >>> output = await handler.handle(envelope)
+        >>> output = await handler.handle(request)
         >>> # output.intents contains ModelIntent objects for effect layer
         >>> # output.events contains registration events from reducer decision
     """
@@ -197,7 +199,7 @@ class HandlerNodeIntrospected:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent],
+        request: ModelInjectedRequest[ModelNodeIntrospectionEvent],
     ) -> ModelHandlerOutput[object]:
         """Process introspection event and decide on registration.
 
@@ -209,14 +211,15 @@ class HandlerNodeIntrospected:
         - intents: Effect layer intents from reducer decision (if initiating)
 
         Args:
-            envelope: Event envelope containing ModelNodeIntrospectionEvent payload.
+            request: Injected request carrying the ModelNodeIntrospectionEvent,
+                the runtime's clock reading, the input id and the correlation id.
 
         Returns:
             ModelHandlerOutput with events and intents for effect layer execution.
 
         Raises:
             RuntimeHostError: If projection query fails (propagated).
-            ProtocolConfigurationError: If envelope timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If the injected clock reading is naive (no timezone info).
         """
         if self._projection_reader is None or self._reducer is None:
             raise RuntimeError(
@@ -226,10 +229,9 @@ class HandlerNodeIntrospected:
 
         start_time = time.perf_counter()
 
-        # Extract from envelope
-        event = envelope.payload
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
+        event = request.event
+        now: datetime = request.now
+        correlation_id: UUID = request.correlation_id or uuid4()
 
         # Validate timezone-awareness for time injection pattern
         ctx = ModelInfraErrorContext(
@@ -271,7 +273,7 @@ class HandlerNodeIntrospected:
         if decision.action == "no_op":
             processing_time_ms = (time.perf_counter() - start_time) * 1000
             return ModelHandlerOutput(
-                input_envelope_id=envelope.envelope_id,
+                input_envelope_id=request.input_id,
                 correlation_id=correlation_id,
                 handler_id=self.handler_id,
                 node_kind=self.node_kind,
@@ -295,7 +297,7 @@ class HandlerNodeIntrospected:
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
         return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
+            input_envelope_id=request.input_id,
             correlation_id=correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,

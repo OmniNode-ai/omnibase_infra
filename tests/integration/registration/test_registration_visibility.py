@@ -26,8 +26,10 @@ from uuid import uuid4
 import pytest
 
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.model_node_introspection_event import (
     ModelNodeIntrospectionEvent,
 )
@@ -68,13 +70,14 @@ class TestRegistrationHandlerInterface:
             "HandlerNodeIntrospected.handle must be async"
         )
 
-        # Verify handle method signature accepts 'envelope' parameter
+        # Verify handle method signature accepts the typed 'request' parameter
         sig = inspect.signature(handle_method)
         param_names = list(sig.parameters.keys())
-        # First param is 'self', second should be 'envelope'
-        assert "envelope" in param_names, (
-            f"handle() must accept 'envelope' parameter, got: {param_names}"
+        # First param is 'self', second should be 'request'
+        assert "request" in param_names, (
+            f"handle() must accept 'request' parameter, got: {param_names}"
         )
+        assert "envelope" not in param_names
 
     @pytest.mark.asyncio
     async def test_handler_produces_output_for_new_node(self) -> None:
@@ -104,13 +107,16 @@ class TestRegistrationHandlerInterface:
             timestamp=datetime.now(UTC),
         )
 
-        envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = ModelEventEnvelope(
-            correlation_id=correlation_id,
-            event_type="ModelNodeIntrospectionEvent",
-            payload=event,
+        request: ModelInjectedRequest[ModelNodeIntrospectionEvent] = (
+            ModelInjectedRequest(
+                event=event,
+                now=datetime.now(UTC),
+                input_id=uuid4(),
+                correlation_id=correlation_id,
+            )
         )
 
-        output = await handler.handle(envelope)
+        output = await handler.handle(request)
 
         # Verify output structure - handler should emit registration initiated event
         assert output is not None

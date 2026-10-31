@@ -48,7 +48,6 @@ from pydantic import BaseModel
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import (
     EnumHandlerType,
@@ -57,6 +56,9 @@ from omnibase_infra.enums import (
     EnumRegistrationState,
 )
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
@@ -92,7 +94,7 @@ class OutputContext:
     reducing the parameter count of _create_output from 6 to 3.
     """
 
-    envelope: ModelEventEnvelope[ModelNodeRegistrationAcked]
+    input_id: UUID
     correlation_id: UUID
     now: datetime
     start_time: float
@@ -191,16 +193,16 @@ class HandlerNodeRegistrationAcked:
     Example:
         >>> from datetime import datetime, UTC
         >>> from uuid import uuid4
-        >>> from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
         >>> # Use explicit timestamps (time injection pattern) - not datetime.now()
         >>> now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=UTC)
-        >>> envelope = ModelEventEnvelope(
-        ...     payload=ack_command,
-        ...     envelope_timestamp=now,
+        >>> request = ModelInjectedRequest(
+        ...     event=ack_command,
+        ...     now=now,
+        ...     input_id=uuid4(),
         ...     correlation_id=uuid4(),
         ... )
         >>> handler = HandlerNodeRegistrationAcked(projection_reader, reducer)
-        >>> output = await handler.handle(envelope)
+        >>> output = await handler.handle(request)
         >>> # output.events may contain (AckReceived, BecameActive)
     """
 
@@ -265,7 +267,7 @@ class HandlerNodeRegistrationAcked:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelNodeRegistrationAcked],
+        request: ModelInjectedRequest[ModelNodeRegistrationAcked],
     ) -> ModelHandlerOutput[object]:
         """Process registration ack command and emit events.
 
@@ -273,7 +275,7 @@ class HandlerNodeRegistrationAcked:
         emit events that complete registration and activate the node.
 
         Args:
-            envelope: The event envelope containing the registration ack command.
+            request: Typed request: ack command, injected clock reading, input id.
 
         Returns:
             ModelHandlerOutput containing [NodeRegistrationAckReceived, NodeBecameActive]
@@ -281,14 +283,13 @@ class HandlerNodeRegistrationAcked:
 
         Raises:
             RuntimeHostError: If projection query fails (propagated from reader).
-            ProtocolConfigurationError: If timestamp is naive (no timezone info).
+            ProtocolConfigurationError: If the injected clock reading is naive (no timezone info).
         """
         start_time = time.perf_counter()
 
-        # Extract from envelope
-        command = envelope.payload
-        now = envelope.envelope_timestamp
-        correlation_id = envelope.correlation_id or uuid4()
+        command = request.event
+        now = request.now
+        correlation_id = request.correlation_id or uuid4()
 
         # Validate timezone-awareness for time injection pattern
         error_ctx = ModelInfraErrorContext(
@@ -299,9 +300,8 @@ class HandlerNodeRegistrationAcked:
         )
         validate_timezone_aware_with_context(now, error_ctx)
 
-        # Create output context for _create_output calls
         ctx = OutputContext(
-            envelope=envelope,
+            input_id=request.input_id,
             correlation_id=correlation_id,
             now=now,
             start_time=start_time,
@@ -404,7 +404,7 @@ class HandlerNodeRegistrationAcked:
         """Create a ModelHandlerOutput with the given events and intents.
 
         Args:
-            ctx: Output context containing envelope, correlation_id, now, start_time.
+            ctx: Output context containing input_id, correlation_id, now, start_time.
             events: Tuple of events to include in the output.
             intents: Tuple of intents for the effect layer (default empty).
 
@@ -413,7 +413,7 @@ class HandlerNodeRegistrationAcked:
         """
         processing_time_ms = (time.perf_counter() - ctx.start_time) * 1000
         return ModelHandlerOutput(
-            input_envelope_id=ctx.envelope.envelope_id,
+            input_envelope_id=ctx.input_id,
             correlation_id=ctx.correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,

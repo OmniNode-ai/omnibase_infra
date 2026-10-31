@@ -46,7 +46,6 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.models.catalog.catalog_warning_codes import (
     INTERNAL_ERROR,
     INVALID_QUERY_PAYLOAD,
@@ -59,6 +58,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_query import (
 )
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_topic_catalog_query import (
     HandlerTopicCatalogQuery,
@@ -214,8 +216,8 @@ def _make_query_envelope(
     client_id: str,
     include_inactive: bool = False,
     topic_pattern: str | None = None,
-) -> ModelEventEnvelope[ModelTopicCatalogQuery]:
-    """Build a ModelEventEnvelope[ModelTopicCatalogQuery] for handler calls.
+) -> ModelInjectedRequest[ModelTopicCatalogQuery]:
+    """Build a ModelInjectedRequest[ModelTopicCatalogQuery] for handler calls.
 
     Args:
         correlation_id: Correlation ID for request-response pairing.
@@ -232,10 +234,11 @@ def _make_query_envelope(
         include_inactive=include_inactive,
         topic_pattern=topic_pattern,
     )
-    return ModelEventEnvelope(
-        payload=query,
+    return ModelInjectedRequest(
+        event=query,
+        now=datetime.now(UTC),
+        input_id=uuid4(),
         correlation_id=correlation_id,
-        envelope_timestamp=datetime.now(UTC),
     )
 
 

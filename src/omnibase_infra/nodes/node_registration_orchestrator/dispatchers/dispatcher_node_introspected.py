@@ -75,6 +75,9 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.models.dispatch.model_dispatch_result import ModelDispatchResult
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.registration.commands.model_node_registration_acked import (
     ModelNodeRegistrationAcked,
 )
@@ -297,20 +300,18 @@ class DispatcherNodeIntrospected(MixinAsyncCircuitBreaker):
             # injected value for full time-injection compliance.
             now = datetime.now(UTC)
 
-            # Create envelope for handler (ProtocolMessageHandler signature)
-            handler_envelope: ModelEventEnvelope[ModelNodeIntrospectionEvent] = (
-                ModelEventEnvelope(
-                    envelope_id=uuid4(),
-                    payload=payload,
-                    envelope_timestamp=now,
+            # Create the typed request for the handler (clock reading and input id injected)
+            handler_request: ModelInjectedRequest[ModelNodeIntrospectionEvent] = (
+                ModelInjectedRequest(
+                    event=payload,
+                    now=now,
+                    input_id=uuid4(),
                     correlation_id=correlation_id,
-                    source_tool=self.dispatcher_id,
-                    tenant_id=None,
                 )
             )
 
             # Delegate to wrapped handler
-            handler_output = await self._handler.handle(handler_envelope)
+            handler_output = await self._handler.handle(handler_request)
             output_events = list(handler_output.events)
             output_intents = handler_output.intents
 

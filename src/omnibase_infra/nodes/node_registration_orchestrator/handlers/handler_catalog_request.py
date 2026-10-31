@@ -13,7 +13,7 @@ topics.
 Architecture:
     Follows the stateless handler pattern from handler_topic_catalog_query.py:
 
-    1. Extract correlation_id from envelope or payload
+    1. Extract correlation_id from the request or payload
     2. Query ServiceIntrospectionTopicStore for accumulated evt topics
     3. Return ModelHandlerOutput with a single ModelTopicCatalogResponse event
 
@@ -65,7 +65,6 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -75,6 +74,9 @@ from omnibase_infra.models.catalog.model_topic_catalog_entry import (
 )
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.models.registration.model_topic_catalog_request import (
     ModelTopicCatalogRequest,
@@ -157,7 +159,7 @@ class HandlerCatalogRequest:
 
     async def handle(
         self,
-        envelope: ModelEventEnvelope[ModelTopicCatalogRequest],
+        request: ModelInjectedRequest[ModelTopicCatalogRequest],
     ) -> ModelHandlerOutput[object]:
         """Process a catalog request and return a catalog response.
 
@@ -169,19 +171,19 @@ class HandlerCatalogRequest:
         with an empty topic list and a cold-registry warning.
 
         Args:
-            envelope: Event envelope containing ``ModelTopicCatalogRequest``
-                payload.
+            request: Injected request carrying the ``ModelTopicCatalogRequest``,
+                the runtime's clock reading, the input id and the correlation id.
 
         Returns:
             ``ModelHandlerOutput`` with exactly one event:
             ``ModelTopicCatalogResponse``.
         """
         start_time = time.perf_counter()
-        now: datetime = envelope.envelope_timestamp
-        correlation_id: UUID = envelope.correlation_id or uuid4()
+        now: datetime = request.now
+        correlation_id: UUID = request.correlation_id or uuid4()
 
-        # Extract correlation_id from payload if available (preferred over envelope)
-        payload = envelope.payload
+        # Use the request's own correlation_id when the event carries one
+        payload = request.event
         if isinstance(payload, ModelTopicCatalogRequest):
             correlation_id = payload.correlation_id
             logger.debug(
@@ -195,7 +197,7 @@ class HandlerCatalogRequest:
         else:
             logger.warning(
                 "HandlerCatalogRequest received unexpected payload type: %s — "
-                "using envelope correlation_id",
+                "using the injected correlation_id",
                 type(payload).__name__,
                 extra={"correlation_id": str(correlation_id)},
             )
@@ -250,7 +252,7 @@ class HandlerCatalogRequest:
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
         return ModelHandlerOutput(
-            input_envelope_id=envelope.envelope_id,
+            input_envelope_id=request.input_id,
             correlation_id=correlation_id,
             handler_id=self.handler_id,
             node_kind=self.node_kind,

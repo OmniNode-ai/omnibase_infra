@@ -39,10 +39,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.enums import EnumRegistrationState
 from omnibase_infra.errors import InfraConnectionError
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
+)
 from omnibase_infra.models.projection import (
     ModelRegistrationProjection,
     ModelSequenceInfo,
@@ -151,7 +153,7 @@ def create_envelope(
     event: ModelNodeHeartbeatEvent,
     now: datetime | None = None,
     correlation_id: UUID | None = None,
-) -> ModelEventEnvelope[ModelNodeHeartbeatEvent]:
+) -> ModelInjectedRequest[ModelNodeHeartbeatEvent]:
     """Create an event envelope for testing.
 
     Args:
@@ -160,14 +162,13 @@ def create_envelope(
         correlation_id: Optional correlation ID (defaults to new UUID).
 
     Returns:
-        ModelEventEnvelope wrapping the heartbeat event.
+        ModelInjectedRequest wrapping the heartbeat event.
     """
-    return ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=event,
-        envelope_timestamp=now or event.timestamp,
+    return ModelInjectedRequest(
+        event=event,
+        now=now or event.timestamp,
+        input_id=uuid4(),
         correlation_id=correlation_id or event.correlation_id or uuid4(),
-        source_tool="test",
     )
 
 
@@ -1062,7 +1063,7 @@ class TestModelHandlerOutputStructure:
         output = await heartbeat_handler.handle(envelope)
 
         # Verify envelope linkage
-        assert output.input_envelope_id == envelope.envelope_id
+        assert output.input_envelope_id == envelope.input_id
         assert output.result is None  # ONEX contract
 
 

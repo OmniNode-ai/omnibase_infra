@@ -24,10 +24,12 @@ from uuid import UUID, uuid4
 import pytest
 
 from omnibase_core.enums import EnumMessageCategory, EnumNodeKind
-from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.catalog.model_topic_catalog_response import (
     ModelTopicCatalogResponse,
+)
+from omnibase_infra.models.dispatch.model_injected_request import (
+    ModelInjectedRequest,
 )
 from omnibase_infra.models.registration.model_topic_catalog_request import (
     ModelTopicCatalogRequest,
@@ -53,7 +55,7 @@ def _make_request_envelope(
     requester: str | None = "test-client",
     store: ServiceIntrospectionTopicStore | None = None,
 ) -> tuple[
-    ModelEventEnvelope[ModelTopicCatalogRequest], ServiceIntrospectionTopicStore
+    ModelInjectedRequest[ModelTopicCatalogRequest], ServiceIntrospectionTopicStore
 ]:
     """Create a test request envelope and store."""
     if correlation_id is None:
@@ -65,12 +67,8 @@ def _make_request_envelope(
         requested_at=TEST_NOW,
         requester=requester,
     )
-    envelope: ModelEventEnvelope[ModelTopicCatalogRequest] = ModelEventEnvelope(
-        envelope_id=uuid4(),
-        payload=payload,
-        envelope_timestamp=TEST_NOW,
-        correlation_id=correlation_id,
-        source_tool="test",
+    envelope: ModelInjectedRequest[ModelTopicCatalogRequest] = ModelInjectedRequest(
+        event=payload, now=TEST_NOW, input_id=uuid4(), correlation_id=correlation_id
     )
     return envelope, store
 
