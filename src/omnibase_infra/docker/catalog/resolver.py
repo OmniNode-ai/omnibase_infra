@@ -107,24 +107,7 @@ def _load_manifest(path: Path) -> CatalogManifest:
     for mount in raw.get("optional_directory_bind_mounts", []):
         if not isinstance(mount, dict):
             raise ValueError("optional_directory_bind_mounts entries must be mappings")
-        source_env = mount.get("source_env")
-        container_path = mount.get("container_path")
-        read_only = mount.get("read_only", True)
-        if not isinstance(source_env, str) or not isinstance(container_path, str):
-            raise ValueError(
-                "optional directory bind mount source_env and container_path must be strings"
-            )
-        if not isinstance(read_only, bool):
-            raise ValueError(
-                "optional directory bind mount read_only must be a boolean"
-            )
-        optional_directory_bind_mounts.append(
-            ModelOptionalDirectoryBindMount(
-                source_env=source_env,
-                container_path=container_path,
-                read_only=read_only,
-            )
-        )
+        optional_directory_bind_mounts.append(ModelOptionalDirectoryBindMount(**mount))
 
     return CatalogManifest(
         name=raw["name"],

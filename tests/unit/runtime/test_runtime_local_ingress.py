@@ -524,6 +524,7 @@ async def test_runtime_host_process_skips_local_ingress_for_disallowed_profile(
         config=make_runtime_config(
             local_ingress={
                 "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
                 "enabled_profiles": ["main"],
             }
         ),
@@ -1259,7 +1260,12 @@ async def test_runtime_host_process_dispatch_local_ingress_request_times_out() -
 
     broker = SimpleNamespace(dispatch_request=AsyncMock(side_effect=_sleepy_dispatch))
     process = RuntimeHostProcess(
-        config=make_runtime_config(local_ingress={"enabled": True}),
+        config=make_runtime_config(
+            local_ingress={
+                "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
+            }
+        ),
         dispatch_engine=AsyncMock(),
     )
     process._is_running = True
@@ -1322,7 +1328,12 @@ async def test_runtime_host_process_dispatch_local_ingress_warns_on_node_alias_c
 @pytest.mark.asyncio
 async def test_runtime_health_includes_local_ingress_details() -> None:
     process = RuntimeHostProcess(
-        config=make_runtime_config(local_ingress={"enabled": True}),
+        config=make_runtime_config(
+            local_ingress={
+                "enabled": True,
+                "socket_path": "/var/run/onex-test/runtime.sock",
+            }
+        ),
         dispatch_engine=AsyncMock(),
     )
     seed_mock_handlers(process)

@@ -232,7 +232,14 @@ def test_the_process_parser_takes_a_mirror_only_config_without_a_broker_ref_map(
     tmp_path: Path,
 ) -> None:
     args = gateway_forwarder._build_parser().parse_args(
-        ["--config", str(tmp_path / "mirror-only.yaml")]
+        [
+            "--config",
+            str(tmp_path / "mirror-only.yaml"),
+            "--egress-health-file",
+            str(tmp_path / "egress-health.json"),
+            "--lane-mirror-health-file",
+            str(tmp_path / "lane-mirror-health.json"),
+        ]
     )
 
     assert args.broker_ref_map is None

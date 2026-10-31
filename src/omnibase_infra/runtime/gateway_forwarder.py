@@ -57,16 +57,12 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_delivery import (
     NodeGatewayDelivery,
 )
-from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_egress_health import (
-    DEFAULT_EGRESS_HEALTH_PATH,
-)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_forwarder import (
     GatewayEgressDeniedError,
     ProtocolGatewayPublisher,
     ServiceGatewayForwarder,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_lane_mirror_health import (
-    DEFAULT_LANE_MIRROR_HEALTH_PATH,
     publish_lane_mirror_health,
 )
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
@@ -2022,7 +2018,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--egress-health-file",
         type=Path,
-        default=Path(DEFAULT_EGRESS_HEALTH_PATH),
+        required=True,
         help=(
             "Where to publish outbound egress denial/delivery counters "
             "(OMN-17201). The container healthcheck reads the same path; pass "
@@ -2032,7 +2028,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lane-mirror-health-file",
         type=Path,
-        default=Path(DEFAULT_LANE_MIRROR_HEALTH_PATH),
+        required=True,
         help=(
             "Where to publish the lane-mirror delivery-verification counters "
             "(OMN-17201): per-lane consumed-vs-confirmed source offsets, "

@@ -34,14 +34,6 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LANE_MIRROR_HEALTH_PATH = "/tmp/gateway-lane-mirror-health.json"  # noqa: S108 -- container-local scratch state, same convention as the egress counters
-"""Shared default so the writer and the healthcheck cannot drift apart.
-
-Container-local and NOT the ``/app/data`` named volume, deliberately: these
-counters describe the CURRENT process, and a loop detected by a previous
-process must not report a freshly repointed one unhealthy.
-"""
-
 LANE_MIRROR_STALL_WINDOW_SECONDS = 120
 """How long a lane may go accepting-and-failing before the container is unhealthy.
 
@@ -304,7 +296,6 @@ def evaluate_lane_mirror_health(
 
 
 __all__ = [
-    "DEFAULT_LANE_MIRROR_HEALTH_PATH",
     "LANE_MIRROR_STALL_WINDOW_SECONDS",
     "evaluate_lane_mirror_health",
     "lane_mirror_lag",

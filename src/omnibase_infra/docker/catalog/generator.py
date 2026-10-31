@@ -22,6 +22,9 @@ from omnibase_core.models.core.model_deployment_topology_service import (
 # Compose YAML values are heterogeneous dicts. We use dict[str, object]
 # instead of dict[str, Any] to satisfy the ONEX Any-type ban.
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
+from omnibase_infra.docker.catalog.model_optional_directory_bind_mount import (
+    ModelOptionalDirectoryBindMount,
+)
 from omnibase_infra.docker.catalog.resolver import (
     DEFAULT_PROJECT,
     CatalogResolver,
@@ -115,21 +118,9 @@ def _reject_redaction_placeholder(service: str, env: Mapping[str, str]) -> None:
         )
 
 
-# Compose default for an optional directory bind mount whose source variable is
-# unset. It must be a DIRECTORY: a file fallback such as ``/dev/null`` is
-# invalid for a directory target, which is the OMN-13248 defect that made the
-# mount conditional in the first place. Docker creates a missing bind source
-# directory, so this resolves to an empty, read-only directory on any host --
-# the same outcome the container saw when the mount was omitted, and the
-# coding-agent handler still fails closed on absent credentials.
-_ABSENT_OPTIONAL_BIND_SOURCE = "/var/lib/omninode/optional-bind-source-absent"
-
-
 def _render_optional_directory_bind_mount(
     *,
-    source_env: str,
-    container_path: str,
-    read_only: bool,
+    mount: ModelOptionalDirectoryBindMount,
     environment: Mapping[str, str],
 ) -> str:
     """Render an optional directory mount from the catalog declaration alone.
@@ -156,6 +147,7 @@ def _render_optional_directory_bind_mount(
     render time, so an explicitly set but unusable value fails closed here
     rather than at container start.
     """
+    source_env = mount.source_env
     raw_source = environment.get(source_env)
     if raw_source is not None and raw_source.strip():
         if raw_source != raw_source.strip():
@@ -166,8 +158,8 @@ def _render_optional_directory_bind_mount(
                 f"{source_env} must point to an existing absolute directory"
             )
 
-    mode = ":ro" if read_only else ""
-    return f"${{{source_env}:-{_ABSENT_OPTIONAL_BIND_SOURCE}}}:{container_path}{mode}"
+    mode = ":ro" if mount.read_only else ""
+    return f"${{{source_env}:-{mount.absent_source}}}:{mount.container_path}{mode}"
 
 
 def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
@@ -304,9 +296,7 @@ def generate_compose(
         for mount in manifest.optional_directory_bind_mounts:
             volumes.append(
                 _render_optional_directory_bind_mount(
-                    source_env=mount.source_env,
-                    container_path=mount.container_path,
-                    read_only=mount.read_only,
+                    mount=mount,
                     environment=configured_environment,
                 )
             )

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class ModelLocalRuntimeIngressConfig(BaseModel):
@@ -22,9 +22,9 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
         description="Whether the runtime should bind a local Unix-socket ingress.",
     )
     socket_path: str = Field(
-        default="/tmp/onex-runtime.sock",  # noqa: S108
-        min_length=1,
-        description="Unix-socket path for local runtime command ingress.",
+        default="",
+        validate_default=True,
+        description="Unix-socket path for ingress; the runtime overlay supplies it.",
     )
     socket_permissions: int = Field(
         default=0o660,
@@ -58,10 +58,10 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
 
     @field_validator("socket_path")
     @classmethod
-    def _validate_socket_path(cls, value: str) -> str:
+    def _validate_socket_path(cls, value: str, info: ValidationInfo) -> str:
         normalized = value.strip()
-        if not normalized:
-            raise ValueError("socket_path must be a non-empty string")
+        if info.data.get("enabled") and not normalized:
+            raise ValueError("socket_path must be a non-empty string when enabled")
         return normalized
 
     @field_validator("package_names", mode="before")
