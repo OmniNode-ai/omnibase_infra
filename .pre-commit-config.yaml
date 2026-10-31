@@ -2137,10 +2137,10 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
-        name: Check the primary dev tenant projection fold
+        name: Check the primary dev runtime fold (tenant projections and in-process writers)
         entry: uv run --frozen pytest tests/unit/docker/test_dev_tenant_projection_fold_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|runtime-policy\.env|dev-tenant-fold-required-env\.manifest\.txt)|contracts/services/runtime_policy\.contract\.yaml|scripts/runtime_build/compose_files\.sh|src/omnibase_infra/handlers/handler_runtime_deploy\.sh|tests/unit/docker/test_dev_(tenant_projection_fold|stack_runtime_only)_omn21288\.py|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: check-dev-tenant-fold-required-env-vars

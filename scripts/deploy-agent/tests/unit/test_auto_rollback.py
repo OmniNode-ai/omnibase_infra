@@ -529,8 +529,13 @@ def test_capture_resolves_dev_effects_by_compose_labels(
 def test_capture_folded_effects_resolves_the_main_service(
     monkeypatch: pytest.MonkeyPatch, command_runner: Mock
 ) -> None:
+    # Only the lab proof lane folds effects; primary dev's fold is its own overlay's.
     monkeypatch.setattr(
-        executor_mod, "lane_folded_profiles", lambda lane: frozenset({"effects"})
+        executor_mod,
+        "lane_folded_profiles",
+        lambda lane: frozenset({"effects"})
+        if lane is EnumRuntimeLane.STABILITY_TEST
+        else frozenset(),
     )
     executor = DeployExecutor()
     monkeypatch.setattr(

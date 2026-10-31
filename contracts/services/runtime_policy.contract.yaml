@@ -190,8 +190,17 @@ profiles:
     services:
       main:
         runtime_id: dev-main
-        # OMN-21288: tenant projection nodes share the main runtime.
-        folded_profiles: [tenant-projection]
+        # OMN-21288: tenant projection nodes and the five projection writers
+        # that dispatch in-process (omnimarket handler_runtime_writer) share
+        # the main runtime. The delegation and hook-ledger writers still run a
+        # standalone consume loop and keep their containers.
+        folded_profiles:
+          - tenant-projection
+          - projection-writer-live-events
+          - projection-writer-registration
+          - projection-writer-savings
+          - projection-writer-tenant-credentials
+          - projection-writer-tenant-registry
         runtime_address: runtime://omninode-pc/dev/main
         capabilities:
           - market.skill-proof

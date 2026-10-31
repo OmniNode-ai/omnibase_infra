@@ -46,7 +46,14 @@ _WORKLOAD_MODULE = re.compile(r"(^|\.)(node_projection\w*|\w*consumer)(\.|$)")
 
 # Services the real dev stack still runs outside the runtime container. Shrink
 # only: move a service's node into the runtime, then delete its line here.
-REMOVED_SERVICES: tuple[str, ...] = ("tenant-projection-writer",)
+REMOVED_SERVICES: tuple[str, ...] = (
+    "tenant-projection-writer",
+    "projection-live-events-writer",
+    "projection-registration-writer",
+    "projection-savings-writer",
+    "projection-tenant-credentials-writer",
+    "projection-tenant-registry-writer",
+)
 DEV_COMPOSE_FILES = (
     _DOCKER / "docker-compose.infra.yml",
     _DOCKER / "docker-compose.dev-lane.yml",
@@ -64,13 +71,8 @@ SEPARATE_SERVICES: tuple[str, ...] = (
     "skill-lifecycle-consumer",
     "context-audit-consumer",
     "infra-routing-decisions-consumer",
-    # Projection writers.
+    # Projection writers that still run their own consume loop.
     "projection-delegation-writer",
-    "projection-live-events-writer",
-    "projection-registration-writer",
-    "projection-savings-writer",
-    "projection-tenant-credentials-writer",
-    "projection-tenant-registry-writer",
 )
 
 
