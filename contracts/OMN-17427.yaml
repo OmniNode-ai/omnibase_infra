@@ -3356,7 +3356,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427640001, AC17427640002]
   - id: dod-omn17427-pool-current-siblings
-    description: Executes the clone phase and build staging pipeline with a recording Git function and staging script; checks the sibling clone set and the exact default repo-ref arguments.
+    description: Executes the unmodified pool clone and build phases against disposable local Git origins and the real workspace staging script. Reads the exact sibling set, immutable refs and staged content; a nonempty retired COMPAT_REF must be ignored.
     source: manual
     checks:
       - check_type: test_passes
@@ -3364,7 +3364,7 @@ dod_evidence:
         cwd: .
     binds_ac: [AC17427547801]
   - id: dod-omn17427-pool-infra-dev-tag
-    description: Executes clone selection with and without INFRA_DEV_TAG, checking the selected infra branch or tag at the Git boundary.
+    description: Executes real local clones with and without INFRA_DEV_TAG and reads their HEAD commits. A missing infra tag must exit before cloning any sibling; explicit core and spi tags must be fetched and checked out.
     source: manual
     checks:
       - check_type: test_passes
@@ -3372,7 +3372,7 @@ dod_evidence:
         cwd: .
     binds_ac: [AC17427547802]
   - id: dod-omn17427-pool-sibling-dev-tags
-    description: Executes the build staging pipeline with empty and enabled STAGE_DEV_TAGS, checking DEPLOY_REF and every argument received by stage_workspace.sh.
+    description: Executes the real workspace staging script through the pool build with empty and enabled STAGE_DEV_TAGS. Reads intended refs, sibling dev-merge tags, staged bytes and SHAs, routing ladder and unchanged source clone heads.
     source: manual
     checks:
       - check_type: test_passes
@@ -3380,7 +3380,7 @@ dod_evidence:
         cwd: .
     binds_ac: [AC17427547803]
   - id: dod-omn17427-pool-stage0-hosted-deploy
-    description: Hosted-runner deploy check exercises the pool clone selection and staging boundary without Docker, services, credentials or network access. Refuses the former compat clone and pins, ignored infra tag, or sibling SHA pins in dev-tag mode.
+    description: Hosted-runner deploy check exercises unmodified pool clone selection and real workspace staging against disposable local Git origins without Docker, services, credentials or network access. Refuses the former compat clone and nonempty compat pin, ignored infra tag, or sibling SHA pins in dev-tag mode by reading staged content and provenance.
     source: manual
     checks:
       - check_type: command
