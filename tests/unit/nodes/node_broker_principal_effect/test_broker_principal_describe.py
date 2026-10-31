@@ -34,9 +34,15 @@ from omnibase_infra.handlers.handler_broker_principal_list import (
     BrokerPrincipalError,
     BrokerPrincipalKafkaAcls,
 )
+from omnibase_infra.handlers.handler_developer_principal_mint import (
+    HandlerDeveloperPrincipalMint,
+)
 from omnibase_infra.models.developer_principal import (
     ModelBrokerPrincipalDescribeRequest,
     ModelBrokerPrincipalDescribeResult,
+    ModelBrokerPrincipalListResult,
+    ModelDeveloperPrincipalMintRequest,
+    ModelDeveloperPrincipalPlan,
 )
 
 pytestmark = pytest.mark.unit
@@ -147,4 +153,83 @@ def test_describe_takes_no_password_and_changes_nothing() -> None:
     assert set(ModelBrokerPrincipalDescribeRequest.model_fields) == {"principal"}
     admin = _FakeKafkaAdmin(reply=[_binding(AclOperation.WRITE)])
     _describe(admin)
+    assert admin.creates == 0
+
+
+@pytest.mark.parametrize(
+    "error_type", [KafkaException, RuntimeError, ValueError, OSError, TimeoutError]
+)
+def test_describe_omits_raw_client_error_text_and_chain(
+    error_type: type[Exception],
+) -> None:
+    sentinel = "synthetic-secret-20823"
+    address = "broker-sensitive.invalid:9092"
+    upstream = error_type(f"{sentinel} at {address}")
+    admin = _FakeKafkaAdmin(error=upstream)
+    with pytest.raises(BrokerPrincipalError) as raised:
+        _describe(admin)
+    error = raised.value
+    # KafkaException is converted to RuntimeError by the real shared adapter.
+    expected_type = (
+        "RuntimeError" if error_type is KafkaException else error_type.__name__
+    )
+    assert "could not be read" in str(error)
+    assert expected_type in str(error)
+    for visible in (str(error), repr(error), repr(error.args), repr(vars(error))):
+        assert sentinel not in visible
+        assert address not in visible
+    assert error.operation == "broker.principal.describe"
+    assert error.acls_applied is False
+    assert error.password_set is False
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert admin.creates == 0
+
+
+@pytest.mark.parametrize("error_type", [KafkaException, TimeoutError])
+def test_audit_result_omits_real_describe_client_error_text(
+    error_type: type[Exception],
+) -> None:
+    sentinel = "synthetic-secret-audit-20823"
+    address = "broker-sensitive.invalid:9092"
+    admin = _FakeKafkaAdmin(error=error_type(f"{sentinel} at {address}"))
+    describe = HandlerBrokerPrincipalDescribe(
+        acls=BrokerPrincipalKafkaAcls(admin_client=admin, timeout_seconds=1.0)
+    )
+    calls: list[str] = []
+
+    def read_acls(
+        request: ModelBrokerPrincipalDescribeRequest,
+    ) -> ModelBrokerPrincipalDescribeResult:
+        calls.append("describe")
+        return describe.handle(request)
+
+    handler = HandlerDeveloperPrincipalMint(
+        list_step=lambda _: ModelBrokerPrincipalListResult(principals=(PRINCIPAL,)),
+        plan_step=lambda _: ModelDeveloperPrincipalPlan(
+            decision="create",
+            principal=PRINCIPAL,
+            lane="local",
+            grants=(),
+            declaration_digest="d" * 64,
+        ),
+        describe_step=read_acls,
+    )
+    result = handler.handle(
+        ModelDeveloperPrincipalMintRequest(
+            mode="audit",
+            declaration_yaml="principal_prefix: dev-\n",
+            login="person",
+            device="mac",
+            admin_url="http://redpanda:9644",
+        )
+    )
+    assert result.status == "failure"
+    assert result.failed_step == "describe"
+    assert result.acls_applied is False
+    assert result.password_set is False
+    assert "could not be read" in result.reason
+    assert sentinel not in result.model_dump_json()
+    assert address not in result.model_dump_json()
+    assert calls == ["describe"]
     assert admin.creates == 0

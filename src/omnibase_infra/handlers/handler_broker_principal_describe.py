@@ -77,7 +77,7 @@ class HandlerBrokerPrincipalDescribe:
         held = attempt(
             lambda: acls.list_acls(request.principal),
             lambda exc: self._fail(
-                f"the principal's ACLs could not be read ({type(exc).__name__}: {exc})"
+                f"the principal's ACLs could not be read ({type(exc).__name__})"
             ),
         )
         return ModelBrokerPrincipalDescribeResult(

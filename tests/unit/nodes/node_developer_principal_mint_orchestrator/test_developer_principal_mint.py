@@ -388,12 +388,25 @@ def test_audit_takes_no_password_and_converge_needs_one() -> None:
         )
 
 
-def test_a_declaration_without_a_prefix_calls_no_step() -> None:
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "schema: developer-principal-grants.v1\n",
+        "[",
+        "null",
+        "- item",
+        "scalar",
+        "principal_prefix: 7\n",
+        "principal_prefix: null\n",
+        "principal_prefix: ''\n",
+    ],
+)
+def test_a_declaration_without_a_prefix_calls_no_step(declaration: str) -> None:
     steps = _Steps()
     result = steps.handler().handle(
         ModelDeveloperPrincipalMintRequest(
             mode="audit",
-            declaration_yaml="schema: developer-principal-grants.v1\n",
+            declaration_yaml=declaration,
             login="person",
             device="mac",
             admin_url=ADMIN_URL,
