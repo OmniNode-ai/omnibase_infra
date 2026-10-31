@@ -48,7 +48,7 @@ _DIST_NAME = {
     "omnibase_infra": "omnibase-infra",
     "omnibase_spi": "omnibase-spi",
 }
-_STAGED_SIBLINGS = ("omnibase_core", "omnibase_compat", "omnimarket")
+_STAGED_SIBLINGS = ("omnibase_core", "omnimarket")
 _PIN_VERSION = "9.9.9"
 
 
@@ -423,7 +423,6 @@ def test_reconcile_wrapper_runs_end_to_end_over_the_manifest(tmp_path: Path) -> 
         "omnibase_infra",
         "omnibase_core",
         "omnibase_spi",
-        "omnibase_compat",
         "omnimarket",
     )
     origins, omni_home = _make_deploy_tree(tmp_path, manifest_repos)
@@ -470,7 +469,6 @@ def _stage_omni_home(tmp_path: Path) -> Path:
     omni_home.mkdir(parents=True, exist_ok=True)
     for repo in (
         "omnibase_core",
-        "omnibase_compat",
         "omnimarket",
         "omnibase_infra",
         "omnibase_spi",

@@ -845,7 +845,6 @@ BUILD_ARGS=(
     --build-arg "PROMOTION_CLASS=stability-candidate"
     --build-arg "NON_MAIN_LINEAGE=true"
     --build-arg "OMNI_HOME=${OMNI_HOME_RESOLVED}"
-    --build-arg "OMNIBASE_COMPAT_REF=${SIBLING_COMMIT[omnibase_compat]}"
     # Empty deliberately: the node inventory is a property of the image and
     # cannot be known before the image exists, and an empty value skips the
     # Dockerfile's verify guard. The two-pass stamping the declared lanes do
