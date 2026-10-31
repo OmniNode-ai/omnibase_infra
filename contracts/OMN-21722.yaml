@@ -32,6 +32,18 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/ci/test_evidence_autoclose_sweep_rotation_period_omn18748.py -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-backfill-width-deploy-probe
+    description: Hosted-runner deploy probe reads the request model from GitHub at the checked-out commit and requires the 40-wide default, so a checkout without the change fails it.
+    source: manual
+    binds_ac:
+      - AC1
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          model="$(gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/models/model_evidence_autoclose_sweep_request.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d)";
+          grep -B1 -A3 'default=40' <<<"$model" | grep -q 'backfill_max_candidates'
+        cwd: ${OMNI_HOME}/omnibase_infra
 requirements:
   - id: req-backfill-width
     statement: The backfill arm drains the pool in hours, not days, inside the run budget.
