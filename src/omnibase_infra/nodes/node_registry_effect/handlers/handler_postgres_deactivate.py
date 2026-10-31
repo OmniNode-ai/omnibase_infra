@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
@@ -45,11 +44,13 @@ from omnibase_infra.errors import (
     InfraConnectionError,
     InfraTimeoutError,
 )
-from omnibase_infra.nodes.node_registry_effect.models import ModelBackendResult
+from omnibase_infra.nodes.node_registry_effect.models import (
+    ModelBackendResult,
+    ModelRegistryRequest,
+)
 from omnibase_infra.utils import sanitize_backend_error, sanitize_error_message
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_registry_effect.models import ModelRegistryRequest
     from omnibase_infra.nodes.node_registry_effect.protocols.protocol_postgres_adapter import (
         ProtocolPostgresAdapter,
     )
@@ -75,7 +76,7 @@ class HandlerPostgresDeactivate:
         >>> adapter = AsyncMock()
         >>> adapter.deactivate.return_value = ModelBackendResult(success=True, backend_id="postgres")
         >>> handler = HandlerPostgresDeactivate(adapter)
-        >>> result = await handler.handle(request, correlation_id)
+        >>> result = await handler.handle(request)
         >>> result.success
         True
 
@@ -103,11 +104,7 @@ class HandlerPostgresDeactivate:
         """
         self._postgres_adapter = postgres_adapter
 
-    async def handle(
-        self,
-        request: ModelRegistryRequest,
-        correlation_id: UUID,
-    ) -> ModelBackendResult:
+    async def handle(self, request: ModelRegistryRequest) -> ModelBackendResult:
         """Execute PostgreSQL registration record deactivation.
 
         Performs the deactivation operation against the PostgreSQL adapter with:
@@ -122,7 +119,6 @@ class HandlerPostgresDeactivate:
 
         Args:
             request: Registration request containing the node_id to deactivate.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -138,6 +134,7 @@ class HandlerPostgresDeactivate:
             prevent exposure of connection strings, credentials, or other
             sensitive information in logs and responses.
         """
+        correlation_id = request.correlation_id
         start_time = time.perf_counter()
 
         try:

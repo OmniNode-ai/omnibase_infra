@@ -71,6 +71,7 @@ class ProtocolPartialRetryRequest(Protocol):
         node_id: Unique identifier for the node being registered.
         node_type: Type of ONEX node (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
+        correlation_id: Request correlation ID for distributed tracing.
         target_backend: Backend to retry (EnumBackendType.POSTGRES).
         idempotency_key: Optional key for idempotent retry semantics.
         endpoints: Dict of endpoint type to URL for PostgreSQL.
@@ -80,6 +81,7 @@ class ProtocolPartialRetryRequest(Protocol):
     node_id: UUID
     node_type: EnumNodeKind
     node_version: ModelSemVer
+    correlation_id: UUID
     target_backend: EnumBackendType
     idempotency_key: str | None
     endpoints: dict[str, str]
@@ -108,7 +110,7 @@ class HandlerPartialRetry:
         >>> from unittest.mock import AsyncMock
         >>> postgres_adapter = AsyncMock()
         >>> handler = HandlerPartialRetry(postgres_adapter)
-        >>> # Call handler.handle(request, correlation_id) in async context
+        >>> # Call handler.handle(request) in async context
     """
 
     @property
@@ -133,11 +135,7 @@ class HandlerPartialRetry:
         """
         self._postgres_adapter = postgres_adapter
 
-    async def handle(
-        self,
-        request: ProtocolPartialRetryRequest,
-        correlation_id: UUID,
-    ) -> ModelBackendResult:
+    async def handle(self, request: ProtocolPartialRetryRequest) -> ModelBackendResult:
         """Execute partial failure retry operation.
 
         Routes to PostgreSQL based on target_backend field and executes the
@@ -153,8 +151,6 @@ class HandlerPartialRetry:
                 - endpoints: Dict of endpoint URLs (for PostgreSQL)
                 - metadata: Additional metadata (for PostgreSQL)
 
-            correlation_id: Request correlation ID for distributed tracing.
-
         Returns:
             ModelBackendResult with:
                 - success: True if retry operation succeeded
@@ -169,6 +165,7 @@ class HandlerPartialRetry:
             and returned in the ModelBackendResult to support partial failure
             handling in registration scenarios.
         """
+        correlation_id = request.correlation_id
         start_time = time.perf_counter()
         target_backend = request.target_backend
 

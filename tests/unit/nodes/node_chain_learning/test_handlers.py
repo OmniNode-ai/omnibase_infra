@@ -21,6 +21,7 @@ from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_store_c
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
     EnumChainVerifyState,
     ModelChainEntry,
+    ModelChainLearnCommand,
     ModelChainMatch,
     ModelChainReplayInput,
     ModelChainReplayResult,
@@ -68,13 +69,13 @@ class TestHandlerChainLearnInitiate:
     @pytest.mark.asyncio
     async def test_returns_dispatch_params(self) -> None:
         handler = HandlerChainLearnInitiate()
-        cid = uuid4()
-        result = await handler.handle(
+        command = ModelChainLearnCommand(
+            correlation_id=uuid4(),
             prompt_text="hello world",
             workflow_ref="test_wf",
-            correlation_id=cid,
             similarity_threshold=0.9,
         )
+        result = await handler.handle(command)
         assert result["prompt_text"] == "hello world"
         assert result["workflow_ref"] == "test_wf"
         assert result["similarity_threshold"] == "0.9"
@@ -93,7 +94,7 @@ class TestHandlerChainRetrievalComplete:
             best_match_similarity=0.92,
             is_hit=True,
         )
-        result = await handler.handle(retrieval, uuid4())
+        result = await handler.handle(retrieval)
         assert result["path"] == "replay"
         assert result["is_hit"] is True
 
@@ -104,7 +105,7 @@ class TestHandlerChainRetrievalComplete:
             correlation_id=uuid4(),
             is_hit=False,
         )
-        result = await handler.handle(retrieval, uuid4())
+        result = await handler.handle(retrieval)
         assert result["path"] == "explore"
         assert result["is_hit"] is False
 
@@ -119,7 +120,7 @@ class TestHandlerChainStoreComplete:
             chain_id=uuid4(),
             success=True,
         )
-        result = await handler.handle(store_result, uuid4())
+        result = await handler.handle(store_result)
         assert result["status"] == "complete"
         assert result["success"] is True
 
@@ -132,7 +133,7 @@ class TestHandlerChainStoreComplete:
             success=False,
             error_message="connection refused",
         )
-        result = await handler.handle(store_result, uuid4())
+        result = await handler.handle(store_result)
         assert result["success"] is False
 
 

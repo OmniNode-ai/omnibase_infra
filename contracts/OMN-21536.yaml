@@ -1,0 +1,27 @@
+# OMN-21536 contract file for omnibase_infra: node_chain_orchestrator and node_registry_effect handlers take one typed request.
+schema_version: "1.0.0"
+ticket_id: "OMN-21536"
+title: "handler_shape checker replaces the canonical_handler_shape repository script and judges every handler class, bound or not"
+summary: "The omnibase_infra slice of the handler-shape burn-down: the three node_chain_orchestrator handlers and the three node_registry_effect handlers took a second positional correlation_id (or loose fields) beside the request, which the core handler_shape rule noncanonical_handle reports. Each now takes one typed request and reads the correlation ID from it; ModelPartialRetryRequest and ProtocolPartialRetryRequest gain correlation_id, and the two registry handlers import ModelRegistryRequest at runtime so the runtime can resolve the request model from the signature."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - public_api
+requirements:
+  - id: req-omn21536-chain-registry-handler-shape
+    statement: "Every handler of node_chain_orchestrator and node_registry_effect declares handle(self, request: ModelX) with the correlation ID inside the request, and the core ValidatorHandlerShape reports no finding on them."
+    acceptance:
+      - id: AC21536101
+        statement: "AC21536101: ValidatorHandlerShape reports zero noncanonical_handle findings on the six handler modules of node_chain_orchestrator and node_registry_effect, and the runtime resolves the request model of five of them from the handle signature -- falsifier: uv run pytest tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py -q fails at origin/dev with six noncanonical_handle findings"
+evidence_requirements:
+  - kind: tests
+    description: "The six handlers take one typed request, the validator is silent on them and flags a planted multi-parameter handle, and the correlation ID of the request reaches the result."
+    command: "uv run pytest tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py tests/unit/nodes/node_chain_learning/test_handlers.py tests/unit/nodes/node_registry_effect -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-omn21536-infra-001
+    description: "ValidatorHandlerShape is silent on the six slice handlers, flags a planted multi-parameter handle, and the request correlation ID reaches each result."
+    source: generated
+    binds_ac: [AC21536101]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/nodes/test_handler_shape_chain_registry_omn21536.py tests/unit/nodes/node_chain_learning/test_handlers.py tests/unit/nodes/node_registry_effect -q -p no:cacheprovider'

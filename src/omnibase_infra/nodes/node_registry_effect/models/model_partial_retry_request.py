@@ -18,7 +18,7 @@ Related:
 
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,7 @@ class ModelPartialRetryRequest(BaseModel):
         node_id: Unique identifier for the node being registered.
         node_type: Type of ONEX node (effect, compute, reducer, orchestrator).
         node_version: Semantic version of the node.
+        correlation_id: Correlation ID for distributed tracing.
         target_backend: Backend to retry ("postgres").
         idempotency_key: Optional key for idempotent retry semantics.
         endpoints: Dict of endpoint type to URL for PostgreSQL.
@@ -55,6 +56,10 @@ class ModelPartialRetryRequest(BaseModel):
     node_version: str = Field(
         ...,
         description="Semantic version of the node",
+    )
+    correlation_id: UUID = Field(
+        default_factory=uuid4,
+        description="Correlation ID for distributed tracing",
     )
     target_backend: EnumBackendType = Field(
         ...,
