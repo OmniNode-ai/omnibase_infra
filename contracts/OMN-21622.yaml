@@ -2,7 +2,7 @@ schema_version: "1.0.0"
 ticket_id: OMN-21622
 title: "Machine login profile: one declared grant set every machine principal receives at issuance, with a drift check"
 summary: >-
-  Every principal the lab issuer mints is one machine's login, and a machine that runs the Claude Code hook edge also runs the hook-emit drainer, which publishes the twelve work-ledger row events and registers its credentials. Those thirteen produce grants are now bindings of the one declared profile (deploy/lab/developer-principal-bindings.yaml, derived by node_broker_grant_derive_compute), so the issuer grants them in the act that mints a principal and no machine needs a follow-up grant. audit-grants --role machine audits the machines a developer.principal overlay declares (omnibase_core EnumDeveloperPrincipalRole) and fails naming each machine and each grant of the profile the broker lacks; a grant a private declaration adds is reported and does not fail. A user timer runs it every 15 minutes through the issuer container. The private overlay rows and the health fleet's watch of the timer live in the private config repository. A machine row may also bind grant roles by name (grant_roles); the issuer accepts the binding on a machine row only and grants the same profile with or without it, because each role's grant set is declared and applied by the deployment's private broker ACL declaration.
+  The lab issuer selects thirteen produce-only grants from machine-principal-derived-grants.json only for trusted developer.principal overlay rows with role machine. The bindings and derived document are separate from the shared developer profile. A missing role and issuance without an overlay receive only developer grants; a request-supplied role cannot select machine privileges. Issuance, apply-grants and audit-grants select the same profile. audit-grants --role machine fails on missing grants and reports private extras without failing. A user timer runs it every 15 minutes through the issuer container. The private overlay rows and timer installation live outside this repository; no live broker apply is claimed. A machine row may also bind grant roles by name (grant_roles); the issuer accepts the binding on a machine row only and grants the same profile with or without it, because each role's grant set is declared and applied by the deployment's private broker ACL declaration.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -17,8 +17,12 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: >-
-      Issuance grants every work-ledger row event and credential registration (produce only) and the append client in one act; the machine audit passes a machine holding the profile, fails naming the machine and the missing grant when one is planted missing, reports a private extra without failing, never lists a developer row's ACLs, and refuses a role no row holds and a role without an overlay.
-    command: uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0
+      Issuance grants declared machine rows every work-ledger row event and credential registration (produce only) and the append client in one act, and withholds machine grants from developer rows and requests without an overlay; the machine audit passes a machine holding the profile, fails naming the machine and the missing grant when one is planted missing, reports a private extra without failing, never lists a developer row's ACLs, and refuses a role no row holds and a role without an overlay.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q
+  - kind: manual
+    description: >-
+      Hosted-runner deployment configuration probe: load the grant documents copied into the issuer image and exercise issuance, apply and audit for each trusted role with a fake broker. Fails when machine grants are shared or the image omits a referenced document; requires no broker or Docker daemon.
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest -o addopts='' tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -k 'same_role_profile or issuer_image'"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -30,15 +34,24 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -n 0 -p no:cacheprovider
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/scripts/test_lab_principal_issuer_machine_role_omn21622.py -q -o addopts='' -p no:cacheprovider
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn21622-ac1-derived-profile
     description: >-
-      The committed derived grants are the derive node's output of the bindings that now carry the machine profile, and the issued set pins it.
+      The two committed derived documents are independently checked against the developer bindings and machine-only supplement; shared developer grants contain no machine-only topic.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -n 0 -p no:cacheprovider -k "typed_by_hand or nodes_output"
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_broker_grant_derive_compute/test_developer_principal_grants_omn19975.py -q -o addopts='' -p no:cacheprovider -k "typed_by_hand or nodes_output or machine_supplement"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21622-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image imports the developer principal plan handler this change edits.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.handlers.handler_developer_principal_plan import HandlerDeveloperPrincipalPlan; print('deploy smoke ok', HandlerDeveloperPrincipalPlan.__name__)\""
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]

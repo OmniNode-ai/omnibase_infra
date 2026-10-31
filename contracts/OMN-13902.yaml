@@ -11,6 +11,8 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false; it reports changed=true today -- falsifier: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only'
+      - id: AC2
+        statement: 'AC2: The committed uv.lock is at format revision 5 after the lock refresh; the merge base carries revision 1 -- falsifier: uv run pytest tests/ci/test_uv_lock_revision_omn13902.py -q'
 evidence_requirements:
   - kind: tests
     description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
@@ -49,3 +51,12 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-13902-ac4
+    description: The refreshed uv.lock header reads revision 5, which the merge base's lock does not.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_uv_lock_revision_omn13902.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

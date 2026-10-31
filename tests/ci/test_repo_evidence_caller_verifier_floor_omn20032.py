@@ -10,15 +10,17 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.ci.receipt_gate_pin import RECEIPT_GATE_PIN_SHA
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CALLER_PATH = REPO_ROOT / ".github" / "workflows" / "call-repo-evidence-gate.yml"
 REQUIRED_CHECKS_PATH = REPO_ROOT / ".github" / "required-checks.yaml"
 
-# omnibase_core#1932: the squash commit that adds VERIFIER_FLOOR to the reusable's
-# "Install the pinned verifier" step.
-_FLOOR_REUSABLE_SHA = "1088a7b0303059c035ecc0e3ea33580f9556fe41"
+# The pin carries omnibase_core#1932, which adds VERIFIER_FLOOR to the reusable's
+# "Install the pinned verifier" step. The sha lives in tests/ci/receipt_gate_pin.py.
+_FLOOR_REUSABLE_SHA = RECEIPT_GATE_PIN_SHA
 
 # 0.4.303 is the first omnimarket release carrying omnimarket#3511, the refusal of
 # a contract that leaves an acceptance criterion unbound.

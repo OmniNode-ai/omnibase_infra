@@ -136,16 +136,7 @@
 # The handler's correlation filter selects responses; it is not an ACL boundary.
 # Runtime command-consumer groups use separate prefixes. Per-principal receipt
 # isolation requires changing the client's group IDs and reply topic routing too.
-# MACHINE PROFILE (OMN-21622): every principal this file grants is one machine's login, and a
-# machine that runs the Claude Code hook edge also runs its hook-emit drainer, which
-# publishes the twelve work-ledger row events beside the hook events, and registers its
-# credentials as every declared host does (no credential value is carried by that event).
-# With the hook topics alone the drainer stalls on the first ledger row it reaches and
-# nothing queued behind it is published (measured 2026-10-30 on the operator Mac: 160
-# refusals of work-ledger-friction in half an hour). Each machine was then given these
-# rows by hand, one host at a time (OMN-20825 for the Mac drainer, OMN-21605 for h051).
-# They are produce only: the work-ledger projection reads the row events, a machine never
-# does. The issuer grants them in the act that mints the principal.
+# Machine-only writes live in machine-principal-bindings.yaml (OMN-21622).
 principal: "{principal}"
 bindings:
   - {broker: dev, physical_topic: onex.cmd.omnimarket.delegate-skill.v1, direction: produce}
@@ -218,19 +209,6 @@ bindings:
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-completed.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.team-task-progress.v1, direction: produce}
   - {broker: dev, physical_topic: onex.evt.omniclaude.tool-executed.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.credential-registered.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ack.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-claim.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-correction.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-friction.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-hold.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-msg.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-operator-consent.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-release.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-ruling.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-status.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-terminal.v1, direction: produce}
-  - {broker: dev, physical_topic: onex.evt.omnimarket.work-ledger-terminal-refused.v1, direction: produce}
   - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-requested.v1, direction: produce}
   - {broker: dev, physical_topic: onex.cmd.omniintelligence.context-compaction-package.v1, direction: consume, consumer_group: receipt-mode-client.call}
   - {broker: dev, physical_topic: onex.evt.omnimarket.context-compaction-prepared.v1, direction: consume, consumer_group: receipt-mode-client.call}

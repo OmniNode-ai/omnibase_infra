@@ -709,7 +709,7 @@ requirements:
     statement: The core dev-merge tag, compatible range, tag-only source, lock and moved consumers agree on version 0.47.58.
     acceptance:
       - id: AC17427630002
-        statement: 'The core tag dev-20261030152335-66d35d2283c3, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
+        statement: 'The core tag dev-20261031000524-fc6159b98026, commit and lock agree without a version override and the moved receipt consumers and typed canonical-file-shape checker import and pass their focused tests -- falsifier: uv run --frozen pytest tests/ci/test_core_dev_tag_pin_omn17427.py tests/ci/test_omn20696_noncanonical_files.py tests/unit/runtime/test_version_compatibility.py tests/unit/runtime/test_seam_released_core_pin.py tests/scripts/test_check_sibling_compatible_range.py -n 0 -q'
   - id: req-omn17427-first-party-dev-merge-tags
     statement: 'Stage 0 of the goal: the dev lane boots its composed runtime on first-party dev-merge tags. Every vendored sibling (core, spi, omnimarket) is staged at its newest dev-merge tag with no caller opt-in, a sibling with no tag is refused instead of built from its branch, the image installs spi from the staged tree, and the build fails when any first-party package of the image resolves from a sha, a branch, a release or an exact version.'
     acceptance:
@@ -722,6 +722,11 @@ requirements:
     acceptance:
       - id: AC17427630004
         statement: 'Contract validation refuses incompatible models, missing handlers and unexported protocol functions; the sweep uses the injected binding and its verdict format matches core at the pin -- falsifier: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov fails at the merge base because this test path and resolver are absent'
+  - id: req-omn17427-delegation-budget-readings-grant
+    statement: The delegation budget readings table (OMN-21326 AC3, moved off the operator machine) is delivered to the lab runtime with exactly SELECT, INSERT and UPDATE for omninode_runtime, ahead of the omnimarket contract pin.
+    acceptance:
+      - id: AC17427640003
+        statement: 'AC17427640003: every topology profile derives one omninode_runtime grant of INSERT, SELECT and UPDATE on delegation_budget_readings, no other principal holds it, and the vendored bytes match the ledger row and migration class -- falsifier: uv run pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py -q'
   - id: req-omn17427-hook-writer-ingress
     statement: The hook-events writer can bind the main-role kernel's local ingress socket as the runtime image's non-root user.
     acceptance:
@@ -3253,7 +3258,7 @@ dod_evidence:
       - AC17427004001
       - AC17427004002
   - id: dod-omn17427-core-dev-tag-pin
-    description: Pin identity at dev-20261030152335-66d35d2283c3, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
+    description: Pin identity at dev-20261031000524-fc6159b98026, moved imports, typed shape checker and compatible-version seams; the pin test fails at the merge base, which pins the earlier tag.
     source: manual
     checks:
       - check_type: test_passes
@@ -3261,7 +3266,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630002]
   - id: dod-omn17427-core-dev-tag-deploy
-    description: Hosted-runner check of tag identity at dev-20261030152335-66d35d2283c3 and moved imports without services, containers or credentials; runtime boot proof is separate.
+    description: Hosted-runner check of tag identity at dev-20261031000524-fc6159b98026 and moved imports without services, containers or credentials; runtime boot proof is separate.
     source: manual
     checks:
       - check_type: command
@@ -3276,6 +3281,15 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/handlers/test_done_write_receipt_gate_contract.py -n 0 -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427630004]
+  - id: dod-omn17427-delegation-budget-readings-grant
+    description: The vendored delegation budget readings migrations, the interim table declaration and the regenerated topology catalogs derive the runtime grant for every profile. Fails at the merge base, which declares no such table.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17427640001
   - id: dod-omn17427-hook-writer-ingress
     description: Both compose and catalog mounts are checked against the kernel socket contract and image user, independently of other main-runtime tmpfs entries. Removing the writer mount at the merge base fails these cases.
     source: manual
@@ -3292,6 +3306,22 @@ dod_evidence:
         check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/docker/test_omn19513_hook_events_writer.py -q -k mounts_the_ingress_socket_directory --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC17427546801]
+  - id: dod-omn17427-delegation-budget-readings-deploy
+    description: Hosted-runner deploy check resolves the delivered table through every shipped topology profile and checks the runtime grant and vendored migration ledger. Requires no database, container, credentials or live lane.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/topology/test_delegation_budget_readings_grant_omn17427.py tests/integration/topology/test_delegation_budget_readings_binding_omn17427.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640003]
+  - id: dod-omn17427-budget-readings-live-constraints
+    description: Apply both delivered SQL migrations to an isolated PostgreSQL cluster. Required values, status check, primary key and defaults are restored on empty drifted tables; populated rows and cursor sequences survive reapplication; missing producer values refuse atomically. Runtime upsert succeeds with only the declared privileges and DELETE is refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_delegation_budget_readings_omn17427.py -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC17427640003]
   - id: dod-omn17427-first-party-dev-merge-tags
     description: The audit, the tag-following checkout, the staging record and the provenance fold-in; at the merge base the audit does not exist and only omnimarket follows its tag.
     source: manual
