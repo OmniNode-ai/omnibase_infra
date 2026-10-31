@@ -121,19 +121,23 @@ def test_the_entrypoint_hands_a_root_owned_mount_to_the_runner_user() -> None:
     root-owned on first use; the root phase of the entrypoint must hand it over
     before it drops to the runner user."""
     text = _ENTRYPOINT.read_text()
-    assert "_own_cache_mounts()" in text
-    body = text[text.index("_own_cache_mounts() {") :]
-    body = body[: body.index("\n}\n") + 3]
-    assert "/home/runner/.cache" in body
-    assert '"${RUNNER_HOME}/${RUNNER_WORK_DIR}"' in body
-    assert "chown runner:runner" in body
-    assert "-R" not in body, (
+    root_phase = text[
+        text.index('if [[ "$(id -u)" -eq 0 ]]; then\n    _fix_docker_socket_gid') :
+    ]
+    root_phase = root_phase[: root_phase.index("\nfi\n")]
+    chown = next(line for line in root_phase.splitlines() if "chown" in line)
+    assert "chown runner:runner" in chown
+    assert "/home/runner/.cache" in chown
+    assert (
+        '"${RUNNER_HOME:-/home/runner/actions-runner}/${RUNNER_WORK_DIR:-_work}"'
+        in chown
+    )
+    assert " -R" not in chown, (
         "a recursive chown of a cache volume costs minutes per start"
     )
-    # called once, from the main section, before the runner is configured or run
-    call = text.index("\n_own_cache_mounts\n")
-    assert call < text.index("_register\n    _save_creds")
-    assert call < text.index('_as_runner "${RUNNER_HOME}/run.sh"')
+    # the root phase comes before the runner is configured or run
+    assert text.index(chown) < text.index('_as_runner "${RUNNER_HOME}/config.sh"')
+    assert text.index(chown) < text.index('_as_runner "${RUNNER_HOME}/run.sh"')
 
 
 _RENDER_ENV = {

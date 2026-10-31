@@ -329,9 +329,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-1-creds:/home/runner/.runner-creds
       - runner-1-cache:/home/runner/.cache
       - runner-1-work:/home/runner/actions-runner/_work
+      - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
     container_name: omninode-runner-2
@@ -345,9 +345,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-2-creds:/home/runner/.runner-creds
       - runner-2-cache:/home/runner/.cache
       - runner-2-work:/home/runner/actions-runner/_work
+      - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
     container_name: omninode-runner-3
@@ -361,9 +361,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-3-creds:/home/runner/.runner-creds
       - runner-3-cache:/home/runner/.cache
       - runner-3-work:/home/runner/actions-runner/_work
+      - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
     container_name: omninode-runner-4
@@ -377,9 +377,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-4-creds:/home/runner/.runner-creds
       - runner-4-cache:/home/runner/.cache
       - runner-4-work:/home/runner/actions-runner/_work
+      - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
     container_name: omninode-runner-5
@@ -393,9 +393,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-5-creds:/home/runner/.runner-creds
       - runner-5-cache:/home/runner/.cache
       - runner-5-work:/home/runner/actions-runner/_work
+      - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
     container_name: omninode-runner-6
@@ -409,9 +409,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-6-creds:/home/runner/.runner-creds
       - runner-6-cache:/home/runner/.cache
       - runner-6-work:/home/runner/actions-runner/_work
+      - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
     container_name: omninode-runner-7
@@ -425,9 +425,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-7-creds:/home/runner/.runner-creds
       - runner-7-cache:/home/runner/.cache
       - runner-7-work:/home/runner/actions-runner/_work
+      - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
     container_name: omninode-runner-8
@@ -441,9 +441,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-8-creds:/home/runner/.runner-creds
       - runner-8-cache:/home/runner/.cache
       - runner-8-work:/home/runner/actions-runner/_work
+      - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
     container_name: omninode-runner-9
@@ -457,9 +457,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-9-creds:/home/runner/.runner-creds
       - runner-9-cache:/home/runner/.cache
       - runner-9-work:/home/runner/actions-runner/_work
+      - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
     container_name: omninode-runner-10
@@ -473,9 +473,9 @@ services:
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
       - *lab-host-table
-      - runner-10-creds:/home/runner/.runner-creds
       - runner-10-cache:/home/runner/.cache
       - runner-10-work:/home/runner/actions-runner/_work
+      - runner-10-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real

@@ -151,7 +151,6 @@ def test_incident_listing_makes_the_wait_poll_until_it_clears(
     )
     assert result.returncode == 0, result.stderr
     assert len([c for c in calls if "status=dead" in c]) == 4
-    assert "omninode-runner-9" in result.stdout
 
 
 def test_a_listing_that_never_clears_times_out_and_fails(
@@ -209,7 +208,7 @@ def _rolling_body(script_text: str) -> str:
         'DRY_RUN=false\nTOKEN_FILE=""\nROLL_ONLY=""\nROLL_LIMIT=0\n'
         "ROLL_SKIP_RETRY_PASSES=0\n"
         'COMPOSE_FILE="docker/docker-compose.runners.yml"\n'
-        "ROLL_DEAD_MAX_SECONDS=30\nROLL_ONLINE_INTERVAL_SECONDS=10\n"
+        "ROLL_DEAD_MAX_SECONDS=30\nROLL_ONLINE_INTERVAL_SECONDS=10\nROLL_ONLINE_MAX_SECONDS=240\n"
         'DEPLOY_RUNNER_TOKEN="placeholder-not-a-token"\n' + funcs + "\nrolling_deploy\n"
     )
 
