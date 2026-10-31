@@ -451,7 +451,11 @@ class TestDev202PhasesOff:
         assert requested
         assert not requested & _DEV_202_DISABLED
 
-        up = _capture_compose_up(DeployExecutor())[0]
+        up = next(
+            cmd
+            for cmd in _capture_compose_up(DeployExecutor())
+            if cmd[:2] == ["docker", "compose"]
+        )
         assert not set(up) & _DEV_202_DISABLED
 
         migrations = _capture_migrations(DeployExecutor())
@@ -500,7 +504,12 @@ class TestDev202PhasesOff:
 # AC3 -- dev-201 and a router-less agent are unchanged                         #
 # --------------------------------------------------------------------------- #
 class TestDev201Unchanged:
-    def test_dev_201_unchanged_config_is_the_legacy_dev_lane(self) -> None:
+    def test_dev_201_unchanged_config_is_the_legacy_dev_lane(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            executor_mod, "RUNTIME_POLICY_ENV_FILE", _DOCKER / "runtime-policy.env"
+        )
         assert active_dev_instance() == "dev-201"
         default = lane_config_for(EnumRuntimeLane.DEV)
         select_dev_instance("dev-201")
@@ -513,20 +522,27 @@ class TestDev201Unchanged:
             "docker-compose.infra.yml",
             "docker-compose.dev-lane.yml",
             "docker-compose.dev-tenant-fold.yml",
+            "docker-compose.dev-fold.yml",
         ]
         assert cfg.postgres_container == "omnibase-infra-postgres"
         assert cfg.runtime_health_targets == RUNTIME_HEALTH_TARGETS
         assert cfg.main_runtime_container == "omninode-runtime"
         assert cfg.disabled_phases == frozenset()
-        assert cfg.disabled_services == frozenset()
+        assert cfg.disabled_services == frozenset(
+            {"runtime-worker", "tenant-projection-writer"}
+        )
         for phase in EnumInstancePhase:
             assert lane_runs_phase(EnumRuntimeLane.DEV, phase)
 
     def test_dev_201_unchanged_compose_argv(self) -> None:
         select_dev_instance("dev-201")
-        up = _capture_compose_up(DeployExecutor())[0]
+        up = next(
+            cmd
+            for cmd in _capture_compose_up(DeployExecutor())
+            if cmd[:2] == ["docker", "compose"]
+        )
         assert _project_of(up) == "omnibase-infra"
-        assert len(_files_of(up)) == 3
+        assert len(_files_of(up)) == 4
         assert "onex-api" in up
 
         builds = _capture_build(DeployExecutor())

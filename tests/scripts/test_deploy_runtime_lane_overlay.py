@@ -160,7 +160,8 @@ def test_dev_project_layers_only_the_dev_lane_overlay() -> None:
     assert out == (
         "-f /DEPLOY/docker/docker-compose.infra.yml "
         "-f /DEPLOY/docker/docker-compose.dev-lane.yml "
-        "-f /DEPLOY/docker/docker-compose.dev-tenant-fold.yml"
+        "-f /DEPLOY/docker/docker-compose.dev-tenant-fold.yml "
+        "-f /DEPLOY/docker/docker-compose.dev-fold.yml"
     ), out
     # infra.yml first, so the dev overlay's environment merges on top of it.
     assert out.index("docker-compose.infra.yml") < out.index(

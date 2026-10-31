@@ -11,6 +11,8 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts.render_runtime_policy_env import load_contract, render_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_FILE = REPO_ROOT / "docker" / "docker-compose.stability-test.yml"
@@ -29,6 +31,7 @@ RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 # service's `rpk cluster config set topic_partitions_per_shard ...` call --
 # must agree with this constant, or the assertions below fail.
 STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD = 15000
+FOLDED_PROFILE = "folded-effects"
 
 RUNTIME_SERVICES = ("omninode-runtime", "runtime-worker")
 RUNTIME_ADDRESS_PREFIX = "runtime://omninode-pc/stability-test/"
@@ -650,3 +653,88 @@ def test_stability_lane_main_carries_effects_environment_and_networks() -> None:
         "redpanda:9092"
     )
     assert set(main["networks"]) == {"omnibase-infra-network", "omnimemory-network"}
+
+
+@pytest.mark.unit
+def test_only_main_renders_folded_effects() -> None:
+    env = render_env(load_contract())
+    folded = {
+        key: value
+        for key, value in env.items()
+        if key.startswith("STABILITY_TEST_") and key.endswith("_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    assert list(folded.values()) == ["effects"]
+    (key,) = folded
+    assert key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    environment = _load_overlay()["services"]["omninode-runtime"]["environment"]
+    assert environment["ONEX_RUNTIME_FOLDED_PROFILES"] == (
+        f"${{{key}:?runtime policy contract must set {key}}}"
+    )
+
+
+@pytest.mark.unit
+def test_committed_policy_env_contains_folded_effects() -> None:
+    rendered = render_env(load_contract())
+    folded = {
+        key: value
+        for key, value in rendered.items()
+        if key.startswith("STABILITY_TEST_")
+        and key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    (key,) = folded
+    assert folded[key] == "effects"
+    assert _load_runtime_policy_env()[key] == "effects"
+    environment = _load_overlay()["services"]["omninode-runtime"]["environment"]
+    assert key in environment["ONEX_RUNTIME_FOLDED_PROFILES"]
+
+
+@pytest.mark.unit
+def test_fold_disables_separate_effects_service() -> None:
+    services = _load_overlay()["services"]
+    assert services["runtime-effects"]["profiles"] == [FOLDED_PROFILE]
+
+
+@pytest.mark.unit
+def test_main_receives_fold_and_effects_environment() -> None:
+    services = _load_overlay()["services"]
+    env = services["omninode-runtime"]["environment"]
+    folded = {
+        key: value
+        for key, value in render_env(load_contract()).items()
+        if key.startswith("STABILITY_TEST_")
+        and key.endswith("_RUNTIME_MAIN_FOLDED_PROFILES")
+    }
+    assert len(folded) == 1
+    (key,) = folded
+    assert folded[key] == "effects"
+    assert key in env["ONEX_RUNTIME_FOLDED_PROFILES"]
+    assert _load_runtime_policy_env()[key] == "effects"
+    carried = {
+        "CODING_AGENT_CRED_HOME": "/home/omniinfra",
+        "ONEX_CODING_AGENT_WORKSPACE_ROOT": "/home/omniinfra/agent-workspaces",
+        "OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS": "redpanda:9092",
+        "ONEX_DEAD_LETTER_ARCHIVE_DIR": "/app/effects-data/dead-letter-archive",
+        "ONEX_CONSUMER_FLOW_ARCHIVE_DIR": "/app/effects-data/consumer-flow-archive",
+    }
+    for key, value in carried.items():
+        assert env[key] == value
+
+
+@pytest.mark.unit
+def test_fold_keeps_both_health_ports_and_memory_network() -> None:
+    main = _load_overlay()["services"]["omninode-runtime"]
+    for key in (
+        "STABILITY_TEST_RUNTIME_MAIN_PORT",
+        "STABILITY_TEST_RUNTIME_EFFECTS_PORT",
+    ):
+        assert (
+            f"${{{key}:?runtime policy contract must set {key}}}:8085" in main["ports"]
+        )
+    assert "omnimemory-network" in main["networks"]
+
+
+@pytest.mark.unit
+def test_fold_leaves_base_infra_separate_effects_service() -> None:
+    assert "runtime-effects" in _load_base_compose()["services"]

@@ -189,7 +189,7 @@ readonly COMPOSE_PROJECT="${DEV_COMPOSE_PROJECT}"
 # correct home for them, out of scope for this config-duplication kill.
 readonly REDPANDA_CONTAINER="omnibase-infra-redpanda"
 readonly POSTGRES_CONTAINER="omnibase-infra-postgres"
-readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projection-api)
+readonly CORE_SERVICES=(omninode-runtime runtime-effects projection-api)
 # OMN-18496: must equal CLOUD_MIGRATION_FAILED_EXIT_CODE in
 # src/omnibase_infra/handlers/handler_runtime_deploy.sh.
 readonly CLOUD_MIGRATION_FAILED_DEPLOY_EXIT=3
@@ -607,7 +607,8 @@ run_preflight_required_env() {
         --runtime-policy-env "${REPO_ROOT}/docker/runtime-policy.env" \
         --compose-file "${INFRA_CLONE}/docker/docker-compose.infra.yml" \
         --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml" \
-        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-tenant-fold.yml"
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-tenant-fold.yml" \
+        --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-fold.yml"
 }
 
 # OMN-20867: the lane's env fragment from the private deployment overlay clone,

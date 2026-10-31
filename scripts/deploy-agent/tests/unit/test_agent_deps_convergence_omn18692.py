@@ -121,6 +121,9 @@ def startup_seams(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(agent_mod, "LAB_OVERLAY_ENABLED", False)
     monkeypatch.setattr(agent_mod, "record_loaded_code_sha", lambda _agent_dir: SHA)
     monkeypatch.setattr(agent_mod, "DeployConsumer", _silent_consumer(timeline))
+    # The idle loop also publishes a tag heartbeat. Keep this startup-order
+    # test network-free at that leaf; its real convergence and ordering remain.
+    monkeypatch.setattr(agent_mod, "publish_dev_tag_heartbeat", lambda *args: None)
     return timeline
 
 
