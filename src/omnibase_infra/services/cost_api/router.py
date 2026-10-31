@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.nodes.node_registry_api_effect.models.model_cost_snapshot_topics import (
+    ModelCostSnapshotTopics,
+)
 from omnibase_infra.services.cost_api.handlers import (
     fetch_cost_by_model,
     fetch_cost_by_repo,
@@ -63,6 +66,12 @@ def get_cost_api_pool(request: Request) -> object:
     return pool
 
 
+def get_cost_snapshot_topics(request: Request) -> ModelCostSnapshotTopics:
+    """Return the contract-declared snapshot topics bound by the registry app factory."""
+    topics: ModelCostSnapshotTopics = request.app.state.cost_snapshot_topics
+    return topics
+
+
 @router.get(
     "/api/costs/summary",
     response_model=ModelCostSummary,
@@ -70,13 +79,18 @@ def get_cost_api_pool(request: Request) -> object:
 )
 async def get_cost_summary(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: Annotated[
+        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
+    ],
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostSummary:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_cost_summary(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_cost_summary(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
@@ -122,13 +136,18 @@ async def get_cost_by_model(
 )
 async def get_cost_by_repo(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: Annotated[
+        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
+    ],
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelCostBreakdown:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_cost_by_repo(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_cost_by_repo(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
@@ -138,13 +157,18 @@ async def get_cost_by_repo(
 )
 async def get_token_usage(
     pool: Annotated[object, Depends(get_cost_api_pool)],
+    snapshot_topics: Annotated[
+        ModelCostSnapshotTopics, Depends(get_cost_snapshot_topics)
+    ],
     window: Annotated[
         AggregationWindow,
         Query(description="Rolling aggregate window to read."),
     ] = "24h",
 ) -> ModelTokenUsage:
     # Why: Runtime wiring validates and narrows this payload shape before use.
-    return await fetch_token_usage(pool, window=window)  # type: ignore[arg-type]
+    return await fetch_token_usage(  # type: ignore[arg-type]
+        pool, window=window, snapshot_topics=snapshot_topics
+    )
 
 
 @router.get(
