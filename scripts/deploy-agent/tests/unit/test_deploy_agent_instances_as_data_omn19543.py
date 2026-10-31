@@ -35,11 +35,14 @@ from deploy_agent.executor import (
     ModelLaneConfig,
     build_dev_instance_lane_configs,
     lane_config_for,
+    lane_with_phases_off,
     select_dev_instance,
 )
 from deploy_agent.instance_lanes import parse_instance_lanes
 from deploy_agent.routing import (
+    AGENT_CLONE_ROOT,
     RoutingTableError,
+    lane_flags_for_instance,
     load_routing_table,
     parse_routing_table,
     resolve_instance,
@@ -131,7 +134,14 @@ class TestInstanceCompositionIsData:
         assert cfg.disabled_phases == frozenset({EnumInstancePhase.LAB_OVERLAY})
         # gateway-deploy is NOT disabled here, so its services are not either.
         assert cfg.disabled_services == frozenset({"onex-api"})
-        assert configs[DEFAULT_DEV_INSTANCE] is _LANE_CONFIGS[EnumRuntimeLane.DEV]
+        # The default declares no ``lane:`` block; its phases are the table's
+        # ``flags:`` (OMN-21629), applied over the historical composition.
+        assert configs[DEFAULT_DEV_INSTANCE] == lane_with_phases_off(
+            _LANE_CONFIGS[EnumRuntimeLane.DEV],
+            lane_flags_for_instance(
+                AGENT_CLONE_ROOT, DEFAULT_DEV_INSTANCE
+            ).disabled_phases,
+        )
 
     def test_dev_202_is_exactly_the_omn19522_literal(self) -> None:
         """The composition OMN-19522 wrote in executor.py, restated here, is what

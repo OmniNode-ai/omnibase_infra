@@ -502,6 +502,16 @@ def _resolve_gateway_lane_from_this_checkout(
     script = repo_root / "scripts" / "deploy-gateway.sh"
     monkeypatch.setattr(executor_mod, "deploy_gateway_script", lambda: str(script))
 
+    # OMN-21629: the runtime policy env is read from the host checkout the agent
+    # runs from (REPO_DIR), so a lab host that carries one (the tenant fold) made
+    # a dozen composition tests red there while CI, which has none, stayed green.
+    # An absent file reads as empty; the tests that want values patch the loader.
+    monkeypatch.setattr(
+        executor_mod,
+        "RUNTIME_POLICY_ENV_FILE",
+        tmp_path_factory.mktemp("runtime-policy") / "absent-runtime-policy.env",
+    )
+
     lane_dir = tmp_path_factory.mktemp("gateway-lane")
     lines: list[str] = []
     for name in sorted(executor_mod.GATEWAY_REQUIRED_MAP_VARS):

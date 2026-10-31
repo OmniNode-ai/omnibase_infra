@@ -117,10 +117,23 @@ class TestThePlanForTheLabLane:
             services_for_scope(Scope.FULL, lane=EnumRuntimeLane.DEV)
         )
         # ... and nothing hands it to compose or to the gateway script.
-        for scope in (Scope.RUNTIME, Scope.FULL):
-            requested = _requested_services_for_up(scope, [], lane=EnumRuntimeLane.DEV)
-            assert requested
-            assert not set(requested) & set(DEV_LANE_GATEWAY_SERVICES)
+        runtime = _requested_services_for_up(
+            Scope.RUNTIME, [], lane=EnumRuntimeLane.DEV
+        )
+        assert runtime
+        assert not set(runtime) & set(DEV_LANE_GATEWAY_SERVICES)
+        # A full scope names no service of its own (compose chooses from the
+        # profile), and an explicit list that names the forwarder loses it.
+        assert (
+            _requested_services_for_up(Scope.FULL, [], lane=EnumRuntimeLane.DEV) == []
+        )
+        named = _requested_services_for_up(
+            Scope.FULL,
+            ["omninode-runtime", *DEV_LANE_GATEWAY_SERVICES],
+            lane=EnumRuntimeLane.DEV,
+        )
+        assert "omninode-runtime" in named
+        assert not set(named) & set(DEV_LANE_GATEWAY_SERVICES)
 
     def test_the_gateway_phase_never_reaches_the_script_or_the_host(
         self, monkeypatch: pytest.MonkeyPatch
