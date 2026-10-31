@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Primary metadata evidence for the inert RSD artifact binding."""
 
-from __future__ import annotations
-
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from omnibase_infra.models.rsd import model_rsd_pinned_model_identity as pin
 
 
 class ModelRsdArtifactSourceRelation(BaseModel):
@@ -28,7 +28,7 @@ class ModelRsdArtifactSourceRelation(BaseModel):
     artifact_embedded_source_model_card_sha256: Literal[
         "57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641"
     ]
-    artifact_declared_base_model_id: Literal["Qwen/Qwen3.8-27B"]
+    artifact_declared_base_model_id: pin.BaseModelId
     relation_status: Literal["publisher-declared-unverified"]
     approval_status: Literal["not-approved"]
 
