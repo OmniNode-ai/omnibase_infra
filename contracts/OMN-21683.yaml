@@ -48,3 +48,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run --frozen pytest tests/unit/handlers/container tests/unit/nodes/node_registry_api_effect tests/unit/nodes/node_contract_resolver_bridge -q -p no:cacheprovider'
+  - id: dod-004-deploy
+    description: "Post-deploy probe: the runtime container imports the binding site the waitlist notifier and the runner-health alert take their Slack handler from. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.container.container_slack import bind_slack_webhook; bind_slack_webhook()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
