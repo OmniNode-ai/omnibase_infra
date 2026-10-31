@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Transition Notification Outbox for guaranteed delivery.
 
-The outbox pattern for state transition notifications.
-The outbox stores notifications in the same database transaction as projections,
-then processes them asynchronously via a background processor to ensure
-at-least-once delivery semantics.
+The outbox pattern for state transition notifications. The outbox stores them in the
+same database transaction as projections, then processes them asynchronously via a
+background processor to ensure at-least-once delivery semantics.
 
 At-Least-Once Delivery Semantics:
     This implementation guarantees that every notification will be delivered
@@ -89,6 +88,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
     RuntimeHostError,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projectors.util_sql_identifiers import quote_identifier
 from omnibase_infra.runtime.models.model_transition_notification_outbox_metrics import (
     ModelTransitionNotificationOutboxMetrics,
@@ -205,10 +205,10 @@ class TransitionNotificationOutbox:
     # Default configuration values
     DEFAULT_TABLE_NAME: str = "transition_notification_outbox"
     DEFAULT_BATCH_SIZE: int = 100
-    DEFAULT_POLL_INTERVAL_SECONDS: float = 1.0
-    DEFAULT_QUERY_TIMEOUT_SECONDS: float = 30.0
+    DEFAULT_POLL_INTERVAL_SECONDS: float = TIMEOUTS.outbox_poll_interval_seconds
+    DEFAULT_QUERY_TIMEOUT_SECONDS: float = TIMEOUTS.database_query_seconds
     DEFAULT_STRICT_TRANSACTION_MODE: bool = True
-    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS: float = 10.0
+    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS: float = TIMEOUTS.outbox_shutdown_seconds
     MAX_ERROR_MESSAGE_LENGTH: int = 1000
 
     def __init__(

@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 """RuntimeScheduler - Core service for emitting RuntimeTick events.
 
-The RuntimeScheduler service that emits RuntimeTick events
-at configured intervals. The scheduler is the single source of truth for "now"
-across all orchestrators in the ONEX infrastructure.
+The RuntimeScheduler service that emits RuntimeTick events at configured intervals.
+The scheduler is the single source of truth for "now" across all orchestrators.
 
 Key Features:
     - Configurable tick interval (10ms - 60,000ms)
@@ -87,6 +86,7 @@ from omnibase_infra.errors import (
     ProtocolConfigurationError,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
 from omnibase_infra.runtime.models import (
@@ -349,7 +349,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         # Wait for tick task to complete
         if self._tick_task is not None:
             try:
-                await asyncio.wait_for(self._tick_task, timeout=5.0)
+                await asyncio.wait_for(self._tick_task, TIMEOUTS.tick_stop_seconds)
             except TimeoutError:
                 logger.warning(
                     "Tick task did not complete within timeout, cancelling",

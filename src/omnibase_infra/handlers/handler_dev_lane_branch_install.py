@@ -31,8 +31,7 @@ The deploy agent runs ``apply`` after every dev job that verified the lane and
 on an idle tick (``check``, then ``apply`` under the lane lock when anything is missing), which also covers a recreate the agent did not do (a hand
 refresh, the settle worker's pin recreate, a rollback). An apply copies a file
 whose sha256 differs, restores its owner and mode, restarts a changed container
-once, then READS EVERY FILE BACK and compares its sha256. A record whose files do
-not read back is FAILED, never quiet.
+once, then READS EVERY FILE BACK and compares its sha256. A record that does not read back is FAILED, never quiet.
 
 RELEASE RULE: MERGED OR EXPIRED
 -------------------------------
@@ -126,6 +125,7 @@ from omnibase_infra.models.model_dev_lane_branch_install_records import (
 from omnibase_infra.models.model_dev_lane_branch_install_release import (
     ModelDevLaneBranchInstallRelease,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +146,8 @@ RELEASED_FILE = "released.jsonl"
 STATUS_FILE = "status.json"
 CONTENT_DIRNAME = "content"
 
-DOCKER_TIMEOUT_SECONDS = 60.0
-RESTART_TIMEOUT_SECONDS = 240.0
+DOCKER_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_docker_seconds
+RESTART_TIMEOUT_SECONDS = TIMEOUTS.dev_lane_restart_seconds
 RESTART_WAIT_SECONDS = 240.0
 RESTART_POLL_SECONDS = 3.0
 

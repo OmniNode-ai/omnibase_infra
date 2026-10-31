@@ -9,8 +9,7 @@ as freshness state transitions occur.
 Rules:
 - Freshness is determined solely by querying MAX({freshness_field}) FROM
   {freshness_source_table}. Never infer from arbitrary timestamp columns.
-- If freshness_field or freshness_source_table is absent: state is UNKNOWN,
-  skip the contract.
+- Absent freshness_field or freshness_source_table: state is UNKNOWN, skip it.
 - Degraded → Recovered transitions emit a recovery event.
 - Duplicate events are suppressed: one degraded event per breach, one recovery
   per resolution.
@@ -33,6 +32,7 @@ from omnibase_infra.models.health.model_projection_degraded_event import (
 from omnibase_infra.models.health.model_projection_recovered_event import (
     ModelProjectionRecoveredEvent,
 )
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.models.projection.model_projection_contract import (
     ModelProjectionContract,
 )
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_INTERVAL: float = 60.0
+_DEFAULT_INTERVAL: float = TIMEOUTS.freshness_interval_seconds
 
 _FreshnessPayload = ModelProjectionDegradedEvent | ModelProjectionRecoveredEvent
 

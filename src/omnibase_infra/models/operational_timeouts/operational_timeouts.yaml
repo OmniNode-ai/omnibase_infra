@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Operational timeouts (OMN-21802).
+#
+# The waits, intervals and backoffs the transition-notification outbox and
+# publisher, the projector shell, the runtime scheduler, the freshness monitor,
+# the optimistic-conflict retry, the consumer restart loop, the demo reset
+# CLI, the dev-lane handlers, the done-write receipt guard and the tool
+# execution adapter apply. Read by ModelOperationalTimeouts; the callers hold no
+# timeout literal. Every key is required: a block that omits one fails to load.
+# Keys ending _seconds are seconds; keys ending _ms are milliseconds.
+timeouts:
+  # Transition-notification outbox and projector shell.
+  outbox_poll_interval_seconds: 1.0
+  outbox_shutdown_seconds: 10.0
+  database_query_seconds: 30.0
+  # Circuit breakers of the notification publisher and the tool execution
+  # adapter: wait before an open circuit resets.
+  circuit_breaker_reset_seconds: 60.0
+  # Runtime scheduler: wait for the tick task on stop.
+  tick_stop_seconds: 5.0
+  # Projection freshness monitor: period between freshness sweeps.
+  freshness_interval_seconds: 60.0
+  # Optimistic-conflict retry backoff.
+  optimistic_retry_initial_backoff_seconds: 0.1
+  optimistic_retry_max_backoff_seconds: 5.0
+  optimistic_retry_backoff_multiplier: 2.0
+  # Consumer restart loop backoff.
+  consumer_restart_initial_backoff_seconds: 1.0
+  consumer_restart_max_backoff_seconds: 60.0
+  consumer_restart_backoff_factor: 2.0
+  # Demo reset CLI: wait of one Kafka admin request, one admin future, one
+  # metadata listing, and one watermark query.
+  kafka_admin_seconds: 10
+  kafka_watermark_seconds: 5
+  # Dev-lane handlers: ledger append, one docker call, a container restart.
+  dev_lane_ledger_seconds: 330
+  dev_lane_docker_seconds: 60.0
+  dev_lane_restart_seconds: 240.0
+  # Done-write receipt guard: whole verifier run, and the wait for a killed
+  # verifier process to exit.
+  done_write_verify_seconds: 300.0
+  kill_wait_seconds: 5
+  # Tool execution adapter: wait of one orchestrator call.
+  tool_execution_seconds: 30.0

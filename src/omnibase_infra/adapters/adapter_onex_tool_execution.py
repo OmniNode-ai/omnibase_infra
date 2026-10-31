@@ -9,9 +9,8 @@ This adapter handles the execution of MCP tool invocations by:
 4. Transforming the response to MCP format
 
 Routing:
-    The adapter uses the tool definition's endpoint or service_id to locate
-    the target orchestrator. It supports both direct HTTP dispatch and
-    service discovery via Consul.
+    The adapter uses the tool definition's endpoint or service_id to locate the target
+    orchestrator, by direct HTTP dispatch or service discovery via Consul.
 
 Timeout Handling:
     Each tool definition includes a timeout_seconds value. The adapter
@@ -39,6 +38,7 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 if TYPE_CHECKING:
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
@@ -81,9 +81,9 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
         self,
         container: ModelONEXContainer,
         http_client: httpx.AsyncClient | None = None,
-        default_timeout: float = 30.0,
+        default_timeout: float = TIMEOUTS.tool_execution_seconds,
         circuit_breaker_threshold: int = 5,
-        circuit_breaker_reset_timeout: float = 60.0,
+        circuit_breaker_reset_timeout: float = TIMEOUTS.circuit_breaker_reset_seconds,
     ) -> None:
         """Initialize the execution adapter.
 

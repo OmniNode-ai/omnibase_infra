@@ -12,8 +12,7 @@ main loop in an exponential-backoff restart cycle with:
 - **Backoff reset**: If a run is stable for longer than ``stable_threshold_s``,
   the backoff counter resets on the next failure.
 
-Not to be confused with ``util_retry_optimistic.py`` which handles database-level
-optimistic locking retries, not process-level restarts.
+Not ``util_retry_optimistic.py``, which retries database optimistic locking conflicts.
 """
 
 from __future__ import annotations
@@ -23,6 +22,8 @@ import logging
 import random
 import time
 from collections.abc import Awaitable, Callable
+
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +106,9 @@ async def run_with_restart(
     *,
     name: str,
     shutdown_event: asyncio.Event | None = None,
-    initial_backoff_s: float = 1.0,
-    max_backoff_s: float = 60.0,
-    backoff_factor: float = 2.0,
+    initial_backoff_s: float = TIMEOUTS.consumer_restart_initial_backoff_seconds,
+    max_backoff_s: float = TIMEOUTS.consumer_restart_max_backoff_seconds,
+    backoff_factor: float = TIMEOUTS.consumer_restart_backoff_factor,
     stable_threshold_s: float = 60.0,
 ) -> None:
     """Run a coroutine in a restart loop with exponential backoff.

@@ -1,0 +1,66 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21802
+title: Twenty-seven runtime timeouts in the outbox, projector shell, scheduler, retry and restart helpers, demo reset CLI, dev-lane handlers, receipt guard and tool execution adapter are read from a declared file, not from literals
+summary: The contracts_and_di check reported 399 literal_timeout findings among 1229 in src/omnibase_infra at dev aceff4fb1. This change declares 27 of them in models/operational_timeouts/operational_timeouts.yaml, loads them through ModelOperationalTimeouts (no field defaults, so an omitted value fails to load; an initial backoff above its ceiling fails to load), and binds each call site to the loaded value. The literal_timeout rule reports zero findings over the twelve edited files and the model, and 372 over src/omnibase_infra.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21802-slice-service-timeouts
+    statement: The transition-notification outbox and publisher, projector shell, runtime scheduler, freshness monitor, optimistic-conflict retry, consumer restart loop, demo reset CLI, dev-lane handlers, done-write receipt guard and tool execution adapter take 27 timeouts from the declared timeouts file, and a block that omits a value fails to load.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contracts_and_di count for literal_timeout over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule'
+      - id: AC2
+        statement: 'AC2: every timeout comes from the owning node contract or overlay and is injected, none hard-coded in the touched code -- falsifier: uv run pytest tests/unit -q over the touched modules plus the checker re-run on the slice paths'
+      - id: AC3
+        statement: 'AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body'
+evidence_requirements:
+  - kind: tests
+    description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited call site carries the declared value.
+    command: uv run --frozen pytest tests/unit/models/operational_timeouts -q
+  - kind: command
+    description: The contracts_and_di check reports no literal_timeout finding over the twelve edited files and the settings model; at the merge base the same run reports 27.
+    command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21802-ac1-literal-timeout-clean
+    description: The literal_timeout rule reports no finding over the twelve edited files and the settings model. Fails at the merge base, where the same run reports 27.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "bash -c '! uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/adapter_onex_tool_execution.py src/omnibase_infra/cli/service_demo_reset.py src/omnibase_infra/handlers/done_write_receipt_guard.py src/omnibase_infra/handlers/handler_dev_lane_branch_install.py src/omnibase_infra/handlers/handler_dev_lane_pin.py src/omnibase_infra/runtime/freshness_monitor.py src/omnibase_infra/runtime/projector_shell.py src/omnibase_infra/runtime/runtime_scheduler.py src/omnibase_infra/runtime/transition_notification_outbox.py src/omnibase_infra/runtime/transition_notification_publisher.py src/omnibase_infra/utils/util_consumer_restart.py src/omnibase_infra/utils/util_retry_optimistic.py src/omnibase_infra/models/operational_timeouts | grep -q literal_timeout'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn21802-ac2-timeouts-declared
+    description: The timeouts load from the declared file, an omitted value is refused, and every edited call site carries the declared value. Fails at the merge base, where the model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/operational_timeouts -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn21802-ac3-touched-module-tests
+    description: The unit tests of every touched module and the timeouts model pass at the PR head. Run on the lab through lab-run; the receipt path is in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/operational_timeouts tests/unit/adapters/test_adapter_onex_tool_execution_402.py tests/unit/adapters/test_done_write_gate_adapters.py tests/unit/cli/test_service_demo_reset.py tests/unit/contracts/test_protocol_ownership.py tests/unit/handlers/test_done_write_receipt_gate_contract.py tests/unit/handlers/test_handler_dev_lane_branch_install_omn17427.py tests/unit/handlers/test_handler_dev_lane_pin_omn18475.py tests/unit/infra/test_catalog_local_runtime_tick_omn19988.py tests/unit/models/test_model_serialization_roundtrip.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_handler_evidence_autoclose_sweep.py tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_16846_dispatch_venv_separation.py tests/unit/nodes/node_sync_revert_watchdog_effect/test_done_write_receipt_gate.py tests/unit/runtime/test_freshness_monitor.py tests/unit/runtime/test_overseer_tick_projector.py tests/unit/runtime/test_projector_plugin_loader_wiring.py tests/unit/runtime/test_projector_shell_notification_integration.py tests/unit/runtime/test_projector_shell.py tests/unit/runtime/test_runtime_scheduler.py tests/unit/runtime/test_runtime_scheduler_valkey.py tests/unit/runtime/test_runtime_scheduler_wiring.py tests/unit/runtime/test_state_store_adapter.py tests/unit/runtime/test_transition_notification_outbox.py tests/unit/runtime/test_transition_notification_publisher.py tests/unit/runtime/test_verification_receipt_projector.py tests/unit/scripts/validation/test_check_no_infra_inmemory_import.py tests/unit/utils/test_util_consumer_restart.py tests/unit/utils/test_util_retry_optimistic.py -q -n 0"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21802-deploy-service-timeouts
+    description: >-
+      Post-deploy probe: the runtime container loads the operational timeouts from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.operational_timeouts import load_operational_timeouts; load_operational_timeouts()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

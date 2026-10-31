@@ -4,8 +4,7 @@
 # Copyright (c) 2026 OmniNode Team
 """Demo Reset -- scoped environment reset for safe pre-demo cleanup.
 
-Provides a safe, scoped reset of demo-related infrastructure without
-affecting shared resources. This module resets only demo-scoped resources:
+Provides a safe, scoped reset of demo-related infrastructure that spares shared resources:
 
 1. **Consumer group offsets** -- Projector starts fresh on next run
 2. **Projector state** -- Registration projection rows cleared
@@ -14,8 +13,7 @@ affecting shared resources. This module resets only demo-scoped resources:
 Shared infrastructure is explicitly preserved:
 - PostgreSQL table schemas and indexes
 - Non-demo Kafka topics and consumer groups
-- Consul/Vault configuration
-- Application code and contracts
+- Consul/Vault configuration, application code and contracts
 
 The reset is idempotent: running twice produces the same result.
 
@@ -32,8 +30,7 @@ Usage:
         report = await engine.execute(dry_run=True)
         print(report.format_summary())
 
-Related Tickets:
-    - OMN-2299: Demo Reset scoped command for safe environment reset
+Related Tickets: OMN-2299 (Demo Reset scoped command for safe environment reset)
 
 .. versionadded:: 0.9.1
 """
@@ -53,6 +50,7 @@ from omnibase_infra.cli.enum_reset_action import EnumResetAction
 from omnibase_infra.cli.model_demo_reset_config import ModelDemoResetConfig
 from omnibase_infra.cli.model_demo_reset_report import ModelDemoResetReport
 from omnibase_infra.cli.model_reset_action_result import ModelResetActionResult
+from omnibase_infra.models.operational_timeouts import TIMEOUTS
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
@@ -539,7 +537,7 @@ class DemoResetEngine:
 
             # List all consumer groups (modern API, confluent-kafka >= 2.x)
             list_result = admin.list_consumer_groups(
-                request_timeout=10,
+                request_timeout=TIMEOUTS.kafka_admin_seconds,
             ).result()
             all_groups: list[str] = [
                 g.group_id for g in list_result.valid if g.group_id is not None
@@ -594,7 +592,7 @@ class DemoResetEngine:
 
                 for group_id, future in futures.items():
                     try:
-                        future.result(timeout=10)
+                        future.result(timeout=TIMEOUTS.kafka_admin_seconds)
                         deleted.append(str(group_id))
                     except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                         errors.append(f"{group_id}: {sanitize_error_message(exc)}")
@@ -696,7 +694,7 @@ class DemoResetEngine:
             )
 
             # Get cluster metadata to find topics
-            metadata = admin.list_topics(timeout=10)
+            metadata = admin.list_topics(timeout=TIMEOUTS.kafka_admin_seconds)
 
             # Filter to demo-scoped topics
             demo_topics: list[str] = []
@@ -765,7 +763,7 @@ class DemoResetEngine:
                             try:
                                 _low, high = consumer.get_watermark_offsets(
                                     TopicPartition(topic_name, partition_id),
-                                    timeout=5,
+                                    timeout=TIMEOUTS.kafka_watermark_seconds,
                                 )
                             except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
                                 watermark_errors += 1
@@ -787,7 +785,9 @@ class DemoResetEngine:
                 # remain as an orphan in Kafka after watermark queries.
                 try:
                     delete_futures = admin.delete_consumer_groups([ephemeral_group_id])
-                    delete_futures[ephemeral_group_id].result(timeout=10)
+                    delete_futures[ephemeral_group_id].result(
+                        timeout=TIMEOUTS.kafka_admin_seconds
+                    )
                     logger.debug(
                         "Deleted ephemeral consumer group %s",
                         ephemeral_group_id,
@@ -818,7 +818,7 @@ class DemoResetEngine:
 
                     for tp, future in futures.items():
                         try:
-                            future.result(timeout=10)
+                            future.result(timeout=TIMEOUTS.kafka_admin_seconds)
                             if tp.topic not in purged:
                                 purged.append(tp.topic)
                         except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
