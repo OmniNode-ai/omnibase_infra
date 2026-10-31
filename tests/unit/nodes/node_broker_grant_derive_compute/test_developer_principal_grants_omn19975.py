@@ -389,8 +389,8 @@ COMPACTION_REPLY_TOPICS: tuple[str, ...] = (
 BROKER = "dev"
 
 
-# The machine profile (OMN-21622): every issued principal is one machine's login, and its
-# hook-emit drainer publishes the twelve work-ledger row events and its credential
+# The machine supplement (OMN-21622): only trusted machine overlay rows receive
+# these grants. The hook-emit drainer publishes the twelve work-ledger row events and its credential
 # registration. Produce only.
 MACHINE_PROFILE_TOPICS: tuple[str, ...] = (
     "onex.evt.omnimarket.credential-registered.v1",
@@ -422,7 +422,7 @@ def typed_rows() -> set[tuple[str, str, str, str, str]]:
     return {
         (BROKER, resource.upper(), name, pattern.upper(), operation.upper())
         for resource, name, pattern, operations in (
-            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS + MACHINE_PROFILE_GRANTS
+            TYPED_GRANTS + DECLARED_GRANTS + HOOK_EDGE_GRANTS
         )
         for operation in operations
     }
@@ -1038,3 +1038,23 @@ def test_h105_scm_pr_create_derived_file_is_exactly_the_nodes_output() -> None:
         )
         for operation in ("WRITE", "DESCRIBE")
     }
+
+
+def test_machine_supplement_is_independently_derived_and_never_shared() -> None:
+    bindings = ModelBrokerGrantBindings.model_validate(
+        yaml.safe_load(
+            (ROOT / "deploy/lab/machine-principal-bindings.yaml").read_text()
+        )
+    )
+    expected = {
+        (BROKER, "TOPIC", topic, "LITERAL", op)
+        for topic in MACHINE_PROFILE_TOPICS
+        for op in ("WRITE", "DESCRIBE")
+    }
+    assert derive(bindings) == expected
+    assert not derive(shipped_bindings()) & expected
+    committed = ROOT / "deploy/lab/machine-principal-derived-grants.json"
+    assert (
+        committed.read_text()
+        == HandlerBrokerGrantDerive().handle(bindings).model_dump_json(indent=2) + "\n"
+    )

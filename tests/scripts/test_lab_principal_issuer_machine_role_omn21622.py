@@ -5,8 +5,8 @@
 Each machine login used to be minted with a set that lacked what its hook-emit drainer
 publishes, and was then given those grants by hand, one host at a time (the operator
 Mac's drainer, then h051, whose ledger append was refused on 2026-10-30). The machine
-profile is now the issued profile: declared once in the bindings, granted in the act that
-mints the principal. ``audit-grants --role machine`` reads the machines a
+profile is a supplement selected only by trusted overlay rows with role machine,
+granted in the act that mints the principal. ``audit-grants --role machine`` reads the machines a
 ``developer.principal`` overlay declares and fails naming each one and each grant of the
 profile the broker lacks. The broker is a fake: no network, no Docker.
 """
@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LAB = REPO_ROOT / "deploy" / "lab"
 GRANTS = LAB / "developer-principal-grants.yaml"
 DERIVED = LAB / "developer-principal-derived-grants.json"
+MACHINE_DERIVED = LAB / "machine-principal-derived-grants.json"
 TIMER = (
     REPO_ROOT / "deploy" / "principal-grant-audit" / "onex-principal-grant-audit.timer"
 )
@@ -110,7 +111,10 @@ def _overlay(tmp_path: Path, *rows: dict[str, str]) -> Path:
 
 def _listing(principal: str, drop: str | None = None, extra: str | None = None) -> str:
     lines = [ACL_HEADER]
-    for g in json.loads(DERIVED.read_text())["grants"]:
+    for g in [
+        *json.loads(DERIVED.read_text())["grants"],
+        *json.loads(MACHINE_DERIVED.read_text())["grants"],
+    ]:
         line = (
             f"User:{principal}  *  {g['resource_type']}  "
             f"{g['resource'].replace('{principal}', principal)}  {g['pattern']}  "
@@ -131,11 +135,14 @@ def declaration() -> lpi.Declaration:
 # --- the profile is the issued set ----------------------------------------------
 
 
-def test_every_issued_principal_gets_the_machine_profile_at_issuance(
+def test_a_declared_machine_gets_the_machine_profile_at_issuance(
     declaration: lpi.Declaration, tmp_path: Path
 ) -> None:
     broker = FakeBroker()
-    issuer = lpi.Issuer(declaration, broker, lpi.Ledger(tmp_path / "issuances.jsonl"))
+    overlay = lpi.load_overlay(_overlay(tmp_path, MACHINE_ROW), declaration)
+    issuer = lpi.Issuer(
+        declaration, broker, lpi.Ledger(tmp_path / "issuances.jsonl"), overlay
+    )
     issuer.issue("ops@example.invalid", {"lane": "dev", "device": "lab-host"})
     for topic in MACHINE_TOPICS:
         assert (topic, "write") in broker.granted, topic
@@ -152,7 +159,7 @@ def test_every_issued_principal_gets_the_machine_profile_at_issuance(
 
 
 def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) -> None:
-    for grant in declaration.grants:
+    for grant in declaration.machine_grants:
         if grant.name in MACHINE_TOPICS:
             assert grant.operations == ("describe", "write"), grant.name
 
@@ -350,3 +357,89 @@ def test_role_and_principal_together_audit_only_the_named_machine(
         == 0
     )
     assert broker.asked == [principal]
+
+
+@pytest.mark.parametrize("overlay_role", [None, "developer", "default"])
+def test_request_role_cannot_grant_machine_privileges(
+    declaration: lpi.Declaration, tmp_path: Path, overlay_role: str | None
+) -> None:
+    row = {**MACHINE_ROW}
+    if overlay_role == "default":
+        row.pop("role")
+    elif overlay_role is not None:
+        row["role"] = overlay_role
+    overlay = (
+        lpi.load_overlay(_overlay(tmp_path, row), declaration) if overlay_role else None
+    )
+    broker = FakeBroker()
+    issuer = lpi.Issuer(
+        declaration, broker, lpi.Ledger(tmp_path / "issuances.jsonl"), overlay
+    )
+    issuer.issue(
+        row["login"], {"lane": "dev", "device": row["device"], "role": "machine"}
+    )
+    assert not any(topic in MACHINE_TOPICS for topic, _ in broker.granted)
+    assert ("onex.cmd.omnimarket.delegate-skill.v1", "write") in broker.granted
+
+
+@pytest.mark.parametrize("role", ["machine", "developer"])
+def test_issuance_apply_and_audit_select_the_same_role_profile(
+    declaration: lpi.Declaration,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+) -> None:
+    row = {**MACHINE_ROW, "role": role}
+    overlay_path = _overlay(tmp_path, row)
+    overlay = lpi.load_overlay(overlay_path, declaration)
+    broker = FakeBroker()
+    ledger_path = tmp_path / "issuances.jsonl"
+    issuer = lpi.Issuer(declaration, broker, lpi.Ledger(ledger_path), overlay)
+    issuer.issue(row["login"], {"lane": "dev", "device": row["device"]})
+    issued = set(broker.granted)
+    assert {topic for topic, _ in issued if topic in MACHINE_TOPICS} == (
+        set(MACHINE_TOPICS) if role == "machine" else set()
+    )
+    broker.granted.clear()
+    monkeypatch.setattr(lpi, "ContainerBroker", lambda name: broker)
+    args = [
+        "--grants",
+        str(GRANTS),
+        "--overlay",
+        str(overlay_path),
+        "--ledger",
+        str(ledger_path),
+        "--rpk-container",
+        "issuer",
+    ]
+    assert lpi.main(["apply-grants", *args]) == 0
+    assert set(broker.granted) == issued
+    principal = row["principal"]
+    listing = [ACL_HEADER]
+    for grant in declaration.grants_for(principal, overlay):
+        grant = grant.for_principal(principal)
+        for op in grant.operations:
+            listing.append(
+                f"User:{principal}  *  {grant.resource.upper()}  {grant.name}  {grant.pattern.upper()}  {op.upper()}  ALLOW"
+            )
+    broker.listings[principal] = "\n".join(listing)
+    assert lpi.main(["audit-grants", *args]) == 0
+    broker.listings[principal] += (
+        f"\nUser:{principal}  *  TOPIC  fleet.private.v1  LITERAL  WRITE  ALLOW"
+    )
+    assert lpi.main(["audit-grants", *args]) == 1
+
+
+def test_issuer_image_copies_every_referenced_grant_document(tmp_path: Path) -> None:
+    """The deployed image can load its policy using only the documents it copies."""
+    import shlex
+    import shutil
+
+    dockerfile = (REPO_ROOT / "docker/Dockerfile.principal-issuer").read_text()
+    for line in dockerfile.splitlines():
+        if line.startswith("COPY deploy/lab/"):
+            _, source, destination = shlex.split(line)
+            shutil.copyfile(REPO_ROOT / source, tmp_path / Path(destination).name)
+    declaration = lpi.load_declaration(tmp_path / GRANTS.name)
+    assert {grant.name for grant in declaration.machine_grants} == set(MACHINE_TOPICS)
+    assert not {grant.name for grant in declaration.grants} & set(MACHINE_TOPICS)
