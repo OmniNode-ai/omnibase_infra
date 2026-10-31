@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: The infra-test CLI reads its broker, runtime URL, timeouts and waits from a declared settings file, not from literals
+summary: The contracts_and_di check reported 34 findings in src/omnibase_infra/cli/infra_test (literal_timeout 29, literal_topic 3, literal_host 1, literal_url 1), among 2095 in src and scripts. This change declares the endpoints and waits in cli/infra_test/infra_test_settings.yaml, loads them through ModelInfraTestSettings (no field defaults, so an omitted value fails to load), and takes the introspection topic from DEFAULT_INTROSPECTION_TOPIC. The check reports zero findings over the CLI and the model.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-slice-infra-test-settings
+    statement: The infra-test CLI takes its broker, runtime URL, subprocess timeouts and waits from the declared settings file, and a settings block that omits a value fails to load.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the infra-test CLI holds no host, URL, topic or timeout literal and reads ModelInfraTestSettings -- falsifier: a settings block missing a value that still loads, or a CLI call whose timeout differs from the declared value'
+      - id: AC4
+        statement: 'AC4: the contracts_and_di check over src/omnibase_infra/cli/infra_test and src/omnibase_infra/models/infra_test reports no finding -- falsifier: any finding from that run'
+evidence_requirements:
+  - kind: tests
+    description: The loaded settings equal the declared file, each omitted value fails to load, and the compose call and health poll carry the declared values.
+    command: uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test -q
+  - kind: command
+    description: The contracts_and_di check exits 0 over the infra-test CLI and its settings model; at the merge base the same run reports 34 findings.
+    command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/cli/infra_test src/omnibase_infra/models/infra_test
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-ac3-infra-test-settings
+    description: The settings load from the declared file, an omitted value is refused, and the CLI calls carry the declared timeouts. Fails at the merge base, where the settings model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn21623-ac4-check-clean
+    description: The contracts_and_di check reports no finding over the infra-test CLI and its settings model. Fails at the merge base, where the CLI reports 34 findings.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/cli/infra_test src/omnibase_infra/models/infra_test
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
