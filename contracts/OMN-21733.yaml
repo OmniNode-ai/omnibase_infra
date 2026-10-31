@@ -14,6 +14,11 @@ requirements:
         statement: "AC4: the compose file refuses to render without a bind address and binds only that address, mounts the serve directory read-only and publishes no 0.0.0.0 port -- falsifier: uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q"
       - id: AC5
         statement: "AC5: on the serving host the running container's only port binding is the tailnet address and the port, and the page answers there -- falsifier: ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+  - id: req-omn21733-reports-web
+    statement: "The reports site under /reports/ is served by the same read-only server, and only the decision map's directory may load the two pinned scripts it draws its graph with."
+    acceptance:
+      - id: AC7
+        statement: "AC7: the server's default content security policy loads nothing from another host, and only /reports/decision-map/ allows exactly the two pinned CDN script files, keeping the method, cache and dot-file rules -- falsifier: uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q -k decision_map_directory"
 evidence_requirements:
   - kind: tests
     description: "The compose file's port, volume and lock-down properties, and docker compose config refusing each missing deployment value."
@@ -36,3 +41,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+  - id: dod-003
+    description: "Only the decision map directory may load the two pinned scripts."
+    source: generated
+    binds_ac: [AC7]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov -k decision_map_directory'

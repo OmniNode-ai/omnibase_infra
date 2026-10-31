@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -107,6 +108,35 @@ def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     assert "default-src 'self'" in conf
     assert "root /srv/site;" in conf
     assert "try_files $uri $uri/index.html =404;" in conf
+
+
+def _location_block(conf: str, header: str) -> str:
+    start = conf.index(header)
+    depth = 0
+    for index in range(conf.index("{", start), len(conf)):
+        depth += {"{": 1, "}": -1}.get(conf[index], 0)
+        if depth == 0:
+            return conf[start : index + 1]
+    raise AssertionError(f"unterminated block {header}")
+
+
+def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> None:
+    conf = NGINX.read_text(encoding="utf-8")
+    cdn = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"
+    elk = "https://cdn.jsdelivr.net/npm/elkjs@0.9.2/lib/elk.bundled.js"
+    policies = re.findall(r'Content-Security-Policy "([^"]+)"', conf)
+    assert len(policies) == 2
+    default, scoped = policies
+    assert "http" not in default
+    assert f"script-src 'self' 'unsafe-inline' {cdn} {elk};" in scoped
+    assert scoped.count("http") == 2
+    block = _location_block(conf, "location /reports/decision-map/ {")
+    assert scoped in block
+    assert "limit_except GET HEAD" in block
+    assert 'Cache-Control "no-store"' in block
+    assert 'X-Content-Type-Options "nosniff"' in block
+    assert "location ^~" not in conf
+    assert conf.index("location ~ /\\.") < conf.index("location /reports/decision-map/")
 
 
 @pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
