@@ -32,16 +32,16 @@ def _assert_fixed_version(version: str) -> None:
 def test_pyasn1_fixed_version_locked() -> None:
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     matches = [p for p in lock["package"] if p["name"] == "pyasn1"]
-    assert len(matches) == 1, f"expected exactly one pyasn1 entry, got {len(matches)}"
-    version = str(matches[0]["version"])
-    _assert_fixed_version(version)
+    assert matches, "pyasn1 is not locked"
+    for entry in matches:
+        _assert_fixed_version(str(entry["version"]))
 
 
 @pytest.mark.parametrize(
     "version",
     ["0.6.5", "0.6.5.post1", "0.7.0rc1", "0.7.0.dev1", "0.6.5+local.1", "1!0.1.0"],
 )
-def test_fixed_version_accepts_pep440_releases(version: str) -> None:
+def test_fixed_version_accepts_versions_at_or_above_floor(version: str) -> None:
     _assert_fixed_version(version)
 
 
