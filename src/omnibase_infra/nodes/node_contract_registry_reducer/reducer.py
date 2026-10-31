@@ -85,6 +85,7 @@ from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from omnibase_core.types import JsonType
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.nodes.node_contract_registry_reducer.models.model_contract_registry_state import (
     ModelContractRegistryState,
 )
@@ -397,7 +398,9 @@ class ContractRegistryReducer:
 
         deactivate_intent = ModelIntent(
             intent_type=deactivate_payload.intent_type,
-            target=f"postgres://contracts/{contract_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().contracts, contract_id
+            ),
             payload=deactivate_payload,
         )
 
@@ -411,7 +414,9 @@ class ContractRegistryReducer:
 
         cleanup_intent = ModelIntent(
             intent_type=cleanup_payload.intent_type,
-            target=f"postgres://topics/cleanup/{contract_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().topics, "cleanup", contract_id
+            ),
             payload=cleanup_payload,
         )
 
@@ -475,7 +480,9 @@ class ContractRegistryReducer:
 
         intent = ModelIntent(
             intent_type=payload.intent_type,
-            target=f"postgres://contracts/{contract_id}/heartbeat",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().contracts, contract_id, "heartbeat"
+            ),
             payload=payload,
         )
 
@@ -537,7 +544,9 @@ class ContractRegistryReducer:
 
         intent = ModelIntent(
             intent_type=payload.intent_type,
-            target="postgres://contracts/stale",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().contracts, "stale"
+            ),
             payload=payload,
         )
 
@@ -644,7 +653,9 @@ class ContractRegistryReducer:
 
         return ModelIntent(
             intent_type=payload.intent_type,
-            target=f"postgres://contracts/{contract_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().contracts, contract_id
+            ),
             payload=payload,
         )
 
@@ -728,7 +739,9 @@ class ContractRegistryReducer:
                         intents.append(
                             ModelIntent(
                                 intent_type=payload.intent_type,
-                                target=f"postgres://topics/{topic_suffix}",
+                                target=load_intent_target_uris().target(
+                                    load_intent_target_uris().topics, topic_suffix
+                                ),
                                 payload=payload,
                             )
                         )
@@ -759,7 +772,9 @@ class ContractRegistryReducer:
                         intents.append(
                             ModelIntent(
                                 intent_type=payload.intent_type,
-                                target=f"postgres://topics/{topic_suffix}",
+                                target=load_intent_target_uris().target(
+                                    load_intent_target_uris().topics, topic_suffix
+                                ),
                                 payload=payload,
                             )
                         )
