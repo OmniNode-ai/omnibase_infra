@@ -42,3 +42,12 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "uv run --frozen pytest tests/unit/runtime/test_literal_path_slice_omn21757.py tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py tests/unit/runtime/test_runtime_local_ingress.py -q -p no:cacheprovider"
+  - id: dod-004
+    description: >-
+      Read docker/catalog/services/runtime-effects.yaml from GitHub at the checked-out commit and count the optional directory bind mount that now declares its own absent_source. Hermetic: it reads the shipped catalog manifest, not a receipt this PR authors, and goes RED at the merge base where the manifest has no absent_source. The deployed containers are read on the lab after the deploy agent converges and are not claimed here.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/catalog/services/runtime-effects.yaml?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -c 'absent_source: /var/lib/omninode/optional-bind-source-absent'"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
