@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 import json
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -189,23 +189,40 @@ def test_companion_lane_failure_keeps_the_healthy_new_runtime(tmp_path: Path) ->
     assert incident["runtime_kept_revision"] == NEW_REVISION
 
 
-def test_companion_lane_failure_restores_when_the_new_runtime_is_unhealthy(
-    tmp_path: Path,
+@pytest.mark.parametrize("runtime_state", ["unhealthy", "absent", "missing-service"])
+def test_companion_lane_failure_restores_when_new_runtime_is_unhealthy_or_absent(
+    tmp_path: Path, runtime_state: str
 ) -> None:
     host = _Host()
     guard = _guard(host, tmp_path)
+    failed_jobs: list[str] = []
 
-    def deploy_unhealthy_then_fail() -> None:
-        host.containers = _family(NEW_REVISION, health="unhealthy")
-        raise guard_mod.DevCompanionLaneFailedError(GATEWAY_FAILURE)
-
-    with pytest.raises(guard_mod.DevBootRecoveryError):
-        with guard.protect("job-x", "c" * 40, lambda error: None):
-            deploy_unhealthy_then_fail()
+    with pytest.raises(guard_mod.DevBootRecoveryError, match="GATEWAY_DEPLOY_FAILED"):
+        with guard.protect("job-absent", NEW_REVISION, failed_jobs.append):
+            host.containers = _family(NEW_REVISION)
+            if runtime_state == "absent":
+                host.containers = []
+            elif runtime_state == "missing-service":
+                host.containers.pop()
+            else:
+                host.containers[0]["State"]["Health"]["Status"] = "unhealthy"
+            raise guard_mod.DevCompanionLaneFailedError(GATEWAY_FAILURE)
 
     assert host.restored
     assert guard.point is not None
     assert guard.point.revision == OLD_REVISION
+    assert {
+        c["Config"]["Labels"]["com.docker.compose.service"] for c in host.containers
+    } == set(guard_mod.DEV_BOOT_SERVICES)
+    assert {
+        c["Config"]["Labels"]["org.opencontainers.image.revision"]
+        for c in host.containers
+    } == {OLD_REVISION}
+    incident = _incident(host, tmp_path)
+    assert incident["status"] == "failed"
+    assert incident["recovery_verified"] is True
+    assert "runtime_kept_revision" not in incident
+    assert failed_jobs and "GATEWAY_DEPLOY_FAILED" in failed_jobs[0]
 
 
 def test_runtime_failure_still_restores_a_healthy_new_runtime(tmp_path: Path) -> None:
@@ -221,3 +238,39 @@ def test_runtime_failure_still_restores_a_healthy_new_runtime(tmp_path: Path) ->
     assert host.restored
     assert guard.point is not None
     assert guard.point.revision == OLD_REVISION
+
+
+def test_companion_lane_failure_restores_when_capture_refuses_healthy_runtime(
+    tmp_path: Path,
+) -> None:
+    host = _Host()
+    guard = _guard(host, tmp_path)
+    failed_jobs: list[str] = []
+    capture_reads: list[tuple[str, ...]] = []
+
+    def changed_compose_hashes(services: Sequence[str]) -> dict[str, str]:
+        capture_reads.append(tuple(services))
+        return dict.fromkeys(services, "changed-compose-hash")
+
+    # Prepare retained the old family before compose settings changed. A
+    # healthy candidate with different settings cannot become a recovery point.
+    guard.config_hashes = changed_compose_hashes
+    with pytest.raises(guard_mod.DevBootRecoveryError, match="GATEWAY_DEPLOY_FAILED"):
+        with guard.protect("job-capture-refused", NEW_REVISION, failed_jobs.append):
+            _deploy_new_runtime_then(
+                host, guard_mod.DevCompanionLaneFailedError(GATEWAY_FAILURE)
+            )
+
+    assert capture_reads == [guard.services]
+    assert host.restored
+    assert guard.point is not None
+    assert guard.point.revision == OLD_REVISION
+    assert {
+        c["Config"]["Labels"]["org.opencontainers.image.revision"]
+        for c in host.containers
+    } == {OLD_REVISION}
+    incident = _incident(host, tmp_path)
+    assert incident["status"] == "failed"
+    assert incident["recovery_verified"] is True
+    assert "runtime_kept_revision" not in incident
+    assert failed_jobs and "GATEWAY_DEPLOY_FAILED" in failed_jobs[0]

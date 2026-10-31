@@ -54,3 +54,12 @@ dod_evidence:
         check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_dev_boot_guard.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'class DevCompanionLaneFailedError' | grep -qx 1"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn21645-ac2-absent-and-capture-refused
+    description: >-
+      A companion failure restores the retained revision when all runtime containers or one required service are absent, or when capture refuses a healthy candidate whose compose settings differ. The job and incident remain failed and no runtime_kept_revision is recorded.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/handlers/test_handler_dev_boot_guard_companion_lane.py -k 'unhealthy_or_absent or capture_refuses' -q -n 0 -p no:cacheprovider
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
