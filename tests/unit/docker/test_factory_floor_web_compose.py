@@ -101,6 +101,7 @@ def test_serve_directory_is_mounted_read_only_and_the_container_is_locked_down()
 def test_nginx_serves_only_get_with_no_store_and_a_same_origin_policy() -> None:
     conf = NGINX.read_text(encoding="utf-8")
     assert "listen 8080;" in conf
+    assert "gzip on;" in conf
     assert "limit_except GET HEAD" in conf
     assert 'Cache-Control "no-store"' in conf
     assert "default-src 'self'" in conf
