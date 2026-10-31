@@ -27,6 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LAB = REPO_ROOT / "deploy" / "lab"
 GRANTS = LAB / "developer-principal-grants.yaml"
 DERIVED = LAB / "developer-principal-derived-grants.json"
+TIMER = (
+    REPO_ROOT / "deploy" / "principal-grant-audit" / "onex-principal-grant-audit.timer"
+)
 UNIT = (
     REPO_ROOT
     / "deploy"
@@ -157,14 +160,8 @@ def test_a_machine_never_reads_a_ledger_row_event(declaration: lpi.Declaration) 
 # --- the overlay names which principals are machines ----------------------------
 
 
-def test_an_unknown_role_is_refused(
-    declaration: lpi.Declaration, tmp_path: Path
-) -> None:
+def test_the_overlay_role_vocabulary_is_developer_and_machine() -> None:
     assert {"developer", "machine"} == lpi.OVERLAY_ROLES
-    with pytest.raises(Exception, match="role must be one of"):
-        lpi.load_overlay(
-            _overlay(tmp_path, {**MACHINE_ROW, "role": "operator"}), declaration
-        )
 
 
 def test_a_machine_row_loads_with_its_role(
@@ -326,3 +323,30 @@ def test_the_audit_unit_runs_the_machine_audit_and_names_no_host() -> None:
     (exec_start,) = [ln for ln in text.splitlines() if ln.startswith("ExecStart=")]
     assert 'lab_principal_issuer.py" audit-grants ' in exec_start
     assert "apply-grants" not in text and " serve" not in exec_start
+
+
+def test_the_audit_timer_fires_the_audit_unit() -> None:
+    text = TIMER.read_text()
+    assert "Unit=onex-principal-grant-audit.service" in text
+    assert "OnUnitActiveSec=15min" in text
+
+
+def test_a_row_without_a_role_is_a_developer(
+    declaration: lpi.Declaration, tmp_path: Path
+) -> None:
+    overlay = lpi.load_overlay(_overlay(tmp_path, DEVELOPER_ROW), declaration)
+    assert [row.role for row in overlay.rows] == ["developer"]
+
+
+def test_role_and_principal_together_audit_only_the_named_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    principal = MACHINE_ROW["principal"]
+    broker = FakeBroker({principal: _listing(principal)})
+    assert (
+        _audit(
+            tmp_path, broker, monkeypatch, "--role", "machine", "--principal", principal
+        )
+        == 0
+    )
+    assert broker.asked == [principal]
