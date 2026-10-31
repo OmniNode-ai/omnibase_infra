@@ -5039,7 +5039,7 @@ class DeployExecutor:
                     env=self._gateway_child_env(build_source, git_ref=git_ref),
                 )
             except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(
+                raise load_dev_boot_guard().DevCompanionLaneFailedError(
                     f"GATEWAY_DEPLOY_TIMED_OUT: {' '.join(cmd)} exceeded its "
                     f"{timeout}s ceiling and was killed. Ceiling derivation: "
                     f"{budget.describe()}."
@@ -5050,7 +5050,7 @@ class DeployExecutor:
             # deploy-gateway.sh stages the workspace into REPO_DIR again (OMN-20637).
             _restore_build_byproducts(REPO_DIR)
         if result.returncode != 0:
-            raise RuntimeError(
+            raise load_dev_boot_guard().DevCompanionLaneFailedError(
                 f"GATEWAY_DEPLOY_FAILED: {' '.join(cmd)} exited "
                 f"{result.returncode}. stderr: {result.stderr[-2000:]}"
             )
