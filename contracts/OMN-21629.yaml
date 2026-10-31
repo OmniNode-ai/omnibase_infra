@@ -57,3 +57,60 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_201_gateway_off_omn21629.py -q -p no:cacheprovider'
+  - id: dod-004
+    description: >-
+      Hosted deploy probe for AC1: start the real ServiceHealth HTTP server and ServiceRuntimeHealthMonitor over installed omnibase_infra contracts with node_architecture_validator excluded. Read /health over loopback and require a nonempty manifest and discovery_errors HEALTHY. The isolated process uses no broker and makes no claim about consumer coverage or the deployed lane. Before the single-filter fix the monitor reports discovery_errors CRITICAL because the second filter refuses the already-excluded contract.
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          set -eu;
+          probe_dir=$(mktemp -d);
+          probe_pid=;
+          trap 'if [ -n "$probe_pid" ]; then kill "$probe_pid" 2>/dev/null || :; wait "$probe_pid" 2>/dev/null || :; fi; rm -rf "$probe_dir"' EXIT;
+          env PYTHONDONTWRITEBYTECODE=1 ONEX_ACTIVE_RUNTIME_PACKAGES=omnibase_infra RUNTIME_PROFILE=main ONEX_RUNTIME_NODE_EXCLUSION=node_architecture_validator uv run --frozen python -c 'import asyncio
+          import signal
+          import sys
+          from pathlib import Path
+          from omnibase_infra.runtime import RuntimeHostProcess
+          from omnibase_infra.services.health_checker import ServiceHealth
+          from omnibase_infra.services.service_runtime_health_monitor import ServiceRuntimeHealthMonitor
+          from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
+
+          async def main():
+              raw = discover_contracts()
+              assert "node_architecture_validator" in {c.name for c in raw.contracts}
+              monitor = ServiceRuntimeHealthMonitor(bootstrap_servers="")
+              event = await monitor.run_once()
+              runtime = RuntimeHostProcess(config={"service_name": "omnibase_infra", "node_name": "node_architecture_validator"})
+              server = ServiceHealth(runtime=runtime, host="127.0.0.1", port=0)
+              server.set_runtime_health_provider(lambda: event)
+              stopped = asyncio.Event()
+              asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopped.set)
+              try:
+                  await server.start()
+                  port = server._runner.addresses[0][1]
+                  Path(sys.argv[1]).write_text(f"http://127.0.0.1:{port}/health")
+                  await asyncio.wait_for(stopped.wait(), timeout=60)
+              finally:
+                  await server.stop()
+
+          asyncio.run(main())' "$probe_dir/url" &
+          probe_pid=$!;
+          for attempt in $(seq 1 300); do
+            if [ -s "$probe_dir/url" ]; then break; fi;
+            kill -0 "$probe_pid";
+            sleep 0.1;
+          done;
+          test -s "$probe_dir/url";
+          curl --silent --show-error --max-time 10 "$(cat "$probe_dir/url")" > "$probe_dir/health.json";
+          uv run --frozen python -c 'import json
+          import sys
+          from pathlib import Path
+          health = json.loads(Path(sys.argv[1]).read_text())["details"]["runtime_health"]
+          dimension = next(d for d in health["dimensions"] if d["name"] == "discovery_errors")
+          assert dimension["status"] == "HEALTHY", dimension
+          assert health["contract_count"] > 0, health
+          assert health["discovery_error_count"] == 0, health
+          print(json.dumps({"discovery_errors": dimension, "contract_count": health["contract_count"]}))' "$probe_dir/health.json"
