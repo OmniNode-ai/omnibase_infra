@@ -4,10 +4,6 @@
 
 An in-memory mock implementation of the service discovery
 handler protocol for testing purposes.
-
-Thread Safety:
-    This handler uses asyncio.Lock for coroutine-safe access to the
-    in-memory service store.
 """
 
 from __future__ import annotations
@@ -24,6 +20,7 @@ from omnibase_infra.handlers.service_discovery.models import (
     ModelHandlerRegistrationResult,
     ModelServiceInfo,
 )
+from omnibase_infra.handlers.store_keyed_memory import StoreKeyedMemory
 from omnibase_infra.nodes.node_service_discovery_effect.models import (
     ModelDiscoveryQuery,
     ModelServiceDiscoveryHealthCheckDetails,
@@ -43,7 +40,7 @@ class HandlerServiceDiscoveryMock:
     protocol for unit and integration testing.
 
     Thread Safety:
-        This handler is coroutine-safe. All operations on the internal
+        This handler is coroutine-safe. All operations on the injected
         service store are protected by asyncio.Lock.
 
     Attributes:
@@ -55,9 +52,11 @@ class HandlerServiceDiscoveryMock:
         >>> assert result.success
     """
 
-    def __init__(self) -> None:
-        """Initialize HandlerServiceDiscoveryMock with empty service store."""
-        self._services: dict[UUID, ModelServiceInfo] = {}
+    def __init__(
+        self, store: StoreKeyedMemory[UUID, ModelServiceInfo] | None = None
+    ) -> None:
+        """Initialize with the injected service store, or an empty one."""
+        self._store = store if store is not None else StoreKeyedMemory()
         self._lock = asyncio.Lock()
 
         logger.debug("HandlerServiceDiscoveryMock initialized")
@@ -109,7 +108,7 @@ class HandlerServiceDiscoveryMock:
                     correlation_id=correlation_id,
                 )
 
-            self._services[service_info.service_id] = service_info
+            self._store.put(service_info.service_id, service_info)
 
         duration_ms = (time.monotonic() - start_time) * 1000
 
@@ -145,7 +144,7 @@ class HandlerServiceDiscoveryMock:
         correlation_id = correlation_id or uuid4()
 
         async with self._lock:
-            self._services.pop(service_id, None)
+            self._store.evict(service_id)
 
         logger.debug(
             "Mock service deregistered",
@@ -177,7 +176,7 @@ class HandlerServiceDiscoveryMock:
         async with self._lock:
             matching_services: list[ModelServiceInfo] = []
 
-            for service in self._services.values():
+            for service in self._store.snapshot():
                 # Match by service name if provided
                 if query.service_name and service.service_name != query.service_name:
                     continue
@@ -225,7 +224,7 @@ class HandlerServiceDiscoveryMock:
         start_time = time.monotonic()
 
         async with self._lock:
-            service_count = len(self._services)
+            service_count = self._store.count()
 
         latency_ms = (time.monotonic() - start_time) * 1000
 
@@ -247,7 +246,7 @@ class HandlerServiceDiscoveryMock:
         Utility method for test cleanup.
         """
         async with self._lock:
-            self._services.clear()
+            self._store.reset()
 
         logger.debug("Mock service store cleared")
 
@@ -258,7 +257,7 @@ class HandlerServiceDiscoveryMock:
             Number of services in the store.
         """
         async with self._lock:
-            return len(self._services)
+            return self._store.count()
 
 
 __all__ = ["HandlerServiceDiscoveryMock"]
