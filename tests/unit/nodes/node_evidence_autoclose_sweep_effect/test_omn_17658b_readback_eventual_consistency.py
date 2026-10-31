@@ -233,7 +233,7 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "readback_delay_seconds": 0,
     }
     payload.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**payload)
+    return ModelEvidenceAutocloseSweepRequest(**{"demotion_window_hours": 0, **payload})
 
 
 @pytest.mark.asyncio

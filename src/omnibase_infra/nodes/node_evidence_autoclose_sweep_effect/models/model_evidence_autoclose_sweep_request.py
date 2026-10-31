@@ -522,8 +522,19 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
     )
     # OMN-18489. The In Progress demotion leg. The window is declared here, in
     # the contract-bound request, and nowhere as a literal in the handler.
+    #
+    # ARMED HERE, in the contract's own default, and not by an expression in the
+    # workflow: the same authority split as `scheduled_apply` and
+    # `backfill_lookback_hours` (OMN-17658). 168h = 7 days is the window the leg
+    # was designed, tested and probed at (OMN-18489 AC4 deploy probe, the unit
+    # and integration tests all run at 168). Measured 2026-10-31 (OMN-21714,
+    # the OMN-17427 Linear triage): 19 tickets sat In Progress with no CLAIM, no
+    # open pull request, no ledger work and no merge in seven days while
+    # `in_progress_demotion` was null in all 8 scheduled runs. The leg's own
+    # fences bound the blast radius: `max_demotions_per_run`, the exclusion
+    # fence, the disarm marker, and a dry run (`apply` false) that writes none.
     demotion_window_hours: int = Field(
-        default=0,
+        default=168,
         ge=0,
         le=24 * 365,
         description=(
@@ -531,7 +542,8 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "A ticket In Progress with no comment other than a sweep's own, no "
             "open pull request and no live execution claim for this long, and "
             "not on the exclusion fence, returns to Backlog. 0 turns the leg "
-            "off and is the value until the window is armed in the workflow."
+            "off. The default is 168 (seven days), the window the leg was built "
+            "and probed at; OMN-21714 armed it here, in the contract."
         ),
     )
     max_demotions_per_run: int = Field(

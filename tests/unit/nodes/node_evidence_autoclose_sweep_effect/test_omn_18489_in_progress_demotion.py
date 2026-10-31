@@ -15,6 +15,9 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.in_progress_demotion import (
     InProgressDemotionLeg,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_request import (
+    ModelEvidenceAutocloseSweepRequest,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_request import (
     ModelInProgressDemotionRequest,
 )
@@ -407,9 +410,36 @@ def _sweep(linear: _SweepLinear, open_prs=None) -> HandlerEvidenceAutocloseSweep
 
 async def test_demotion_leg_is_off_when_the_window_is_zero():
     linear = _SweepLinear([_issue()])
-    result = await _sweep(linear).handle(_sweep_request(apply=True))
+    result = await _sweep(linear).handle(
+        _sweep_request(apply=True, demotion_window_hours=0)
+    )
     assert result.in_progress_demotion is None
     assert linear.since_isos == []
+    assert linear.state_updates == []
+
+
+def test_the_contract_default_arms_the_leg_at_the_designed_window():
+    # OMN-21714. The request a scheduled tick sends carries no demotion flag,
+    # so the model's contract-declared default IS the arming. 168 is the window
+    # the leg was built, tested and probed at (OMN-18489). The shared helper
+    # pins the window to 0 for the other suites, so this reads the model.
+    request = ModelEvidenceAutocloseSweepRequest(correlation_id=uuid4())
+    assert request.demotion_window_hours == 168
+    assert (
+        ModelEvidenceAutocloseSweepRequest.model_fields["demotion_window_hours"].default
+        == 168
+    )
+
+
+async def test_a_request_without_a_demotion_flag_runs_the_leg_and_a_dry_run_demotes_nothing():
+    linear = _SweepLinear([_issue()])
+    defaulted = _sweep_request(apply=False).model_dump()
+    defaulted.pop("demotion_window_hours")
+    result = await _sweep(linear).handle(
+        ModelEvidenceAutocloseSweepRequest(**defaulted)
+    )
+    assert result.in_progress_demotion is not None
+    assert result.in_progress_demotion.tickets_would_demote == 1
     assert linear.state_updates == []
 
 

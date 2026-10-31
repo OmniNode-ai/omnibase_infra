@@ -156,9 +156,18 @@ class InProgressDemotionLeg:
         now = datetime.now(tz=UTC)
         window = timedelta(hours=request.window_hours)
         since_iso = (now - window).strftime("%Y-%m-%dT%H:%M:%SZ")
-        issues, enumeration_error = await self._linear.fetch_in_progress_issues(
-            since_iso
-        )
+        try:
+            issues, enumeration_error = await self._linear.fetch_in_progress_issues(
+                since_iso
+            )
+        except Exception as exc:
+            # This read precedes every demotion write. Preserve the completed
+            # sweep's receipt even if the client raises instead of returning
+            # its failure tuple; the demotion census must remain explicitly
+            # failed, never an empty successful census. Cancellation propagates.
+            logger.exception("In Progress enumeration raised")
+            issues = None
+            enumeration_error = f"Linear client raised {type(exc).__name__}"
         if issues is None:
             return ModelInProgressDemotionResult(
                 window_hours=request.window_hours,

@@ -256,7 +256,7 @@ def _request(**overrides: object) -> ModelEvidenceAutocloseSweepRequest:
         "apply": True,
     }
     payload.update(overrides)
-    return ModelEvidenceAutocloseSweepRequest(**payload)
+    return ModelEvidenceAutocloseSweepRequest(**{"demotion_window_hours": 0, **payload})
 
 
 def _handler(linear: FakeLinear, gh, dod) -> HandlerEvidenceAutocloseSweep:
