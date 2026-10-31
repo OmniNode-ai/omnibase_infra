@@ -87,17 +87,35 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "asked."
         ),
     )
+    # OMN-21722. SIZED FROM THE RECEIPTS, NOT FROM THE ORIGINAL ESTIMATE.
+    #
+    # It was 5, from a ~15 s per-call estimate against a 30-minute cadence. The
+    # cadence is now 2 hours and the job timeout 60 minutes, and the pool is 133
+    # (the 8 scheduled runs of 2026-10-30T20:10Z to 2026-10-31T10:09Z): at 5 per
+    # run one pass of the pool took 27 runs, 54 hours, and the closer flipped 0
+    # tickets in those 8 runs. Measured in those same receipts, the sweep step
+    # took 62 to 285 s; the slowest run (285 s) made 9 verifier-class calls, so
+    # the worst measured cost is 31.7 s per call, including the run's own
+    # enumeration. The sizing rule: the worst measured run plus the ADDED
+    # candidates at the worst measured per-call cost must stay under half the
+    # job timeout. 285 + (40 - 5) * 31.7 = 1395 s = 23.3 min, against 30 min.
+    # tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_21715_backfill_width.py
+    # holds that arithmetic against the workflow's own `timeout-minutes`, so a
+    # shorter timeout or a larger width is a red test naming both. 40 sweeps a
+    # 133 pool in 4 runs (8 hours). Linear 503s (10 in those 8 runs) are
+    # recorded per candidate and fail closed; they do not stop the run.
     backfill_max_candidates: int = Field(
-        default=5,
+        default=40,
         ge=1,
         le=100,
         description=(
             "Hard per-run bound on how many backfill candidates reach "
             "dod_verify. This is the run-budget guard and the thing that must "
-            "not track the size of the board: at ~15s per verifier call, 5 is "
-            "~75s of added work against a 30-minute cadence. Raising it trades "
-            "drain rate for run duration and nothing else -- it can never "
-            "widen what the flip predicate accepts."
+            "not track the size of the board: 40 is sized from the measured "
+            "worst run (285 s) and worst per-call cost (31.7 s), 23 minutes "
+            "against a 60-minute job timeout on a 2-hour cadence (OMN-21722). "
+            "Raising it trades drain rate for run duration and nothing else -- "
+            "it can never widen what the flip predicate accepts."
         ),
     )
     backfill_pool_size: int = Field(
