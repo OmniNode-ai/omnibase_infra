@@ -39,7 +39,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import ast
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -54,7 +54,11 @@ from omnibase_infra.topics.contract_topic_extractor import ContractTopicExtracto
 
 
 def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
-    """Extract SUFFIX_* constant values from a Python module using AST parsing.
+    """Extract SUFFIX_* constant values by importing the constants module.
+
+    A suffix is a string literal or ``EnumProducerTopic.MEMBER.value`` read off the
+    per-producer topic enums generated from contract YAML, so the value is read
+    from the module itself rather than from its source text.
 
     Args:
         constants_file: Path to platform_topic_suffixes.py or similar.
@@ -62,38 +66,16 @@ def _extract_suffix_values(constants_file: Path) -> dict[str, str]:
     Returns:
         Mapping of constant name to string value (e.g., {"SUFFIX_NODE_REGISTRATION": "onex.evt.platform.node-registration.v1"}).
     """
-    source = constants_file.read_text()
-    tree = ast.parse(source, filename=str(constants_file))
-
-    suffix_constants: dict[str, str] = {}
-    for node in ast.walk(tree):
-        # Handle plain assignment: SUFFIX_X = "..."
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                if not target.id.startswith("SUFFIX_"):
-                    continue
-                value = node.value
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    suffix_constants[target.id] = value.value
-
-        # Handle annotated assignment: SUFFIX_X: str = "..."
-        elif isinstance(node, ast.AnnAssign):
-            target = node.target
-            if not isinstance(target, ast.Name):
-                continue
-            if not target.id.startswith("SUFFIX_"):
-                continue
-            value = node.value
-            if (
-                value is not None
-                and isinstance(value, ast.Constant)
-                and isinstance(value.value, str)
-            ):
-                suffix_constants[target.id] = value.value
-
-    return suffix_constants
+    spec = importlib.util.spec_from_file_location("_suffix_constants", constants_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load constants file: {constants_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {
+        name: value
+        for name, value in vars(module).items()
+        if name.startswith("SUFFIX_") and isinstance(value, str)
+    }
 
 
 def _is_infrastructure_topic(topic: str) -> bool:

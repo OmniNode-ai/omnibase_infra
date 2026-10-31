@@ -54,12 +54,11 @@ See Also:
     model_topic_spec.ModelTopicSpec - Per-topic creation spec
 """
 
-from __future__ import annotations
-
 import os
 
 from omnibase_core.errors import OnexError
 from omnibase_core.validation import validate_topic_suffix
+from omnibase_infra.enums import generated as topic_enums
 from omnibase_infra.topics.model_topic_provisioning_policy import (
     MANAGED_MINIMUM_REPLICATION_FACTOR,
 )
@@ -246,7 +245,7 @@ SUFFIX_INTELLIGENCE_PATTERN_LIFECYCLE_TRANSITIONED: str = (
 """Topic for pattern lifecycle transition completion events."""
 
 SUFFIX_INTELLIGENCE_LLM_CALL_COMPLETED: str = (
-    "onex.evt.omniintelligence.llm-call-completed.v1"
+    topic_enums.EnumOmniintelligenceTopic.EVT_LLM_CALL_COMPLETED_V1.value
 )
 """Topic for LLM call completed metrics events.
 
@@ -964,7 +963,7 @@ Consumer: omniintelligence pattern learning pipeline
 """
 
 SUFFIX_OMNIMEMORY_POLICY_STATE_UPDATED: str = (
-    "onex.evt.omnimemory.policy-state-updated.v1"
+    topic_enums.EnumOmnimemoryTopic.EVT_POLICY_STATE_UPDATED_V1.value
 )
 """Topic suffix for policy state update events (OMN-2927).
 
@@ -1399,7 +1398,7 @@ even if no consumer is registered yet.
 # the DB directly (OMN-5042); registering here closes that gap.
 
 SUFFIX_VALIDATION_CROSS_REPO_RUN_STARTED: str = (
-    "onex.evt.validation.cross-repo-run-started.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_RUN_STARTED_V1.value
 )
 """Topic suffix for cross-repo validation run started events.
 
@@ -1412,7 +1411,7 @@ Consumer: omnidash EventBusDataSource
 """
 
 SUFFIX_VALIDATION_CROSS_REPO_VIOLATIONS_BATCH: str = (
-    "onex.evt.validation.cross-repo-violations-batch.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_VIOLATIONS_BATCH_V1.value
 )
 """Topic suffix for cross-repo validation violations batch events.
 
@@ -1425,7 +1424,7 @@ Consumer: omnidash EventBusDataSource
 """
 
 SUFFIX_VALIDATION_CROSS_REPO_RUN_COMPLETED: str = (
-    "onex.evt.validation.cross-repo-run-completed.v1"
+    topic_enums.EnumValidationTopic.EVT_CROSS_REPO_RUN_COMPLETED_V1.value
 )
 """Topic suffix for cross-repo validation run completed events.
 
@@ -1655,7 +1654,7 @@ TCB_OUTCOME_REGISTRATION) and demo_loop_gate verification.
 """
 
 SUFFIX_OMNICLAUDE_NOTIFICATION_BLOCKED: str = (
-    "onex.evt.omniclaude.notification-blocked.v1"
+    topic_enums.EnumOmniclaudeTopic.EVT_NOTIFICATION_BLOCKED_V1.value
 )
 """Notification event topic for agent BLOCKED states.
 
@@ -1664,7 +1663,7 @@ Consumer: omnibase_infra emit daemon notification consumer (push-notification re
 """
 
 SUFFIX_OMNICLAUDE_NOTIFICATION_COMPLETED: str = (
-    "onex.evt.omniclaude.notification-completed.v1"
+    topic_enums.EnumOmniclaudeTopic.EVT_NOTIFICATION_COMPLETED_V1.value
 )
 """Notification event topic for agent COMPLETED states.
 
