@@ -1,0 +1,22 @@
+{
+  "branch_coverage_pct": 36.0,
+  "candidate_count": 3,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_registry_api_effect.handlers.handler_registry_api_get_node",
+  "handler_module_sha256": "sha256:2153cd265a6397f7883cd1f50a6e3313d83bb6adcb40a1f7c3056024332cc7b8",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_registry_api_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T22:17:28.133683+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:af5c56d1e38dc3348fd21c7bbae2fecaa4570657c909206a4d501b1baebdc7af",
+    "sha256:e0648a7c053dea026207e300adef4112a42e6bbf6cd30fa76f6ddb628515dd4f"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21696 flips the node to canonical def-B by changing handle() to take one typed ModelRegistryApiRequest (correlation id read from the request). The handlers delegate their business logic to ServiceRegistryDiscovery, which this change does not touch; the handler constructor and the handler_type and handler_category properties are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence rests on that git-verbatim preservation plus the executed parity tests, not on a broad branch-coverage claim: the scenario pool drives this node's representative handler (get_node) only, and the other handlers are covered by the node's existing unit suite.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}
