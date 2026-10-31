@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import subprocess
 from pathlib import Path
 
@@ -47,9 +48,19 @@ git() {{
   printf '%s\\n' "$*" >> {shlex.quote(str(tmp_path / "git.log"))}
   if [ "$1" = clone ]; then
     mkdir -p "${{@: -1}}"
-  else
+  elif [ "$1" = -C ] && [ "$3" = rev-parse ] && [ "$4" = HEAD ]; then
     printf '%s\\n' {SHA}
+  else
+    echo "unexpected git call: $*" >&2
+    return 97
   fi
+}}
+# The build case reaches make (inside a pipeline) right after staging; terminate
+# the script there so the real script runs unmodified through staging and never
+# reaches container operations.
+make() {{
+  printf '%s\\n' "$*" >> {shlex.quote(str(tmp_path / "make.log"))}
+  kill -TERM "$$"
 }}
 """,
         encoding="utf-8",
@@ -97,22 +108,16 @@ def test_pool_staging_passes_spi_pins_or_selects_dev_tags(
         'printf "%s\\n" "$@" > "$OMNI_HOME/stage-args"\n',
         encoding="utf-8",
     )
-    # Run the script through staging, stopping before local-env and all container
-    # operations. Keep the actual build case and staging pipeline unchanged.
-    source = PROVE.read_text()
-    before_make = source.split("  make local-env ", 1)[0]
-    assert before_make != source
-    staging_only = tmp_path / "staging-only.sh"
-    staging_only.write_text(before_make + "  ;;\nesac\n", encoding="utf-8")
     done = subprocess.run(
-        ["bash", str(staging_only), str(params), "build"],
+        ["bash", str(PROVE), str(params), "build"],
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
-    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.returncode == -signal.SIGTERM, done.stdout + done.stderr
     assert "stage rc=0" in done.stdout
+    assert (tmp_path / "make.log").read_text().startswith("local-env ")
     root = infra.parent
     assert (root / "deploy-ref").read_text().strip() == (
         "origin/dev" if stage_tags else ""
