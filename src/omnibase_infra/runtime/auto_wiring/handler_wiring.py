@@ -120,17 +120,20 @@ from omnibase_infra.event_bus.model_topic_set_readiness import (
 from omnibase_infra.event_bus.topic_constants import (
     derive_event_type_alias_for_topic,
 )
+from omnibase_infra.handlers.handler_contract_subscribe_preflight import (
+    HandlerContractSubscribePreflight,
+)
 from omnibase_infra.handlers.handler_projection_derived_write import (
     HandlerProjectionDerivedWrite,
 )
 from omnibase_infra.handlers.handler_projection_write_cursor import (
     HandlerProjectionWriteCursor,
 )
+from omnibase_infra.models.event_bus.model_contract_subscribe_preflight_request import (
+    ModelContractSubscribePreflightRequest,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
     resolve_tenant_from_wire_topic,
-)
-from omnibase_infra.protocols.protocol_consume_concurrency_declarer import (
-    ProtocolConsumeConcurrencyDeclarer,
 )
 from omnibase_infra.protocols.protocol_dispatch_result_applier import (
     ProtocolDispatchResultApplier,
@@ -156,9 +159,6 @@ from omnibase_infra.runtime.auto_wiring.models import (
     ModelDiscoveredContract,
     ModelHandlerRef,
     ModelHandlerRoutingEntry,
-)
-from omnibase_infra.runtime.auto_wiring.models.model_consume_concurrency import (
-    load_consume_concurrency,
 )
 from omnibase_infra.runtime.auto_wiring.report import (
     EnumWiringOutcome,
@@ -11566,33 +11566,16 @@ async def _subscribe_contract_topics(
         node_identity, EnumConsumerGroupPurpose.CONSUME
     )
 
-    # OMN-18852: a node may declare how many consumed records its handler may
-    # have in flight at once. Absent -- which is every node in the fleet today
-    # -- resolves to 1, and 1 leaves the consume loop on the inline serial
-    # ``await`` it has always taken, so an undeclared node is unchanged.
-    #
-    # Declared BEFORE ``subscribe``, because ``subscribe`` is what starts the
-    # consume loop and the loop reads the bound once, when it starts.
-    #
-    # A malformed declaration raises out of ``load_consume_concurrency`` and
-    # fails wiring for this contract rather than degrading to 1: an operator
-    # who believes a bound is in force and is silently running serial is the
-    # position this ticket started from.
-    consume_concurrency = load_consume_concurrency(contract.contract_path)
-    concurrency_declarer: ProtocolConsumeConcurrencyDeclarer | None = None
-    if not consume_concurrency.is_serial:
-        if not isinstance(event_bus, ProtocolConsumeConcurrencyDeclarer):
-            raise TypeError(
-                f"contract '{contract.name}' declares consume_concurrency."
-                f"max_in_flight_records={consume_concurrency.max_in_flight_records}, "
-                f"but the wired event bus ({type(event_bus).__name__}) cannot "
-                "bound in-flight records. Implement "
-                "ProtocolConsumeConcurrencyDeclarer.declare_consume_concurrency "
-                "on the bus and record the declared bound before subscribing. "
-                "A declared bound that silently does "
-                "nothing is the defect OMN-18852 exists to remove"
-            )
-        concurrency_declarer = event_bus
+    # OMN-18852 consume_concurrency and OMN-21753 consumer_group_handover: read
+    # both declarations and refuse a bus that cannot honour either, before any
+    # topic of this contract is subscribed. See the handler's module docstring.
+    preflight = HandlerContractSubscribePreflight(
+        contract_name=contract.name,
+        contract_path=contract.contract_path,
+        event_bus=event_bus,
+        environment=environment,
+        consumer_group=consumer_group,
+    )
 
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
@@ -11694,25 +11677,9 @@ async def _subscribe_contract_topics(
         topic: str,
         cb: Callable[..., Awaitable[None]],
     ) -> str:
-        # OMN-18852: strictly before ``subscribe``, which starts the consume
-        # loop that reads this bound once at start. Scoped to the topics this
-        # contract actually subscribes to, so a topic skipped as core-runtime
-        # owned never carries a bound nothing reads.
-        if concurrency_declarer is not None:
-            concurrency_declarer.declare_consume_concurrency(
-                topic=topic,
-                group_id=consumer_group,
-                max_in_flight_records=consume_concurrency.max_in_flight_records,
-            )
-            logger.info(
-                "Auto-wired consume concurrency: topic=%s consumer_group=%s "
-                "node=%s max_in_flight_records=%d -- this topic no longer "
-                "preserves global partition ordering (OMN-18852)",
-                topic,
-                consumer_group,
-                contract.name,
-                consume_concurrency.max_in_flight_records,
-            )
+        # Strictly before ``subscribe``, which starts the consume loop (reads
+        # the bound once) and joins the group (reads its offsets once).
+        await preflight.handle(ModelContractSubscribePreflightRequest(topic=topic))
         if auto_offset_reset is None:
             await typed_bus.subscribe(
                 topic=topic,
