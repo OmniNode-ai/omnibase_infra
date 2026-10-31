@@ -33,6 +33,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.nodes.node_gateway_link_health_projection_compute.models.model_payload_gateway_link_health_upsert import (
     ModelPayloadGatewayLinkHealthUpsert,
 )
@@ -125,7 +126,9 @@ class HandlerGatewayLinkHealthProjection:
         payload = self._extract_payload(message)
         return ModelIntent(
             intent_type=payload.intent_type,
-            target=f"postgres://gateway_link_health/{payload.tenant_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().gateway_link_health, payload.tenant_id
+            ),
             payload=payload,
         )
 

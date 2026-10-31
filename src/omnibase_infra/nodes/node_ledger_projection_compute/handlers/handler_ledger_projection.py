@@ -41,6 +41,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.models.ledger.model_payload_ledger_append import (
     ModelPayloadLedgerAppend,
 )
@@ -158,7 +159,12 @@ class HandlerLedgerProjection:
         payload = self._extract_ledger_metadata(message)
         return ModelIntent(
             intent_type=payload.intent_type,
-            target=f"postgres://event_ledger/{payload.topic}/{payload.partition}/{payload.kafka_offset}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().event_ledger,
+                payload.topic,
+                payload.partition,
+                payload.kafka_offset,
+            ),
             payload=payload,
         )
 

@@ -32,6 +32,7 @@ from pydantic import BaseModel
 
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_infra.enums import EnumRegistrationState
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.models.projection.model_registration_projection import (
     ModelRegistrationProjection,
 )
@@ -265,7 +266,9 @@ class RegistrationReducerService:
         )
         upsert_intent = ModelIntent(
             intent_type=postgres_payload.intent_type,
-            target=f"postgres://node_registrations/{node_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().node_registrations, node_id
+            ),
             payload=postgres_payload,
         )
 
@@ -352,7 +355,9 @@ class RegistrationReducerService:
             )
             update_intent = ModelIntent(
                 intent_type=update_payload.intent_type,
-                target=f"postgres://node_registrations/{node_id}",
+                target=load_intent_target_uris().target(
+                    load_intent_target_uris().node_registrations, node_id
+                ),
                 payload=update_payload,
             )
 
@@ -434,7 +439,9 @@ class RegistrationReducerService:
         )
         update_intent = ModelIntent(
             intent_type=update_payload.intent_type,
-            target=f"postgres://node_registrations/{node_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().node_registrations, node_id
+            ),
             payload=update_payload,
         )
 
