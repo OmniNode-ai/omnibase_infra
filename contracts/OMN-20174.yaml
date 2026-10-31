@@ -44,5 +44,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_pyasn1_omn20174.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/ci/test_lockfile_cve_bump_omn20174.py -q -k 'test_fixed_versions_locked and pyasn1'"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
