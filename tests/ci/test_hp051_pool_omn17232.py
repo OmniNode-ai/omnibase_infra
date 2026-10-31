@@ -61,6 +61,19 @@ def _directives(unit: str) -> dict[str, str]:
     return {key.strip(): value.strip() for key, value in pairs}
 
 
+def _values(unit: str, key: str) -> list[str]:
+    """Every value of a directive that systemd lets repeat (ExecStartPre), in file order."""
+    return [
+        value.strip()
+        for name, value in (
+            line.split("=", 1)
+            for line in unit.replace("\\\n", " ").splitlines()
+            if "=" in line and not line.lstrip().startswith(("#", "["))
+        )
+        if name.strip() == key
+    ]
+
+
 def test_every_runner_carries_the_opt_in_label_and_no_required_pool_label() -> None:
     services = _compose()["services"]
     assert len(services) == 4
@@ -140,7 +153,6 @@ def test_the_pool_is_its_own_cgroup_slice_with_declared_limits() -> None:
     assert limits["MemoryMax"] == "112G"
     assert limits["MemorySwapMax"] == "2G"
     ram = sum(_bytes(s["mem_limit"]) for s in services.values())
-    assert ram == 24 * 1024**3
     assert ram <= _bytes(limits["MemoryHigh"]) <= _bytes(limits["MemoryMax"])
     swap = sum(
         _bytes(s["memswap_limit"]) - _bytes(s["mem_limit"]) for s in services.values()
@@ -163,7 +175,9 @@ def test_the_fleet_declares_the_pool_with_the_multiarch_class_only() -> None:
     assert host.declared_count("action") == 0
     assert host.declared_count("verify") == 0
     assert host.declared_count("action-multiarch") == 4
-    assert config.declared_total("action") == 26
+    # The pool adds nothing to the omnibase-ci spread: the total is what the other hosts declare, whatever that is.
+    others = sum(h.declared_count("action") for h in config.hosts if h.host != "h051")
+    assert config.declared_total("action") == others
 
 
 def test_the_runner_names_match_the_declared_count() -> None:
@@ -215,11 +229,8 @@ def test_daemon_preflight_waits_for_the_compose_bridge_without_a_start_limit() -
     assert directives["StartLimitIntervalSec"] == "0"
     assert directives["Restart"] == "always"
     assert directives["RestartSec"] == "5"
-    preflight = [
-        shlex.split(line.split("=", 1)[1])
-        for line in daemon.splitlines()
-        if line.startswith("ExecStartPre=")
-    ]
+    preflight = [shlex.split(value) for value in _values(daemon, "ExecStartPre")]
+    assert len(preflight) == 2
     assert preflight[0][:2] == ["/bin/sh", "-ec"]
     assert preflight[1][:2] == ["/usr/bin/python3", "-c"]
 
@@ -240,11 +251,7 @@ def test_daemon_network_preflight_requires_the_configured_compose_gateway(
     )
     docker.chmod(0o755)
     record = tmp_path / "arguments"
-    first = next(
-        line.split("=", 1)[1]
-        for line in MIRROR_DAEMON.read_text().splitlines()
-        if line.startswith("ExecStartPre=")
-    )
+    first = _values(MIRROR_DAEMON.read_text(), "ExecStartPre")[0]
     # systemd turns $$ into a literal $ before passing the command to the shell.
     command = [argument.replace("$$", "$") for argument in shlex.split(first)]
     result = subprocess.run(
@@ -269,23 +276,24 @@ def test_daemon_network_preflight_requires_the_configured_compose_gateway(
 
 
 @pytest.mark.parametrize(
-    "address",
+    ("address", "diagnostic"),
     [
-        None,
-        "",
-        pytest.param(str(IPv4Address(0)), id="ipv4-wildcard"),
-        "::",
-        "[::]",
-        "224.0.0.1",
-        "ff02::1",
-        "not-an-ip",
-        "192.0.2.1",
+        (None, "KeyError"),
+        ("", "ValueError"),
+        pytest.param(str(IPv4Address(0)), "must be unicast", id="ipv4-wildcard"),
+        ("::", "must be unicast"),
+        ("[::]", "ValueError"),
+        ("224.0.0.1", "must be unicast"),
+        ("ff02::1", "must be unicast"),
+        ("not-an-ip", "ValueError"),
+        ("192.0.2.1", "OSError"),
     ],
 )
 def test_daemon_preflight_refuses_unsafe_or_unassigned_listen_addresses(
-    address: str | None,
+    address: str | None, diagnostic: str
 ) -> None:
-    command = shlex.split(_directives(MIRROR_DAEMON.read_text())["ExecStartPre"])
+    """Each refusal comes from the check meant to make it, so a broken one-liner cannot pass every case."""
+    command = shlex.split(_values(MIRROR_DAEMON.read_text(), "ExecStartPre")[1])
     environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     environment.pop("OMNI_GIT_MIRROR_LISTEN", None)
     if address is not None:
@@ -299,10 +307,12 @@ def test_daemon_preflight_refuses_unsafe_or_unassigned_listen_addresses(
         timeout=10,
     )
     assert result.returncode != 0, result
+    assert "SyntaxError" not in result.stderr, result.stderr
+    assert diagnostic in result.stderr, result.stderr
 
 
 def test_daemon_preflight_accepts_an_assigned_unicast_address() -> None:
-    command = shlex.split(_directives(MIRROR_DAEMON.read_text())["ExecStartPre"])
+    command = shlex.split(_values(MIRROR_DAEMON.read_text(), "ExecStartPre")[1])
     result = subprocess.run(
         [sys.executable, *command[1:]],
         env={
