@@ -34,11 +34,11 @@ description: >
 # Note: This is a multi-operation effect node. The top-level input_model
 # declares the primary domain model (ModelSessionIndex), but individual
 # handlers accept different per-operation inputs:
-#   - session.index.read:  (correlation_id) -> ModelSessionIndex
-#   - session.index.write: (ModelSessionIndex, correlation_id) -> result
-#   - session.run.read:    (run_id: str, correlation_id) -> ModelRunContext
-#   - session.run.write:   (ModelRunContext, correlation_id) -> result
-#   - session.gc:          (correlation_id) -> result
+#   - session.index.read:  ModelSessionIndexReadRequest -> ModelSessionIndex
+#   - session.index.write: ModelSessionIndexWriteRequest -> result
+#   - session.run.read:    ModelRunContextReadRequest -> ModelRunContext
+#   - session.run.write:   ModelRunContextWriteRequest -> result
+#   - session.gc:          ModelStaleRunGcRequest -> result
 # Per-handler input_model entries in handler_routing below are the source
 # of truth for each operation's I/O contract.
 input_model:
@@ -65,22 +65,31 @@ capabilities:
 io_operations:
   - operation: "session.index.read"
     description: "Read session.json and return ModelSessionIndex"
+    input_fields:
+      - correlation_id: "UUID"
     idempotent: true
   - operation: "session.index.write"
     description: "Atomic write session.json with flock protection"
+    input_fields:
+      - index: "ModelSessionIndex"
+      - correlation_id: "UUID"
     idempotent: true
   - operation: "session.run.read"
     description: "Read runs/{run_id}.json and return ModelRunContext"
     input_fields:
       - run_id: "str"
+      - correlation_id: "UUID"
     idempotent: true
   - operation: "session.run.write"
     description: "Atomic write runs/{run_id}.json (single writer, no lock)"
     input_fields:
-      - run_id: "str"
+      - context: "ModelRunContext"
+      - correlation_id: "UUID"
     idempotent: true
   - operation: "session.gc"
     description: "Remove run documents older than TTL (default 4hr)"
+    input_fields:
+      - correlation_id: "UUID"
     idempotent: true
 # Handler routing
 handler_routing:
@@ -92,15 +101,15 @@ handler_routing:
         module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_read"
       description: "Read session.json index"
       input_model:
-        name: "None"
-        description: "No input required (reads current session.json from disk)."
+        name: "ModelSessionIndexReadRequest"
+        module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.index.write"
       handler:
         name: "HandlerSessionIndexWrite"
         module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_session_index_write"
       description: "Atomic write session.json with flock"
       input_model:
-        name: "ModelSessionIndex"
+        name: "ModelSessionIndexWriteRequest"
         module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.run.read"
       handler:
@@ -108,15 +117,15 @@ handler_routing:
         module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_read"
       description: "Read run context document"
       input_model:
-        name: "str"
-        description: "run_id string identifying the run context to read."
+        name: "ModelRunContextReadRequest"
+        module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.run.write"
       handler:
         name: "HandlerRunContextWrite"
         module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_run_context_write"
       description: "Atomic write run context document"
       input_model:
-        name: "ModelRunContext"
+        name: "ModelRunContextWriteRequest"
         module: "omnibase_infra.nodes.node_session_state_effect.models"
     - operation: "session.gc"
       handler:
@@ -124,8 +133,8 @@ handler_routing:
         module: "omnibase_infra.nodes.node_session_state_effect.handlers.handler_stale_run_gc"
       description: "Garbage-collect stale run documents"
       input_model:
-        name: "None"
-        description: "No input required (scans runs/ directory based on configured TTL)."
+        name: "ModelStaleRunGcRequest"
+        module: "omnibase_infra.nodes.node_session_state_effect.models"
 # Dependencies
 dependencies:
   - name: "state_dir"

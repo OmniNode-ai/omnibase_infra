@@ -87,7 +87,7 @@ class HandlerPostgresDeactivate(MixinPostgresOpExecutor):
         >>> import asyncpg
         >>> pool = await asyncpg.create_pool(dsn="postgresql://...")
         >>> handler = HandlerPostgresDeactivate(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
 
@@ -117,8 +117,7 @@ class HandlerPostgresDeactivate(MixinPostgresOpExecutor):
 
     async def handle(
         self,
-        payload: ModelPayloadDeactivateContract,
-        correlation_id: UUID,
+        request: ModelPayloadDeactivateContract,
     ) -> ModelBackendResult:
         """Execute PostgreSQL contract deactivation (soft-delete).
 
@@ -128,9 +127,8 @@ class HandlerPostgresDeactivate(MixinPostgresOpExecutor):
         potential reactivation scenarios.
 
         Args:
-            payload: Deactivation payload containing contract_id and
+            request: Deactivation request containing contract_id and
                 deactivated_at timestamp.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -147,13 +145,14 @@ class HandlerPostgresDeactivate(MixinPostgresOpExecutor):
             This follows the idempotency principle - deactivating a
             non-existent or already-deactivated contract is not an error.
         """
+        correlation_id = request.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.DEACTIVATE_ERROR,
             correlation_id=correlation_id,
             log_context={
-                "contract_id": payload.contract_id,
+                "contract_id": request.contract_id,
             },
-            fn=lambda: self._execute_deactivate(payload, correlation_id),
+            fn=lambda: self._execute_deactivate(request, correlation_id),
         )
 
     async def _execute_deactivate(
