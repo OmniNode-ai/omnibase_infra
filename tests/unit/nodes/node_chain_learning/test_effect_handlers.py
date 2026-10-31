@@ -18,6 +18,7 @@ from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
     ModelChainEntry,
     ModelChainStep,
+    ModelChainStoreRequest,
 )
 from omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval import (
     COLLECTION_NAME,
@@ -257,9 +258,11 @@ class TestHandlerChainStore:
         embedding = [0.1] * 128
 
         result = await handler.handle(
-            chain_entry=entry,
-            prompt_embedding=embedding,
-            correlation_id=uuid4(),
+            ModelChainStoreRequest(
+                chain_entry=entry,
+                prompt_embedding=embedding,
+                correlation_id=uuid4(),
+            )
         )
         assert result.success
         assert result.chain_id == entry.chain_id
@@ -273,9 +276,11 @@ class TestHandlerChainStore:
         entry = _make_entry()
 
         result = await handler.handle(
-            chain_entry=entry,
-            prompt_embedding=[0.1] * 128,
-            correlation_id=uuid4(),
+            ModelChainStoreRequest(
+                chain_entry=entry,
+                prompt_embedding=[0.1] * 128,
+                correlation_id=uuid4(),
+            )
         )
         assert not result.success
         assert result.chain_id == entry.chain_id
@@ -288,9 +293,11 @@ class TestHandlerChainStore:
         entry = _make_entry()
 
         result = await handler.handle(
-            chain_entry=entry,
-            prompt_embedding=[0.1] * 128,
-            correlation_id=cid,
+            ModelChainStoreRequest(
+                chain_entry=entry,
+                prompt_embedding=[0.1] * 128,
+                correlation_id=cid,
+            )
         )
         assert result.correlation_id == cid
 
@@ -301,9 +308,11 @@ class TestHandlerChainStore:
         entry = _make_entry()
 
         await handler.handle(
-            chain_entry=entry,
-            prompt_embedding=[0.1] * 128,
-            correlation_id=uuid4(),
+            ModelChainStoreRequest(
+                chain_entry=entry,
+                prompt_embedding=[0.1] * 128,
+                correlation_id=uuid4(),
+            )
         )
 
         qdrant_client.upsert.assert_called_once()

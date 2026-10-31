@@ -79,7 +79,9 @@ class TestHandlerPostgresUpsertSuccess:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is True
@@ -111,7 +113,9 @@ class TestHandlerPostgresUpsertSuccess:
         correlation_id = uuid4()
 
         # Act
-        await handler.handle(request, correlation_id)
+        await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert - verify parameters are passed correctly
         mock_adapter.upsert.assert_called_once_with(
@@ -147,7 +151,9 @@ class TestHandlerPostgresUpsertNodeTypes:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is True
@@ -175,7 +181,9 @@ class TestHandlerPostgresUpsertFailure:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is False
@@ -202,7 +210,9 @@ class TestHandlerPostgresUpsertFailure:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert - error should be sanitized (exact behavior depends on sanitize_backend_error)
         assert result.success is False
@@ -228,7 +238,9 @@ class TestHandlerPostgresUpsertException:
         correlation_id = uuid4()
 
         # Act - should NOT raise
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is False
@@ -251,7 +263,9 @@ class TestHandlerPostgresUpsertException:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is False
@@ -271,7 +285,9 @@ class TestHandlerPostgresUpsertException:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is False
@@ -294,7 +310,9 @@ class TestHandlerPostgresUpsertException:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.success is False
@@ -316,7 +334,9 @@ class TestHandlerPostgresUpsertCorrelationId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.correlation_id == correlation_id
@@ -337,7 +357,9 @@ class TestHandlerPostgresUpsertCorrelationId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.correlation_id == correlation_id
@@ -354,7 +376,9 @@ class TestHandlerPostgresUpsertCorrelationId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.correlation_id == correlation_id
@@ -373,7 +397,9 @@ class TestHandlerPostgresUpsertTiming:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.duration_ms >= 0
@@ -390,7 +416,9 @@ class TestHandlerPostgresUpsertTiming:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.duration_ms >= 0
@@ -409,7 +437,9 @@ class TestHandlerPostgresUpsertBackendId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.backend_id == "postgres"
@@ -428,7 +458,9 @@ class TestHandlerPostgresUpsertBackendId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.backend_id == "postgres"
@@ -445,7 +477,9 @@ class TestHandlerPostgresUpsertBackendId:
         correlation_id = uuid4()
 
         # Act
-        result = await handler.handle(request, correlation_id)
+        result = await handler.handle(
+            request.model_copy(update={"correlation_id": correlation_id})
+        )
 
         # Assert
         assert result.backend_id == "postgres"

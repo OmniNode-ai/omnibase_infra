@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
-    ModelChainEntry,
+    ModelChainStoreRequest,
     ModelChainStoreResult,
 )
 from omnibase_infra.nodes.node_chain_orchestrator.models.protocol_chain_vector_client import (
@@ -44,35 +43,29 @@ class HandlerChainStore:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.EFFECT
 
-    async def handle(
-        self,
-        chain_entry: ModelChainEntry,
-        prompt_embedding: list[float],
-        correlation_id: UUID,
-    ) -> ModelChainStoreResult:
+    async def handle(self, request: ModelChainStoreRequest) -> ModelChainStoreResult:
         """Store a verified chain to Qdrant.
 
         Args:
-            chain_entry: The verified chain trajectory to store.
-            prompt_embedding: The embedding vector for the prompt.
-            correlation_id: Workflow correlation ID.
+            request: The verified chain trajectory, its prompt embedding and the
+                workflow correlation ID.
 
         Returns:
             ModelChainStoreResult with success/failure status.
         """
         if self._qdrant_client is None:
             return ModelChainStoreResult(
-                correlation_id=correlation_id,
-                chain_id=chain_entry.chain_id,
+                correlation_id=request.correlation_id,
+                chain_id=request.chain_entry.chain_id,
                 success=False,
                 error_message="HandlerChainStore: qdrant_client not configured",
             )
 
         logger.info(
             "Storing chain %s (correlation_id=%s, steps=%d)",
-            chain_entry.chain_id,
-            correlation_id,
-            len(chain_entry.chain_steps),
+            request.chain_entry.chain_id,
+            request.correlation_id,
+            len(request.chain_entry.chain_steps),
         )
 
         try:
@@ -80,18 +73,18 @@ class HandlerChainStore:
         except ImportError:
             logger.exception("qdrant-client not installed")
             return ModelChainStoreResult(
-                correlation_id=correlation_id,
-                chain_id=chain_entry.chain_id,
+                correlation_id=request.correlation_id,
+                chain_id=request.chain_entry.chain_id,
                 success=False,
                 error_message="qdrant-client is required for chain storage",
             )
 
         # Serialize chain entry to Qdrant payload
-        payload = chain_entry.model_dump(mode="json")
+        payload = request.chain_entry.model_dump(mode="json")
 
         point = PointStruct(
-            id=str(chain_entry.chain_id),
-            vector=prompt_embedding,
+            id=str(request.chain_entry.chain_id),
+            vector=request.prompt_embedding,
             payload=payload,
         )
 
@@ -104,24 +97,24 @@ class HandlerChainStore:
         except Exception:
             logger.exception(
                 "Failed to store chain %s (correlation_id=%s)",
-                chain_entry.chain_id,
-                correlation_id,
+                request.chain_entry.chain_id,
+                request.correlation_id,
             )
             return ModelChainStoreResult(
-                correlation_id=correlation_id,
-                chain_id=chain_entry.chain_id,
+                correlation_id=request.correlation_id,
+                chain_id=request.chain_entry.chain_id,
                 success=False,
                 error_message="Qdrant upsert failed",
             )
 
         logger.info(
             "Chain %s stored successfully (correlation_id=%s)",
-            chain_entry.chain_id,
-            correlation_id,
+            request.chain_entry.chain_id,
+            request.correlation_id,
         )
 
         return ModelChainStoreResult(
-            correlation_id=correlation_id,
-            chain_id=chain_entry.chain_id,
+            correlation_id=request.correlation_id,
+            chain_id=request.chain_entry.chain_id,
             success=True,
         )

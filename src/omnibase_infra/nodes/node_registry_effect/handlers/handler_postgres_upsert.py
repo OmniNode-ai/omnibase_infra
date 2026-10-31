@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import (
@@ -67,7 +66,7 @@ class HandlerPostgresUpsert:
         >>> adapter = AsyncMock()
         >>> adapter.upsert.return_value = ModelBackendResult(success=True, backend_id="postgres")
         >>> handler = HandlerPostgresUpsert(adapter)
-        >>> result = await handler.handle(request, correlation_id)
+        >>> result = await handler.handle(request)
         >>> result.success
         True
 
@@ -95,11 +94,7 @@ class HandlerPostgresUpsert:
         """
         self._postgres_adapter = postgres_adapter
 
-    async def handle(
-        self,
-        request: ModelRegistryRequest,
-        correlation_id: UUID,
-    ) -> ModelBackendResult:
+    async def handle(self, request: ModelRegistryRequest) -> ModelBackendResult:
         """Execute PostgreSQL registration record upsert.
 
         Performs the upsert operation against the PostgreSQL adapter with:
@@ -111,7 +106,6 @@ class HandlerPostgresUpsert:
         Args:
             request: Registration request with node details including
                 node_id, node_type, node_version, endpoints, and metadata.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with:
@@ -145,7 +139,7 @@ class HandlerPostgresUpsert:
                     success=True,
                     duration_ms=duration_ms,
                     backend_id="postgres",
-                    correlation_id=correlation_id,
+                    correlation_id=request.correlation_id,
                 )
             else:
                 # Sanitize backend error to avoid exposing secrets
@@ -157,7 +151,7 @@ class HandlerPostgresUpsert:
                     error_code="POSTGRES_UPSERT_ERROR",
                     duration_ms=duration_ms,
                     backend_id="postgres",
-                    correlation_id=correlation_id,
+                    correlation_id=request.correlation_id,
                 )
 
         except (TimeoutError, InfraTimeoutError) as e:
@@ -170,7 +164,7 @@ class HandlerPostgresUpsert:
                 error_code="POSTGRES_TIMEOUT_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
-                correlation_id=correlation_id,
+                correlation_id=request.correlation_id,
             )
 
         except InfraAuthenticationError as e:
@@ -183,7 +177,7 @@ class HandlerPostgresUpsert:
                 error_code="POSTGRES_AUTH_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
-                correlation_id=correlation_id,
+                correlation_id=request.correlation_id,
             )
 
         except InfraConnectionError as e:
@@ -196,7 +190,7 @@ class HandlerPostgresUpsert:
                 error_code="POSTGRES_CONNECTION_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
-                correlation_id=correlation_id,
+                correlation_id=request.correlation_id,
             )
 
         except (
@@ -212,7 +206,7 @@ class HandlerPostgresUpsert:
                 error_code="POSTGRES_UNKNOWN_ERROR",
                 duration_ms=duration_ms,
                 backend_id="postgres",
-                correlation_id=correlation_id,
+                correlation_id=request.correlation_id,
             )
 
 
