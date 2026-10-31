@@ -16,21 +16,38 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import Protocol
 
-from omnibase_infra.cli.delegate_caller import DELEGATE_CALLER_LANE_METADATA_KEY
 from omnibase_infra.models.delegation.model_delegate_session_model import (
     ModelDelegateSessionModel,
 )
 
-if TYPE_CHECKING:
-    from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
-
-__all__ = ["DELEGATE_TICKET_METADATA_KEY", "build_delegate_request_payload"]
+__all__ = [
+    "DELEGATE_CALLER_LANE_METADATA_KEY",
+    "DELEGATE_TICKET_METADATA_KEY",
+    "ProtocolDelegateRequestCaller",
+    "build_delegate_request_payload",
+]
 
 #: The request ``metadata`` key that names the ticket a delegation works
 #: (OMN-19514). omnimarket's delegate-skill handler reads the same key.
 DELEGATE_TICKET_METADATA_KEY = "ticket_id"
+
+#: The request ``metadata`` key naming the caller's lane (OMN-19860). The same
+#: value as ``omnibase_infra.cli.delegate_caller.DELEGATE_CALLER_LANE_METADATA_KEY``,
+#: declared here so this module depends on nothing in the command line package;
+#: a test pins the two equal.
+DELEGATE_CALLER_LANE_METADATA_KEY = "caller_lane"
+
+
+class ProtocolDelegateRequestCaller(Protocol):
+    """The caller's lane and session, as the command line resolves them."""
+
+    @property
+    def lane(self) -> str | None: ...
+
+    @property
+    def session_id(self) -> str | None: ...
 
 
 def build_delegate_request_payload(
@@ -48,7 +65,7 @@ def build_delegate_request_payload(
     backend_id: str | None = None,
     model: str | None = None,
     ticket_id: str | None = None,
-    caller: ModelDelegateCaller | None = None,
+    caller: ProtocolDelegateRequestCaller | None = None,
     tenant_id: str | None = None,
     trace_id: uuid.UUID | None = None,
     span_id: uuid.UUID | None = None,

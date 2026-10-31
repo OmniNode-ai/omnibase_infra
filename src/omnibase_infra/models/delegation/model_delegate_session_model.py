@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "SESSION_MODEL_METADATA_KEY",
@@ -40,9 +40,15 @@ class ModelDelegateSessionModel(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    model: str = Field(
-        ..., pattern=_SESSION_MODEL_PATTERN.pattern, description="Session model id"
-    )
+    model: str = Field(..., description="Session model id")
+
+    @field_validator("model")
+    @classmethod
+    def _is_a_model_id(cls, value: str) -> str:
+        """One check for every path in: ``fullmatch``, so no trailing newline."""
+        if _SESSION_MODEL_PATTERN.fullmatch(value) is None:
+            raise ValueError(f"{value!r} is not a model id")
+        return value
 
     @classmethod
     def from_flag(cls, value: str | None) -> ModelDelegateSessionModel | None:

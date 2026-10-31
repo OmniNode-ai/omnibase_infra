@@ -92,7 +92,7 @@ def test_no_session_model_writes_no_key() -> None:
     assert "metadata" not in payload
 
 
-@pytest.mark.parametrize("value", ["", "claude opus"])
+@pytest.mark.parametrize("value", ["", "claude opus", "claude-opus-5-5\n"])
 def test_a_malformed_session_model_is_refused_by_the_builder_too(value: str) -> None:
     """The builder holds the flag's contract: a malformed value is never dropped."""
     with pytest.raises(ValueError, match="model"):
@@ -237,3 +237,14 @@ def test_golden_chain_without_the_flag_writes_no_key_and_says_none(
     (call,) = calls
     assert "session_model" not in call["payload"].get("metadata", {})
     assert "session model: none" in result.stderr
+
+
+def test_the_caller_lane_key_matches_the_command_lines() -> None:
+    from omnibase_infra.cli.delegate_caller import (
+        DELEGATE_CALLER_LANE_METADATA_KEY as CLI_KEY,
+    )
+    from omnibase_infra.models.delegation.delegate_request_payload import (
+        DELEGATE_CALLER_LANE_METADATA_KEY,
+    )
+
+    assert DELEGATE_CALLER_LANE_METADATA_KEY == CLI_KEY
