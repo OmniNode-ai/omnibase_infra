@@ -16,8 +16,8 @@ requirements:
 evidence_requirements:
   - kind: tests
     description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited outbound-call site carries the declared value.
-    command: uv run --frozen pytest tests/unit/models/outbound_timeouts -q
-  - kind: command
+    command: uv run --frozen pytest tests/unit/models/outbound_timeouts/test_model_outbound_timeouts.py tests/integration/adapters/test_outbound_timeouts_omn21623.py -q
+  - kind: ci
     description: The contracts_and_di check reports no literal_timeout finding over the seven edited files and the settings model; at the merge base the same run reports 16.
     command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py src/omnibase_infra/adapters/llm/adapter_documentation_generation.py src/omnibase_infra/adapters/llm/adapter_test_boilerplate_generation.py src/omnibase_infra/adapters/project_tracker/linear_graphql_project_tracker_adapter.py src/omnibase_infra/adapters/ticket/adapter_ticket_service_linear.py src/omnibase_infra/diagnostics/bus_audit.py src/omnibase_infra/models/outbound_timeouts
 emergency_bypass:
@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/models/outbound_timeouts -q"
+        check_value: "uv run --frozen pytest tests/unit/models/outbound_timeouts/test_model_outbound_timeouts.py tests/integration/adapters/test_outbound_timeouts_omn21623.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
@@ -43,6 +43,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC10
+  - id: dod-omn21623-deploy-hosted-outbound-timeouts
+    description: Hosted deploy check loads the shipped timeout declaration and sends loopback HTTP requests through the Linear and LLM adapters, asserting the declared waits reach HTTPX without clamping and explicit Linear overrides are retained.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/adapters/test_outbound_timeouts_omn21623.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
   - id: dod-omn21623-deploy-outbound-timeouts
     description: >-
       Post-deploy probe: the runtime container loads the outbound timeouts from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
