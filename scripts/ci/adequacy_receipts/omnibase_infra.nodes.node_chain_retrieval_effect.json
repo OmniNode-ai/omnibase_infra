@@ -1,0 +1,26 @@
+{
+  "branch_coverage_pct": 68.48,
+  "candidate_count": 6,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval",
+  "handler_module_sha256": "sha256:3b5917f1595c21dc731d687224482972969da1e7ad8627c496c1706f912239f8",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_chain_retrieval_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T09:12:22.985709+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 6,
+  "selected_input_hashes": [
+    "sha256:41c06477274b29ceaf480011507cd6d636fa945adb204ea902816dd74eabeac9",
+    "sha256:3b6ef1ae72aa1f85089e26143002155768c57ea5553ceb4e9909193e7b0b4c0b",
+    "sha256:8c2a8d8a7b73c6522c6a6f2e867bad29637c28d5a38474af6bdae14fec187cb0",
+    "sha256:b6cde6722b3e0bcb6f8a298ad2de96844b2fcdbf5558f9f5b1b06cf0d2163acb",
+    "sha256:4e5e6e2ab94ad433415ef402da36277ffebf3f863d446907b80357c759550358",
+    "sha256:92b4abb5c65ba901d55197fe657541525013137a7b895e96bd5c1c56490c08c8"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21536 flips the node to canonical def-B by changing handle() to take one typed request (correlation id read from the request); the private helpers that hold the business logic are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence rests on that git-verbatim preservation plus the executed parity tests, not on a broad branch-coverage claim: the scenario pool drives this node's representative handler only.",
+    "uncovered_branch_count": 2
+  },
+  "volatile_mask": []
+}

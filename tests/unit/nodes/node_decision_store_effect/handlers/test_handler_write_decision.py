@@ -266,9 +266,9 @@ class TestHandlerWriteDecisionStage1Success:
         handler._pool.acquire = MagicMock(return_value=mock_acquire)
 
         payload = make_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.backend_id == "postgres"
@@ -301,7 +301,7 @@ class TestHandlerWriteDecisionStage1Success:
         handler._pool.acquire = MagicMock(return_value=mock_acquire)
 
         payload = make_payload(scope_services=["ZService", "aService", "MService"])
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         # Verify the upsert SQL call received sorted lowercase services in JSON
@@ -341,7 +341,7 @@ class TestHandlerWriteDecisionStage1Success:
 
         superseder_id = uuid4()
         payload = make_payload(status="ACTIVE", superseded_by=superseder_id)
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         # Verify the status arg passed to upsert is SUPERSEDED
@@ -371,7 +371,7 @@ class TestHandlerWriteDecisionStage1Success:
         handler._pool.acquire = MagicMock(return_value=mock_acquire)
 
         payload = make_payload(created_at=future_ts)
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is False
         # ValueError is caught as UNKNOWN_ERROR by MixinPostgresOpExecutor
@@ -396,7 +396,7 @@ class TestHandlerWriteDecisionStage1Success:
         handler._pool.acquire = MagicMock(return_value=mock_acquire)
 
         payload = make_payload(scope_domain="not-a-valid-domain")
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
@@ -448,7 +448,7 @@ class TestHandlerWriteDecisionErrors:
     async def test_timeout_error_returns_timeout_code(self) -> None:
         """TimeoutError returns success=False with TIMEOUT_ERROR code."""
         handler = self._make_handler_with_error(TimeoutError("timed out"))
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
 
@@ -456,7 +456,7 @@ class TestHandlerWriteDecisionErrors:
     async def test_connection_error_returns_connection_code(self) -> None:
         """InfraConnectionError returns success=False with CONNECTION_ERROR code."""
         handler = self._make_handler_with_error(InfraConnectionError("refused"))
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
 
@@ -464,7 +464,7 @@ class TestHandlerWriteDecisionErrors:
     async def test_auth_error_returns_auth_code(self) -> None:
         """InfraAuthenticationError returns success=False with AUTH_ERROR code."""
         handler = self._make_handler_with_error(InfraAuthenticationError("bad creds"))
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
 
@@ -472,7 +472,7 @@ class TestHandlerWriteDecisionErrors:
     async def test_generic_exception_returns_unknown_code(self) -> None:
         """Unexpected exception returns success=False with UNKNOWN_ERROR code."""
         handler = self._make_handler_with_error(RuntimeError("boom"))
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
 
@@ -545,7 +545,7 @@ class TestHandlerWriteDecisionStage2:
     async def test_no_active_decisions_no_conflicts_written(self) -> None:
         """When no other ACTIVE decisions exist, no conflicts are written."""
         handler, conn2 = self._make_handler_stage2(active_rows=[])
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
 
         assert result.success is True
         conn2.fetchrow.assert_not_called()  # INSERT CONFLICT not called
@@ -578,7 +578,7 @@ class TestHandlerWriteDecisionStage2:
             scope_layer="architecture",
             scope_services=[],
         )
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         # Conflict INSERT was called
@@ -611,7 +611,7 @@ class TestHandlerWriteDecisionStage2:
             scope_layer="architecture",
             scope_services=[],
         )
-        await handler.handle(payload, uuid4())
+        await handler.handle(payload)
 
         # SQL_DEMOTE_TO_PROPOSED should have been called
         assert conn2.execute.called
@@ -648,7 +648,7 @@ class TestHandlerWriteDecisionStage2:
             scope_layer="architecture",
             scope_services=[],
         )
-        await handler.handle(payload, uuid4())
+        await handler.handle(payload)
 
         # SQL_DEMOTE_TO_PROPOSED should NOT have been called
         execute_calls = [str(call) for call in conn2.execute.call_args_list]
@@ -680,7 +680,7 @@ class TestHandlerWriteDecisionStage2:
             scope_layer="architecture",
             scope_services=[],
         )
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         # Conflict INSERT NOT called for confidence < 0.3
@@ -727,7 +727,7 @@ class TestHandlerWriteDecisionStage2:
 
         handler._pool.acquire = MagicMock(side_effect=acquire_factory)
 
-        result = await handler.handle(make_payload(), uuid4())
+        result = await handler.handle(make_payload())
 
         # Stage 1 committed → overall success=True despite Stage 2 failure
         assert result.success is True

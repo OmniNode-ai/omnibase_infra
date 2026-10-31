@@ -60,7 +60,7 @@ class HandlerUpdateOutcome(MixinPostgresOpExecutor):
     Example:
         >>> pool = await asyncpg.create_pool(dsn="...")
         >>> handler = HandlerUpdateOutcome(pool)
-        >>> result = await handler.handle(payload, correlation_id)
+        >>> result = await handler.handle(payload)
         >>> result.success
         True
     """
@@ -86,19 +86,18 @@ class HandlerUpdateOutcome(MixinPostgresOpExecutor):
     async def handle(
         self,
         payload: ModelPayloadUpdateOutcome,
-        correlation_id: UUID,
     ) -> ModelBackendResult:
         """Update a delta bundle with the PR outcome.
 
         Args:
             payload: Outcome update payload from pr-outcome event.
-            correlation_id: Request correlation ID for distributed tracing.
 
         Returns:
             ModelBackendResult with success=True on successful update or
             idempotent skip (outcome already set). Returns success=False
             only on infrastructure errors.
         """
+        correlation_id = payload.correlation_id
         return await self._execute_postgres_op(
             op_error_code=EnumPostgresErrorCode.UPSERT_ERROR,
             correlation_id=correlation_id,

@@ -1,0 +1,26 @@
+{
+  "branch_coverage_pct": 61.43,
+  "candidate_count": 9,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_merge_gate_effect.handlers.handler_upsert_merge_gate",
+  "handler_module_sha256": "sha256:4e46fe0466bfb4a3977a5e78858e932e751bdb644d1ae06e17499565a7c1a3c8",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_merge_gate_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-31T09:53:19.571774+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 6,
+  "selected_input_hashes": [
+    "sha256:c98b5fb8d2deee13882bcbcd93aac5d75daaea451aa1b0df9527a748033c307d",
+    "sha256:f7e8da6099907a060cb98a3bdbcf5fd22a3d858abfb2c5a3878c201e3b9e1a0f",
+    "sha256:b5487065d8da556539671ea0927812541e50c0ca02e2807b7d417a5110909646",
+    "sha256:dcd601051bcca7cc7aebc66ff7e574426120c3da1b1c239f2d282ccf0afe4e45",
+    "sha256:21566a565d8062874c7858a0e79f57efb5266646eac79721aaff0ffef8384dab",
+    "sha256:5f495cbe57df3505a7c33b008103e909d43f77da4a5a9144b360d3ce6d03c018"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21536 flips the node to canonical def-B by changing handle() to take one typed request (correlation id read from the request); the private helpers that hold the business logic are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence rests on that git-verbatim preservation plus the executed parity tests, not on a broad branch-coverage claim: the scenario pool drives this node's representative handler only.",
+    "uncovered_branch_count": 1
+  },
+  "volatile_mask": []
+}

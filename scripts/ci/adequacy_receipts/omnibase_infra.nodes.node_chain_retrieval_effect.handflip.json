@@ -1,0 +1,30 @@
+{
+  "base_ref": "a9ffea9a3321b7944278557dbb00079accf5eec4",
+  "canonical_handler_module": "omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval",
+  "legacy_handler_module": "omnibase_infra.nodes.node_chain_retrieval_effect.handlers.handler_chain_retrieval",
+  "node_id": "omnibase_infra.nodes.node_chain_retrieval_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:41c06477274b29ceaf480011507cd6d636fa945adb204ea902816dd74eabeac9",
+      "sha256:3b6ef1ae72aa1f85089e26143002155768c57ea5553ceb4e9909193e7b0b4c0b",
+      "sha256:8c2a8d8a7b73c6522c6a6f2e867bad29637c28d5a38474af6bdae14fec187cb0",
+      "sha256:b6cde6722b3e0bcb6f8a298ad2de96844b2fcdbf5558f9f5b1b06cf0d2163acb",
+      "sha256:4e5e6e2ab94ad433415ef402da36277ffebf3f863d446907b80357c759550358",
+      "sha256:92b4abb5c65ba901d55197fe657541525013137a7b895e96bd5c1c56490c08c8"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_hits_are_sorted_and_custom_query_settings_forwarded",
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_empty_search_returns_a_miss",
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_embedding_failure_stops_before_search",
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_search_failure_retains_embedding",
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_malformed_hits_are_skipped",
+      "tests/unit/nodes/node_chain_retrieval_effect/test_handle_typed_request_omn21536.py::TestRetrievalHandleTypedRequest::test_unconfigured_vector_client_returns_miss"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerChainRetrieval._get_embedding",
+    "HandlerChainRetrieval._ensure_collection"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

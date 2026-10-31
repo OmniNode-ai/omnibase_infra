@@ -111,9 +111,9 @@ class TestHandlerWriteConflictSuccess:
 
         handler = HandlerWriteConflict(pool)
         payload = make_conflict_payload()
-        correlation_id = uuid4()
+        correlation_id = payload.correlation_id
 
-        result = await handler.handle(payload, correlation_id)
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.backend_id == "postgres"
@@ -131,7 +131,7 @@ class TestHandlerWriteConflictSuccess:
 
         handler = HandlerWriteConflict(pool)
         payload = make_conflict_payload()
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         assert result.backend_id == "postgres"
@@ -155,7 +155,7 @@ class TestHandlerWriteConflictSuccess:
             structural_confidence=0.7,
             final_severity="MEDIUM",
         )
-        result = await handler.handle(payload, uuid4())
+        result = await handler.handle(payload)
 
         assert result.success is True
         # Verify the SQL was called with min < max
@@ -181,7 +181,7 @@ class TestHandlerWriteConflictErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerWriteConflict(pool)
-        result = await handler.handle(make_conflict_payload(), uuid4())
+        result = await handler.handle(make_conflict_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.TIMEOUT_ERROR
@@ -195,7 +195,7 @@ class TestHandlerWriteConflictErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerWriteConflict(pool)
-        result = await handler.handle(make_conflict_payload(), uuid4())
+        result = await handler.handle(make_conflict_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.CONNECTION_ERROR
@@ -209,7 +209,7 @@ class TestHandlerWriteConflictErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerWriteConflict(pool)
-        result = await handler.handle(make_conflict_payload(), uuid4())
+        result = await handler.handle(make_conflict_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.AUTH_ERROR
@@ -223,7 +223,7 @@ class TestHandlerWriteConflictErrors:
         pool = create_mock_pool_with_conn(conn)
 
         handler = HandlerWriteConflict(pool)
-        result = await handler.handle(make_conflict_payload(), uuid4())
+        result = await handler.handle(make_conflict_payload())
 
         assert result.success is False
         assert result.error_code == EnumPostgresErrorCode.UNKNOWN_ERROR
