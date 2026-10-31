@@ -14,16 +14,18 @@ import httpx
 import pytest
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_infra.nodes.node_registry_api_effect.models.model_cost_snapshot_topics import (
+    ModelCostSnapshotTopics,
+)
 from omnibase_infra.services.cost_api.snapshot_cache import (
-    TOPIC_COST_BY_REPO,
-    TOPIC_COST_SUMMARY,
-    TOPIC_COST_TOKEN_USAGE,
     clear_latest_snapshots,
     store_latest_snapshot,
 )
 from omnibase_infra.services.registry_api.main import create_app
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
+
+SNAPSHOT_TOPICS = ModelCostSnapshotTopics.from_contract()
 
 
 class FakeAcquire:
@@ -282,7 +284,7 @@ async def test_token_usage_response(app: Any, fake_conn: FakeConnection) -> None
 
 async def test_cost_summary_prefers_latest_projection_snapshot(app: Any) -> None:
     store_latest_snapshot(
-        TOPIC_COST_SUMMARY,
+        SNAPSHOT_TOPICS.summary,
         "24h",
         {
             "window": "24h",
@@ -307,7 +309,7 @@ async def test_cost_summary_prefers_latest_projection_snapshot(app: Any) -> None
 
 async def test_cost_by_repo_prefers_latest_projection_snapshot(app: Any) -> None:
     store_latest_snapshot(
-        TOPIC_COST_BY_REPO,
+        SNAPSHOT_TOPICS.by_repo,
         "24h",
         {
             "window": "24h",
@@ -352,7 +354,7 @@ async def test_cost_by_repo_prefers_latest_projection_snapshot(app: Any) -> None
 
 async def test_token_usage_prefers_latest_projection_snapshot(app: Any) -> None:
     store_latest_snapshot(
-        TOPIC_COST_TOKEN_USAGE,
+        SNAPSHOT_TOPICS.token_usage,
         "24h",
         {
             "window": "24h",

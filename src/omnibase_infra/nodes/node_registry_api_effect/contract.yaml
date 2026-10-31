@@ -62,6 +62,12 @@ config:
   postgres_query_timeout_seconds: 30
   # Widget mapping cache behaviour
   widget_mapping_cache_enabled: true
+  # Cost API: topics whose latest projection snapshot backs the cost routes.
+  # Injected into the route handlers through create_app (OMN-21736).
+  cost_snapshot_topics:
+    summary: "onex.snapshot.projection.cost.summary.v1"
+    by_repo: "onex.snapshot.projection.cost.by_repo.v1"
+    token_usage: "onex.snapshot.projection.cost.token_usage.v1"
 # ---------------------------------------------------------------------------
 # IO operations (EFFECT node specific)
 # ---------------------------------------------------------------------------
