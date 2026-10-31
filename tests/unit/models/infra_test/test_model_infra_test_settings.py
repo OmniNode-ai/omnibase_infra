@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from click.testing import CliRunner
 
 from omnibase_infra.cli.infra_test import env as env_module
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -36,7 +37,10 @@ def _declared_block() -> dict[str, object]:
 class TestInfraTestSettingsContract:
     def test_loaded_settings_equal_the_declared_block(self) -> None:
         loaded = load_infra_test_settings()
-        assert loaded.model_dump() == _declared_block()
+        expected = ModelInfraTestSettings.model_validate(_declared_block())
+        assert loaded == expected
+        for field in type(expected).model_fields:
+            assert type(getattr(loaded, field)) is type(getattr(expected, field))
 
     @pytest.mark.parametrize("key", sorted(_declared_block()))
     def test_block_missing_a_value_fails_to_load(
@@ -66,6 +70,31 @@ class TestInfraTestSettingsContract:
 
 @pytest.mark.unit
 class TestCliUsesDeclaredSettings:
+    @pytest.mark.parametrize("arguments", [[], ["--timeout", "9"]])
+    def test_env_up_resolves_integer_timeout_at_invocation(
+        self, arguments: list[str]
+    ) -> None:
+        settings = load_infra_test_settings().model_copy(
+            update={"health_wait_timeout_seconds": 737}
+        )
+        with (
+            patch.object(env_module, "load_infra_test_settings", return_value=settings),
+            patch.object(env_module, "_run_compose"),
+            patch.object(env_module, "_wait_for_healthy", return_value=True) as wait,
+        ):
+            result = CliRunner().invoke(
+                env_module.env,
+                ["up", *arguments],
+                obj={
+                    "compose_file": "compose.yml",
+                    "project_name": "landing-l19772-lab",
+                },
+            )
+        assert result.exit_code == 0, result.output
+        expected = 9 if arguments else settings.health_wait_timeout_seconds
+        wait.assert_called_once_with("compose.yml", "landing-l19772-lab", expected)
+        assert type(wait.call_args.args[2]) is int
+
     def test_compose_call_carries_the_declared_timeout(self) -> None:
         completed = subprocess.CompletedProcess(args=[], returncode=0)
         with patch.object(env_module.subprocess, "run", return_value=completed) as run:
@@ -80,9 +109,10 @@ class TestCliUsesDeclaredSettings:
         failing = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
         sleeper = MagicMock()
         with (
-            patch.object(env_module.subprocess, "run", return_value=failing),
+            patch.object(env_module.subprocess, "run", return_value=failing) as run,
             patch.object(env_module.time, "sleep", sleeper),
             patch.object(env_module.time, "monotonic", side_effect=[0.0, 0.0, 1e9]),
         ):
             assert env_module._wait_for_healthy("compose.yml", "proj") is False
         sleeper.assert_called_once_with(settings.health_poll_interval_seconds)
+        assert run.call_args.kwargs["timeout"] == settings.docker_query_timeout_seconds

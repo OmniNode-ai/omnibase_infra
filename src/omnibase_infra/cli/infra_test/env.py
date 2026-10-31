@@ -143,7 +143,8 @@ def env() -> None:  # stub-ok: click group
 )
 @click.option(
     "--timeout",
-    default=load_infra_test_settings().health_wait_timeout_seconds,
+    default=lambda: load_infra_test_settings().health_wait_timeout_seconds,
+    type=int,
     help="Timeout in seconds for health checks.",
     show_default=True,
 )
@@ -207,9 +208,7 @@ def env_down(ctx: click.Context, volumes: bool) -> None:
 
     console.print("[bold blue]Stopping E2E infrastructure...[/bold blue]")
 
-    args = ["down"]
-    if volumes:
-        args.append("-v")
+    args = ["down", "-v"] if volumes else ["down"]
 
     _run_compose(compose_file, project_name, args)
     console.print("[bold green]Infrastructure stopped.[/bold green]")

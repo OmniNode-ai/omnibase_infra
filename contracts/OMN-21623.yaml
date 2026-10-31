@@ -15,9 +15,9 @@ requirements:
         statement: 'AC4: the contracts_and_di check over src/omnibase_infra/cli/infra_test and src/omnibase_infra/models/infra_test reports no finding -- falsifier: any finding from that run'
 evidence_requirements:
   - kind: tests
-    description: The loaded settings equal the declared file, each omitted value fails to load, and the compose call and health poll carry the declared values.
-    command: uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test -q
-  - kind: command
+    description: The loaded settings equal the declared file, each omitted value fails to load, and every CLI command and suite carries the declared timeouts and waits.
+    command: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test/test_cli_scaffold.py tests/unit/cli/infra_test/test_helpers.py tests/unit/cli/infra_test/test_introspect.py tests/unit/cli/infra_test/test_verify_topics.py tests/integration/test_infra_test_settings_cli_omn21623.py -q
+  - kind: ci
     description: The contracts_and_di check exits 0 over the infra-test CLI and its settings model; at the merge base the same run reports 34 findings.
     command: uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/cli/infra_test src/omnibase_infra/models/infra_test
 emergency_bypass:
@@ -30,7 +30,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test -q"
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/models/infra_test/test_model_infra_test_settings.py tests/unit/cli/infra_test/test_cli_scaffold.py tests/unit/cli/infra_test/test_helpers.py tests/unit/cli/infra_test/test_introspect.py tests/unit/cli/infra_test/test_verify_topics.py tests/integration/test_infra_test_settings_cli_omn21623.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
@@ -53,3 +53,12 @@ dod_evidence:
         check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.infra_test import load_infra_test_settings; load_infra_test_settings()'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: []
+  - id: dod-omn21623-hosted-cli-probe
+    description: 'Post-deploy probe for hosted CI: the installed CLI imports without reading settings, renders help with unavailable settings, and each command uses values loaded from YAML. External subprocess and database boundaries are intercepted; no lane container is required.'
+    source: manual
+    execution_scope: hosted_and_local
+    checks:
+      - check_type: test_passes
+        check_value: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/test_infra_test_settings_cli_omn21623.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
