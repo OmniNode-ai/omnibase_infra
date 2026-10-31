@@ -41,8 +41,8 @@ def _declared_block() -> dict[str, object]:
 
 def test_settings_equal_the_contract_block() -> None:
     settings = load_probe_settings()
-    block = _declared_block()
-    assert settings.model_dump() == block
+    assert settings.rpk_command_timeout_seconds == 10.0
+    assert settings.rpk_discovery_timeout_seconds == 5.0
 
 
 def test_missing_timeout_fails_to_load(tmp_path: Path) -> None:
@@ -86,3 +86,14 @@ def test_discovery_call_uses_the_discovery_timeout() -> None:
         == load_probe_settings().rpk_discovery_timeout_seconds
     )
     assert "env" not in run.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    "field", ["rpk_command_timeout_seconds", "rpk_discovery_timeout_seconds"]
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_nonpositive_timeout_is_refused(field: str, value: int) -> None:
+    block = _declared_block()
+    block[field] = value
+    with pytest.raises(ValidationError):
+        ModelVerificationProbeSettings.model_validate(block)

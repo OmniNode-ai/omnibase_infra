@@ -9,15 +9,18 @@ from __future__ import annotations
 import importlib
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.enums import EnumCheckSeverity, EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
-from omnibase_infra.validation.checks.handler_check_executor import (
-    HandlerCheckExecutor,
-)
+
+if TYPE_CHECKING:
+    from omnibase_infra.validation.checks.handler_check_executor import (
+        HandlerCheckExecutor,
+    )
 
 _CATALOG_PATH = (
     Path(__file__).resolve().parents[2] / "validation" / "checks" / "check_catalog.yaml"
@@ -80,6 +83,12 @@ class ModelCheckCatalogEntry(BaseModel):
             ProtocolConfigurationError: If the handler is outside the checks
                 namespace, is not an executor, or reports another check code.
         """
+        # The checks package builds its registry at import time. Import the
+        # executor base only after this catalog model has finished loading.
+        from omnibase_infra.validation.checks.handler_check_executor import (
+            HandlerCheckExecutor,
+        )
+
         module_path, _, class_name = self.handler.rpartition(".")
         if not module_path.startswith(_HANDLER_NAMESPACE):
             raise _configuration_error(

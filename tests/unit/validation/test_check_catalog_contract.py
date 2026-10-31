@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.validation import model_check_catalog_entry as catalog
 from omnibase_infra.models.validation.model_check_catalog_entry import (
     ModelCheckCatalogEntry,
 )
@@ -56,3 +60,41 @@ def test_entry_whose_code_disagrees_with_its_executor_is_refused() -> None:
     )
     with pytest.raises(ProtocolConfigurationError):
         entry.build_executor()
+
+
+@pytest.mark.parametrize(
+    "rows", [[], [{"check_code": "duplicate", "handler": "x.y"}] * 2]
+)
+def test_invalid_catalog_is_refused(
+    rows: list[dict[str, str]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "check_catalog.yaml"
+    path.write_text(yaml.safe_dump({"checks": rows}), encoding="utf-8")
+    monkeypatch.setattr(catalog, "_CATALOG_PATH", path)
+    ModelCheckCatalogEntry.load_catalog.cache_clear()
+    try:
+        with pytest.raises(ProtocolConfigurationError):
+            ModelCheckCatalogEntry.load_catalog()
+    finally:
+        ModelCheckCatalogEntry.load_catalog.cache_clear()
+
+
+def test_catalog_cache_is_reused_until_cleared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "check_catalog.yaml"
+    path.write_text(
+        yaml.safe_dump({"checks": [{"check_code": "one", "handler": "x.y"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog, "_CATALOG_PATH", path)
+    ModelCheckCatalogEntry.load_catalog.cache_clear()
+    try:
+        entries = ModelCheckCatalogEntry.load_catalog()
+        path.write_text(yaml.safe_dump({"checks": []}), encoding="utf-8")
+        assert ModelCheckCatalogEntry.load_catalog() is entries
+        ModelCheckCatalogEntry.load_catalog.cache_clear()
+        with pytest.raises(ProtocolConfigurationError):
+            ModelCheckCatalogEntry.load_catalog()
+    finally:
+        ModelCheckCatalogEntry.load_catalog.cache_clear()
