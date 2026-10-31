@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -86,6 +88,8 @@ def test_no_repository_workflow_routes_jobs_to_the_canary_pin() -> None:
 
 
 def test_compose_cli_and_yaml_loader_agree_on_inherited_service_settings() -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI is not installed")
     result = subprocess.run(
         [
             "docker",
@@ -345,6 +349,7 @@ def test_git_daemon_serves_reads_but_refuses_repository_write_and_archive_overri
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         env=scrub_git_location_env(os.environ),
+        start_new_session=True,
     )
     try:
         deadline = time.monotonic() + 5
@@ -373,7 +378,7 @@ def test_git_daemon_serves_reads_but_refuses_repository_write_and_archive_overri
                 response = client.recv(4096)
             assert b"ERR access denied" in response, (service, response)
     finally:
-        process.terminate()
+        os.killpg(process.pid, signal.SIGTERM)
         process.communicate(timeout=5)
 
 
