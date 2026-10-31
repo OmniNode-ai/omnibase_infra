@@ -15,11 +15,18 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.version import InvalidVersion, Version
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PYASN1_FIXED_FLOOR = (0, 6, 5)
+PYASN1_FIXED_FLOOR = Version("0.6.5")
+
+
+def _assert_fixed_version(version: str) -> None:
+    assert Version(version) >= PYASN1_FIXED_FLOOR, (
+        f"pyasn1 {version} is below fixed floor {PYASN1_FIXED_FLOOR}"
+    )
 
 
 def test_pyasn1_fixed_version_locked() -> None:
@@ -27,10 +34,25 @@ def test_pyasn1_fixed_version_locked() -> None:
     matches = [p for p in lock["package"] if p["name"] == "pyasn1"]
     assert len(matches) == 1, f"expected exactly one pyasn1 entry, got {len(matches)}"
     version = str(matches[0]["version"])
-    try:
-        parsed = tuple(int(part) for part in version.split("."))
-    except ValueError:
-        pytest.fail(f"version has a non-integer component: {version!r}")
-    assert parsed >= PYASN1_FIXED_FLOOR, (
-        f"pyasn1 {version} is below fixed floor {PYASN1_FIXED_FLOOR}"
-    )
+    _assert_fixed_version(version)
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["0.6.5", "0.6.5.post1", "0.7.0rc1", "0.7.0.dev1", "0.6.5+local.1", "1!0.1.0"],
+)
+def test_fixed_version_accepts_pep440_releases(version: str) -> None:
+    _assert_fixed_version(version)
+
+
+@pytest.mark.parametrize(
+    "version", ["0.6.4", "0.6.4.post1", "0.6.5rc1", "0.6.5.dev1", "0.6.4+local.1"]
+)
+def test_fixed_version_rejects_versions_below_floor(version: str) -> None:
+    with pytest.raises(AssertionError, match=r"below fixed floor 0\.6\.5"):
+        _assert_fixed_version(version)
+
+
+def test_fixed_version_rejects_invalid_version() -> None:
+    with pytest.raises(InvalidVersion, match="Invalid version"):
+        _assert_fixed_version("not-a-version")
