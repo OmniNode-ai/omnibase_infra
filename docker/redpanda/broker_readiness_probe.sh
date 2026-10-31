@@ -96,6 +96,7 @@ ready() {
   "no readable declaration at ${DECLARATION_PATH}"
 
 sync_window_seconds=""
+sync_exempt_group_suffixes=""
 probe_topic=""
 broker=""
 sasl_mechanism=""
@@ -105,13 +106,14 @@ while IFS= read -r line || [ -n "$line" ]; do
   value="${line#*=}"
   case "$key" in
     sync_window_seconds) sync_window_seconds="$value" ;;
+    sync_exempt_group_suffixes) sync_exempt_group_suffixes="$value" ;;
     probe_topic)         probe_topic="$value" ;;
     broker)              broker="$value" ;;
     sasl_mechanism)      sasl_mechanism="$value" ;;
   esac
 done < "$DECLARATION_PATH"
 
-for required in sync_window_seconds probe_topic broker sasl_mechanism; do
+for required in sync_window_seconds sync_exempt_group_suffixes probe_topic broker sasl_mechanism; do
   eval "declared=\${$required}"
   [ -n "$declared" ] || not_ready declaration_missing_key \
     "${required} is not declared in ${DECLARATION_PATH}"
@@ -203,6 +205,12 @@ if [ "$offsets_verdict" != "ok" ]; then
 fi
 
 # --- check 2: a group that has committed before must still be committing -----
+# A group whose name ends in a declared exempt suffix is not judged (OMN-21789):
+# a relay to the cloud (the gateway forwarder's outbound group) stops committing
+# whenever the cloud link is down, which is the relay's own health and not this
+# broker's. Judging it held `redpanda` unhealthy for hours, and every runtime
+# container that depends on `redpanda: service_healthy` stayed in State=created.
+exempt_re="($(printf '%s' "$sync_exempt_group_suffixes" | sed 's/,/|/g'))\$"
 # `rpk group describe` exit status is deliberately not consulted: the broker has
 # just proved it serves offsets, and a lane whose only fault is that one group
 # listing errored should not be declared down. What is consulted is whatever it
@@ -211,10 +219,10 @@ groups="$(rpk group describe -r '.*' 2>/dev/null)"
 
 new_state="${STATE_PATH}.new"
 stale="$(printf '%s\n' "$groups" | awk \
-  -v now="$NOW" -v window="$sync_window_seconds" \
+  -v now="$NOW" -v window="$sync_window_seconds" -v exempt="$exempt_re" \
   -v statefile="$STATE_PATH" -v newstate="$new_state" '
   function flush() {
-    if (g != "" && state == "Stable" && members > 0 && lag > 0 && committed > 0) {
+    if (g != "" && g !~ exempt && state == "Stable" && members > 0 && lag > 0 && committed > 0) {
       cur[g] = progress
     }
   }
@@ -241,11 +249,7 @@ stale="$(printf '%s\n' "$groups" | awk \
   }
 ')"
 
-if [ -f "$new_state" ]; then
-  mv -f "$new_state" "$STATE_PATH" 2>/dev/null
-else
-  : > "$STATE_PATH" 2>/dev/null
-fi
+if [ -f "$new_state" ]; then mv -f "$new_state" "$STATE_PATH" 2>/dev/null; else : > "$STATE_PATH" 2>/dev/null; fi
 
 if [ -n "$stale" ]; then
   not_ready group_not_synced \

@@ -187,6 +187,55 @@ echo "unable to request metadata: dial tcp 172.19.0.2:9092: connect: connection 
 exit 1
 """
 
+#: OMN-21789. The recorded incident: the gateway forwarder's outbound group as
+#: ``rpk group describe`` printed it on the dev lane at 2026-10-31T15:13Z
+#: (Stable, one member, TOTAL-LAG 150078, committed offsets static while the
+#: forwarder restarted 106 times and could not resolve the cloud brokers).
+FORWARDER_GROUP_DESCRIBE = """GROUP        tenant-beta-gateway-canary-79afa7263852-gateway-forwarder-outbound
+COORDINATOR  0
+STATE        Stable
+BALANCER     roundrobin
+MEMBERS      1
+TOTAL-LAG    150078
+
+TOPIC                                       PARTITION  CURRENT-OFFSET  LOG-START-OFFSET  LOG-END-OFFSET  LAG     MEMBER-ID               CLIENT-ID        HOST
+onex.evt.omniclaude.tool-executed.v1        0          2128855         2035772           2251705         122850  aiokafka-0.13.0-eb6dafaa  aiokafka-0.13.0  gwfwd
+onex.evt.omniclaude.prompt-submitted.v1     0          58183           50573             76287           18104   aiokafka-0.13.0-eb6dafaa  aiokafka-0.13.0  gwfwd
+"""
+
+_STUB_GROUPS_HEAD = r"""#!/usr/bin/env bash
+case "$1 $2" in
+  "cluster health") echo "Healthy:                     true"; exit 0 ;;
+  "topic list")
+    echo "NAME                PARTITIONS  REPLICAS"
+    echo "__consumer_offsets  16          1"
+    exit 0 ;;
+  "topic describe")
+    echo "PARTITION  LEADER  EPOCH  REPLICAS  LOG-START-OFFSET  HIGH-WATERMARK"
+    echo "0          0       179    [0]       0                 28101324"
+    exit 0 ;;
+  "group describe")
+"""
+
+#: The forwarder's frozen outbound group alone, beside a healthy broker.
+STUB_FROZEN_FORWARDER = (
+    _STUB_GROUPS_HEAD
+    + "    cat <<'EOF'\n"
+    + FORWARDER_GROUP_DESCRIBE
+    + "EOF\n    exit 0 ;;\nesac\nexit 0\n"
+)
+
+#: The forwarder's frozen group printed first, then the frozen runtime group of
+#: ``STUB_FROZEN_GROUP``: rpk prints one block per group.
+STUB_FROZEN_FORWARDER_AND_RUNTIME = (
+    _STUB_GROUPS_HEAD
+    + "    cat <<'EOF'\n"
+    + FORWARDER_GROUP_DESCRIBE
+    + "\n"
+    + STUB_FROZEN_GROUP.split("cat <<'EOF'\n", 1)[1].split("\nEOF", 1)[0]
+    + "\nEOF\n    exit 0 ;;\nesac\nexit 0\n"
+)
+
 
 class ProbeRunner(Protocol):
     """Runs the real probe file against a stub ``rpk`` placed first on PATH."""
@@ -421,6 +470,99 @@ def test_probe_fails_closed_on_a_missing_declaration(
     )
     assert result.returncode != 0
     assert "declaration_unreadable" in (result.stdout + result.stderr)
+
+
+# ---------------------------------------------------------------------------
+# OMN-21789 -- a relay to the cloud is not this broker's data plane
+# ---------------------------------------------------------------------------
+
+
+def test_frozen_forwarder_group_does_not_make_the_broker_not_ready(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """The incident: the forwarder's outbound group froze and held redpanda unhealthy.
+
+    Every runtime container depends on ``redpanda: service_healthy``, so the
+    broker's verdict decides whether omninode-runtime-effects, and with it the
+    github write consumer, ever starts. The forwarder is a relay to the cloud;
+    its link health is its own container's healthcheck.
+    """
+    window = int(_declared("sync_window_seconds"))
+    state = tmp_path / "state"
+    probe_env(STUB_FROZEN_FORWARDER, now=1_000_000, state=state)
+    later = probe_env(STUB_FROZEN_FORWARDER, now=1_000_000 + window * 10, state=state)
+    assert later.returncode == 0, (
+        "a frozen gateway-forwarder-outbound group must not be judged.\n"
+        f"stdout={later.stdout}\nstderr={later.stderr}"
+    )
+
+
+def test_forwarder_group_is_judged_when_its_suffix_is_not_exempt(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """Positive control: the same stub is NOT READY when the exemption is absent.
+
+    Without this the test above is satisfied by a probe that stopped judging
+    groups at all.
+    """
+    window = int(_declared("sync_window_seconds"))
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        DECLARATION.read_text().replace(
+            "sync_exempt_group_suffixes=-gateway-forwarder-outbound",
+            "sync_exempt_group_suffixes=-some-other-suffix",
+        )
+    )
+    state = tmp_path / "state"
+    probe_env(
+        STUB_FROZEN_FORWARDER, now=1_000_000, state=state, declaration=declaration
+    )
+    later = probe_env(
+        STUB_FROZEN_FORWARDER,
+        now=1_000_000 + window + 1,
+        state=state,
+        declaration=declaration,
+    )
+    assert later.returncode != 0
+    assert "group_not_synced" in (later.stdout + later.stderr)
+
+
+def test_frozen_runtime_group_is_still_not_ready_beside_a_forwarder_group(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    """The exemption names the forwarder, not every frozen group."""
+    window = int(_declared("sync_window_seconds"))
+    state = tmp_path / "state"
+    probe_env(STUB_FROZEN_FORWARDER_AND_RUNTIME, now=1_000_000, state=state)
+    later = probe_env(
+        STUB_FROZEN_FORWARDER_AND_RUNTIME, now=1_000_000 + window + 1, state=state
+    )
+    assert later.returncode != 0
+    verdict = later.stdout + later.stderr
+    assert "group_not_synced" in verdict
+    assert "pr_lifecycle_fix_effect" in verdict
+    assert "gateway-forwarder-outbound" not in verdict
+
+
+def test_declaration_declares_the_exempt_group_suffixes() -> None:
+    assert _declared("sync_exempt_group_suffixes") == "-gateway-forwarder-outbound"
+
+
+def test_probe_fails_closed_when_the_exempt_suffixes_are_not_declared(
+    probe_env: ProbeRunner, tmp_path: Path
+) -> None:
+    declaration = tmp_path / "declaration.conf"
+    declaration.write_text(
+        "\n".join(
+            line
+            for line in DECLARATION.read_text().splitlines()
+            if not line.startswith("sync_exempt_group_suffixes=")
+        )
+    )
+    result = probe_env(STUB_FROZEN_GROUP, now=1_000_000, declaration=declaration)
+    assert result.returncode != 0
+    assert "declaration_missing_key" in (result.stdout + result.stderr)
+    assert "sync_exempt_group_suffixes" in (result.stdout + result.stderr)
 
 
 def test_probe_has_no_environment_fallback_for_the_window() -> None:
