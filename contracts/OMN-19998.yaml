@@ -580,11 +580,20 @@ dod_evidence:
     binds_ac:
       - AC30
   - id: dod-omn19998-ac31-stage-host-pyyaml
-    description: AC31 tests read the imports of the two host-side staging modules with ast and look for each third-party package in the install step that runs before staging.
+    description: AC31 tests discover SCRIPT_DIR-relative Python helpers and Python heredocs in stage_workspace.sh, read their imports with ast, and require exact normalized distribution names from executable python3 pip installs before staging. Controls cover source discovery, renamed steps, comments, unrelated package names, and late installs.
     source: manual
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -n 0 -k third_party
+        cwd: .
+    binds_ac:
+      - AC31
+  - id: dod-omn19998-ac31-stage-host-deploy-probe
+    description: Hosted-runner deployment artifact check for AC31. Reads the candidate workflow and staging source imports and fails when any host dependency is missing before the executable staging command.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/ci/test_workspace_candidate_build.py -q -k test_stage_step_host_python_has_every_third_party_import
         cwd: .
     binds_ac:
       - AC31

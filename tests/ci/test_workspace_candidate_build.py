@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import ast
 import re
+import shlex
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _REPO_ROOT / "docker" / "Dockerfile.runtime"
@@ -44,6 +47,107 @@ def _step_index(steps: list[dict], name: str) -> int:
     indices = [index for index, step in enumerate(steps) if step.get("name") == name]
     assert len(indices) == 1, f"expected exactly one step named {name!r}, got {indices}"
     return indices[0]
+
+
+def _stage_host_distributions(steps: list[dict]) -> set[str]:
+    """Read direct host pip installs before the executable staging command."""
+    stage_indices = [
+        index
+        for index, step in enumerate(steps)
+        if re.search(
+            r"^\s*bash\s+scripts/runtime_build/stage_workspace\.sh(?:\s|$)",
+            step.get("run", ""),
+            re.MULTILINE,
+        )
+    ]
+    assert len(stage_indices) == 1, "expected exactly one staging command"
+    installed: set[str] = set()
+    for step in steps[: stage_indices[0]]:
+        script = step.get("run", "").replace("\\\n", " ")
+        for line in script.splitlines():
+            if not re.match(r"^\s*python3\s+-m\s+pip\s+install\s", line):
+                continue
+            tokens = shlex.split(line, comments=True)
+            for token in tokens[4:]:
+                if token in {"--upgrade", "-U"}:
+                    continue
+                installed.add(canonicalize_name(Requirement(token).name))
+    return installed
+
+
+def _stage_python_sources(stage_script: Path) -> dict[str, str]:
+    """Inspect SCRIPT_DIR-relative helpers and Python heredocs in staging."""
+    shell = stage_script.read_text(encoding="utf-8")
+    sources = {}
+    for relative_path in sorted(
+        set(re.findall(r"\$\{SCRIPT_DIR\}/([\w./-]+\.py)\b", shell))
+    ):
+        path = (stage_script.parent / relative_path).resolve()
+        sources[str(path)] = path.read_text(encoding="utf-8")
+    assert sources, "expected staging to reference Python helpers"
+    for index, match in enumerate(
+        re.finditer(
+            r"\bpython3\b[^\n]*<<'(?P<delimiter>\w+)'\n"
+            r"(?P<source>.*?)\n(?P=delimiter)(?:\n|$)",
+            shell,
+            re.DOTALL,
+        )
+    ):
+        sources[f"{stage_script}:heredoc-{index}"] = match["source"]
+    return sources
+
+
+@pytest.mark.unit
+def test_stage_third_party_sources_follow_script_references(tmp_path: Path) -> None:
+    helper = tmp_path / "new_host_helper.py"
+    helper.write_text("import newly_required_package\n", encoding="utf-8")
+    stage = tmp_path / "stage_workspace.sh"
+    stage.write_text(
+        'python3 "${SCRIPT_DIR}/new_host_helper.py"\n'
+        "python3 - <<'PY'\nimport inline_dependency\nPY\n",
+        encoding="utf-8",
+    )
+    sources = _stage_python_sources(stage)
+    assert sources[str(helper)] == "import newly_required_package\n"
+    assert sources[f"{stage}:heredoc-0"] == "import inline_dependency"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("install_run", "expected"),
+    [
+        ("python3 -m pip install --upgrade 'PyYAML>=6'", True),
+        (
+            "python3 -m pip install -U \\\n            'pyyaml>=6' # host dependencies",
+            True,
+        ),
+        ("python3 -m pip install 'pydantic>=2' # pyyaml>=6", False),
+        ("python3 -m pip install 'unrelated-pyyaml>=6'", False),
+        ("# python3 -m pip install 'pyyaml>=6'", False),
+        ("echo python3 -m pip install 'pyyaml>=6'", False),
+        ("python -m pip install 'pyyaml>=6'", False),
+    ],
+)
+def test_stage_third_party_distributions_use_requirement_names(
+    install_run: str, expected: bool
+) -> None:
+    steps = [
+        {"name": "Renamed dependency setup", "run": install_run},
+        {
+            "name": "Renamed staging step",
+            "run": "set -euo pipefail\nbash scripts/runtime_build/stage_workspace.sh",
+        },
+    ]
+    assert ("pyyaml" in _stage_host_distributions(steps)) is expected
+
+
+@pytest.mark.unit
+def test_stage_third_party_distributions_exclude_late_installs() -> None:
+    steps = [
+        {"run": "bash scripts/runtime_build/stage_workspace.sh"},
+        {"run": "python3 -m pip install 'pyyaml>=6'"},
+    ]
+    assert _stage_host_distributions(steps) == set()
 
 
 @pytest.fixture(scope="module")
@@ -152,21 +256,13 @@ class TestWorkspaceCandidateWorkflow:
     ) -> None:
         """Install every host-side staging dependency before staging (OMN-19998)."""
         steps = _candidate_steps(workflow)
-        install_idx = _step_index(
-            steps, "Install stage_workspace.sh host deps (pydantic, pyyaml)"
-        )
-        stage_idx = _step_index(
-            steps, "Stage workspace sibling trees into the build context"
-        )
-        assert install_idx < stage_idx
-        install_run = steps[install_idx]["run"].lower()
+        installed = _stage_host_distributions(steps)
         import_to_distribution = {"yaml": "pyyaml"}
-        for relative_path in (
-            "scripts/runtime_build/check_sibling_lock_pins.py",
-            "src/omnibase_infra/validation/checker_first_party_sources.py",
-        ):
-            path = _REPO_ROOT / relative_path
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        sources = _stage_python_sources(
+            _REPO_ROOT / "scripts/runtime_build/stage_workspace.sh"
+        )
+        for source_path, source in sources.items():
+            tree = ast.parse(source, filename=source_path)
             imports: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -180,8 +276,8 @@ class TestWorkspaceCandidateWorkflow:
                     imports.add(node.module.split(".")[0])
             for name in sorted(imports - sys.stdlib_module_names):
                 distribution = import_to_distribution.get(name, name)
-                assert distribution.lower() in install_run, (
-                    f"missing host dependency {distribution!r} imported by {relative_path}"
+                assert canonicalize_name(distribution) in installed, (
+                    f"missing host dependency {distribution!r} imported by {source_path}"
                 )
 
     def test_workflow_runs_unweakened_trivy_scan(self, workflow_text: str) -> None:
