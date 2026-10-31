@@ -1,0 +1,56 @@
+# docker-compose.factory-floor-web.yml
+# OMN-21733 — the factory floor page, served from the lab on the tailnet only.
+#
+# A read-only static server for one directory. The directory holds the page (index.html) and the JSON
+# record it reads (factory-floor.json); omnimarket's node_factory_floor_publish_effect writes both there
+# over ssh on every tick, each file to a temporary name and renamed into place. The container writes
+# nothing and holds no secret, and the page carries none.
+#
+# Why this is a standalone file and not a docker/catalog entry: the catalog renders every published port
+# as "external:internal" on all interfaces (src/omnibase_infra/docker/catalog/generator.py), so no catalog
+# entry can bind one address. This service must answer on the host's tailnet address and nowhere else,
+# including not on the LAN, which is the same reason docker-compose.pypi-cache.yml is standalone.
+#
+# Deployment values come from the host's own env file, never from this repository, and the three that have
+# no safe default are required: `docker compose` refuses to render without them.
+#   FACTORY_FLOOR_BIND_ADDR  the host's tailnet address (the address the port is published on)
+#   FACTORY_FLOOR_PORT       the published port
+#   FACTORY_FLOOR_SERVE_DIR  the host directory the publish node writes into (mounted read-only)
+#
+# Bring up (on the serving host, env file in place):
+#   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml up -d
+# Tear down:
+#   docker compose --env-file <host env file> -f docker/docker-compose.factory-floor-web.yml down
+name: factory-floor-web
+services:
+  factory-floor-web:
+    image: nginx:1.29-alpine
+    container_name: omninode-factory-floor-web
+    restart: unless-stopped
+    init: true
+    user: "101:101"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${FACTORY_FLOOR_BIND_ADDR:?set FACTORY_FLOOR_BIND_ADDR to the host tailnet address}:${FACTORY_FLOOR_PORT:?set FACTORY_FLOOR_PORT}:8080"
+    volumes:
+      - ${FACTORY_FLOOR_SERVE_DIR:?set FACTORY_FLOOR_SERVE_DIR}:/srv/site:ro
+      - ./factory-floor-web/nginx.conf:/etc/nginx/nginx.conf:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

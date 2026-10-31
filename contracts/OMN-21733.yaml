@@ -1,0 +1,38 @@
+# OMN-21733 contract file for omnibase_infra: the factory floor page is served from the lab on one tailnet address.
+schema_version: "1.0.0"
+ticket_id: "OMN-21733"
+title: "The factory floor page is served from h051 on the tailnet, with its JSON projection published to it on every tick"
+summary: "docker/docker-compose.factory-floor-web.yml runs a read-only static server (nginx, unprivileged, read-only root, no capabilities) whose only published port is bound to the address named by the required FACTORY_FLOOR_BIND_ADDR, and serves the directory named by the required FACTORY_FLOOR_SERVE_DIR read-only. The standalone file is needed because the docker catalog publishes every port on all interfaces. omnimarket's node_factory_floor_publish_effect writes the page and the JSON record into that directory on every tick."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21733-factory-floor-web
+    statement: "The factory floor web service publishes one port on one named address, mounts its content read-only, and refuses to render without its deployment values."
+    acceptance:
+      - id: AC4
+        statement: "AC4: the compose file refuses to render without a bind address and binds only that address, mounts the serve directory read-only and publishes no 0.0.0.0 port -- falsifier: uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q"
+      - id: AC5
+        statement: "AC5: on the serving host the running container's only port binding is the tailnet address and the port, and the page answers there -- falsifier: ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+evidence_requirements:
+  - kind: tests
+    description: "The compose file's port, volume and lock-down properties, and docker compose config refusing each missing deployment value."
+    command: "uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov"
+  - kind: manual
+    description: "Deploy check on the serving host: the container's port bindings name one address, and the page answers on it."
+    command: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
+dod_evidence:
+  - id: dod-001
+    description: "The compose file binds one named address, mounts the serve directory read-only and requires its deployment values."
+    source: generated
+    binds_ac: [AC4]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/docker/test_factory_floor_web_compose.py -q --no-cov'
+  - id: dod-002
+    description: "On the serving host the container publishes one port bound to one address."
+    source: generated
+    binds_ac: [AC5]
+    checks:
+      - check_type: command
+        check_value: "ssh h051 docker inspect omninode-factory-floor-web --format '{{json .HostConfig.PortBindings}}'"
