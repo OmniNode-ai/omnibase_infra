@@ -107,6 +107,7 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "compaction_activations": "omnimarket OMN-21115 (node_context_install_confirm_trigger_effect)",
+    "delegation_budget_readings": "omnimarket OMN-17427 (node_projection_delegation_budget_readings)",
     "delegation_capability_cells": "omnimarket#4380",
     "delegation_lab_jobs": "omnimarket#4277",
     "delegation_lab_job_outbox": "omnimarket#4277",

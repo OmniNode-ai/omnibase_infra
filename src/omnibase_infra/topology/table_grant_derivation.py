@@ -180,6 +180,26 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     ),
 )
 
+
+def _vendored_read_write(
+    table: str, node_dir: str, create_file: str
+) -> ContractTableDeclaration:
+    """An infra-first vendored relation: read_write, role named for the table."""
+    migration = f"docker/migrations/forward/nodes/{node_dir}/{create_file}"
+    return ContractTableDeclaration(
+        node=f"legacy_migration:{table}",
+        contract_path=Path(migration),
+        table=ModelDbTableDeclaration(
+            name=table,
+            database_ref="application",
+            schema="omninode_internal",
+            migration=migration,
+            access="read_write",
+            role=table,
+        ),
+    )
+
+
 # Some migration-owned projection relations landed before their producing node's
 # ``db_io.db_tables`` contract is available in the omnimarket contracts root
 # consumed by this repo's CI. They still participate in the same grant
@@ -369,41 +389,15 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # vendored infra-first ahead of omnimarket#4277. Both carry the source
     # contract's read_write access and table-name role. Removable once the
     # pin advances past that pull request; the expiry module names both.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_lab_jobs",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-            "0000_delegation_lab_job_execution.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_lab_jobs",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-                "0000_delegation_lab_job_execution.sql"
-            ),
-            access="read_write",
-            role="delegation_lab_jobs",
-        ),
+    _vendored_read_write(
+        "delegation_lab_jobs",
+        "node_llm_delegation_call_effect",
+        "0000_delegation_lab_job_execution.sql",
     ),
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_lab_job_outbox",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-            "0000_delegation_lab_job_execution.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_lab_job_outbox",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_llm_delegation_call_effect/"
-                "0000_delegation_lab_job_execution.sql"
-            ),
-            access="read_write",
-            role="delegation_lab_job_outbox",
-        ),
+    _vendored_read_write(
+        "delegation_lab_job_outbox",
+        "node_llm_delegation_call_effect",
+        "0000_delegation_lab_job_execution.sql",
     ),
     #
     # OMN-19861: same infra-first window; this repo vendors
@@ -434,23 +428,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # OMN-21115: activation ingestion precedes the omnimarket contract pin.
     # The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
     # when node_context_install_confirm_trigger_effect reaches the pin.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_activations",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
-            "0000_create_compaction_activations.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_activations",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_context_install_confirm_trigger_effect/"
-                "0000_create_compaction_activations.sql"
-            ),
-            access="read_write",
-            role="compaction_activations",
-        ),
+    _vendored_read_write(
+        "compaction_activations",
+        "node_context_install_confirm_trigger_effect",
+        "0000_create_compaction_activations.sql",
+    ),
+    # OMN-17427: the delegation budget readings precede the omnimarket contract
+    # pin. The vendor delivers exactly SELECT/INSERT/UPDATE; expire this bridge
+    # when node_projection_delegation_budget_readings reaches the pin.
+    _vendored_read_write(
+        "delegation_budget_readings",
+        "node_projection_delegation_budget_readings",
+        "0000_create_delegation_budget_readings.sql",
     ),
     # OMN-21090: vendor compaction_current_context/0000-0001 ahead of the
     # omnimarket node contract, as compaction_receipts below. 0001 grants
@@ -460,23 +449,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # node_projection_compaction_current_context contract merges and the
     # omnimarket pin advances past it; the OMN-18863 expiry module names this
     # bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_current_context",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
-            "0000_create_compaction_current_context.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_current_context",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_compaction_current_context/"
-                "0000_create_compaction_current_context.sql"
-            ),
-            access="read_write",
-            role="compaction_current_context",
-        ),
+    _vendored_read_write(
+        "compaction_current_context",
+        "node_projection_compaction_current_context",
+        "0000_create_compaction_current_context.sql",
     ),
     # OMN-21334/OMN-21336: vendor compaction_receipts/0000-0001 ahead of the
     # omnimarket node contract. 0001 grants omninode_runtime SELECT, INSERT,
@@ -484,23 +460,10 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # names access read_write, role compaction_receipts. Retired when the
     # node_projection_compaction_receipts contract merges and the omnimarket
     # pin advances past it; the OMN-18863 expiry module names this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:compaction_receipts",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-            "0000_create_compaction_receipts.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="compaction_receipts",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_compaction_receipts/"
-                "0000_create_compaction_receipts.sql"
-            ),
-            access="read_write",
-            role="compaction_receipts",
-        ),
+    _vendored_read_write(
+        "compaction_receipts",
+        "node_projection_compaction_receipts",
+        "0000_create_compaction_receipts.sql",
     ),
     # OMN-20169: infra vendors delegation_capability_cells before omnimarket#4380
     # lands its node contract (head 677d2941ff7e). This bridge expires once the
