@@ -46,7 +46,6 @@
 # Design decisions:
 #   - confluent-kafka (sync): CLI tool — no async event loop needed.
 #   - list_topics() is the source of truth, not create_topics() return value.
-#   - Repo-root is discovered via Path(__file__).resolve(), not CWD.
 #   - --dry-run never attempts a broker connection, even if --bootstrap-servers given.
 #
 # OMN-15395 (D2) — why this script shares the runtime's policy seam:
@@ -67,73 +66,15 @@
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from omnibase_infra.tools.contract_topic_extractor import ModelContractTopicEntry
     from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
-
-# ---------------------------------------------------------------------------
-# Repo-root discovery
-# ---------------------------------------------------------------------------
-
-# This script lives at scripts/create_kafka_topics.py.
-# The repo root is one level up.
-_SCRIPT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _SCRIPT_DIR.parent
-_DEFAULT_CONTRACTS_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
-
-
-# ---------------------------------------------------------------------------
-# Multi-package discovery via entry points
-# ---------------------------------------------------------------------------
-
-
-def _discover_all_packages(
-    *, filter_names: list[str] | None = None, lenient: bool = False
-) -> list[tuple[str, Path]]:
-    """Return [(name, nodes_dir_path)] for all ``onex.node_package`` entry points.
-
-    Args:
-        filter_names: If set, only return entry points whose ``ep.name`` is in
-            this list.  Matches are case-sensitive.
-        lenient: When ``True``, unloadable entry points emit a warning and are
-            skipped.  When ``False`` (default), any load failure causes a hard
-            exit (non-zero) because a broken entry point in the canonical path
-            indicates a broken environment.
-
-    Returns:
-        Sorted list of ``(ep.name, Path)`` tuples.
-    """
-    eps = importlib.metadata.entry_points(group="onex.node_package")
-    result: list[tuple[str, Path]] = []
-    for ep in eps:
-        if filter_names is not None and ep.name not in filter_names:
-            continue
-        try:
-            pkg = ep.load()
-        except Exception as exc:  # noqa: BLE001 — boundary: catch-all for resilience
-            msg = f"Could not load entry point {ep.name!r}: {exc}"
-            if lenient:
-                print(f"WARNING: {msg} — skipping", file=sys.stderr)
-                continue
-            print(f"ERROR: {msg}", file=sys.stderr)
-            sys.exit(1)
-        pkg_path = Path(pkg.__path__[0])
-        if not pkg_path.exists():
-            msg = f"Entry point {ep.name!r} path does not exist: {pkg_path}"
-            if lenient:
-                print(f"WARNING: {msg} — skipping", file=sys.stderr)
-                continue
-            print(f"ERROR: {msg}", file=sys.stderr)
-            sys.exit(1)
-        result.append((ep.name, pkg_path))
-    return sorted(result, key=lambda t: t[0])
-
 
 # ---------------------------------------------------------------------------
 # CLI argument parsing
@@ -184,13 +125,24 @@ ModelTopicProvisioningPolicy the runtime provisioner uses — managed (MSK)
 clusters reject RF1 fail-closed before any topic is created (OMN-15395).
 """,
     )
-    parser.add_argument(
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument(
         "--bootstrap-servers",
         metavar="HOST:PORT",
         default=None,
         help=(
             "Kafka bootstrap servers (e.g. localhost:19092). "
             "Required in non-dry-run mode. Optional in --dry-run."
+        ),
+    )
+    target.add_argument(
+        "--lane",
+        metavar="LANE",
+        default=None,
+        help=(
+            "Lane id in ci_bus_lanes.yaml: broker, protocol and mechanism come "
+            "from that declaration, the identity from the lane store or the "
+            "SASL environment (OMN-21529). Excludes --bootstrap-servers."
         ),
     )
     parser.add_argument(
@@ -285,8 +237,7 @@ def _run_dry(
         topic_sources: Optional mapping of topic -> list of package names
             that declared it.  Used in multi-package mode for diagnostics.
     """
-    bs_display = bootstrap_servers if bootstrap_servers else "<unset>"
-    print(f"Bootstrap servers: {bs_display}")
+    print(f"Bootstrap servers: {bootstrap_servers or '<unset>'}")
     if contracts_root is not None:
         print(f"Contracts root: {contracts_root}")
     if topic_sources:
@@ -353,6 +304,7 @@ def _run_live(
     specs: Sequence[ModelTopicSpec],
     bootstrap_servers: str,
     contracts_root: Path,
+    client_config: Mapping[str, str] | None = None,
 ) -> int:
     """
     Connect to broker, diff existing topics, create missing ones.
@@ -397,7 +349,9 @@ def _run_live(
     admin: AdminClient | None = None
     try:
         print(f"Connecting to broker: {bootstrap_servers}")
-        admin = AdminClient({"bootstrap.servers": bootstrap_servers})
+        admin = AdminClient(
+            {**(client_config or {}), "bootstrap.servers": bootstrap_servers}
+        )
 
         # Step 1: List existing topics (source of truth — before). The same
         # response carries the live broker list, so capacity is MEASURED off
@@ -541,10 +495,25 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    # In non-dry-run mode, --bootstrap-servers is required
+    client_config: dict[str, str] | None = None
+    if args.lane is not None and not args.dry_run:
+        from omnibase_infra.models.model_lane_admin_client_config import (
+            ModelLaneAdminClientConfig,
+        )
+
+        try:
+            client_config = ModelLaneAdminClientConfig.resolve(
+                args.lane, os.environ
+            ).librdkafka_config()
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        args.bootstrap_servers = client_config["bootstrap.servers"]
+
+    # In non-dry-run mode, a broker is required
     if not args.dry_run and not args.bootstrap_servers:
         print(
-            "ERROR: --bootstrap-servers is required in non-dry-run mode.\n"
+            "ERROR: --bootstrap-servers (or --lane) is required in non-dry-run mode.\n"
             "Use --dry-run to print the topic plan without connecting to a broker.",
             file=sys.stderr,
         )
@@ -570,9 +539,7 @@ def main() -> int:
     # -----------------------------------------------------------------------
     # Mode selection: single-root (legacy) vs multi-package (new default)
     # -----------------------------------------------------------------------
-    use_single_root = args.contracts_root is not None
-
-    if use_single_root:
+    if args.contracts_root is not None:
         # Legacy single-root mode (--contracts-root given)
         contracts_root = Path(args.contracts_root).resolve()
         if not contracts_root.exists():
@@ -615,6 +582,7 @@ def main() -> int:
             _build_specs(entries, partitions_fallback=args.partitions),
             bootstrap_servers=args.bootstrap_servers,
             contracts_root=contracts_root,
+            client_config=client_config,
         )
 
     # -------------------------------------------------------------------
@@ -624,7 +592,21 @@ def main() -> int:
     if args.packages:
         filter_names = [n.strip() for n in args.packages.split(",") if n.strip()]
 
-    packages = _discover_all_packages(filter_names=filter_names, lenient=args.lenient)
+    from omnibase_infra.errors import ProtocolConfigurationError
+    from omnibase_infra.models.model_node_package_entry import ModelNodePackageEntry
+
+    try:
+        discovered = ModelNodePackageEntry.discover(
+            filter_names=filter_names,
+            lenient=args.lenient,
+            report_warning=lambda message: print(
+                f"WARNING: {message}", file=sys.stderr
+            ),
+        )
+    except ProtocolConfigurationError as exc:
+        print(f"ERROR: {exc.message}", file=sys.stderr)
+        return 1
+    packages = [(entry.name, entry.path) for entry in discovered]
 
     if not packages:
         print(
@@ -660,10 +642,7 @@ def main() -> int:
                 topic_sources.setdefault(entry.topic, []).append(pkg_name)
             all_entries.extend(pkg_entries)
     except Exception as exc:  # noqa: BLE001 — boundary: prints error and degrades
-        print(
-            f"ERROR: Failed to extract topics: {exc}",
-            file=sys.stderr,
-        )
+        print(f"ERROR: Failed to extract topics: {exc}", file=sys.stderr)
         return 1
 
     # Deduplicate topics across packages
@@ -677,16 +656,14 @@ def main() -> int:
         if skill_manifests_root is not None:
             print(f"Skills root: {skill_manifests_root}")
         return _run_dry(
-            unique_topics,
-            args.bootstrap_servers,
-            None,
-            topic_sources=topic_sources,
+            unique_topics, args.bootstrap_servers, None, topic_sources=topic_sources
         )
 
     return _run_live(
         _build_specs(all_entries, partitions_fallback=args.partitions),
         bootstrap_servers=args.bootstrap_servers,
         contracts_root=packages[0][1],  # display first package path
+        client_config=client_config,
     )
 
 

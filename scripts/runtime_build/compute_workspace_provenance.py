@@ -98,8 +98,7 @@ VCS_PROVENANCE_PATH = Path("/workspace/sibling-vcs-provenance.json")
 # its install is local makes a regression (core silently reverting to the
 # enum-less released wheel) fail the build instead of crash-looping at runtime.
 WORKSPACE_PACKAGES: dict[str, str] = {
-    "omnibase_core": "omnibase-core",
-    "omnibase_compat": "omnibase-compat",
+    repo: repo.replace("_", "-") for repo in ("omnibase_core", "omnibase_spi")
 }
 
 
@@ -547,12 +546,10 @@ def main() -> int:
     pin_violation: str | None = None
     lock_path = SIBLING_REPOS_DIR / CONSUMING_REPO / "uv.lock"
     try:
-        comparisons = build_comparisons(
-            lock_path=lock_path,
-            siblings={
-                "omnibase-compat": SIBLING_REPOS_DIR / "omnibase_compat",
-            },
-        )
+        # omnibase_compat was the one staged sibling compared here; it is no
+        # longer staged (OMN-21284, compat is being retired) and comes from the
+        # lock itself, so only the host self-check below remains.
+        comparisons = build_comparisons(lock_path=lock_path, siblings={})
         # Host self-check (OMN-12989): the runtime image's OWN omnibase_infra is
         # built from the build context, NOT from sibling-repos — that is exactly
         # where the 2026-06-11 stale 0.37.0 entered. Compare the installed infra

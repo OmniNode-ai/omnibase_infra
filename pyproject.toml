@@ -270,7 +270,7 @@ override-dependencies = [
 [tool.uv.sources]
 # RULING 2026-10-29T01:50:26Z: iterate with a dev-merge TAG, verified by
 # core dev_tag_lineage; rev and branch pins remain refused.
-omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261029143607-342000ec5702" }
+omnibase-core = { git = "https://github.com/OmniNode-ai/omnibase_core.git", tag = "dev-20261030152335-66d35d2283c3" }
 
 
 [tool.ruff]

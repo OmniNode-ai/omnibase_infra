@@ -286,8 +286,12 @@ COPY workspace/sibling-pin-comparison.json /workspace/sibling-pin-comparison.jso
 # deploy verifiers. Release mode ignores it.
 COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.json
 
-# workspace mode installs omnibase_core and omnibase_compat from the staged
-# local trees.  release mode installs from pinned remote sources (core stays
+# workspace mode installs omnibase_core and omnibase_spi from the staged local
+# trees (OMN-17427: spi used to come from the package index at an exact version;
+# each staged tree is a checkout of the sibling's newest dev-merge tag, and the
+# first-party source audit below proves it). omnibase_compat is no longer staged
+# (OMN-21284: it is being retired); workspace mode takes it from the lock.
+# release mode installs from pinned remote sources (core stays
 # from omnibase_infra/uv.lock — correct for a release).
 #
 # OMN-21279: omnimarket is deliberately NOT installed into the runtime image, in
@@ -334,7 +338,7 @@ COPY workspace/sibling-vcs-provenance.json /workspace/sibling-vcs-provenance.jso
 ARG OMNIBASE_COMPAT_REF="v0.5.5"
 ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archive/v0.5.5.tar.gz"
 #
-# OMN-14262: the compat workspace install ALSO uses
+# OMN-14262: the spi workspace install (and compat's, until OMN-21284) ALSO uses
 # the forced `uv pip uninstall` + `--no-cache --reinstall-package "<pkg> @ file://…"`
 # form (mirroring core above). A bare `uv pip install --no-deps <path>` no-ops
 # ("Audited 1 package") whenever the staged dev-tree version already equals the
@@ -369,7 +373,7 @@ ARG OMNIBASE_COMPAT_SOURCE="https://github.com/OmniNode-ai/omnibase_compat/archi
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     if [ "${BUILD_SOURCE}" = "workspace" ]; then \
-        for repo in omnibase_core omnibase_compat; do \
+        for repo in omnibase_core omnibase_spi; do \
             p="/workspace/sibling-repos/${repo}"; \
             if [ ! -d "${p}" ]; then \
                 echo "workspace mode: missing staged repo ${p}" >&2; exit 2; \
@@ -379,10 +383,10 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
             --no-deps --no-sources --no-cache --reinstall-package omnibase-core \
             "omnibase-core @ file:///workspace/sibling-repos/omnibase_core" ); \
-        uv-with-retry pip uninstall omnibase-compat; \
+        uv-with-retry pip uninstall omnibase-spi; \
         ( cd / && VIRTUAL_ENV=/app/.venv uv-with-retry pip install --python /app/.venv/bin/python \
-            --no-deps --no-sources --no-cache --reinstall-package omnibase-compat \
-            "omnibase-compat @ file:///workspace/sibling-repos/omnibase_compat" ); \
+            --no-deps --no-sources --no-cache --reinstall-package omnibase-spi \
+            "omnibase-spi @ file:///workspace/sibling-repos/omnibase_spi" ); \
     else \
         uv-with-retry pip install --no-deps \
             "https://github.com/OmniNode-ai/omnibase_compat/archive/${OMNIBASE_COMPAT_REF}.tar.gz"; \
@@ -396,6 +400,18 @@ RUN set -eu; \
     else \
         printf '{\n  "build_source": "release",\n  "build_time": "%s",\n  "infra_vcs_ref": "%s",\n  "proofs": [],\n  "per_repo_vcs_provenance": {"siblings": {}},\n  "lock_pin_comparison": []\n}\n' \
             "${BUILD_DATE:-unknown}" "${VCS_REF:-unknown}" > /app/build-provenance.json; \
+    fi
+
+# First-party source audit (OMN-17427 stage 0): the dev lane takes no first-party
+# package from a sha, a branch, a release or an exact version. Every package
+# installed above must resolve to a dev-merge tag whose twelve hex digits are the
+# installed commit, or the build fails. The classification is written into
+# build-provenance.json as first_party_sources. The same function reads a running
+# container: run_audit(Path("/app/build-provenance.json")).
+RUN set -eu; \
+    if [ "${BUILD_SOURCE}" = "workspace" ]; then \
+        /app/.venv/bin/python -c 'import sys; from pathlib import Path; from omnibase_infra.validation.checker_first_party_sources import run_audit; sys.exit(run_audit(Path("/workspace/sibling-vcs-provenance.json"), record_into=Path("/app/build-provenance.json"), require=sys.argv[1:]))' \
+            omnibase-core omnibase-spi omnibase-infra; \
     fi
 
 # The runtime image still installs legacy packages for import compatibility while

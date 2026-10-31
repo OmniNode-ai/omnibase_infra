@@ -259,13 +259,15 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
         # engages where the primary names no commit, so a DEPLOY_REF that
         # resolves everywhere (origin/dev) behaves exactly as before.
         checkout_args+=(--fallback-ref "${DEPLOY_SIBLING_FALLBACK_REF:-origin/dev}")
-        # OMN-19998: a lab caller names the siblings that build their newest
-        # dev-* tag in place of the branch (the deploy agent and the stability
-        # refresh name omnimarket). Unset, every sibling builds its branch.
-        read -r -a follow_dev_tag_repos <<< "${DEPLOY_FOLLOW_DEV_TAG_REPOS:-}"
-        for repo in ${follow_dev_tag_repos[@]+"${follow_dev_tag_repos[@]}"}; do
-            checkout_args+=(--follow-dev-tag "${repo}")
-        done
+        # OMN-19998, OMN-17427 stage 0: every vendored sibling builds its newest
+        # dev-merge tag in place of the branch, with no caller opt-in. A first-party
+        # package built from a branch, a sha or a release is what the dev lane
+        # forbids; a sibling with no dev-merge tag on origin refuses the build.
+        for repo in "${SIBLING_REPOS[@]}"; do checkout_args+=(--follow-dev-tag "${repo}"); done
+        # OMN-21611: explicit sibling release tags retain precedence over the
+        # dev-tag follow set in deploy_source_ref.py.
+        read -r -a sibling_refs <<< "${DEPLOY_SIBLING_REFS:-}"
+        for sibling_ref in ${sibling_refs[@]+"${sibling_refs[@]}"}; do checkout_args+=(--repo-ref "${sibling_ref}"); done
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
@@ -564,6 +566,8 @@ echo "delegation routing ladder staged to ${ROUTING_TIERS_OUT}"
 # present); the unpinned ambient path skips it (and is warned above).
 # ---------------------------------------------------------------------------
 if [[ "${RT1_ENGAGED}" == true ]]; then
+    # OMN-17427: record the dev-merge tag each tree sits at; the image audit refuses a tree with none.
+    python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("c", sys.argv[1]); m = u.module_from_spec(s); sys.modules["c"] = m; s.loader.exec_module(m); m.stamp(*map(__import__("pathlib").Path, sys.argv[2:]))' "${SCRIPT_DIR}/../../src/omnibase_infra/validation/checker_first_party_sources.py" "${VCS_PROVENANCE_OUT}" "${EXPECTED_REFS_OUT}" . || exit 4
     echo "RT-1: asserting vendored SHAs == intended ref for every sibling (OMN-14438)" >&2
     if ! python3 "${DEPLOY_SOURCE_REF_SCRIPT}" assert \
         --vcs-provenance "${VCS_PROVENANCE_OUT}" \

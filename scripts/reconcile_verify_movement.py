@@ -87,7 +87,7 @@ from pathlib import Path
 from typing import Any
 
 FLOOR_SCHEMA = "onex.workspace.floor.v1"
-GOVERNED_DISTS = ("omnibase-infra", "omnibase-core", "omnibase-spi", "omnibase-compat")
+GOVERNED_DISTS = ("omnibase-infra", "omnibase-core", "omnibase-spi")
 
 EXIT_OK = 0
 EXIT_FAIL = 1

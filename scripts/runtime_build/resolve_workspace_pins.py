@@ -64,7 +64,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without packagi
 # Directory-name -> uv.lock distribution name for every sibling that workspace
 # mode provisions. Mirrors WORKSPACE_PACKAGES in compute_workspace_provenance.py.
 SIBLING_DISTRIBUTIONS: dict[str, str] = {
-    "omnibase_compat": "omnibase-compat",
     "omnimarket": "omnimarket",
 }
 

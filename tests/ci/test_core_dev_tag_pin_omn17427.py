@@ -16,9 +16,11 @@ from packaging.requirements import Requirement
 from scripts.ci.check_sibling_compatible_range import violations
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG = "dev-20261029143607-342000ec5702"
-COMMIT = "342000ec57020e5258dde41d571420e7c09ed05b"
+TAG = "dev-20261030152335-66d35d2283c3"
+COMMIT = "66d35d2283c3011c436799eacb9bce1a434ee6c9"
+# The published floor stays where the moved node APIs need it; the lock moves on.
 VERSION = "0.47.58"
+LOCKED_VERSION = "0.47.60"
 GIT_URL = "https://github.com/OmniNode-ai/omnibase_core.git"
 
 
@@ -37,7 +39,7 @@ def test_core_tag_alone_range_and_lock_agree() -> None:
     locked = tomllib.loads((ROOT / "uv.lock").read_text())
     packages = [p for p in locked["package"] if p["name"] == "omnibase-core"]
     assert len(packages) == 1
-    assert packages[0]["version"] == VERSION
+    assert packages[0]["version"] == LOCKED_VERSION
     source = urlsplit(packages[0]["source"]["git"])
     assert source._replace(query="", fragment="").geturl() == GIT_URL
     assert parse_qs(source.query) == {"tag": [TAG]}

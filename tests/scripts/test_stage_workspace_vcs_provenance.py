@@ -34,7 +34,7 @@ SCHEMA_FILE = REPO_ROOT / "scripts" / "runtime_build" / "build-provenance-schema
 # per-repo provenance this asserts.
 SIBLING_REPOS = (
     "omnibase_core",
-    "omnibase_compat",
+    "omnibase_spi",
     "omnimarket",
 )
 
@@ -100,8 +100,9 @@ def _make_omni_home(tmp_path: Path, *, dirty_repo: str | None = None) -> Path:
     omni_home = tmp_path / "omni_home"
     for repo in SIBLING_REPOS:
         _init_repo(omni_home / repo, _DIST_NAME[repo], dirty=(repo == dirty_repo))
-    # omnibase_infra (the building repo) + spi must exist for the preflight.
-    for repo in ("omnibase_infra", "omnibase_spi"):
+    # omnibase_infra (the building repo) must exist for the preflight; spi is
+    # vendored now (OMN-17427), so the loop above made it.
+    for repo in ("omnibase_infra",):
         _init_repo(omni_home / repo, _DIST_NAME[repo])
     _write_consumer_lock(omni_home)
     return omni_home
@@ -233,7 +234,7 @@ def test_manifest_uses_infra_vcs_ref_and_folds_vcs_provenance(tmp_path: Path) ->
     app_dir.mkdir(parents=True)
     for repo in (
         "omnibase_core",
-        "omnibase_compat",
+        "omnibase_spi",
         "omnimarket",
     ):
         (sib_dir / repo).mkdir(parents=True)
@@ -293,3 +294,10 @@ def test_schema_declares_per_repo_vcs_provenance_and_infra_vcs_ref() -> None:
         "siblings"
     ]["additionalProperties"]
     assert set(sibling_schema["required"]) == {"vcs_ref", "vcs_dirty", "vcs_branch"}
+    # OMN-17427: the stamp command adds the tag and the build context, and the
+    # install audit adds the classification.
+    assert "dev_merge_tag" in sibling_schema["properties"]
+    assert (
+        "build_context" in schema["properties"]["per_repo_vcs_provenance"]["properties"]
+    )
+    assert "first_party_sources" in schema["properties"]

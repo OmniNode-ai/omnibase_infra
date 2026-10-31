@@ -225,7 +225,8 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     # omnibase_spi, a repo the pin preflight reads, untagged.
     assert "omnibase_spi" in LAB_REF_REPOS
     assert "onex_change_control" not in LAB_REF_REPOS
-    assert len(LAB_REF_REPOS) == 5
+    assert "omnibase_compat" not in LAB_REF_REPOS
+    assert len(LAB_REF_REPOS) == 4
     # A lab tag lab/dev/<utc>-<shortsha> was cut in every sibling clone at its dev SHA.
     tag_re = re.compile(r"^lab/dev/\d{8}T\d{6}Z-[0-9a-f]{12}$")
     for repo in LAB_REF_REPOS:

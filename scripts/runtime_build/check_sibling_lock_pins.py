@@ -90,7 +90,6 @@ DEFAULT_PACKAGE_REPO_DIRS: dict[str, str] = {
     "omnibase-infra": "omnibase_infra",
     "omnibase-core": "omnibase_core",
     "omnibase-spi": "omnibase_spi",
-    "omnibase-compat": "omnibase_compat",
     "omnimarket": "omnimarket",
 }
 
