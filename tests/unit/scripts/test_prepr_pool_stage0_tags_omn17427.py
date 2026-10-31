@@ -46,7 +46,9 @@ def _params(tmp_path: Path, **overrides: str) -> Path:
         + f"""
 git() {{
   printf '%s\\n' "$*" >> {shlex.quote(str(tmp_path / "git.log"))}
-  if [ "$1" = clone ]; then
+  if [ "$1" = clone ] && [ -n "${{FAIL_CLONE_TAG:-}}" ] && [[ "$*" == *"--branch $FAIL_CLONE_TAG "* ]]; then
+    return 128
+  elif [ "$1" = clone ]; then
     mkdir -p "${{@: -1}}"
   elif [ "$1" = -C ] && [ "$3" = rev-parse ] && [ "$4" = HEAD ]; then
     printf '%s\\n' {SHA}
@@ -93,6 +95,24 @@ def test_pool_clone_selects_infra_tag_and_only_current_siblings(
     }
     infra = next(line for line in clones if "omnibase_infra.git" in line)
     assert f"--branch {tag or 'dev'} " in infra
+
+
+def test_pool_clone_fails_when_the_infra_dev_tag_cannot_be_cloned(
+    tmp_path: Path,
+) -> None:
+    tag = "dev-20261030223038-9de6fcbd36e7"
+    params = _params(tmp_path, INFRA_DEV_TAG=tag)
+    done = subprocess.run(
+        ["bash", str(PROVE), str(params), "clone"],
+        env={**os.environ, "HOME": str(tmp_path), "FAIL_CLONE_TAG": tag},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode != 0, done.stdout + done.stderr
+    calls = (tmp_path / "git.log").read_text().splitlines()
+    assert not any("omnimarket" in line for line in calls)
 
 
 @pytest.mark.parametrize("stage_tags", ["", "1"])
