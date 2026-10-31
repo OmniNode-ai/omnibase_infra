@@ -255,6 +255,8 @@ def _run_compose_config(
     ]
     if with_dev_lane_overlay:
         command += ["-f", str(DEV_LANE_OVERLAY)]
+    if with_dev_lane_overlay and borrower_overlay is None:
+        command += ["-f", str(REPO_ROOT / "docker/docker-compose.dev-fold.yml")]
     if borrower_overlay is not None:
         # A lane that layers its own overlay THIRD, over this base and the
         # dev-lane overlay, as the deploy agent renders it.
@@ -290,16 +292,19 @@ def test_primary_dev_tenant_fold_removes_the_carrier_in_real_compose() -> None:
     assert result.returncode == 0, result.stderr
     services = yaml.safe_load(result.stdout)["services"]
     assert "tenant-projection-writer" not in services
+    assert "runtime-worker" not in services
     main = services["omninode-runtime"]
     assert main["environment"]["RUNTIME_PROFILE"] == "main"
-    assert "tenant-projection" in main["environment"][
-        "ONEX_RUNTIME_FOLDED_PROFILES"
-    ].split(",")
+    assert set(main["environment"]["ONEX_RUNTIME_FOLDED_PROFILES"].split(",")) == {
+        "workers",
+        "tenant-projection",
+    }
     targets = {volume["target"] for volume in main["volumes"]}
     assert {
         "/app/data",
         "/app/tenant-projection-data",
         "/app/tenant-projection-logs",
+        "/app/worker-logs",
     } <= targets
 
 
@@ -573,7 +578,7 @@ def test_dev_lane_renders_the_tenant_projection_carrier() -> None:
     # group name embeds KAFKA_INSTANCE_ID as `...__i.<instance>...`.
     shared_instance_ids = {
         services[name]["environment"]["KAFKA_INSTANCE_ID"]
-        for name in ("omninode-runtime", "runtime-effects", "runtime-worker")
+        for name in ("omninode-runtime", "runtime-effects")
     }
     assert carrier["environment"]["KAFKA_INSTANCE_ID"] not in shared_instance_ids, (
         "the carrier must not share a KAFKA_INSTANCE_ID with a shared kernel; "
@@ -773,7 +778,7 @@ def test_dev_lane_runtime_probe_is_the_strict_semantic_check() -> None:
     lane_services = yaml.safe_load(lane.stdout)["services"]
     base_services = yaml.safe_load(base.stdout)["services"]
 
-    for service_name in _KERNEL_RUNTIME_SERVICES:
+    for service_name in ("omninode-runtime", "runtime-effects"):
         healthcheck = lane_services[service_name]["healthcheck"]
 
         # Exact list, not a substring check: the probe is what Docker executes,
@@ -833,7 +838,7 @@ def test_dev_lane_runtime_services_do_not_carry_autoheal() -> None:
         "runtime-effects": "runtime-effects",
         "runtime-worker": "runtime-worker",
     }
-    for service_name in _KERNEL_RUNTIME_SERVICES:
+    for service_name in ("omninode-runtime", "runtime-effects"):
         service = services[service_name]
 
         assert _label_value(service, "autoheal") is None, (
@@ -1218,7 +1223,13 @@ def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
     assert result.returncode == 0, result.stderr
     services = yaml.safe_load(result.stdout)["services"]
     expected = "off" if overlay else "in_memory"
-    for name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+    active_kernels = (
+        ("omninode-runtime", "runtime-effects", "runtime-worker")
+        if overlay
+        else ("omninode-runtime", "runtime-effects")
+    )
+    assert ("runtime-worker" in services) is bool(overlay)
+    for name in active_kernels:
         assert (
             services[name]["environment"]["ONEX_TRAJECTORY_EVALUATION_BACKEND"]
             == expected

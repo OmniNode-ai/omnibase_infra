@@ -42,6 +42,10 @@ def _lane_overlay() -> Path:
 
 def test_exactly_one_lane_folds_effects() -> None:
     contract = load_contract()
+    assert contract.profiles["dev"].processes["main"].folded_profiles == (
+        "workers",
+        "tenant-projection",
+    )
     folding = {
         name: profile
         for name, profile in contract.profiles.items()
@@ -59,7 +63,7 @@ def test_rendered_env_carries_the_fold_for_that_lane_only() -> None:
     rendered = render_env(load_contract())
     assert {k: v for k, v in rendered.items() if k.endswith("_FOLDED_PROFILES")} == {
         FOLDED_KEY: "effects",
-        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "tenant-projection",
+        "DEV_RUNTIME_MAIN_FOLDED_PROFILES": "workers,tenant-projection",
     }
     committed = (ROOT / "docker" / "runtime-policy.env").read_text(encoding="utf-8")
     assert committed == format_dotenv(rendered)

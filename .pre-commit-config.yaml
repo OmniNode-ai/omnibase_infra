@@ -719,7 +719,7 @@ repos:
         name: Cloud migration failure gates only cloud consumers (OMN-18496)
         entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
         language: system
-        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane|dev-fold)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-20112: no pull-request gate may require the staging plane. Mirrors the
@@ -2126,6 +2126,14 @@ repos:
         files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: check-dev-fold-required-env-vars
+        name: Check primary dev fold required env vars are declared
+        entry: >-
+          uv run --frozen python scripts/check_required_env_vars.py --compose-file docker/docker-compose.dev-fold.yml --manifest-file docker/dev-fold-required-env.manifest.txt
+        language: system
+        files: docker/(docker-compose\.dev-fold\.yml|dev-fold-required-env\.manifest\.txt)
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-21288: projection writers, consumers and effects run inside the one
       # runtime container. Refuses a dev-stack service that runs one outside it;
       # the services that still do are a shrink-only list in the test.
@@ -2133,7 +2141,7 @@ repos:
         name: Check the dev stack runs no workload outside the runtime container
         entry: uv run --frozen pytest tests/unit/docker/test_dev_stack_runtime_only_omn21288.py -q --no-cov
         language: system
-        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(docker/(docker-compose\.(infra|dev-lane|dev-fold|dev-tenant-fold)\.yml|catalog/.*\.ya?ml)|tests/(unit/docker/test_dev_stack_runtime_only_omn21288\.py|fixtures/omn21288/.*)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: dev-tenant-projection-fold
@@ -2364,7 +2372,7 @@ repos:
         language: system
         entry: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q -p no:randomly
         files: >-
-          ^(\.github/workflows/(reusable-runtime-boot|ci)\.yml|docker/docker-compose\.(infra|dev-lane)\.yml|tests/ci/test_runtime_boot_dev_lane_class_omn17427\.py)$
+          ^(\.github/workflows/(reusable-runtime-boot|ci)\.yml|docker/docker-compose\.(infra|dev-lane|dev-fold)\.yml|tests/ci/test_runtime_boot_dev_lane_class_omn17427\.py)$
         pass_filenames: false
         stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
