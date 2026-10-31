@@ -21,6 +21,7 @@ from scripts.ci.ci_summary_gate import (
     evaluate_external_contexts,
     evaluate_external_sweep,
 )
+from tests.ci.receipt_gate_pin import RECEIPT_GATE_PIN_SHA
 
 pytestmark = pytest.mark.unit
 
@@ -103,7 +104,7 @@ def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
 
 def test_caller_pins_the_s6_part1_inputs() -> None:
     job = _job()
-    assert job["uses"].endswith("@1088a7b0303059c035ecc0e3ea33580f9556fe41")
+    assert job["uses"].endswith(f"@{RECEIPT_GATE_PIN_SHA}")
     assert job["with"].get("shadow") == "false"
     assert job["with"].get("compare-with-occ") == "false"
 
