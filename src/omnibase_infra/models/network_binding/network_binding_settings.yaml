@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Network binding settings (OMN-21623).
+#
+# The loopback and bind-all addresses, the local host, the PostgreSQL port and the
+# TCP port bounds that infra services fall back to when the environment names none.
+# Read by ModelNetworkBindingSettings; code holds no host, address or port literal
+# for them. Every key is required: a block that omits one fails to load.
+settings:
+  # Health and metrics servers bind loopback unless the environment says otherwise,
+  # so an unconfigured service is never exposed to the network.
+  loopback_address: "127.0.0.1"
+  # Container-facing servers (MCP, health probes) bind every interface.
+  bind_all_address: "0.0.0.0"
+  # Host of the Docker-exposed local stack, and the PostgreSQL port used when a caller names none.
+  local_host: "localhost"
+  postgres_port: 5432
+  # Bounds of a valid TCP port number.
+  tcp_port_min: 1
+  tcp_port_max: 65535

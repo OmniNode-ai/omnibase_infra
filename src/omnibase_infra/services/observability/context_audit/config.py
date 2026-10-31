@@ -13,6 +13,7 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.models.network_binding import ModelLoopbackHealthServerBinding
 from omnibase_infra.topics import (
     SUFFIX_OMNICLAUDE_AUDIT_COMPRESSION_TRIGGERED,
     SUFFIX_OMNICLAUDE_AUDIT_CONTEXT_BUDGET_EXCEEDED,
@@ -25,7 +26,7 @@ from omnibase_infra.topics import (
 logger = logging.getLogger(__name__)
 
 
-class ConfigContextAuditConsumer(BaseSettings):
+class ConfigContextAuditConsumer(ModelLoopbackHealthServerBinding, BaseSettings):
     """Configuration for the context audit observability Kafka consumer.
 
     Environment variables use the OMNIBASE_INFRA_CONTEXT_AUDIT_ prefix.
@@ -181,15 +182,6 @@ class ConfigContextAuditConsumer(BaseSettings):
         ge=1024,
         le=65535,
         description="Port for HTTP health check endpoint",
-    )
-    health_check_host: str = Field(
-        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
-        description=(
-            "Host/IP for health check server binding. Default '127.0.0.1' restricts "
-            "to localhost-only access for security. For container/Kubernetes deployments, "
-            "override to '0.0.0.0' via OMNIBASE_INFRA_CONTEXT_AUDIT_HEALTH_CHECK_HOST "
-            "env var to allow external probe access."
-        ),
     )
     health_check_staleness_seconds: int = Field(
         default=300,

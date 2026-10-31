@@ -1,0 +1,55 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21623
+title: Infra services read their fallback bind addresses, local stack endpoints and runtime health port from a declared settings file, not from literals
+summary: The contracts_and_di check reported 37 literal_host, literal_ip and literal_port findings in src/omnibase_infra (literal_ip 18, literal_host 10, literal_port 9), among 1228 in src. This change declares the loopback and bind-all addresses, the local host, the PostgreSQL port and the TCP port bounds in models/network_binding/network_binding_settings.yaml, loads them through ModelNetworkBindingSettings (no field defaults, so an omitted value fails to load), and reads them where 17 source files held the literals; nine service configs take their health_check_host field from one of two small mixin models instead of declaring it each. Every fallback keeps its previous value. The check reports 19 fewer findings (1228 to 1209). The 18 findings left in the three rules sit in files whose canonical-file-shape baseline forbids growth or that another change holds.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21623-slice-network-binding-settings
+    statement: Infra services take their fallback bind addresses, loopback host names, local stack endpoints and runtime health port from the declared network binding settings, and a settings block that omits a value fails to load.
+    acceptance:
+      - id: AC31
+        statement: 'AC31: the network binding settings load from the declared file, an omitted or unknown key is refused, and every consumer that held a host, address or port literal reads the declared value -- falsifier: a settings block missing a key that still loads, or a consumer default that differs from the declared value'
+      - id: AC32
+        statement: 'AC32: the contracts_and_di check reports no literal_host, literal_ip or literal_port finding in the 17 source files this change edited and the three new models -- falsifier: any such finding from the check over those files'
+evidence_requirements:
+  - kind: tests
+    description: The loaded settings equal the declared file, each omitted key fails to load, and the health, MCP, registration storage, kernel and domain-validator consumers carry the declared values.
+    command: uv run --frozen pytest tests/unit/models/network_binding tests/integration/test_network_binding_settings_consumers.py -q -p no:cacheprovider
+  - kind: tests
+    description: The contracts_and_di check reports no host, address or port finding in the edited files, and reports a planted file.
+    command: uv run --frozen pytest tests/unit/validation/test_network_binding_contracts_and_di_omn21623.py -q -p no:cacheprovider
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21623-ac31-network-binding-settings
+    description: The settings load from the declared file, an omitted key is refused, and the consumers carry the declared values. Fails at the merge base, where the settings model does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/models/network_binding tests/integration/test_network_binding_settings_consumers.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC31
+  - id: dod-omn21623-ac32-binding-check-clean
+    description: The contracts_and_di check reports no host, address or port finding in the edited files and reports a planted file. Fails at the merge base, where those files hold 19 such findings.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/unit/validation/test_network_binding_contracts_and_di_omn21623.py -q -p no:cacheprovider"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC32
+  - id: dod-omn21623-deploy-network-binding-settings
+    description: >-
+      Post-deploy probe: the runtime container loads the network binding settings from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.network_binding import load_network_binding_settings; load_network_binding_settings()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []

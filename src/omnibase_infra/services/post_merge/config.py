@@ -13,10 +13,11 @@ from __future__ import annotations
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omnibase_infra.models.network_binding import ModelLoopbackHealthServerBinding
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GITHUB_PR_MERGED
 
 
-class ConfigPostMergeConsumer(BaseSettings):
+class ConfigPostMergeConsumer(ModelLoopbackHealthServerBinding, BaseSettings):
     """Configuration for the post-merge consumer.
 
     Environment variables use the ``POST_MERGE_`` prefix.
@@ -122,10 +123,6 @@ class ConfigPostMergeConsumer(BaseSettings):
         ge=1024,
         le=65535,
         description="Port for HTTP health check endpoint",
-    )
-    health_check_host: str = Field(
-        default="127.0.0.1",  # fallback-ok: bind 127.0.0.1 to prevent unauthenticated network exposure; override via env for cluster deployments
-        description="Host/IP for health check server binding",
     )
 
 

@@ -154,6 +154,7 @@ from omnibase_infra.models import ModelNodeIdentity
 from omnibase_infra.models.health.model_llm_endpoint_health_config import (
     ModelLlmEndpointHealthConfig,
 )
+from omnibase_infra.models.network_binding import load_network_binding_settings
 from omnibase_infra.models.workspace import ModelWorkspaceConfigRootRequest
 from omnibase_infra.nodes.node_contract_registry_reducer.contract_registration_event_router import (
     ContractRegistrationEventRouter,
@@ -298,10 +299,6 @@ _DEPRECATED_TOPIC_ENV_VARS: tuple[str, ...] = (
     "ONEX_INPUT_TOPIC",
     "ONEX_OUTPUT_TOPIC",
 )
-
-# Port validation constants
-MIN_PORT = 1
-MAX_PORT = 65535
 
 # Kafka broker allowlist validation
 # Patterns that are unconditionally rejected — they point at local or
@@ -4162,12 +4159,13 @@ async def bootstrap() -> int:
         http_port_str = os.getenv("ONEX_HTTP_PORT", str(DEFAULT_HTTP_PORT))
         try:
             http_port = int(http_port_str)
-            if not MIN_PORT <= http_port <= MAX_PORT:
+            port_bounds = load_network_binding_settings()
+            if not port_bounds.tcp_port_min <= http_port <= port_bounds.tcp_port_max:
                 logger.warning(
                     "ONEX_HTTP_PORT %d outside valid range %d-%d, using default %d (correlation_id=%s)",
                     http_port,
-                    MIN_PORT,
-                    MAX_PORT,
+                    port_bounds.tcp_port_min,
+                    port_bounds.tcp_port_max,
                     DEFAULT_HTTP_PORT,
                     correlation_id,
                 )
