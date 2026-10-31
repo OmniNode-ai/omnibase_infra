@@ -46,3 +46,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21623-deploy-probe-settings
+    description: >-
+      Post-deploy probe: the runtime container loads the probe settings from the verification contract it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.models.verification.model_verification_probe_settings import load_probe_settings; load_probe_settings()'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: []
