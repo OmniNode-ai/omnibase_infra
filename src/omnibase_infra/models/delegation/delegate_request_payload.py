@@ -109,8 +109,14 @@ def build_delegate_request_payload(
         metadata.update(named_tests)
     # OMN-20557: the caller's session model, the run's savings baseline, under
     # the metadata key omnimarket's handler reads. Omitted entirely when unset.
-    if session_model:
-        metadata.update(ModelDelegateSessionModel(model=session_model).as_metadata())
+    if session_model is not None:
+        entry = ModelDelegateSessionModel(model=session_model).as_metadata()
+        if entry.keys() & metadata.keys():
+            raise ValueError(
+                f"request metadata already names {sorted(entry.keys() & metadata.keys())}; "
+                "the session model is written once, never overwritten"
+            )
+        metadata.update(entry)
     if metadata:
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:

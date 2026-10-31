@@ -80,17 +80,43 @@ def test_the_payload_file_carries_it(tmp_path: Path) -> None:
     assert loaded["metadata"]["session_model"] == SESSION_MODEL
 
 
-@pytest.mark.parametrize("absent", [None, ""])
-def test_no_session_model_writes_no_key(absent: str | None) -> None:
+def test_no_session_model_writes_no_key() -> None:
     payload = _request_payload(
         prompt="Summarise this.",
         task_type="document",
         source="claude-code",
         max_tokens=None,
         correlation_id=uuid4(),
-        session_model=absent,
+        session_model=None,
     )
     assert "metadata" not in payload
+
+
+@pytest.mark.parametrize("value", ["", "claude opus"])
+def test_a_malformed_session_model_is_refused_by_the_builder_too(value: str) -> None:
+    """The builder holds the flag's contract: a malformed value is never dropped."""
+    with pytest.raises(ValueError, match="model"):
+        _request_payload(
+            prompt="Summarise this.",
+            task_type="document",
+            source="claude-code",
+            max_tokens=None,
+            correlation_id=uuid4(),
+            session_model=value,
+        )
+
+
+def test_a_colliding_metadata_key_is_refused_not_overwritten() -> None:
+    with pytest.raises(ValueError, match="never overwritten"):
+        _request_payload(
+            prompt="Summarise this.",
+            task_type="document",
+            source="claude-code",
+            max_tokens=None,
+            correlation_id=uuid4(),
+            lineage={"session_model": "claude-sonnet-5-5"},
+            session_model=SESSION_MODEL,
+        )
 
 
 @pytest.mark.parametrize(
