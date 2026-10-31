@@ -21,8 +21,13 @@ class ModelScopeCheckCommand(BaseModel):
         ..., description="Absolute path to the plan file to read."
     )
     output_path: str = Field(
-        default="~/.claude/scope-manifest.json",
-        description="Path to write the scope manifest JSON.",
+        ...,
+        min_length=1,
+        description=(
+            "Path to write the scope manifest JSON. Required: the command"
+            " producer supplies it and every hop carries it forward; code holds"
+            " no default location (OMN-21799)."
+        ),
     )
     auto_confirm: bool = Field(
         default=False,
