@@ -53,6 +53,8 @@ def boundary(tmp_path: Path) -> tuple[dict[str, str], Path]:
                 print("true")
             elif "docker top" in command:
                 print("0")
+            elif "status=dead" in command:
+                pass  # OMN-21807: the host lists no Dead container
             elif "docker ps" in command:
                 print("omninode-runner-2 running")
             elif "--force-recreate" in command:

@@ -1,0 +1,39 @@
+# OMN-21807 contract file for omnibase_infra: a runner recreate on the runner host removes a thin container layer, and the rolling deploy waits for each layer delete to finish.
+schema_version: "1.0.0"
+ticket_id: "OMN-21807"
+title: "The general-pool runners keep their tool caches and job workspace on named volumes, and deploy-runners.sh --rolling waits for no Dead container before each recreate"
+summary: "Lane dev-restore-1515 measured that each runner recreate on the runner host removed a container whose writable layer held the uv cache and the shared ci-envs, and that containerd's garbage collector held its metadata write lock for about 28 minutes while it deleted that layer, so every docker rm on the host blocked and the dev deploy agent's redeploys failed. Each omninode-runner-N service now mounts a per-runner named volume at /home/runner/.cache (pip, pre-commit, pnpm, playwright, ci-envs, npm) and one at the job workspace, with the uv cache inside the workspace volume so uv still hardlinks. The entrypoint hands a root-owned first-use mount to the runner user. The rolling deploy waits until docker ps -a lists no Dead container before each recreate and halts, recreating nothing more, when one is still listed after ROLL_DEAD_MAX_SECONDS. No host change is made by this change and no runner is restarted by it."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21807-thin-layer
+    statement: "A recreate of a general-pool runner on the runner host removes a thin layer, because its caches and workspace are on named volumes, and a roll never queues a removal behind a pending layer delete."
+    acceptance:
+      - id: AC1
+        statement: "AC1: every omninode-runner-N service mounts a per-runner named volume at /home/runner/.cache and one at /home/runner/actions-runner/_work, and UV_CACHE_DIR points inside the workspace volume -- falsifier: uv run pytest tests/ci/test_runner_cache_volumes.py -q fails when a service lacks either volume or sets the uv cache outside the workspace mount"
+      - id: AC2
+        statement: "AC2: the entrypoint hands a root-owned cache or workspace mount to the runner user before it drops privileges, without a recursive chown -- falsifier: uv run pytest tests/ci/test_runner_cache_volumes.py -q -k entrypoint_hands"
+      - id: AC3
+        statement: "AC3: deploy-runners.sh --rolling waits until docker ps -a on the runner host lists no Dead container before it recreates the next runner, and halts with nothing more recreated when the wait times out -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_rolling_waits_for_dead.py -q fails when the wait is absent, comes after the idle re-check, or a pending delete does not stop the roll"
+      - id: AC4
+        statement: "AC4: a listing of the container names the incident's ledger rows record as pending removal makes the wait poll until it clears, and a host whose listing cannot be read is not treated as quiet -- falsifier: uv run pytest tests/unit/scripts/test_deploy_runners_rolling_waits_for_dead.py -q -k 'incident_listing or unreadable_host'"
+evidence_requirements:
+  - kind: tests
+    description: "The compose file as written and as docker compose renders it carries the volumes, and the rolling loop run for real in bash waits, rolls and halts as stated."
+    command: "uv run pytest tests/ci/test_runner_cache_volumes.py tests/unit/scripts/test_deploy_runners_rolling_waits_for_dead.py -q -p no:cacheprovider"
+dod_evidence:
+  - id: dod-001
+    description: "Every general-pool runner has its caches and workspace on its own named volumes."
+    source: generated
+    binds_ac: [AC1, AC2]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/ci/test_runner_cache_volumes.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "The rolling deploy waits for the host to list no Dead container before each recreate and halts when it does not."
+    source: generated
+    binds_ac: [AC3, AC4]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/scripts/test_deploy_runners_rolling_waits_for_dead.py -q -p no:cacheprovider'

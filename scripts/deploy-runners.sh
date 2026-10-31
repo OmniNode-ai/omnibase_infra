@@ -62,6 +62,11 @@
 #      signals, recreate that ONE service, wait for it to come back online
 #   3. Skip (and retry later) any runner executing a job; HALT if a recreated
 #      runner does not return
+#   Before each recreate it waits until `docker ps -a` on the host lists no Dead
+#   container (OMN-21807): a pending layer delete holds containerd's metadata lock
+#   and blocks every docker rm, so a second removal queued behind it only
+#   lengthens the stall. It HALTS, recreating nothing more, if one is still
+#   listed after ROLL_DEAD_MAX_SECONDS (default 3600).
 #   Skips: image build, cron installs, --remove-orphans
 #   Use when: a container-env change must reach live runners. Env is frozen at
 #   container creation, so a recreate is the only way; --soft cannot carry one.
@@ -177,7 +182,7 @@
 #
 # Trap for on-host operators (OMN-15142): this script is written to run from
 # an OPERATOR WORKSTATION that SSHes into the runner host (see run_ssh/
-# run_local below). It cannot be run directly ON the runner host targeting
+# the ssh helpers below). It cannot be run directly ON the runner host targeting
 # itself via its own Tailscale MagicDNS hostname -- self-ssh fails "Host key
 # verification failed" (no known_hosts entry for the box's own hostname).
 # Run the rsync/build/compose steps directly on-host instead in that case.
@@ -630,15 +635,6 @@ run_ssh() {
         return 0
     fi
     ssh "${RUNNER_HOST}" "$1"
-}
-
-run_local() {
-    # Run a local command (suppressed in dry-run)
-    if "${DRY_RUN}"; then
-        log "[DRY RUN] local: $*"
-        return 0
-    fi
-    "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -1510,6 +1506,13 @@ add_services_deploy() {
 ROLL_ONLINE_MAX_SECONDS="${ROLL_ONLINE_MAX_SECONDS:-240}"
 ROLL_ONLINE_INTERVAL_SECONDS="${ROLL_ONLINE_INTERVAL_SECONDS:-10}"
 ROLL_SKIP_RETRY_PASSES="${ROLL_SKIP_RETRY_PASSES:-2}"
+# OMN-21807: a recreate deletes the old container's layer, and containerd's
+# garbage collector holds its metadata write lock for that whole delete, so
+# every `docker rm` on the host blocks behind it. Docker lists the container
+# as Dead while that delete is pending. The roll waits for none to be listed
+# before it removes the next runner; the cap is generous because the measured
+# delete of a cache-filled layer took about 28 minutes (lane dev-restore-1515).
+ROLL_DEAD_MAX_SECONDS="${ROLL_DEAD_MAX_SECONDS:-3600}"
 
 fleet_services() {
     # Enumerate fleet services from the compose file itself, then cross-check
@@ -1618,12 +1621,10 @@ runner_is_idle() {
 }
 
 wait_for_runner_online() {
-    local name="${1}"
-    local elapsed=0
+    local name="${1}" elapsed=0 state
     while [[ "${elapsed}" -lt "${ROLL_ONLINE_MAX_SECONDS}" ]]; do
         sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
         elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
-        local state
         state=$(github_runner_state "${name}")
         if [[ "${state%% *}" == "online" ]]; then
             log "  ${name} back online after ~${elapsed}s."
@@ -1631,6 +1632,21 @@ wait_for_runner_online() {
         fi
     done
     return 1
+}
+
+wait_for_no_dead_containers() {
+    # OMN-21807: block until `docker ps -a` on the runner host lists no Dead
+    # container, so a roll never queues a second removal behind the previous
+    # one's pending layer delete. Read-only, so it runs for real under --dry-run
+    # like the busy probes. A listing that cannot be read counts as not empty
+    # (fail closed): the lock that holds a delete can also stall the listing.
+    local elapsed=0
+    until [[ -z "$(ssh "${RUNNER_HOST}" "docker ps -a --filter status=dead --format '{{.Names}}'" 2>/dev/null || echo unreadable)" ]]; do
+        [[ "${elapsed}" -lt "${ROLL_DEAD_MAX_SECONDS}" ]] || return 1
+        log "  ${RUNNER_HOST} lists a Dead container (a layer delete is pending) or the listing is unreadable; waiting ..."
+        sleep "${ROLL_ONLINE_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + ROLL_ONLINE_INTERVAL_SECONDS))
+    done
 }
 
 roll_one_runner() {
@@ -1644,6 +1660,11 @@ roll_one_runner() {
         warn "  ${name}: DEPLOY_RUNNER_TOKEN or --token-file is required -- refusing to recreate."
         return 3
     fi
+
+    # OMN-21807: wait for the previous runner's layer delete to finish BEFORE the
+    # idle re-check, which must stay immediately ahead of the stop: the wait can
+    # take most of an hour and a job can start in that time. Exit 4: not recreated.
+    wait_for_no_dead_containers || return 4
 
     # Re-check immediately before stopping: a job can start between the
     # selection pass and this call.
@@ -1715,9 +1736,8 @@ rolling_deploy() {
     rsync_artifacts
     install_runner_slice
 
-    local services
+    local services total
     services=$(fleet_services)
-    local total
     total=$(printf '%s\n' "${services}" | grep -c .)
     log "Rolling ${total} fleet services on ${RUNNER_HOST}. Expect roughly $((total * 100 / 60)) minutes."
 
@@ -1740,8 +1760,7 @@ rolling_deploy() {
         log "Converging a single runner: ${ROLL_ONLY}."
     fi
 
-    local pass=0 done_count=0 failed="" rc
-    local skip_migration=()
+    local pass=0 done_count=0 failed="" rc skip_migration=()
     while [[ "${#pending[@]}" -gt 0 ]] && [[ "${pass}" -le "${ROLL_SKIP_RETRY_PASSES}" ]]; do
         [[ "${pass}" -eq 0 ]] || log "--- retry pass ${pass} for ${#pending[@]} runner(s) that were busy earlier ---"
         local next=()
@@ -1773,7 +1792,7 @@ rolling_deploy() {
     done
 
     if [[ -n "${failed}" ]]; then
-        err "HALTED at ${failed}: it did not come back online within ${ROLL_ONLINE_MAX_SECONDS}s. ${done_count}/${total} rolled; the rest still carry the previous container env. Investigate that container before resuming -- do NOT retry blindly, a wedged removal spawns another wedged container."
+        err "HALTED at ${failed}: it did not come back online within ${ROLL_ONLINE_MAX_SECONDS}s, or the host still lists a Dead container (an earlier removal is still deleting its layer) after ${ROLL_DEAD_MAX_SECONDS}s, in which case nothing was recreated. ${done_count}/${total} rolled; the rest still carry the previous container env. Investigate that container before resuming -- do NOT retry blindly, a wedged removal spawns another wedged container."
     fi
 
     log "Rolled ${done_count}/${total} runners."
