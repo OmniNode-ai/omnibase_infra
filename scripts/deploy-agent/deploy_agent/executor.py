@@ -979,10 +979,10 @@ def active_dev_instance() -> str:
 def _folded_dev_services(lane: EnumRuntimeLane) -> set[str]:
     """Containers the fold overlay retires: each is gated under folded-<profile> (OMN-21288)."""
     gates = {f"folded-{profile}" for profile in lane_folded_profiles(lane)}
-    services = _read_compose_services((_DEV_TENANT_FOLD_OVERLAY,)) if gates else {}
-    profiles = {
-        name: set(spec.get("profiles") or ()) for name, spec in services.items()
-    }
+    # Read beside the policy env that names the folded profiles: one deploy root.
+    overlay = RUNTIME_POLICY_ENV_FILE.with_name(Path(_DEV_TENANT_FOLD_OVERLAY).name)
+    services = _read_compose_services((str(overlay),)) if gates else {}
+    profiles = {name: set(s.get("profiles") or ()) for name, s in services.items()}
     if missing := gates.difference(*profiles.values()):
         raise RuntimeError(f"fold overlay gates no service under {sorted(missing)}")
     return {name for name, gated in profiles.items() if gated & gates}

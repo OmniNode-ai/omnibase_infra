@@ -28,8 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 def _committed_fold_overlay(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read this checkout's fold overlay, not the deploy host's clone path."""
     monkeypatch.setattr(
-        "deploy_agent.executor._DEV_TENANT_FOLD_OVERLAY",
-        str(REPO_ROOT / "docker/docker-compose.dev-tenant-fold.yml"),
+        "deploy_agent.executor.RUNTIME_POLICY_ENV_FILE",
+        REPO_ROOT / "docker/runtime-policy.env",
     )
 
 
