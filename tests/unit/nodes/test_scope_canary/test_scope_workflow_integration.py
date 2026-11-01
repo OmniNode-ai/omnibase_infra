@@ -66,6 +66,7 @@ The hooks system needs updating.
                 content=read_result.content,
                 plan_file_path=str(plan_file),
                 correlation_id=cid,
+                output_path=str(manifest_path),
             )
         )
         assert len(extracted.files) > 0

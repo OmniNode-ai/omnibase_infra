@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Third-party endpoints and loopback probe base (OMN-21623).
+#
+# The URLs the infra handlers, adapters and probes call. Read by
+# ModelThirdPartyEndpoints; code holds no URL literal. Every key is required: a
+# block that omits one fails to load.
+endpoints:
+  github_api_base_url: "https://api.github.com"
+  github_web_base_url: "https://github.com"
+  # The repository the runtime source attestation clones when no URL is given.
+  runtime_source_repo_url: "https://github.com/OmniNode-ai/omnibase_infra.git"
+  linear_graphql_url: "https://api.linear.app/graphql"
+  linear_oauth_token_url: "https://api.linear.app/oauth/token"
+  slack_post_message_url: "https://slack.com/api/chat.postMessage"
+  gmail_oauth_token_url: "https://oauth2.googleapis.com/token"
+  gmail_api_base_url: "https://gmail.googleapis.com/gmail/v1/users/me"
+  claude_code_settings_schema_url: "https://raw.githubusercontent.com/anthropics/claude-code/main/.claude/settings.schema.json"
+  # Scheme and host of a container or host-mapped self-probe; the caller adds ":<port><path>".
+  loopback_http_base_url: "http://localhost"

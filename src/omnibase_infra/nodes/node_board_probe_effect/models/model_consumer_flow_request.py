@@ -8,13 +8,20 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_board_probe_effect.contract_topics import (
+    consumer_flow_projection_api_base_url,
+)
+
 
 class ModelConsumerFlowRequest(BaseModel):
     """CLI-equivalent controls; subject_lane is the board result's subject."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     subject_lane: str = Field(min_length=1)
-    base_url: str = Field(default="http://host.docker.internal:3002", min_length=1)
+    # Bound from the node contract's consumer_flow_endpoints (OMN-21688).
+    base_url: str = Field(
+        default_factory=consumer_flow_projection_api_base_url, min_length=1
+    )
     docker_bin: str = Field(default="docker", min_length=1)
     samples: int = Field(default=4, ge=2)
     sample_interval: float = Field(default=30.0, ge=0, allow_inf_nan=False)
