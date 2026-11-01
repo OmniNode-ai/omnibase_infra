@@ -26,6 +26,7 @@
 # this block is what changes.
 #
 # Related tickets:
+#   - OMN-21623: step timeouts and the bus address are declared in the bundle block, not in the handler
 #   - OMN-19941: an undecidable verdict input fails closed (a planned but unobserved focused_tests step fails)
 #   - OMN-19572: the omnibase_core foundation_override profile
 #   - OMN-19565: the proof-profile registry
@@ -143,6 +144,27 @@ config:
       - "omnimarket"
     delegation_prompt: "Reply with the single word: ready"
     delegation_timeout_seconds: 300
+    # The bus address on the bundle's compose network (the redpanda service and
+    # its internal listener), which the delegation step in the effects container
+    # reaches. Not a host port: those are host_ports above.
+    bus_bootstrap_servers: "redpanda:9092"
+    # The wall-clock bound of each kind of step the plan renders (OMN-21623).
+    # The handler holds no number; a step takes its bound from here.
+    step_timeouts:
+      default_seconds: 120
+      git_fetch_seconds: 600
+      focused_tests_seconds: 1800
+      generate_seconds: 900
+      build_base_seconds: 3600
+      build_override_seconds: 1800
+      up_seconds: 1800
+      health_probe_seconds: 30
+      identity_seconds: 60
+      import_smoke_seconds: 180
+      wiring_logs_seconds: 60
+      down_seconds: 600
+      remove_images_seconds: 300
+      remove_workdir_seconds: 300
     # The uv the runtime image itself is built with (docker/Dockerfile.runtime
     # UV_VERSION), so the override installs with the same resolver.
     uv_image: "ghcr.io/astral-sh/uv:0.6.14"
