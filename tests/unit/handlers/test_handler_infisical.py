@@ -214,8 +214,8 @@ class TestHandlerInfisicalCaching:
             # Adapter should only be called once (cache hit on second)
             assert mock_adapter.get_secret.call_count == 1
             assert result.result["source"] == "cache"
-            assert handler._cache_hits == 1
-            assert handler._cache_misses == 1
+            assert handler._cache.hits == 1
+            assert handler._cache.misses == 1
 
     @pytest.mark.asyncio
     async def test_cache_disabled(self, mock_container: MagicMock) -> None:
@@ -286,7 +286,7 @@ class TestHandlerInfisicalCaching:
 
             count = handler.invalidate_cache()
             assert count == 1
-            assert len(handler._cache) == 0
+            assert len(handler._cache.entries) == 0
 
 
 class TestHandlerInfisicalListSecrets:

@@ -95,17 +95,17 @@ def test_gateway_failure_keeps_or_restores_the_runtime(
     assert failed_jobs and diagnostic in failed_jobs[0]
     gateway_command.assert_called_once()
     restore_byproducts.assert_called_once()
-    assert guard.point is not None
+    assert guard.point.current is not None
     incident = _incident(host, tmp_path)
     assert incident["status"] == "failed"
     assert incident["recovery_verified"] is True
     if runtime_state == "healthy":
         assert not host.restored
-        assert guard.point.revision == NEW_REVISION
+        assert guard.point.current.revision == NEW_REVISION
         assert incident["runtime_kept_revision"] == NEW_REVISION
     else:
         assert host.restored
-        assert guard.point.revision == OLD_REVISION
+        assert guard.point.current.revision == OLD_REVISION
         assert "runtime_kept_revision" not in incident
     assert {
         container["Config"]["Labels"]["org.opencontainers.image.revision"]
