@@ -222,7 +222,8 @@ def test_last_healthy_snapshot_survives_agent_restart(
     docker["containers"] = _containers(healthy=False)
     second = executor_mod.DevBootGuard(DeployExecutor(), tmp_path)
     second.prepare()
-    assert second.point is not None and second.point.revision == GOOD_COMMIT
+    point = second.point.current
+    assert point is not None and point.revision == GOOD_COMMIT
     assert (second.snapshot_path.stat().st_mode & 0o777) == 0o400
 
 
