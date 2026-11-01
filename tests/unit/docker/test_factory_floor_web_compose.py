@@ -26,6 +26,11 @@ REQUIRED = (
     "FACTORY_FLOOR_PORT",
     "FACTORY_FLOOR_SERVE_DIR",
 )
+REFUSAL_MESSAGES = {
+    "FACTORY_FLOOR_BIND_ADDR": "set FACTORY_FLOOR_BIND_ADDR to the host tailnet address",
+    "FACTORY_FLOOR_PORT": "set FACTORY_FLOOR_PORT",
+    "FACTORY_FLOOR_SERVE_DIR": "set FACTORY_FLOOR_SERVE_DIR",
+}
 RENDER_ENV = {
     "FACTORY_FLOOR_BIND_ADDR": "192.0.2.1",
     "FACTORY_FLOOR_PORT": "8088",
@@ -135,19 +140,32 @@ def test_only_the_decision_map_directory_may_load_two_pinned_cdn_scripts() -> No
     assert "limit_except GET HEAD" in block
     assert 'Cache-Control "no-store"' in block
     assert 'X-Content-Type-Options "nosniff"' in block
+    # nginx tries the regex locations after the longest prefix match and lets a regex win unless the prefix is
+    # `^~`, so a plain prefix keeps the dot-file rule in force for the directory whatever the order in the file.
     assert "location ^~" not in conf
-    assert conf.index("location ~ /\\.") < conf.index("location /reports/decision-map/")
+    assert re.search(r"location\s+~\s+/\\\.\s*\{\s*return 404;", conf)
+    assert re.search(r"location\s+/reports/decision-map/\s*\{", conf)
 
 
 @pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
+@pytest.mark.parametrize("empty", [False, True], ids=["unset", "empty"])
 @pytest.mark.parametrize("missing", REQUIRED)
 def test_compose_refuses_to_render_when_a_required_value_is_missing(
-    missing: str,
+    missing: str, empty: bool
 ) -> None:
     values = {k: v for k, v in RENDER_ENV.items() if k != missing}
+    if empty:
+        values[missing] = ""
     done = _compose_config(values)
     assert done.returncode != 0
-    assert missing in done.stderr
+    assert REFUSAL_MESSAGES[missing] in done.stderr
+
+
+def test_every_refusal_message_is_the_one_the_compose_file_declares() -> None:
+    text = COMPOSE.read_text(encoding="utf-8")
+    assert set(REFUSAL_MESSAGES) == set(REQUIRED)
+    for name, message in REFUSAL_MESSAGES.items():
+        assert f"${{{name}:?{message}}}" in text
 
 
 @pytest.mark.skipif(not _compose_available(), reason="docker compose is not available")
