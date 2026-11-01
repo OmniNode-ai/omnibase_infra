@@ -8,9 +8,13 @@ Ticket: OMN-19572
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import re
+from ipaddress import IPv6Address
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_infra.models.lab_proof.model_lab_proof_step_timeouts import (
+    MAX_STEP_SECONDS,
     ModelLabProofStepTimeouts,
 )
 
@@ -45,15 +49,43 @@ class ModelLabProofBundlePolicy(BaseModel):
     wiring_failure_extract: str = Field(min_length=1)
     consumer_modules: tuple[str, ...] = Field(min_length=1)
     delegation_prompt: str = Field(min_length=1)
-    delegation_timeout_seconds: int = Field(ge=1)
+    delegation_timeout_seconds: int = Field(ge=1, le=MAX_STEP_SECONDS)
     bus_bootstrap_servers: str = Field(
-        pattern=r"^[A-Za-z0-9.-]+:[0-9]{1,5}$",
-        description="The bus address the effects container's delegation step reaches, "
-        "as the bundle's compose network names it.",
+        min_length=1,
+        description="Comma-separated host:port bus addresses the effects container's "
+        "delegation step reaches. IPv6 hosts must be bracketed.",
     )
     step_timeouts: ModelLabProofStepTimeouts
     uv_image: str = Field(min_length=1)
     override_dockerfile: str = Field(min_length=1)
+
+    @field_validator("bus_bootstrap_servers")
+    @classmethod
+    def validate_bus_bootstrap_servers(cls, value: str) -> str:
+        """Reject malformed brokers before the first delegation needs the bus."""
+        for broker in value.split(","):
+            host, separator, port = broker.rpartition(":")
+            if (
+                not separator
+                or re.fullmatch(r"[0-9]{1,5}", port) is None
+                or not 1 <= int(port) <= 65535
+            ):
+                raise ValueError("each bus broker must have a port in 1..65535")
+            if host.startswith("[") and host.endswith("]"):
+                IPv6Address(host[1:-1])
+            elif (
+                len(host) > 253
+                or re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?",
+                    host,
+                )
+                is None
+            ):
+                raise ValueError(
+                    "each bus broker must have a valid hostname or IPv6 address"
+                )
+        return value
 
 
 __all__ = ["ModelLabProofBundlePolicy"]

@@ -64,9 +64,63 @@ def test_a_timeout_below_one_second_is_refused_at_load(name: str, value: int) ->
 
 
 @pytest.mark.parametrize(
-    "address", ["", "bus", "bus:", "bus:123456x", "http://bus:9092"]
+    "address",
+    [
+        "",
+        "bus",
+        "bus:",
+        "bus:123456x",
+        "http://bus:9092",
+        "bus:0",
+        "bus:00000",
+        "bus:65536",
+        "bus:99999",
+        ".:9092",
+        "-:9092",
+        "a..b:9092",
+        "-bus:9092",
+        "bus-:9092",
+        "bus:9092,",
+        "bus:9092,other:0",
+        "[invalid]:9092",
+    ],
 )
 def test_a_malformed_bus_address_is_refused_at_load(address: str) -> None:
     block = {**_bundle_block(), "bus_bootstrap_servers": address}
     with pytest.raises(ValidationError, match="bus_bootstrap_servers"):
         ModelLabProofBundlePolicy.model_validate(block)
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "bus:1",
+        "bus:65535",
+        "127.0.0.1:9092",
+        "bus.example:9092",
+        "a:9092,b:9092",
+        "[::1]:9092",
+        "bus:9092,[2001:db8::1]:65535",
+    ],
+)
+def test_valid_bootstrap_addresses_load_unchanged(address: str) -> None:
+    policy = ModelLabProofBundlePolicy.model_validate(
+        {**_bundle_block(), "bus_bootstrap_servers": address}
+    )
+    assert policy.bus_bootstrap_servers == address
+
+
+@pytest.mark.parametrize("value", [0, -1, MAX_STEP_SECONDS + 1])
+def test_delegation_timeout_outside_step_bounds_is_refused(value: int) -> None:
+    with pytest.raises(ValidationError, match="delegation_timeout_seconds"):
+        ModelLabProofBundlePolicy.model_validate(
+            {**_bundle_block(), "delegation_timeout_seconds": value}
+        )
+
+
+@pytest.mark.parametrize("value", [1, MAX_STEP_SECONDS])
+def test_delegation_timeout_accepts_step_bounds(value: int) -> None:
+    policy = ModelLabProofBundlePolicy.model_validate(
+        {**_bundle_block(), "delegation_timeout_seconds": value}
+    )
+    assert policy.delegation_timeout_seconds == value

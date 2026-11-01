@@ -235,9 +235,10 @@ def test_the_base_build_is_handed_the_runtime_policy_env_before_the_bundle_env()
     assert env_files == ["docker/runtime-policy.env", f"{LANE}/{RUN}/local.env"]
 
 
-def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy() -> (
-    None
-):
+@pytest.mark.parametrize("negative_control", [False, True])
+def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy(
+    negative_control: bool,
+) -> None:
     """Nothing in the handler fixes a timeout or the bus address (OMN-21623).
 
     Every bound is given a distinct value the handler could not have held, so a
@@ -249,17 +250,36 @@ def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy()
         update={
             "step_timeouts": ModelLabProofStepTimeouts.model_validate(distinct),
             "bus_bootstrap_servers": "bus.example:4321",
+            "delegation_timeout_seconds": 1100,
         }
     )
-    plan = HandlerLabProofPlan().handle(core_request(bundle=policy))
+    plan = HandlerLabProofPlan().handle(
+        core_request(bundle=policy, negative_control=negative_control)
+    )
     by_id = {step.step_id: step for step in plan.steps}
     expected = {
+        _ID.HOST_LOAD: "default_seconds",
+        _ID.PREFLIGHT_PROJECT_ABSENT: "default_seconds",
+        _ID.PREFLIGHT_IMAGE_ABSENT: "default_seconds",
+        _ID.PREFLIGHT_PORTS_FREE: "default_seconds",
         _ID.INFRA_INIT: "default_seconds",
         _ID.INFRA_FETCH: "git_fetch_seconds",
+        _ID.INFRA_CHECKOUT: "default_seconds",
+        _ID.INFRA_REV: "default_seconds",
+        _ID.SUBJECT_INIT: "default_seconds",
         _ID.SUBJECT_FETCH: "git_fetch_seconds",
+        _ID.SUBJECT_CHECKOUT: "default_seconds",
+        _ID.SUBJECT_REV: "default_seconds",
         _ID.FOCUSED_TESTS: "focused_tests_seconds",
+        _ID.SUBJECT_ARCHIVE: "default_seconds",
+        _ID.SUBJECT_EXTRACT: "default_seconds",
+        _ID.SUBJECT_HASH: "default_seconds",
+        _ID.OVERRIDE_DOCKERFILE: "default_seconds",
+        _ID.LOCAL_ENV: "default_seconds",
+        _ID.MODEL_ENDPOINT: "default_seconds",
         _ID.GENERATE: "generate_seconds",
         _ID.BUILD_BASE: "build_base_seconds",
+        _ID.TAG_BASE: "default_seconds",
         _ID.BUILD_OVERRIDE: "build_override_seconds",
         _ID.UP: "up_seconds",
         _ID.HEALTH_MIGRATION_GATE: "health_probe_seconds",
@@ -274,11 +294,20 @@ def test_every_step_takes_its_bound_and_the_bus_address_from_the_bundle_policy()
         _ID.DOWN: "down_seconds",
         _ID.REMOVE_IMAGES: "remove_images_seconds",
         _ID.REMOVE_WORKDIR: "remove_workdir_seconds",
+        _ID.RESIDUE_CONTAINERS: "default_seconds",
+        _ID.RESIDUE_VOLUMES: "default_seconds",
+        _ID.RESIDUE_NETWORKS: "default_seconds",
+        _ID.RESIDUE_IMAGES: "default_seconds",
+        _ID.RESIDUE_PORTS: "default_seconds",
+        _ID.RESIDUE_WORKDIR: "default_seconds",
+        _ID.RESIDUE_POSITIVE_CONTROL: "default_seconds",
     }
+    if negative_control:
+        expected[_ID.NEGATIVE_CONTROL_SABOTAGE] = "default_seconds"
+    assert set(by_id) == {*expected, _ID.GOLDEN_CHAIN_DELEGATION}
     for step_id, field in expected.items():
         assert by_id[step_id].timeout_seconds == distinct[field], step_id
-    allowed = {*distinct.values(), policy.delegation_timeout_seconds}
-    assert {step.timeout_seconds for step in plan.steps} <= allowed
     delegation = by_id[_ID.GOLDEN_CHAIN_DELEGATION]
+    assert delegation.timeout_seconds == policy.delegation_timeout_seconds
     bootstrap = delegation.argv[delegation.argv.index("--kafka-bootstrap") + 1]
     assert bootstrap == "bus.example:4321"
