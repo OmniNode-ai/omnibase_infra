@@ -4,19 +4,22 @@
 
 The embedding and inference registries build their handler only as the
 instance argument of ``service_registry.register_instance``. These tests
-drive the real registries against a recording service registry and assert
-the registered instance is the real handler class, and that the four
-removed node registry packages no longer import.
+drive the real registries against a real ``ModelONEXContainer`` and resolve
+the handlers back through ``get_service_async``, assert the unset-registry
+paths build nothing, and assert the four removed node registry packages no
+longer import.
 """
 
 from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import pytest
 
+from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_infra.mixins import MixinLlmHttpTransport
 from omnibase_infra.nodes.node_llm_embedding_effect.handlers import (
     HandlerEmbeddingOpenaiCompatible,
 )
@@ -29,106 +32,108 @@ from omnibase_infra.nodes.node_llm_inference_effect.handlers import (
 from omnibase_infra.nodes.node_llm_inference_effect.registry import (
     RegistryInfraLlmInferenceEffect,
 )
+from omnibase_infra.nodes.node_llm_inference_effect.registry import (
+    registry_infra_llm_inference_effect as registry_module,
+)
 from omnibase_infra.nodes.node_llm_inference_effect.services.service_llm_metrics_publisher import (
     ServiceLlmMetricsPublisher,
 )
 
-if TYPE_CHECKING:
-    from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-
 pytestmark = [pytest.mark.integration]
 
 
-class _RecordingServiceRegistry:
-    """Service registry double that records every register_instance call."""
-
-    def __init__(self) -> None:
-        self.registered: list[dict[str, Any]] = []
-
-    async def register_instance(self, **kwargs: Any) -> None:
-        self.registered.append(kwargs)
-
-    def get_service(self, interface: type) -> Any:
-        for call in reversed(self.registered):
-            if call["interface"] is interface:
-                return call["instance"]
-        raise KeyError(interface)
-
-
-def _container(registry: _RecordingServiceRegistry | None) -> ModelONEXContainer:
-    return cast(
-        "ModelONEXContainer",
-        SimpleNamespace(
-            service_registry=registry,
-            get_service=registry.get_service if registry else None,
-        ),
-    )
+def _unset_registry_container() -> ModelONEXContainer:
+    return cast("ModelONEXContainer", SimpleNamespace(service_registry=None))
 
 
 @pytest.mark.asyncio
 async def test_embedding_registry_registers_real_handler_instance() -> None:
-    registry = _RecordingServiceRegistry()
-    container = cast("ModelONEXContainer", SimpleNamespace(service_registry=registry))
+    container = ModelONEXContainer()
 
     await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(
         container,
         target_name="omn21784-embedding",
     )
 
-    assert len(registry.registered) == 1
-    call = registry.registered[0]
-    assert call["interface"] is HandlerEmbeddingOpenaiCompatible
-    assert isinstance(call["instance"], HandlerEmbeddingOpenaiCompatible)
+    handler = await container.get_service_async(HandlerEmbeddingOpenaiCompatible)
+    assert isinstance(handler, HandlerEmbeddingOpenaiCompatible)
 
 
 @pytest.mark.asyncio
-async def test_embedding_registry_without_service_registry_registers_nothing() -> None:
-    container = _container(None)
+async def test_embedding_registry_without_service_registry_registers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("handler constructed with no service registry")
 
-    await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(container)
+    monkeypatch.setattr(HandlerEmbeddingOpenaiCompatible, "__init__", _forbidden)
 
-    assert container.service_registry is None
+    await RegistryInfraLlmEmbeddingEffect.register_openai_compatible(
+        _unset_registry_container()
+    )
 
 
 @pytest.mark.asyncio
 async def test_inference_registry_registers_real_handler_and_transport() -> None:
-    registry = _RecordingServiceRegistry()
+    container = ModelONEXContainer()
 
     await RegistryInfraLlmInferenceEffect.register_openai_compatible(
-        _container(registry), target_name="omn21784-inference"
+        container, target_name="omn21784-inference"
     )
 
-    interfaces = [call["interface"] for call in registry.registered]
-    assert HandlerLlmOpenaiCompatible in interfaces
-    handler = registry.get_service(HandlerLlmOpenaiCompatible)
+    handler = await container.get_service_async(HandlerLlmOpenaiCompatible)
+    transport = await container.get_service_async(MixinLlmHttpTransport)
     assert isinstance(handler, HandlerLlmOpenaiCompatible)
+    assert isinstance(transport, MixinLlmHttpTransport)
 
 
 @pytest.mark.asyncio
-async def test_inference_registry_without_service_registry_registers_nothing() -> None:
-    container = _container(None)
+async def test_inference_registry_without_service_registry_registers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("transport built with no service registry")
 
-    await RegistryInfraLlmInferenceEffect.register_openai_compatible(container)
+    monkeypatch.setattr(registry_module, "_create_transport_adapter", _forbidden)
 
-    assert container.service_registry is None
+    await RegistryInfraLlmInferenceEffect.register_openai_compatible(
+        _unset_registry_container()
+    )
 
 
 @pytest.mark.asyncio
 async def test_inference_metrics_registry_wraps_the_registered_handler() -> None:
-    registry = _RecordingServiceRegistry()
+    container = ModelONEXContainer()
 
     async def publisher(*_args: Any, **_kwargs: Any) -> bool:
         return True
 
     await RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics(
-        _container(registry), publisher, target_name="omn21784-metrics"
+        container, publisher, target_name="omn21784-metrics"
     )
 
-    handler = registry.get_service(HandlerLlmOpenaiCompatible)
-    service = registry.get_service(ServiceLlmMetricsPublisher)
+    handler = await container.get_service_async(HandlerLlmOpenaiCompatible)
+    service = await container.get_service_async(ServiceLlmMetricsPublisher)
     assert isinstance(handler, HandlerLlmOpenaiCompatible)
     assert isinstance(service, ServiceLlmMetricsPublisher)
     assert service._handler is handler
+
+
+@pytest.mark.asyncio
+async def test_inference_metrics_registry_without_service_registry_registers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("transport built with no service registry")
+
+    monkeypatch.setattr(registry_module, "_create_transport_adapter", _forbidden)
+
+    async def publisher(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    await RegistryInfraLlmInferenceEffect.register_openai_compatible_with_metrics(
+        _unset_registry_container(), publisher
+    )
 
 
 @pytest.mark.parametrize(

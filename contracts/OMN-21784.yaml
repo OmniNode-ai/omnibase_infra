@@ -15,28 +15,37 @@ requirements:
       - id: AC2
         statement: "AC2: the embedding and inference registries build their handler only as the instance argument of the container registration call, and the registered instance is the real handler class -- falsifier: the registry registration cases of tests/integration/nodes/test_llm_registry_registration_omn21784.py"
       - id: AC3
-        statement: "AC3: the metrics registration resolves the handler from the container before wrapping it, and an unset service registry registers nothing -- falsifier: test_inference_metrics_registry_wraps_the_registered_handler and the without_service_registry cases of the same file"
+        statement: "AC3: the metrics registration resolves the handler from the container with get_service_async before wrapping it, and an unset service registry builds and registers nothing -- falsifier: test_inference_metrics_registry_wraps_the_registered_handler and the without_service_registry cases of the same file, which run against a real ModelONEXContainer"
 evidence_requirements:
   - kind: tests
-    description: "Unit tests of the touched LLM registries, reward binder handler and the four nodes pass."
-    command: "uv run pytest tests/unit/nodes/node_llm_inference_effect tests/unit/nodes/node_llm_embedding_effect tests/unit/nodes/node_reward_binder_effect -q -p no:cacheprovider"
+    description: "Unit tests of every touched node (LLM inference, LLM embedding, reward binder, contract persistence, RRH emit, pattern lifecycle) pass."
+    command: "uv run pytest tests/unit/nodes/node_llm_inference_effect tests/unit/nodes/node_llm_embedding_effect tests/unit/nodes/node_reward_binder_effect tests/unit/nodes/node_contract_persistence_effect tests/unit/nodes/test_node_rrh_emit_effect.py tests/unit/test_pattern_lifecycle_effect.py -q -p no:cacheprovider"
 dod_evidence:
   - id: dod-001
-    description: "Touched modules' unit tests pass, so the registries still register and resolve the handlers."
+    description: "Unit tests of all six touched nodes pass, so the registries still register and resolve the handlers."
     source: generated
     checks:
       - check_type: command
-        check_value: 'uv run pytest tests/unit/nodes/node_llm_inference_effect tests/unit/nodes/node_llm_embedding_effect tests/unit/nodes/node_reward_binder_effect -q -p no:cacheprovider'
+        check_value: 'uv run pytest tests/unit/nodes/node_llm_inference_effect tests/unit/nodes/node_llm_embedding_effect tests/unit/nodes/node_reward_binder_effect tests/unit/nodes/node_contract_persistence_effect tests/unit/nodes/test_node_rrh_emit_effect.py tests/unit/test_pattern_lifecycle_effect.py -q -p no:cacheprovider'
+  - id: dod-002
+    description: "The core contracts_and_di checker run over the embedding registry reports no handler_hand_construction finding, and over the inference registry reports exactly the one remaining create() finding that this slice leaves untouched."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: 'uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/nodes/node_llm_embedding_effect/registry/registry_infra_llm_embedding_effect.py'
+      - check_type: command
+        check_value: 'test "$(uv run python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/nodes/node_llm_inference_effect/registry/registry_infra_llm_inference_effect.py | grep -c handler_hand_construction)" = 1'
   - id: dod-003
-    description: "The integration test drives the embedding and both inference registries against a recording service registry, asserts the registered instances are the real handler classes and the metrics service wraps the registered handler, asserts the unset-registry path registers nothing, and asserts the four removed registry packages no longer import."
+    description: "The integration test drives the embedding and both inference registries through a real ModelONEXContainer, resolves the registered handlers back with get_service_async, asserts the metrics service wraps the registered handler, asserts the unset-registry paths build nothing, and asserts the four removed registry packages no longer import."
     source: generated
     binds_ac: [AC1, AC2, AC3]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/nodes/test_llm_registry_registration_omn21784.py -q -p no:cacheprovider
   - id: dod-deploy
-    description: "Deploy probe: the embedding registry at the PR head builds its handler as the argument of the container registration call."
+    description: "Deploy probe: the registries register the handlers into a real container and the registered handlers resolve back from it (the same integration test, runnable on a hosted runner with no live runtime)."
     source: generated
     checks:
       - check_type: command
-        check_value: 'gh api -H ''Accept: application/vnd.github.raw'' "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_llm_embedding_effect/registry/registry_infra_llm_embedding_effect.py?ref=c6a36f394ebca0fd0fe2a1c1c2bf5efe91cb64d6" | grep -qF ''instance=HandlerEmbeddingOpenaiCompatible(target_name=target_name)'''
+        check_value: 'uv run pytest tests/integration/nodes/test_llm_registry_registration_omn21784.py -q -p no:cacheprovider'
