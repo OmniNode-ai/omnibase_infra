@@ -14,7 +14,7 @@ from functools import cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -45,6 +45,18 @@ class ModelIntentTargetUris(BaseModel):
     node_registrations: str = Field(min_length=1)
     validation_event_ledger: str = Field(min_length=1)
 
+    @field_validator("*")
+    @classmethod
+    def _validate_base(cls, value: str) -> str:
+        """Require a ``postgres://`` base with an identifier and no trailing slash."""
+        resource = value.removeprefix("postgres://")
+        if resource == value or not resource or value.endswith("/"):
+            raise ValueError(
+                "intent target base must be postgres://<resource> without a "
+                "trailing slash"
+            )
+        return value
+
     @staticmethod
     def target(base: str, *segments: object) -> str:
         """Return ``base`` followed by each segment, joined with ``/``."""
@@ -55,21 +67,34 @@ class ModelIntentTargetUris(BaseModel):
         """Load the base URIs from the ``intent_targets`` mapping of a YAML file.
 
         Raises:
-            ProtocolConfigurationError: If the file has no ``intent_targets`` mapping.
+            ProtocolConfigurationError: If the file is unreadable, is not valid
+                YAML, has no ``intent_targets`` mapping, or the mapping fails
+                validation.
         """
-        with uris_path.open(encoding="utf-8") as handle:
-            document = yaml.safe_load(handle) or {}
+        context = ModelInfraErrorContext.with_correlation(
+            transport_type=EnumInfraTransportType.FILESYSTEM,
+            operation="load_intent_target_uris",
+        )
+        try:
+            with uris_path.open(encoding="utf-8") as handle:
+                document = yaml.safe_load(handle) or {}
+        except (OSError, yaml.YAMLError) as error:
+            raise ProtocolConfigurationError(
+                f"{uris_path.name} cannot be read as YAML", context=context
+            ) from error
         block = document.get("intent_targets") if isinstance(document, dict) else None
         if not isinstance(block, dict):
-            context = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.FILESYSTEM,
-                operation="load_intent_target_uris",
-            )
             raise ProtocolConfigurationError(
                 f"{uris_path.name} has no intent_targets mapping",
                 context=context,
             )
-        return cls.model_validate(block)
+        try:
+            return cls.model_validate(block)
+        except ValidationError as error:
+            raise ProtocolConfigurationError(
+                f"{uris_path.name} intent_targets is invalid: {error}",
+                context=context,
+            ) from error
 
 
 @cache
