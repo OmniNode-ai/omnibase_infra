@@ -23,6 +23,7 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
     )
     socket_path: str = Field(
         default="",
+        pattern=r"^(\S(.*\S)?)?$",
         description="Unix-socket path for ingress; the runtime overlay supplies it.",
     )
     socket_permissions: int = Field(
@@ -57,23 +58,14 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_socket_path(self) -> ModelLocalRuntimeIngressConfig:
-        if self.enabled and not self.socket_path.strip():
+        if self.enabled and not self.socket_path:
             raise ValueError("socket_path must be a non-empty string when enabled")
         return self
 
-    @field_validator("package_names", mode="before")
+    @field_validator("package_names", "enabled_profiles", mode="before")
     @classmethod
-    def _coerce_package_names(cls, value: object) -> object:
-        if isinstance(value, list):
-            return tuple(value)
-        return value
-
-    @field_validator("enabled_profiles", mode="before")
-    @classmethod
-    def _coerce_enabled_profiles(cls, value: object) -> object:
-        if isinstance(value, list):
-            return tuple(value)
-        return value
+    def _coerce_sequences(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
 
     @field_validator("package_names")
     @classmethod

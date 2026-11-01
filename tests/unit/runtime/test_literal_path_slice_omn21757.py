@@ -61,6 +61,7 @@ def test_forwarder_takes_the_health_paths_from_its_arguments() -> None:
 @pytest.mark.unit
 def test_contracts_and_di_reports_no_literal_path_on_the_slice() -> None:
     pytest.importorskip("omnibase_core.validation.validator_contracts_and_di")
+    assert all((_REPO_ROOT / p).exists() for p in _SLICE_PATHS)
     completed = subprocess.run(
         [
             sys.executable,
@@ -75,6 +76,6 @@ def test_contracts_and_di_reports_no_literal_path_on_the_slice() -> None:
         check=False,
     )
     output = completed.stdout + completed.stderr
-    assert completed.returncode in (0, 1), output
+    assert completed.returncode == 0, output
     assert "Traceback" not in output, output
     assert "literal_path" not in output

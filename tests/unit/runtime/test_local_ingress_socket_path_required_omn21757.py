@@ -37,3 +37,9 @@ def test_enabled_ingress_takes_the_supplied_socket_path(tmp_path: object) -> Non
 def test_enabled_ingress_with_blank_socket_path_is_refused() -> None:
     with pytest.raises(ValidationError, match="socket_path"):
         ModelLocalRuntimeIngressConfig(enabled=True, socket_path="   ")
+
+
+@pytest.mark.unit
+def test_padded_socket_path_is_refused() -> None:
+    with pytest.raises(ValidationError, match="socket_path"):
+        ModelLocalRuntimeIngressConfig(enabled=True, socket_path=" /run/x.sock ")
