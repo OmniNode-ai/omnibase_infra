@@ -6,7 +6,6 @@
 call sites read their waits from it and hold no timeout literal.
 """
 
-from omnibase_infra.models.runtime_timeouts import model_runtime_timeouts
 from omnibase_infra.models.runtime_timeouts.model_runtime_timeouts import (
     ModelRuntimeTimeouts,
     load_runtime_timeouts,
@@ -18,5 +17,4 @@ __all__ = [
     "RUNTIME_TIMEOUTS",
     "ModelRuntimeTimeouts",
     "load_runtime_timeouts",
-    "model_runtime_timeouts",
 ]
