@@ -728,7 +728,8 @@ io_operations:
       - scheduled_apply
       - max_flips_per_run
       # OMN-18489. The In Progress demotion leg: the window is declared in the
-      # request (0 = leg off) and the per-run write cap bounds its blast radius.
+      # request, armed at 168h by default (OMN-21714; 0 = leg off) and the
+      # per-run write cap bounds its blast radius.
       - demotion_window_hours
       - max_demotions_per_run
       - disarmed_by_ticket
