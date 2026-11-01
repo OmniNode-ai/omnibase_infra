@@ -69,8 +69,6 @@ class WiringResult(TypedDict):
 
 
 if TYPE_CHECKING:
-    import asyncpg
-
     from omnibase_core.container import ModelONEXContainer
     from omnibase_core.protocols.event_bus.protocol_event_bus import ProtocolEventBus
     from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
@@ -81,6 +79,9 @@ if TYPE_CHECKING:
         HandlerTopicCatalogQuery,
     )
     from omnibase_infra.projectors import ProjectionReaderRegistration
+    from omnibase_infra.protocols.protocol_registration_projection_pool import (
+        RegistrationProjectionPool,
+    )
     from omnibase_infra.protocols.protocol_snapshot_publisher import (
         ProtocolSnapshotPublisher,
     )
@@ -551,7 +552,7 @@ async def wire_registration_dispatchers(
 
 async def wire_registration_handlers(
     container: ModelONEXContainer,
-    pool: asyncpg.Pool,
+    pool: RegistrationProjectionPool,
     liveness_interval_seconds: int | None = None,
     projector: ProjectorShell | None = None,
     snapshot_publisher: ProtocolSnapshotPublisher | None = None,
