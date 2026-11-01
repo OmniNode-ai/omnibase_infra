@@ -94,8 +94,8 @@ class TestHandlerChainRetrievalComplete:
             is_hit=True,
         )
         result = await handler.handle(retrieval)
-        assert result["path"] == "replay"
-        assert result["is_hit"] is True
+        assert result.path == "replay"
+        assert result.is_hit is True
 
     @pytest.mark.asyncio
     async def test_miss_path(self) -> None:
@@ -105,8 +105,8 @@ class TestHandlerChainRetrievalComplete:
             is_hit=False,
         )
         result = await handler.handle(retrieval)
-        assert result["path"] == "explore"
-        assert result["is_hit"] is False
+        assert result.path == "explore"
+        assert result.is_hit is False
 
 
 @pytest.mark.unit

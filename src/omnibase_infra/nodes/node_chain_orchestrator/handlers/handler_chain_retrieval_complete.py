@@ -8,6 +8,7 @@ import logging
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_chain_orchestrator.models import (
+    ModelChainRetrievalDecision,
     ModelChainRetrievalResult,
 )
 
@@ -25,7 +26,9 @@ class HandlerChainRetrievalComplete:
     def handler_category(self) -> EnumHandlerTypeCategory:
         return EnumHandlerTypeCategory.COMPUTE
 
-    async def handle(self, request: ModelChainRetrievalResult) -> dict[str, str | bool]:
+    async def handle(
+        self, request: ModelChainRetrievalResult
+    ) -> ModelChainRetrievalDecision:
         """Evaluate retrieval result and decide path.
 
         Args:
@@ -33,7 +36,7 @@ class HandlerChainRetrievalComplete:
                 correlation ID).
 
         Returns:
-            Dict with path decision and data for next step.
+            Typed decision with path and data for next step.
         """
         if request.is_hit and request.matches:
             best_match = request.matches[0]
@@ -43,18 +46,15 @@ class HandlerChainRetrievalComplete:
                 best_match.chain_entry.chain_id,
                 request.correlation_id,
             )
-            return {
-                "path": "replay",
-                "chain_id": str(best_match.chain_entry.chain_id),
-                "is_hit": True,
-            }
+            return ModelChainRetrievalDecision(
+                path="replay",
+                chain_id=best_match.chain_entry.chain_id,
+                is_hit=True,
+            )
 
         logger.info(
             "Chain MISS: best_similarity=%.3f (correlation_id=%s)",
             request.best_match_similarity,
             request.correlation_id,
         )
-        return {
-            "path": "explore",
-            "is_hit": False,
-        }
+        return ModelChainRetrievalDecision(path="explore", is_hit=False)
