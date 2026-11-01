@@ -49,6 +49,7 @@ from omnibase_infra.enums import (
 )
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.models.validation_ledger import (
     ModelPayloadValidationLedgerAppend,
 )
@@ -281,9 +282,11 @@ class HandlerValidationLedgerProjection:
         )
         intent = ModelIntent(
             intent_type=payload.intent_type,
-            target=(
-                f"postgres://validation_event_ledger/{payload.kafka_topic}/"
-                f"{payload.kafka_partition}/{payload.kafka_offset}"
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().validation_event_ledger,
+                payload.kafka_topic,
+                payload.kafka_partition,
+                payload.kafka_offset,
             ),
             payload=payload,
         )
