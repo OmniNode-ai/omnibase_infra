@@ -94,9 +94,53 @@ def test_hook_id_is_not_defined_locally(hook_id: str) -> None:
             assert hook_id not in [hook["id"] for hook in block["hooks"]]
 
 
-@pytest.mark.parametrize("hook_id", WIRED_HOOK_IDS)
-def test_ci_job_runs_the_hook_id(hook_id: str) -> None:
-    assert hook_id in _job_text(CORE_JOB)
+def _step_script(name_prefix: str) -> list[str]:
+    """Executable lines of the named step's ``run`` script, comments removed."""
+    steps = _workflow_jobs()[CORE_JOB]["steps"]
+    (step,) = [s for s in steps if str(s.get("name", "")).startswith(name_prefix)]
+    return [
+        line.strip()
+        for line in str(step["run"]).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _joined(lines: list[str]) -> str:
+    return " ".join(line.rstrip("\\").strip() for line in lines)
+
+
+def _loop_words(lines: list[str], variable: str) -> list[str]:
+    """The words a ``for <variable> in ...; do`` header iterates over."""
+    match = re.search(rf"for {variable} in (.*?); do", _joined(lines))
+    assert match, f"no for-{variable} loop in the step script"
+    return match.group(1).split()
+
+
+def test_ci_job_executes_exactly_the_wired_hook_ids() -> None:
+    """The run loop iterates the wired ids (comments and strings elsewhere do not count)."""
+    lines = _step_script("Run the core validators")
+    assert sorted(_loop_words(lines, "hook")) == sorted(WIRED_HOOK_IDS)
+    invocation = [line for line in lines if "pre-commit" in line]
+    assert len(invocation) == 1
+    assert 'run "$hook"' in invocation[0]
+    assert "--from-ref" in invocation[0]
+    assert "--to-ref HEAD" in invocation[0]
+
+
+def test_ci_run_loop_does_not_mask_a_hook_failure() -> None:
+    """No ``|| true``, no unset-e masking, and no ``set +e`` in the validator step."""
+    text = _joined(_step_script("Run the core validators"))
+    assert "|| true" not in text
+    assert "set +e" not in text
+    assert "continue-on-error" not in yaml.safe_dump(_workflow_jobs()[CORE_JOB])
+
+
+def test_ci_run_step_derives_the_base_before_judging() -> None:
+    text = _joined(_step_script("Run the core validators"))
+    assert 'from_ref="$(git merge-base "$base" HEAD)"' in text
+    assert "github.event.pull_request.base.sha" in yaml.safe_dump(
+        _workflow_jobs()[CORE_JOB]
+    )
 
 
 def test_ci_job_is_unconditional_and_hosted() -> None:
@@ -107,10 +151,29 @@ def test_ci_job_is_unconditional_and_hosted() -> None:
     assert job["name"] == "Core Validators (OMN-21538)"
 
 
-def test_ci_job_has_a_positive_control() -> None:
-    text = _job_text(CORE_JOB)
-    assert "POSITIVE CONTROL FAILED" in text
-    assert "pre-commit@" in text
+def test_ci_job_has_a_positive_control_for_each_planted_hook() -> None:
+    """Each control pair names a wired hook, plants a file, and fails closed on acceptance."""
+    lines = _step_script("Positive control")
+    pairs = [word.split(":") for word in _loop_words(lines, "pair")]
+    assert sorted(hook for hook, _ in pairs) == [
+        "check-local-paths-compute",
+        "check-no-raw-sqlite3",
+    ]
+    text = _joined(lines)
+    for hook, planted in pairs:
+        assert hook in WIRED_HOOK_IDS
+        assert f"> {planted}" in text, f"{planted} is never written"
+    # An accepting hook must stop the job: the if-branch exits non-zero.
+    accepted = re.search(
+        r'if uvx pre-commit@4\.5\.1 run "\$hook" --files "\$planted"; '
+        r"then (.*?) fi",
+        text,
+    )
+    assert accepted, "the control does not branch on the hook accepting the plant"
+    assert "POSITIVE CONTROL FAILED" in accepted.group(1)
+    assert "exit 1" in accepted.group(1)
+    assert "set -u" in lines[0]
+    assert "set +e" not in text
 
 
 def test_the_tag_has_one_home() -> None:
