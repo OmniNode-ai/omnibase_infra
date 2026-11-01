@@ -17,7 +17,9 @@ single-file; it layers exactly like stability-test and prod do.
 
 from __future__ import annotations
 
+import re
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -31,6 +33,48 @@ from deploy_agent.executor import (
 )
 
 pytestmark = pytest.mark.unit
+
+# The repo's docker/ directory, resolved the way conftest.py resolves it.
+DOCKER_DIR = Path(__file__).resolve().parents[4] / "docker"
+
+
+def _overlay_container_name(overlay: str, service: str) -> str:
+    """Read one service's container_name from the committed overlay text.
+
+    The overlay uses compose's !override tags, so read that line rather than
+    load the YAML. The service block ends at the next line indented no deeper
+    than the service key; blank and comment lines inside it are skipped, and
+    the indentation width is taken from the file rather than assumed.
+    """
+    match = re.search(
+        rf"^(?P<indent>[ ]+){re.escape(service)}:[ \t]*\n"
+        rf"(?:(?:(?P=indent)[ ]+.*|[ \t]*(?:#.*)?)\n)*?"
+        rf"(?P=indent)[ ]+container_name:[ \t]*['\"]?(?P<name>[^'\"\s]+)",
+        overlay,
+        re.MULTILINE,
+    )
+    assert match is not None, f"{service} has no container_name in the overlay"
+    return match.group("name")
+
+
+@pytest.mark.parametrize(
+    "overlay",
+    [
+        "services:\n  main:\n    image: x\n\n    # pinned\n    container_name: main-c\n"
+        "  other:\n    container_name: other-c\n",
+        "services:\n main:\n   image: x\n   container_name: 'main-c'\n"
+        " other:\n   container_name: other-c\n",
+    ],
+)
+def test_overlay_container_name_tolerates_layout(overlay: str) -> None:
+    assert _overlay_container_name(overlay, "main") == "main-c"
+    assert _overlay_container_name(overlay, "other") == "other-c"
+
+
+def test_overlay_container_name_stays_inside_the_service_block() -> None:
+    overlay = "services:\n  main:\n    image: x\n  other:\n    container_name: c\n"
+    with pytest.raises(AssertionError, match="main has no container_name"):
+        _overlay_container_name(overlay, "main")
 
 
 def _noop_phase_update(phase: Phase, status: PhaseStatus) -> None:
@@ -64,7 +108,17 @@ class TestLaneConfig:
         )
 
     def test_stability_test_lane_config(self) -> None:
-        cfg = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
+        policy = DOCKER_DIR / "runtime-policy.env"
+        assert policy.is_file(), f"committed runtime policy missing at {policy}"
+        with patch("deploy_agent.executor.RUNTIME_POLICY_ENV_FILE", policy):
+            cfg = lane_config_for(EnumRuntimeLane.STABILITY_TEST)
+        # OMN-15181: the expected names come from the committed overlay, a file
+        # the executor's hardcoded lane config does not read. Which overlay it
+        # is stays pinned by the compose_files assertion below.
+        overlay = (DOCKER_DIR / Path(cfg.compose_files[-1]).name).read_text()
+        main_container = _overlay_container_name(overlay, "omninode-runtime")
+        effects_container = _overlay_container_name(overlay, "runtime-effects")
+        assert main_container != effects_container
         assert cfg.compose_project == "omnibase-infra-stability-test"
         assert cfg.postgres_container == "omnibase-infra-stability-test-postgres"
         # overlay must be layered on top of the base infra compose file
@@ -72,10 +126,13 @@ class TestLaneConfig:
         assert any("docker-compose.stability-test.yml" in f for f in cfg.compose_files)
         # OMN-15181: must match the container_name: override in
         # docker-compose.stability-test.yml, not the dev-lane bare name.
+        # OMN-21288: effects is folded into main, so both health ports resolve
+        # to the one runtime container.
         assert cfg.runtime_health_targets == (
-            ("omninode-stability-test-runtime", 18085),
-            ("omninode-stability-test-runtime-effects", 18086),
+            (main_container, 18085),
+            (main_container, 18086),
         )
+        assert all(name != effects_container for name, _ in cfg.runtime_health_targets)
 
     def test_prod_lane_config(self) -> None:
         cfg = lane_config_for(EnumRuntimeLane.PROD)

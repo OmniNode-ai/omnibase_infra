@@ -262,11 +262,91 @@ def render_resolver_config(env: Mapping[str, str]) -> int:
     return render_resolver_main()
 
 
+def prepare_folded_effects_state(env: Mapping[str, str]) -> None:
+    """Alias only delegation state; refuse to overwrite any existing main state.
+
+    The effects container must be retired before main starts. Its mounted state
+    root remains authoritative for delegation claims, including SQLite's WAL
+    and SHM files. Linking the directory preserves all three together without
+    copying a live database or moving main's other state onto the effects volume.
+    An installation with two nonempty delegation directories needs an explicit
+    reconciliation; choosing either silently would reopen completed claims.
+    """
+    configured = env.get("ONEX_FOLDED_EFFECTS_STATE_ROOT", "").strip()
+    if not configured:
+        return
+    folded = {
+        role.strip().lower()
+        for role in env.get("ONEX_RUNTIME_FOLDED_PROFILES", "").split(",")
+    }
+    if "effects" not in folded:
+        raise ValueError("effects state handover requires the folded effects role")
+    # The claim reader opens ONEX_STATE_DIR/delegation. Falling back to
+    # ONEX_STATE_ROOT could alias a directory the reader never opens.
+    main_configured = env.get("ONEX_STATE_DIR", "").strip()
+    if not main_configured:
+        raise ValueError("effects state handover requires ONEX_STATE_DIR")
+    main_root = Path(main_configured)
+    effects_root = Path(configured)
+    if not main_root.is_absolute() or not effects_root.is_absolute():
+        raise ValueError("folded effects and main state roots must be absolute")
+    source = effects_root / "delegation"
+    destination = main_root / "delegation"
+    # Only the destination alias may be a link. A redirected source would
+    # silently adopt a different claim store, including on a later restart.
+    for state_path in (main_root, effects_root, source):
+        if state_path.is_symlink():
+            raise ValueError(f"folded state path must not be a symlink: {state_path}")
+        if state_path.exists() and not state_path.is_dir():
+            raise ValueError(f"folded state path must be a directory: {state_path}")
+    source_path = source.resolve()
+    destination_path = destination.resolve()
+    if destination.is_symlink():
+        if destination_path != source_path:
+            raise ValueError("main delegation state links to a conflicting directory")
+        # An existing alias records a completed handover. A missing target on
+        # restart can mean the preserved volume was replaced or unmounted;
+        # creating a new empty store would let completed claims run again.
+        if not source.is_dir():
+            raise ValueError("preserved delegation state is missing after handover")
+        return
+    if source_path.is_relative_to(destination_path) or destination_path.is_relative_to(
+        source_path
+    ):
+        raise ValueError("folded effects and main delegation directories overlap")
+    if destination.exists() and (
+        not destination.is_dir() or any(destination.iterdir())
+    ):
+        raise ValueError(
+            "main has conflicting delegation state; reconcile it before folding"
+        )
+    source.mkdir(parents=True, exist_ok=True, mode=0o700)
+    main_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if destination.exists():
+        destination.rmdir()  # Only an empty directory can reach this point.
+    destination.symlink_to(source, target_is_directory=True)
+    # The checks above ran before these filesystem steps. Confirm the alias and
+    # its source still hold, so a path swapped in between refuses this boot.
+    if (
+        destination.readlink() != source
+        or source.is_symlink()
+        or not source.is_dir()
+        or effects_root.is_symlink()
+        or main_root.is_symlink()
+    ):
+        raise ValueError("folded delegation state changed during handover")
+
+
 def run_preflight(env: MutableMapping[str, str]) -> int:
     """Run every preflight step in the shell's original order.
 
     Returns ``0`` when the kernel may start, or the boot-abort exit code.
     """
+    try:
+        prepare_folded_effects_state(env)
+    except (OSError, ValueError) as exc:
+        _echo_err(f"[entrypoint] FOLDED_EFFECTS_STATE_REFUSED: {exc}")
+        return 2
     rc = stamp_all_fingerprints(env)
     if rc != 0:
         return rc
