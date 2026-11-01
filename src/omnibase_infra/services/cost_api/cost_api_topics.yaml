@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Cost API snapshot topics (OMN-21623).
+#
+# The projection snapshot topics whose latest payload the cost API caches and
+# serves. Read by ModelCostApiTopics; the cost API modules hold no topic literal.
+# Every key is required: a block that omits one fails to load.
+topics:
+  summary: "onex.snapshot.projection.cost.summary.v1"
+  by_repo: "onex.snapshot.projection.cost.by_repo.v1"
+  token_usage: "onex.snapshot.projection.cost.token_usage.v1"
