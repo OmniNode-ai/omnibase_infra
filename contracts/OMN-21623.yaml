@@ -43,6 +43,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn21623-ac5-packaged-file
+    description: The packaged endpoints file loads and the Slack and Gmail handler constants equal its values. Fails at the merge base, where the endpoints loader does not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run --frozen pytest tests/integration/models/test_third_party_endpoints_runtime_file_omn21623.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
   - id: dod-omn21623-deploy-service-endpoints
     description: >-
       Post-deploy probe: the runtime container loads the service endpoints from the file it ships. Hosted CI has no runtime container, so only the local Done gate runs it and it binds no acceptance criterion.

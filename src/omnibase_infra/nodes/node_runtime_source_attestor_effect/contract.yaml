@@ -108,6 +108,10 @@ dependencies:
     type: "environment"
     description: "GitHub repo URL for git ls-remote HEAD resolution"
     required: false
+  - name: "third_party_endpoints"
+    type: "service"
+    description: "OMN-21623: The default repository URL for git ls-remote HEAD resolution. Read from the declared third_party_endpoints.yaml through load_third_party_endpoints(), not spelled in the handler."
+    required: true
 # Feature flags
 feature_flags:
   - name: "ENABLE_SOURCE_ATTESTATION"

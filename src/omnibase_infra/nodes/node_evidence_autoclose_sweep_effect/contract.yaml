@@ -834,6 +834,10 @@ dependencies:
     type: "service"
     description: "OMN-17678: every Linear GraphQL POST goes through AdapterLinearGraphQLProjectTracker.graphql_transport (ProtocolLinearGraphQLTransport). The handler keeps its own status, retry and Done-write handling."
     required: false
+  - name: "third_party_endpoints"
+    type: "service"
+    description: "OMN-21623: The GitHub pull and blob URLs the sweep records. Read from the declared third_party_endpoints.yaml through load_third_party_endpoints(), not spelled in the handler."
+    required: true
 # Health check
 health_check:
   enabled: true
