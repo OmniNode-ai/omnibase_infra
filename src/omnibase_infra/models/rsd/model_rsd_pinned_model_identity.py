@@ -5,17 +5,13 @@
 from __future__ import annotations
 
 import functools
-from pathlib import Path
+from importlib.resources import files
 from typing import Annotated
 
 import yaml
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
 from omnibase_infra.errors import ProtocolConfigurationError
-
-_CONTRACT_PATH = (
-    Path(__file__).resolve().parents[2] / "contracts" / "rsd_pinned_model_identity.yaml"
-)
 
 
 class ModelRsdPinnedModelIdentity(BaseModel):
@@ -34,9 +30,12 @@ class ModelRsdPinnedModelIdentity(BaseModel):
     @classmethod
     @functools.cache
     def from_contract(cls) -> ModelRsdPinnedModelIdentity:
-        """Load the packaged pin or report a configuration failure at startup."""
+        """Load the packaged pin once, when first requested by a consumer."""
         try:
-            document = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
+            contract = files("omnibase_infra").joinpath(
+                "contracts", "rsd_pinned_model_identity.yaml"
+            )
+            document = yaml.safe_load(contract.read_text(encoding="utf-8"))
             if not isinstance(document, dict):
                 raise ValueError("the contract must be a mapping")
             return cls.model_validate(document["pinned_model_identity"])
@@ -58,9 +57,12 @@ class ModelRsdPinnedModelIdentity(BaseModel):
 
 
 def _pinned(field_name: str) -> AfterValidator:
-    """Load the pin while defining the types, before any payload validation."""
-    pinned = ModelRsdPinnedModelIdentity.from_contract()
-    return AfterValidator(lambda value: pinned.require(field_name, value))
+    """Resolve the cached contract on use, without I/O during model imports."""
+    return AfterValidator(
+        lambda value: ModelRsdPinnedModelIdentity.from_contract().require(
+            field_name, value
+        )
+    )
 
 
 ServedModelId = Annotated[str, _pinned("served_model")]

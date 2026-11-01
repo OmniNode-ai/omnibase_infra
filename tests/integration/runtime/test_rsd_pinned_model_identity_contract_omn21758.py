@@ -53,11 +53,14 @@ def test_real_runtime_model_accepts_the_pin_and_refuses_a_substitute() -> None:
         )
 
 
-def test_built_wheel_loads_the_pin_outside_the_source_tree(tmp_path: Path) -> None:
+@pytest.mark.parametrize("package_mode", ["directory", "zip"])
+def test_built_wheel_loads_the_pin_outside_the_source_tree(
+    tmp_path: Path, package_mode: str
+) -> None:
     root = Path(__file__).resolve().parents[3]
     wheels = tmp_path / "wheels"
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(wheels)],
+        [sys.executable, "-m", "hatchling", "build", "-t", "wheel", "-d", str(wheels)],
         cwd=root,
         check=True,
         capture_output=True,
@@ -71,7 +74,9 @@ def test_built_wheel_loads_the_pin_outside_the_source_tree(tmp_path: Path) -> No
             "omnibase_infra/contracts/rsd_pinned_model_identity.yaml"
             in archive.namelist()
         )
-        archive.extractall(installed)
+        if package_mode == "directory":
+            archive.extractall(installed)
+    package_path = installed if package_mode == "directory" else wheel
     completed = subprocess.run(
         [
             sys.executable,
@@ -88,10 +93,11 @@ def test_built_wheel_loads_the_pin_outside_the_source_tree(tmp_path: Path) -> No
             "installed_public_rsd_revision_sha='0'*40, observed_model_id=pin.observed_model); "
             "assert observation.observed_model_id == pin.observed_model; "
             "print('wheel RSD pin readback passed')",
-            str(installed),
+            str(package_path),
         ],
         cwd=tmp_path,
-        env=os.environ | {"PYTHONPATH": str(installed), "PYTHONDONTWRITEBYTECODE": "1"},
+        env=os.environ
+        | {"PYTHONPATH": str(package_path), "PYTHONDONTWRITEBYTECODE": "1"},
         check=True,
         capture_output=True,
         text=True,

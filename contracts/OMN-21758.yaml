@@ -49,3 +49,10 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'uv run pytest tests/integration/runtime/test_rsd_pinned_model_identity_contract_omn21758.py -q -p no:cacheprovider'
+  - id: dod-005
+    description: "Package resources load the RSD pin from extracted and zipped wheels; importing RSD models performs no contract I/O, and invalid contracts raise configuration errors on use."
+    source: generated
+    binds_ac: [AC2, AC3]
+    checks:
+      - check_type: command
+        check_value: 'uv run pytest tests/unit/runtime/test_rsd_pinned_model_identity_omn21758.py tests/integration/runtime/test_rsd_pinned_model_identity_contract_omn21758.py -q -p no:cacheprovider'

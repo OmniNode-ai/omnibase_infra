@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -152,54 +154,63 @@ def test_authority_overlay_and_provenance_refuse_each_substituted_pin(
         "{}",
         "pinned_model_identity: {}",
         "pinned_model_identity: 1",
+        "pinned_model_identity: []",
+        "pinned_model_identity: null",
+        "pinned_model_identity: {served_model: 123}",
     ],
 )
 def test_contract_load_failures_are_configuration_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str | None
 ) -> None:
-    contract = tmp_path / "rsd_pinned_model_identity.yaml"
+    contracts = tmp_path / "contracts"
+    contracts.mkdir()
+    contract = contracts / "rsd_pinned_model_identity.yaml"
     if payload is not None:
         contract.write_text(payload, encoding="utf-8")
-    monkeypatch.setattr(pin, "_CONTRACT_PATH", contract)
-    # Bypass only the success cache so the production loader reads the bad file.
-    with pytest.raises(
-        ProtocolConfigurationError, match="repair or reinstall"
-    ) as error:
-        ModelRsdPinnedModelIdentity.from_contract.__wrapped__(
-            ModelRsdPinnedModelIdentity
-        )
-    assert error.value.__cause__ is not None
-    assert not isinstance(error.value, ValidationError)
+    monkeypatch.setattr(pin, "files", lambda _package: tmp_path)
+    ModelRsdPinnedModelIdentity.from_contract.cache_clear()
+    try:
+        with pytest.raises(
+            ProtocolConfigurationError, match="repair or reinstall"
+        ) as error:
+            _relation("substituted")
+        assert error.value.__cause__ is not None
+        assert not isinstance(error.value, ValidationError)
+    finally:
+        ModelRsdPinnedModelIdentity.from_contract.cache_clear()
 
 
-def test_pin_is_loaded_when_defining_a_type_before_validating_a_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unavailable(
-        _cls: type[ModelRsdPinnedModelIdentity],
-    ) -> ModelRsdPinnedModelIdentity:
-        raise ProtocolConfigurationError("packaged pin unavailable")
-
-    monkeypatch.setattr(
-        ModelRsdPinnedModelIdentity, "from_contract", classmethod(unavailable)
+def test_model_imports_do_not_read_the_contract() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.resources; "
+            "importlib.resources.files = lambda *args: "
+            "(_ for _ in ()).throw(AssertionError('import must not read contract')); "
+            "import omnibase_infra.runtime.models.model_rsd_artifact_source_relation; "
+            "import omnibase_infra.runtime.models.model_rsd_live_delegation_authority_envelope; "
+            "import omnibase_infra.runtime.models.model_rsd_live_delegation_observation; "
+            "import omnibase_infra.runtime.models.model_rsd_live_delegation_overlay; "
+            "import omnibase_infra.runtime.models.model_rsd_model_artifact_provenance",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    with pytest.raises(ProtocolConfigurationError, match="packaged pin unavailable"):
-        pin._pinned("served_model")
+    assert completed.returncode == 0
 
 
-def test_payload_validation_uses_the_already_loaded_pin(
+def test_payload_validation_reuses_the_cached_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pinned = ModelRsdPinnedModelIdentity.from_contract()
 
-    def unexpected_load(
-        _cls: type[ModelRsdPinnedModelIdentity],
-    ) -> ModelRsdPinnedModelIdentity:
-        raise AssertionError("payload validation must not load a contract")
+    def unexpected_load(_package: str) -> None:
+        raise AssertionError("cached payload validation must not read a contract")
 
-    monkeypatch.setattr(
-        ModelRsdPinnedModelIdentity, "from_contract", classmethod(unexpected_load)
-    )
+    monkeypatch.setattr(pin, "files", unexpected_load)
     assert (
         _relation(pinned.base_model).artifact_declared_base_model_id
         == pinned.base_model
