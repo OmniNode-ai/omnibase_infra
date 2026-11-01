@@ -199,6 +199,7 @@ async def test_the_receipt_json_names_the_failing_check() -> None:
     result = await _handler(linear).handle(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
+            demotion_window_hours=0,
             evidence_repo=_OCC_REPO,
             lookback_hours=24,
             apply=True,
@@ -243,6 +244,7 @@ async def test_the_receipt_round_trips_back_into_the_result_model() -> None:
     result = await _handler(linear).handle(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
+            demotion_window_hours=0,
             evidence_repo=_OCC_REPO,
             lookback_hours=24,
             apply=True,
@@ -272,6 +274,7 @@ async def test_the_declared_counters_survive_a_disagreeing_check_list() -> None:
     result = await _handler(linear).handle(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
+            demotion_window_hours=0,
             evidence_repo=_OCC_REPO,
             lookback_hours=24,
             apply=True,
@@ -299,6 +302,7 @@ async def test_the_comment_written_to_linear_names_the_failing_check() -> None:
     await _handler(linear).handle(
         ModelEvidenceAutocloseSweepRequest(
             correlation_id=uuid4(),
+            demotion_window_hours=0,
             evidence_repo=_OCC_REPO,
             lookback_hours=24,
             apply=True,

@@ -325,6 +325,7 @@ from omnibase_core.enums import EnumNodeKind, EnumReductionType, EnumStreamingMo
 from omnibase_core.models.reducer.model_intent import ModelIntent
 from omnibase_core.nodes import ModelReducerOutput
 from omnibase_infra.enums import EnumConfirmationEventType, EnumRegistrationStatus
+from omnibase_infra.models.intent_target_uris import load_intent_target_uris
 from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
@@ -858,7 +859,9 @@ class RegistrationReducer:
         # ModelIntent.payload expects ProtocolIntentPayload, which our model implements
         return ModelIntent(
             intent_type=postgres_payload.intent_type,
-            target=f"postgres://node_registrations/{event.node_id}",
+            target=load_intent_target_uris().target(
+                load_intent_target_uris().node_registrations, event.node_id
+            ),
             payload=postgres_payload,
         )
 
