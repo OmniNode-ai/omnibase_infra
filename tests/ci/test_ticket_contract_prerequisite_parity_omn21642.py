@@ -8,9 +8,8 @@ ticket contract with ``requirements`` and ``evidence_requirements`` and no
 ``dod_evidence``, then ``onex scm pr-create`` refused the same contract twice,
 first for the missing ``dod_evidence[]`` and then for unbound acceptance
 criteria (about 25 lane-minutes). The hook judged only the verifier's check-value
-shape guard. pr-create calls ``contract_prerequisite`` from the released
-``omnimarket``; the hook now runs that same function at the pin the
-repo-evidence caller uses.
+shape guard. pr-create calls ``contract_prerequisite`` from ``omnimarket``; the hook now runs that same
+function from the dev-merge tag the repo-evidence caller passes as ``verifier-tag``.
 
 The fixtures under ``fixtures/ticket_contract_prerequisite_omn21642/`` come from
 a recorded contract, the OMN-21629 contract at omnibase_infra#5481 head
@@ -28,12 +27,12 @@ from pathlib import Path
 import pytest
 
 from scripts.ci.check_deploy_scope_dod import (
-    _VERIFIER_PYTHON,
     FAIL_NO_CONTRACT,
     PASS_CONTRACTS,
     classify_ticket_contracts,
+    install_verifier,
     pinned_verifier_judge,
-    read_verifier_version,
+    read_verifier_tag,
 )
 
 pytestmark = pytest.mark.unit
@@ -51,7 +50,7 @@ _REFUSALS = {
     ),
 }
 
-#: Runs in the released verifier's environment and prints what pr-create's own
+#: Runs in the tag-installed verifier's environment and prints what pr-create's own
 #: module binding returns for each fixture, with whether that binding is the
 #: function the hook runs.
 _PR_CREATE_PROGRAM = (
@@ -72,9 +71,9 @@ def _text(name: str) -> str:
 
 @pytest.fixture(scope="module")
 def released_judge(tmp_path_factory: pytest.TempPathFactory):
-    """The released verifier's prerequisite, at the pin the repo-evidence caller uses."""
+    """The verifier's prerequisite, at the tag the repo-evidence caller passes."""
     return pinned_verifier_judge(
-        read_verifier_version(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
+        read_verifier_tag(REPO_ROOT), tmp_path_factory.mktemp("judge-cwd")
     )
 
 
@@ -122,22 +121,10 @@ def test_hook_and_pr_create_give_one_verdict_per_fixture_parity(
     """pr-create's own binding of ``contract_prerequisite`` agrees with the hook on every fixture."""
     names = ["accepted_recorded_omn21629.yaml", *_REFUSALS]
     texts = {name: _text(name) for name in names}
-    verifier = read_verifier_version(REPO_ROOT)
+    verifier_python = install_verifier(read_verifier_tag(REPO_ROOT))
 
     ran = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--no-project",
-            "--python",
-            _VERIFIER_PYTHON,
-            "--with",
-            f"omnimarket=={verifier}",
-            "python",
-            "-I",
-            "-c",
-            _PR_CREATE_PROGRAM,
-        ],
+        [str(verifier_python), "-I", "-c", _PR_CREATE_PROGRAM],
         input=json.dumps(texts),
         check=False,
         capture_output=True,
