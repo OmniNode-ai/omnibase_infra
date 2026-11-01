@@ -72,3 +72,48 @@ def test_consumer_defaults_read_the_declared_endpoints() -> None:
     assert default_endpoint == endpoints.linear_graphql_url
     assert endpoints.slack_post_message_url == handler_slack_webhook._SLACK_WEB_API_URL
     assert endpoints.gmail_api_base_url == handler_gmail_api._GMAIL_API_BASE
+
+
+def test_declared_values_are_the_expected_endpoints() -> None:
+    """Pin the declared file to independent literals, so a changed value is seen."""
+    endpoints = load_third_party_endpoints()
+    assert endpoints.linear_graphql_url == "https://api.linear.app/graphql"
+    assert endpoints.linear_oauth_token_url == "https://api.linear.app/oauth/token"
+    assert endpoints.slack_post_message_url == "https://slack.com/api/chat.postMessage"
+    assert endpoints.gmail_oauth_token_url == "https://oauth2.googleapis.com/token"
+    assert (
+        endpoints.gmail_api_base_url == "https://gmail.googleapis.com/gmail/v1/users/me"
+    )
+    assert endpoints.github_api_base_url == "https://api.github.com"
+    assert (
+        endpoints.runtime_source_repo_url
+        == "https://github.com/OmniNode-ai/omnibase_infra.git"
+    )
+
+
+def test_module_constants_equal_the_declared_values() -> None:
+    from omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers import (
+        handler_plan_to_pr_comment,
+    )
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers import (
+        handler_evidence_autoclose_sweep,
+    )
+    from omnibase_infra.nodes.node_runtime_source_attestor_effect.handlers import (
+        handler_source_attestation,
+    )
+
+    assert handler_plan_to_pr_comment._GITHUB_API_BASE == "https://api.github.com"
+    assert (
+        handler_evidence_autoclose_sweep._LINEAR_OAUTH_TOKEN_URL
+        == "https://api.linear.app/oauth/token"
+    )
+    assert (
+        handler_source_attestation._DEFAULT_REPO_URL
+        == "https://github.com/OmniNode-ai/omnibase_infra.git"
+    )
+
+
+def test_endpoints_file_is_packaged_beside_the_model() -> None:
+    declared = _SRC / "models" / "third_party_endpoints" / "third_party_endpoints.yaml"
+    assert declared.is_file()
+    assert "linear_graphql_url" in declared.read_text(encoding="utf-8")
