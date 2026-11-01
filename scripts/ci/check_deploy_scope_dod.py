@@ -67,12 +67,13 @@ PR that missed them. This leg refuses the same two classes at ``git push``:
     own, naming the contract.
 
 The verdict is not re-implemented here. It is ``contract_prerequisite`` from the
-released ``omnimarket==<verifier-version>`` (``node_dod_verify`` services), the
-one function ``onex scm pr-create`` (``node_github_repo_write_effect``) calls
+``omnimarket`` installed from the dev-merge tag the caller passes as
+``verifier-tag`` (``node_dod_verify`` services), the one function ``onex scm pr-create`` (``node_github_repo_write_effect``) calls
 before it opens a pull request, so a contract this leg passes is one pr-create
 accepts (OMN-21642; FRICTION 2026-10-31T01:38:58Z, where the earlier shape-only
-judge passed a contract pr-create then refused twice). The version is read from
-the caller workflow, so the local and hosted verdicts use one pin. The leg runs
+judge passed a contract pr-create then refused twice). The tag is read from the
+caller workflow and installed the way the hosted reusable installs it (the tag's
+own ``uv.lock``, OMN-21853), so the local and hosted verdicts use one pin. The leg runs
 no bound check: ``contract_prerequisite`` only judges presence and static shape.
 Bot authorship is not consulted -- a push has no GitHub-verified author, and the
 hosted job's bot exemptions are derived from that metadata alone, so they stay
@@ -457,12 +458,15 @@ def render(decision: DeployScopeDecision, validator: ModuleType) -> None:
 # Ticket-contract leg (OMN-20870)
 # ---------------------------------------------------------------------------
 
-#: The repo-evidence caller; its ``verifier-version`` input is the one pin.
+#: The repo-evidence caller; its ``verifier-tag`` input is the one pin.
 _REPO_EVIDENCE_CALLER_RELPATH = Path(".github/workflows/call-repo-evidence-gate.yml")
 #: The same ticket pattern the hosted job greps out of the PR title.
 _CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
-#: The Python the hosted job installs the verifier into.
-_VERIFIER_PYTHON = "3.13"
+#: An omnimarket dev-merge tag, the shape the hosted reusable accepts.
+_VERIFIER_TAG_RE = re.compile(r"dev-[0-9]{14}-[0-9a-f]{12}")
+#: The repository the hosted reusable fetches the verifier source from.
+_VERIFIER_REPO = "OmniNode-ai/omnimarket"
+_VERIFIER_INSTALL_SCRIPT = '''set -euo pipefail; mkdir -p "$(dirname "$2")"; exec 9>"$2.lock"; flock 9; [[ -f "$2/installed" ]] && exit 0; rm -rf "$2"; git init -q "$2/src"; git -C "$2/src" fetch -q --depth 1 --no-tags "https://github.com/$VERIFIER_REPO.git" "refs/tags/$1"; commit="$(git -C "$2/src" rev-parse --verify "FETCH_HEAD^{commit}")"; [[ "$commit" == "${1##*-}"* ]] || { echo "tag $1 names commit $commit, whose first 12 characters differ from the tag suffix; the tag was moved, refusing it" >&2; exit 1; }; git -C "$2/src" checkout -q --detach "$commit"; uv venv -q --clear --python 3.13 "$2/venv"; UV_PROJECT_ENVIRONMENT="$2/venv" uv sync -q --project "$2/src" --frozen --no-dev --no-editable --no-config --python 3.13; echo "tag=$1 commit=$commit" > "$2/installed"'''
 #: Runs inside the released verifier's environment: reads a JSON map of
 #: ticket to contract text on stdin and writes ``contract_prerequisite``'s
 #: refusal (or null) for each, the call ``onex scm pr-create`` makes.
@@ -588,71 +592,72 @@ def classify_ticket_contracts(
     )
 
 
-def read_verifier_version(repo_root: Path) -> str:
-    """The ``verifier-version`` the repo-evidence caller pins."""
+def read_verifier_tag(repo_root: Path) -> str:
     caller = repo_root / _REPO_EVIDENCE_CALLER_RELPATH
     try:
-        workflow = yaml.safe_load(caller.read_text(encoding="utf-8"))
-        version = workflow["jobs"]["repo-evidence"]["with"]["verifier-version"]
-    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        with_block = yaml.safe_load(caller.read_text(encoding="utf-8"))["jobs"]
+        tag = with_block["repo-evidence"]["with"]["verifier-tag"]
+        assert _VERIFIER_TAG_RE.fullmatch(tag)
+    except (OSError, yaml.YAMLError, KeyError, TypeError, AssertionError) as exc:
         raise DeployScopeHookError(
-            f"cannot read verifier-version from {_REPO_EVIDENCE_CALLER_RELPATH}: {exc}"
+            f"{_REPO_EVIDENCE_CALLER_RELPATH} passes no verifier-tag of the shape "
+            f"dev-YYYYMMDDHHMMSS-<sha12>: {exc!r}"
         ) from exc
-    if not isinstance(version, str) or not version.strip():
+    return str(tag)
+
+
+def install_verifier(tag: str) -> Path:
+    # The Python of a venv installed from omnimarket tag ``tag``'s own uv.lock. The
+    # hosted reusable refuses a moved tag and syncs the tag's lock (a plain install of
+    # the git commit cannot resolve the unreleased first-party tags it pins); this
+    # does the same once per tag, under a file lock.
+    # Imported here, not at module load, so the deploy-scope leg and the other legs of
+    # this hook run without omnibase_core importable; only the tag install needs it.
+    from omnibase_core.validators.no_unguarded_git_subprocess import (
+        scrub_git_location_env,
+    )
+
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    entry = Path(cache) / "onex-dod-verifier" / tag
+    env = {**scrub_git_location_env(os.environ), "VERIFIER_REPO": _VERIFIER_REPO}
+    done = subprocess.run(
+        ["bash", "-c", _VERIFIER_INSTALL_SCRIPT, "install", tag, str(entry)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=900,
+    )
+    if done.returncode != 0:
         raise DeployScopeHookError(
-            f"{_REPO_EVIDENCE_CALLER_RELPATH} pins no verifier-version"
+            f"installing omnimarket tag {tag} failed (rc={done.returncode}): "
+            f"{done.stderr.strip()[-2000:]}"
         )
-    return version.strip()
+    return entry / "venv" / "bin" / "python"
 
 
-def verifier_prerequisite_argv(verifier_version: str) -> list[str]:
-    """The command that runs the released verifier's ``contract_prerequisite``."""
-    return [
-        "uv",
-        "run",
-        "--no-project",
-        "--python",
-        _VERIFIER_PYTHON,
-        "--with",
-        f"omnimarket=={verifier_version}",
-        "python",
-        "-I",
-        "-c",
-        _VERIFIER_PREREQUISITE_PROGRAM,
-    ]
-
-
-def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ContractJudge:
-    """A judge that asks the pinned released verifier, failing loud if it cannot."""
-
+def pinned_verifier_judge(verifier_tag: str, cwd: Path) -> ContractJudge:
     def judge(contracts: Mapping[str, str]) -> dict[str, str | None]:
+        python = str(install_verifier(verifier_tag))
         result = subprocess.run(
-            verifier_prerequisite_argv(verifier_version),
+            [python, "-I", "-c", _VERIFIER_PREREQUISITE_PROGRAM],
             input=json.dumps(dict(contracts)),
             check=False,
             capture_output=True,
             text=True,
             cwd=str(cwd),
         )
-        if result.returncode != 0:
-            raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} contract_prerequisite did not run "
-                f"(rc={result.returncode}): {result.stderr.strip()[-2000:]}"
-            )
         try:
             verdicts = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
+            valid = result.returncode == 0 and all(
+                v is None or isinstance(v, str) for v in verdicts.values()
+            )
+        except (json.JSONDecodeError, AttributeError):
+            valid = False
+        if not valid:
             raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} contract_prerequisite returned "
-                f"no JSON: {exc}"
-            ) from exc
-        if not isinstance(verdicts, dict) or not all(
-            isinstance(t, str) and (v is None or isinstance(v, str))
-            for t, v in verdicts.items()
-        ):
-            raise DeployScopeHookError(
-                f"omnimarket=={verifier_version} contract_prerequisite "
-                f"returned {verdicts!r}"
+                f"omnimarket {verifier_tag} contract_prerequisite did not return "
+                f"verdicts (rc={result.returncode}): {result.stderr.strip()[-2000:]}"
             )
         return dict(verdicts)
 
@@ -772,7 +777,7 @@ def main(argv: list[str] | None = None) -> int:
         contract_decision = classify_ticket_contracts(
             tickets=cited_tickets(subjects),
             read_contract=lambda ticket: read_head_contract(repo_root, ticket),
-            judge=pinned_verifier_judge(read_verifier_version(repo_root), repo_root),
+            judge=pinned_verifier_judge(read_verifier_tag(repo_root), repo_root),
         )
     except DeployScopeHookError as exc:
         _log(f"ERROR (fail-loud): {exc}")
