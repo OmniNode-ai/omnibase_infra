@@ -120,6 +120,9 @@ from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_c
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_correlation_batch_output import (
     ModelSavingsCorrelationBatchOutput,
 )
+from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_counterfactual_policy import (
+    ModelSavingsCounterfactualPolicy,
+)
 from omnibase_infra.nodes.node_savings_estimation_compute.models.model_savings_estimation_input import (
     ModelSavingsEstimationInput,
 )
@@ -298,31 +301,6 @@ _SEVERITY_CONFIDENCE: dict[EnumCatchSeverity, float] = {
     EnumCatchSeverity.MINOR: 0.4,
 }
 
-# Counterfactual model: the highest-cost configured routing candidate.
-_COUNTERFACTUAL_MODEL_MAP: dict[str, str] = {
-    "claude-sonnet-4": "claude-opus-4-6",
-    "claude-3-5-sonnet": "claude-opus-4-6",
-    "claude-3.5-sonnet": "claude-opus-4-6",
-    "claude-opus-4-6": "claude-opus-4-6",
-    "claude-3-opus": "claude-opus-4-6",
-}
-
-
-def _resolve_counterfactual(actual_model_id: str) -> str:
-    """Resolve the counterfactual model for a given actual model.
-
-    Never returns None — downstream (omnimarket's node_projection_savings)
-    treats an absent/empty ``model_cloud_baseline`` as a malformed event and
-    routes it to the DLQ (OMN-14533), so this must always resolve to
-    something. Falls back to ``actual_model_id`` itself when no tier match is
-    found.
-    """
-    lower = actual_model_id.lower()
-    for key, value in _COUNTERFACTUAL_MODEL_MAP.items():
-        if key in lower:
-            return value
-    return actual_model_id
-
 
 def _classify_severity(raw: str) -> EnumCatchSeverity:
     lower = raw.lower().strip()
@@ -479,6 +457,8 @@ class HandlerSavingsCorrelation:
         _pool: Injected asyncpg connection pool.
         _publisher: Optional async callable for publishing to Kafka.
         _estimation_handler: The existing pure COMPUTE handler.
+        _counterfactual_policy: Counterfactual model rules and the fallback
+            model; the node contract's ``config`` block unless injected.
     """
 
     def __init__(
@@ -491,6 +471,7 @@ class HandlerSavingsCorrelation:
         lookback_hours: int = DEFAULT_LOOKBACK_HOURS,
         batch_size: int = DEFAULT_BATCH_SIZE,
         query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        counterfactual_policy: ModelSavingsCounterfactualPolicy | None = None,
     ) -> None:
         self._pool = pool
         self._publisher = publisher
@@ -500,6 +481,11 @@ class HandlerSavingsCorrelation:
         self._lookback_hours = lookback_hours
         self._batch_size = batch_size
         self._query_timeout = query_timeout
+        self._counterfactual_policy = (
+            ModelSavingsCounterfactualPolicy.from_node_contract()
+            if counterfactual_policy is None
+            else counterfactual_policy
+        )
 
     @property
     def handler_id(self) -> str:
@@ -749,7 +735,9 @@ class HandlerSavingsCorrelation:
 
         actual_total_tokens = sum(r.prompt_tokens + r.completion_tokens for r in llm)
         actual_model_id = (
-            llm[0].model_id if llm and llm[0].model_id else "claude-opus-4-6"
+            llm[0].model_id
+            if llm and llm[0].model_id
+            else self._counterfactual_policy.fallback_model
         )
 
         estimation_input = ModelSavingsEstimationInput(
@@ -761,7 +749,7 @@ class HandlerSavingsCorrelation:
 
         estimate = await self._estimation_handler.handle(estimation_input)
 
-        counterfactual = _resolve_counterfactual(actual_model_id)
+        counterfactual = self._counterfactual_policy.resolve(actual_model_id)
         heuristic_usd, heuristic_tokens, heuristic_confidence = (
             _compute_validator_catch_savings([row.severity for row in validator])
         )
