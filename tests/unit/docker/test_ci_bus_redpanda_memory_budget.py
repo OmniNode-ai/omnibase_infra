@@ -21,24 +21,20 @@ reading of this file.
 from __future__ import annotations
 
 import re
+import shlex
+from typing import Any
 
 import pytest
 
-from tests.unit.docker.test_ci_bus_broker_isolation_omn18691 import CI_BUS_COMPOSE
+from tests.unit.docker.test_ci_bus_broker_isolation_omn18691 import (
+    CI_BUS_COMPOSE,
+    _load,
+)
 
 pytestmark = [pytest.mark.unit]
 
 #: Smallest budget (GiB) known to recover the 2026-10-31 production volume.
 RECOVERY_FLOOR_GIB = 4
-
-#: The broker's own literal flag line: ``- --memory 4G``.
-_BROKER_FLAG = re.compile(r"^\s*-\s+--memory\s+(\S+)\s*$", re.MULTILINE)
-#: The partition-cap job's sizing input.
-_PROFILE = re.compile(
-    r"^\s*REDPANDA_PROFILE_MEMORY:\s+(\S+)\s*$",
-    re.MULTILINE,
-)
-
 
 _UNIT_GIB = {
     "B": 1 / 1024**3,
@@ -56,35 +52,54 @@ def _gib(size: str) -> float:
     return float(match.group(1)) * _UNIT_GIB[match.group(2) or "B"]
 
 
-def _text() -> str:
-    return CI_BUS_COMPOSE.read_text(encoding="utf-8")
+def _services() -> dict[str, Any]:
+    """Read service boundaries rather than depending on Compose YAML formatting."""
+    services = _load(CI_BUS_COMPOSE)["services"]
+    assert isinstance(services, dict), "the CI bus compose must declare services"
+    return services
+
+
+def _broker_memory(services: dict[str, Any]) -> str:
+    """Read only the broker command, accepting Compose string and list forms."""
+    command = services["redpanda"]["command"]
+    entries = [command] if isinstance(command, str) else command
+    tokens = [token for entry in entries for token in shlex.split(str(entry))]
+    values = []
+    for index, token in enumerate(tokens):
+        if token == "--memory":
+            assert index + 1 < len(tokens), "the broker --memory flag needs a value"
+            values.append(tokens[index + 1])
+        elif token.startswith("--memory="):
+            values.append(token.split("=", 1)[1])
+    assert len(values) == 1, (
+        "the dedicated CI broker must declare exactly one --memory dial"
+    )
+    return values[0]
+
+
+def _setup_environment(services: dict[str, Any]) -> dict[str, str]:
+    """Read only the partition-cap job, accepting mapping and list environments."""
+    environment = services["redpanda-partition-cap"]["environment"]
+    if isinstance(environment, dict):
+        return {key: str(value) for key, value in environment.items()}
+    return dict(str(entry).split("=", 1) for entry in environment)
 
 
 def test_default_memory_budget_covers_recovery() -> None:
     """The broker's default budget is at least the figure that recovered the volume."""
-    matches = _BROKER_FLAG.findall(_text())
-    assert len(matches) == 1, (
-        "the dedicated CI broker must declare exactly one --memory dial"
-    )
-    assert _gib(matches[0]) >= RECOVERY_FLOOR_GIB
+    assert _gib(_broker_memory(_services())) >= RECOVERY_FLOOR_GIB
 
 
 def test_partition_cap_profile_follows_the_same_dial() -> None:
     """The partition-cap job sizes against the broker's own budget, not its own."""
-    broker = _BROKER_FLAG.findall(_text())
-    profile = _PROFILE.findall(_text())
-    assert len(broker) == len(profile) == 1
-    assert [_gib(v) for v in profile] == [_gib(v) for v in broker]
+    services = _services()
+    broker = _broker_memory(services)
+    profile = _setup_environment(services)["REDPANDA_PROFILE_MEMORY"]
+    assert _gib(profile) == _gib(broker)
 
 
 #: Longest retention (seconds) that keeps the per-run group pile bounded.
 MAX_GROUP_OFFSET_RETENTION_SEC = 86400
-
-_RETENTION = re.compile(
-    r"^\s*REDPANDA_GROUP_OFFSET_RETENTION_SEC:\s+"
-    r"\$\{CI_BUS_GROUP_OFFSET_RETENTION_SEC:-(\d+)\}\s*$",
-    re.MULTILINE,
-)
 
 
 def test_group_offsets_expire_within_a_day() -> None:
@@ -94,17 +109,18 @@ def test_group_offsets_expire_within_a_day() -> None:
     call; about 15,000 of them sat in ``__consumer_offsets`` on 2026-10-31 and
     the broker replays every one into heap at each start.
     """
-    matches = _RETENTION.findall(_text())
-    assert len(matches) == 1, "the broker setup job must declare the retention"
-    assert 0 < int(matches[0]) <= MAX_GROUP_OFFSET_RETENTION_SEC
+    value = _setup_environment(_services())["REDPANDA_GROUP_OFFSET_RETENTION_SEC"]
+    match = re.fullmatch(r"\$\{CI_BUS_GROUP_OFFSET_RETENTION_SEC:-(\d+)\}", value)
+    assert match, f"the broker setup job must declare the retention default: {value!r}"
+    assert 0 < int(match.group(1)) <= MAX_GROUP_OFFSET_RETENTION_SEC
 
 
 def test_memory_budget_has_no_environment_override() -> None:
     """A stale .env cannot lower either startup or sizing below recovery."""
-    broker = _BROKER_FLAG.findall(_text())
-    profile = _PROFILE.findall(_text())
-    assert len(broker) == len(profile) == 1
-    for value in broker + profile:
+    services = _services()
+    broker = _broker_memory(services)
+    profile = _setup_environment(services)["REDPANDA_PROFILE_MEMORY"]
+    for value in (broker, profile):
         assert "$" not in value, "the recovery memory budget must be a literal value"
         assert _gib(value) >= RECOVERY_FLOOR_GIB
 
@@ -115,6 +131,8 @@ def test_memory_budget_has_no_environment_override() -> None:
         ("4G", 4),
         ("4096M", 4),
         ("4.5G", 4.5),
+        ("100M", 100 / 1024),
+        ("0.1G", 0.1),
         ("4194304K", 4),
         ("0.00390625T", 4),
         ("4294967296", 4),
@@ -124,7 +142,7 @@ def test_memory_budget_has_no_environment_override() -> None:
 )
 def test_memory_size_units(size: str, expected: float) -> None:
     """Equivalent Seastar units compare by size, including bare byte values."""
-    assert _gib(size) == expected
+    assert _gib(size) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("size", ["", "bogus", "4X", "-4G", "4Gjunk"])
@@ -132,3 +150,49 @@ def test_memory_size_diagnostic(size: str) -> None:
     """Unsupported sizes name the value rather than an unrelated dial count."""
     with pytest.raises(AssertionError, match="unparseable Seastar memory size"):
         _gib(size)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "redpanda start --memory 4G",
+        ["redpanda", "start", "--memory", "4G"],
+        ["redpanda start", "--memory 4G"],
+        ["redpanda", "start", "--memory=4G"],
+    ],
+)
+def test_broker_memory_is_scoped_to_service(command: str | list[str]) -> None:
+    """Another service's memory flag must not affect the CI broker budget."""
+    services = {
+        "redpanda": {"command": command},
+        "other": {"command": ["--memory 1G"]},
+    }
+    assert _broker_memory(services) == "4G"
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["redpanda start", "redpanda start --memory", "--memory 4G --memory 1G"],
+)
+def test_broker_memory_requires_one_value(command: str) -> None:
+    """A missing or duplicate dial must fail rather than read another service."""
+    with pytest.raises(AssertionError, match="--memory"):
+        _broker_memory({"redpanda": {"command": command}})
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"REDPANDA_PROFILE_MEMORY": "4G"},
+        ["REDPANDA_PROFILE_MEMORY=4G"],
+    ],
+)
+def test_setup_environment_is_scoped_to_service(
+    environment: dict[str, str] | list[str],
+) -> None:
+    """Mapping and list forms read the setup job's own sizing value."""
+    services = {
+        "redpanda-partition-cap": {"environment": environment},
+        "other": {"environment": {"REDPANDA_PROFILE_MEMORY": "1G"}},
+    }
+    assert _setup_environment(services)["REDPANDA_PROFILE_MEMORY"] == "4G"
