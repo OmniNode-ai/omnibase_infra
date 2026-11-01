@@ -11,7 +11,13 @@ from unittest.mock import patch
 
 import pytest
 from deploy_agent.compose_budget import _read_compose_services
-from deploy_agent.events import EnumRuntimeLane, Phase, PhaseStatus, Scope
+from deploy_agent.events import (
+    DEV_LANE_GATEWAY_SERVICES,
+    EnumRuntimeLane,
+    Phase,
+    PhaseStatus,
+    Scope,
+)
 from deploy_agent.executor import (
     DEFAULT_DEV_INSTANCE,
     DeployExecutor,
@@ -32,7 +38,11 @@ def test_primary_dev_disables_the_tenant_carrier_only(
         },
     )
     config = lane_config_for(EnumRuntimeLane.DEV)
-    assert config.disabled_services == frozenset({"tenant-projection-writer"})
+    # The gateway project's services are off too: the shipped table declares
+    # gateway-deploy off for dev-201 (OMN-21629).
+    assert config.disabled_services == frozenset(
+        {"tenant-projection-writer", *DEV_LANE_GATEWAY_SERVICES}
+    )
     assert config.compose_files[-1].endswith("docker-compose.dev-tenant-fold.yml")
     assert "tenant-projection" in lane_folded_profiles(EnumRuntimeLane.DEV)
     monkeypatch.setattr(
