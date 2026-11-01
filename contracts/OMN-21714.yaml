@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21714"
+title: "Arm the evidence closer's In Progress demotion leg at 168 hours"
+summary: "The request default enables the seven-day demotion census. Enumeration failures produce an explicit failed result without discarding completed forward evidence."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-default-window
+    statement: "Requests that omit a demotion flag run the In Progress leg at 168 hours."
+    acceptance:
+      - id: AC1
+        statement: "The default request reaches the real Linear client and HTTP adapter with a seven-day census window; a confirmed apply moves an eligible ticket to Backlog and posts its explanation."
+  - id: req-demotion-fences
+    statement: "Arming preserves the demotion write fences."
+    acceptance:
+      - id: AC2
+        statement: "Dry runs, exclusion fences, disarmed runs and the kill switch write no demotions; the per-run budget bounds writes and an unconfirmed readback is an error."
+  - id: req-enumeration-receipt
+    statement: "An unavailable census is a failed demotion result, preserving the completed sweep receipt."
+    acceptance:
+      - id: AC3
+        statement: "A missing client method, a raised enumeration error or a failed census page judges no tickets and reports failure; completed forward check results survive JSON round trip and cancellation propagates."
+evidence_requirements:
+  - kind: tests
+    description: "Default arming and all existing demotion fences."
+    command: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov"
+  - kind: manual
+    description: "Hosted deploy-boundary readback runs the real handler, Linear client and HTTP adapter against a simulated Linear service, without credentials or access to lane containers. It checks the default census window, Backlog state readback, comment and refusal cases."
+    command: "deploy: env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov"
+dod_evidence:
+  - id: dod-default-demotion
+    description: "A request without a demotion flag uses the 168-hour window through the HTTP adapter and confirms the state write by readback."
+    source: generated
+    binds_ac: [AC1]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k sweep_deploy_demotion"
+  - id: dod-demotion-fences
+    description: "Arming preserves dry-run, exclusion, disarm, kill-switch, budget and readback fences."
+    source: generated
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov"
+  - id: dod-enumeration-receipt
+    description: "Failed census reads retain forward evidence in a round-trippable receipt, report failure and release no demotion; cancellation propagates."
+    source: generated
+    binds_ac: [AC3]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k 'enumeration or partial-census'"
