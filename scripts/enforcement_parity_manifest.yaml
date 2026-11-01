@@ -186,6 +186,9 @@ repos:
   # the check-run names are "<caller job> / <called job>".
   omniui:
     main:
+      # Merge policy verified 2026-11-01 from the PR watcher settings read of
+      # omniui:main (read_at 2026-11-01T17:35:53Z): protection strict=False and
+      # no merge-queue rule on the branch, so queue disabled and strict false.
       merge_policy:
         queue: disabled
         strict: false
