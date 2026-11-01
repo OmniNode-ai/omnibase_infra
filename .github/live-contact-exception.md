@@ -1,0 +1,1 @@
+Live-contact exception: the changed workflow step contacts only its own git origin with git ls-remote and git fetch, and tests/ci/test_candidate_build_dev_merge_tags_omn19998.py runs that step unchanged against a real local bare git origin, so the contact is exercised end to end with no service response to record.

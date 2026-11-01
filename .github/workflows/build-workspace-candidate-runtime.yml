@@ -318,15 +318,50 @@ jobs:
       - name: Install stage_workspace.sh host deps (pydantic, pyyaml)
         run: python3 -m pip install --upgrade 'pydantic>=2' 'pyyaml>=6'
 
+      # OMN-19998/OMN-17427: checkout can race dev-merge-tag.yml pushing HEAD's
+      # tag. Fetch it before staging: the first-party source audit reads local
+      # tags at HEAD, and fetch-depth: 0 cannot include a tag not yet pushed.
+      - name: Fetch the build context's dev-merge tag
+        shell: bash
+        env:
+          DEV_TAG_WAIT_ATTEMPTS: "20"
+          DEV_TAG_WAIT_SECONDS: "15"
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          SHA12="${SHA:0:12}"
+          for ((attempt=1; attempt<=DEV_TAG_WAIT_ATTEMPTS; attempt++)); do
+            TAG=$(git ls-remote --tags origin 'refs/tags/dev-*' |
+              awk -v suffix="-${SHA12}" '
+                length($2) > length(suffix) &&
+                substr($2, length($2) - length(suffix) + 1) == suffix {
+                  sub(/^refs\/tags\//, "", $2); print $2
+                }' | LC_ALL=C sort | tail -n 1)
+            if [ -n "${TAG}" ]; then
+              git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+              echo "build context ${SHA} carries ${TAG}"
+              exit 0
+            fi
+            if [ "${attempt}" -lt "${DEV_TAG_WAIT_ATTEMPTS}" ]; then
+              sleep "${DEV_TAG_WAIT_SECONDS}"
+            fi
+          done
+          echo "::warning::no dev-merge tag names ${SHA12} on origin; the first-party source audit will refuse the build context"
+          exit 0
+
       - name: Stage workspace sibling trees into the build context
         env:
           OMNI_HOME: ${{ steps.stage-siblings.outputs.workspace_root }}
           # The consuming pin authority is omnimarket's uv.lock (OMN-12977).
           CONSUMER_LOCK: ${{ steps.stage-siblings.outputs.workspace_root }}/omnimarket/uv.lock
           # OMN-17291: stage_workspace.sh refuses an unpinned build. The clones
-          # above were cloned fresh AT sibling_ref, so arming RT-1 with the same
-          # ref makes the checkout a no-op and turns the vendored SHA into an
-          # asserted fact instead of an unfalsifiable claim.
+          # above were cloned fresh AT sibling_ref, so arming RT-1 with that
+          # branch turns the vendored SHA into an asserted fact instead of an
+          # unfalsifiable claim.
+          #
+          # OMN-19998/OMN-17427: unpinned, arm RT-1 with the remote-tracking ref
+          # so deploy_source_ref.py's --follow-dev-tag stages each sibling at
+          # its newest dev-merge tag. A bare branch name is never followed.
           #
           # OMN-17057: when a pin is requested, RT-1's primary ref becomes the
           # pinned COMMIT and sibling_ref becomes the fallback. That is exactly
@@ -335,7 +370,7 @@ jobs:
           # repository takes the fallback and records `fallback_from`. Both
           # values are still refs, so RT-1's own refusals (unresolvable ref,
           # vendored SHA not equal to the expected one) apply unchanged.
-          DEPLOY_REF: ${{ inputs.pinned_revision || inputs.sibling_ref }}
+          DEPLOY_REF: ${{ inputs.pinned_revision || format('origin/{0}', inputs.sibling_ref) }}
           DEPLOY_SIBLING_FALLBACK_REF: origin/${{ inputs.sibling_ref }}
           PINNED_REPO: ${{ inputs.pinned_repo }}
           PINNED_REVISION: ${{ inputs.pinned_revision }}
