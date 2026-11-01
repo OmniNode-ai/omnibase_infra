@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -39,6 +40,8 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.runtime.models.model_http_client_config import ModelHttpClientConfig
+from omnibase_infra.runtime.providers.provider_http_client import ProviderHttpClient
 
 if TYPE_CHECKING:
     from omnibase_infra.models.mcp.model_mcp_tool_definition import (
@@ -53,8 +56,7 @@ PAYMENT_REFUSED_MESSAGE = "Payment required: the tool endpoint refused the call 
 class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
     """Bridges MCP tool calls to ONEX orchestrator execution.
 
-    This adapter handles the dispatch of MCP tool invocations to the
-    appropriate ONEX orchestrator node. It supports:
+    Dispatches tool invocations to ONEX orchestrators with:
     - Direct HTTP dispatch to orchestrator endpoint
     - Input validation against JSON Schema
     - Timeout enforcement
@@ -84,6 +86,7 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
         default_timeout: float = 30.0,
         circuit_breaker_threshold: int = 5,
         circuit_breaker_reset_timeout: float = 60.0,
+        http_client_provider: ProviderHttpClient | None = None,
     ) -> None:
         """Initialize the execution adapter.
 
@@ -94,9 +97,14 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
             default_timeout: Default timeout in seconds for orchestrator calls.
             circuit_breaker_threshold: Max failures before opening circuit (default: 5).
             circuit_breaker_reset_timeout: Seconds before automatic reset (default: 60.0).
+            http_client_provider: Provider for temporary clients when no client
+                is supplied. The adapter closes each temporary client.
         """
         self._container = container
         self._http_client = http_client
+        self._http_client_provider = http_client_provider or ProviderHttpClient(
+            ModelHttpClientConfig(follow_redirects=False)
+        )
         self._default_timeout = default_timeout
         self._owns_client = http_client is None
 
@@ -342,25 +350,16 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
             InfraTimeoutError: If request times out.
             InfraConnectionError: If connection fails.
         """
-        # Use provided client or create one
-        if self._http_client is not None:
-            return await self._dispatch_with_client(
-                self._http_client,
-                endpoint,
-                envelope,
-                timeout,
-                correlation_id,
-            )
-        else:
-            # Create temporary client
-            async with httpx.AsyncClient() as client:
-                return await self._dispatch_with_client(
-                    client,
-                    endpoint,
-                    envelope,
-                    timeout,
-                    correlation_id,
+        # Only provider-created clients enter the stack; borrowed clients stay open.
+        async with AsyncExitStack() as stack:
+            client = self._http_client
+            if client is None:
+                client = await stack.enter_async_context(
+                    await self._http_client_provider.create()
                 )
+            return await self._dispatch_with_client(
+                client, endpoint, envelope, timeout, correlation_id
+            )
 
     async def _dispatch_with_client(
         self,

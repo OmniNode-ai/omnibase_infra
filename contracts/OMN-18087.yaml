@@ -58,6 +58,18 @@ requirements:
       - id: AC10
         statement: >-
           AC10: main's join limit and memory limit are rendered from runtime_policy.contract.yaml, and no compose file carries a literal ONEX_MAX_CONCURRENT_CONTRACT_ATTACH or a 1536M memory limit on main
+  - id: req-omn18087-runtime-http-provider
+    statement: Runtime HTTP consumers materialize their transport through the runtime provider.
+    acceptance:
+      - id: AC11
+        statement: >-
+          AC11: the HTTP handler and tool adapter use ProviderHttpClient, complete requests over a real socket, close clients they own and leave a supplied adapter client open
+  - id: req-omn18087-runtime-account-paths
+    statement: Compose runtime account paths follow the configured runtime user.
+    acceptance:
+      - id: AC12
+        statement: >-
+          AC12: credential and workspace paths render under the same home for the default and an alternate runtime account, in the infra compose and service catalog
 evidence_requirements:
   - kind: tests
     description: "Boot subscription tests pass"
@@ -169,3 +181,21 @@ dod_evidence:
       - check_type: command
         check_value: >-
           bash -o pipefail -c 'test "$(docker inspect -f "{{.HostConfig.Memory}}" ${RUNTIME_CONTAINER:-omninode-runtime})" = 3221225472'
+  - id: dod-omn18087-deploy-http-provider-readback
+    description: >-
+      Hosted-runner deploy check: the runtime HTTP handler and tool adapter use the runtime HTTP provider over loopback sockets; owned clients close and supplied clients stay open. No lane container or credential is required. The fix parent constructs raw clients without calling the runtime provider.
+    source: manual
+    binds_ac: [AC11]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/runtime/test_omn18087_runtime_http_readback.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-omn18087-deploy-runtime-account-paths
+    description: >-
+      Hosted-runner deploy render check: docker compose config renders the real runtime account paths for the default and an alternate user. It starts no container and needs no daemon or lane credentials. The fix parent ignores the alternate user.
+    source: manual
+    binds_ac: [AC12]
+    checks:
+      - check_type: test_passes
+        check_value: "env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/integration/docker/test_omn18087_runtime_user_home.py -q --no-cov"
+        cwd: "${OMNI_HOME}/omnibase_infra"
