@@ -165,6 +165,7 @@ def test_a_build_context_that_is_not_a_git_clone_does_not_fail_the_rebuild(
 
 
 @pytest.mark.gateway_lane
+@pytest.mark.usefixtures("gateway_phase_available")
 @pytest.mark.parametrize("script_exit", [0, 1])
 def test_gateway_deploy_restores_what_its_own_staging_rewrote(
     script_exit: int, build_clone: Path, monkeypatch: pytest.MonkeyPatch
