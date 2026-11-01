@@ -63,6 +63,74 @@ def test_entry_whose_code_disagrees_with_its_executor_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
+    "handler",
+    [
+        "HandlerRiskDiffSize",
+        "omnibase_infra.validation.checks.missing_handler.HandlerMissing",
+        "omnibase_infra.validation.checks.handler_risk.HandlerMissing",
+    ],
+)
+def test_unloadable_handler_is_a_configuration_error(handler: str) -> None:
+    entry = ModelCheckCatalogEntry(check_code="CHECK-X-003", handler=handler)
+    with pytest.raises(ProtocolConfigurationError, match="CHECK-X-003"):
+        entry.build_executor()
+
+
+@pytest.mark.parametrize(
+    ("command", "label", "severity"),
+    [
+        ("", "Lint", "required"),
+        ("  ", "Lint", "required"),
+        ("true", "", "required"),
+        ("true", "  ", "required"),
+        ("true", "Lint", None),
+    ],
+)
+def test_incomplete_subprocess_configuration_is_refused(
+    command: str, label: str, severity: str | None
+) -> None:
+    entry = ModelCheckCatalogEntry.model_validate(
+        {
+            "check_code": "CHECK-X-004",
+            "handler": "omnibase_infra.validation.checks.handler_check_executor."
+            "HandlerSubprocessCheckExecutor",
+            "command": command,
+            "label": label,
+            "severity": severity,
+        }
+    )
+    with pytest.raises(ProtocolConfigurationError, match="requires command"):
+        entry.build_executor()
+
+
+@pytest.mark.parametrize(
+    "metadata", [{"command": "true"}, {"label": "Lint"}, {"severity": "required"}]
+)
+def test_subprocess_fields_on_another_handler_are_refused(
+    metadata: dict[str, str],
+) -> None:
+    entry = ModelCheckCatalogEntry.model_validate(
+        {
+            "check_code": "CHECK-RISK-002",
+            "handler": "omnibase_infra.validation.checks.handler_risk.HandlerRiskDiffSize",
+            **metadata,
+        }
+    )
+    with pytest.raises(ProtocolConfigurationError, match="only subprocess"):
+        entry.build_executor()
+
+
+def test_constructor_failure_is_a_configuration_error() -> None:
+    entry = ModelCheckCatalogEntry(
+        check_code="CHECK-RISK-002",
+        handler="omnibase_infra.validation.checks.handler_risk.HandlerRiskDiffSize",
+    )
+    with pytest.raises(ProtocolConfigurationError, match="cannot construct") as error:
+        entry.build_executor(artifact_dir=Path("artifacts"))
+    assert isinstance(error.value.__cause__, TypeError)
+
+
+@pytest.mark.parametrize(
     "rows", [[], [{"check_code": "duplicate", "handler": "x.y"}] * 2]
 )
 def test_invalid_catalog_is_refused(

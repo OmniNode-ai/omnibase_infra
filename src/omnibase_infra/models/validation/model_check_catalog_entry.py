@@ -80,13 +80,14 @@ class ModelCheckCatalogEntry(BaseModel):
         class; other executors take only ``overrides``.
 
         Raises:
-            ProtocolConfigurationError: If the handler is outside the checks
-                namespace, is not an executor, or reports another check code.
+            ProtocolConfigurationError: If the handler cannot be loaded or
+                constructed, its configuration is invalid, or its code differs.
         """
         # The checks package builds its registry at import time. Import the
         # executor base only after this catalog model has finished loading.
         from omnibase_infra.validation.checks.handler_check_executor import (
             HandlerCheckExecutor,
+            HandlerSubprocessCheckExecutor,
         )
 
         module_path, _, class_name = self.handler.rpartition(".")
@@ -96,7 +97,13 @@ class ModelCheckCatalogEntry(BaseModel):
                 f"{_HANDLER_NAMESPACE}",
                 "build_check_executor",
             )
-        handler_class = getattr(importlib.import_module(module_path), class_name)
+        try:
+            handler_class = getattr(importlib.import_module(module_path), class_name)
+        except (ImportError, AttributeError, ValueError) as exc:
+            raise _configuration_error(
+                f"{self.check_code}: cannot load handler {self.handler!r}: {exc}",
+                "build_check_executor",
+            ) from exc
         if not (
             isinstance(handler_class, type)
             and issubclass(handler_class, HandlerCheckExecutor)
@@ -106,14 +113,32 @@ class ModelCheckCatalogEntry(BaseModel):
                 "build_check_executor",
             )
         kwargs: dict[str, object] = dict(overrides)
-        if self.command:
+        if issubclass(handler_class, HandlerSubprocessCheckExecutor):
+            if not (self.command.strip() and self.label.strip() and self.severity):
+                raise _configuration_error(
+                    f"{self.check_code}: subprocess handler requires command, "
+                    "label and severity",
+                    "build_check_executor",
+                )
             kwargs.update(
                 check_code=self.check_code,
                 label=self.label,
                 severity=self.severity,
                 command=self.command,
             )
-        executor: HandlerCheckExecutor = handler_class(**kwargs)
+        elif self.command or self.label or self.severity is not None:
+            raise _configuration_error(
+                f"{self.check_code}: only subprocess handlers accept command, "
+                "label or severity",
+                "build_check_executor",
+            )
+        try:
+            executor: HandlerCheckExecutor = handler_class(**kwargs)
+        except (TypeError, ValueError) as exc:
+            raise _configuration_error(
+                f"{self.check_code}: cannot construct handler {self.handler!r}: {exc}",
+                "build_check_executor",
+            ) from exc
         if executor.check_code != self.check_code:
             raise _configuration_error(
                 f"{self.check_code}: {self.handler!r} reports check_code "

@@ -90,3 +90,14 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn21703-ac1-catalog-configuration-errors
+    description: >-
+      Catalog construction rejects missing handlers, incomplete subprocess metadata, subprocess fields on other handlers, and incompatible constructor arguments as configuration errors. The regression tests fail on the dispatch source.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: >-
+          env PYTHONDONTWRITEBYTECODE=1 uv run --frozen pytest tests/unit/validation/test_check_catalog_contract.py -k 'unloadable_handler or incomplete_subprocess or subprocess_fields_on_another or constructor_failure' -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
