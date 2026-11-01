@@ -43,7 +43,8 @@ _COMMAND_TOPIC = "onex.cmd.omnimarket.delegate-skill.v1"
 _FAILED_TOPIC = "onex.evt.omnimarket.delegate-skill-failed.v1"
 _HEADER_CORRELATION = UUID("95c783ae-79b6-47bb-a1d9-2edc46f66a45")
 _CONFIG = ModelDlqReplayEngineConfig(
-    bootstrap_servers="localhost:9092", dlq_topic="onex.dlq.omnimarket.events.v1"
+    bootstrap_servers="localhost:9092",
+    dlq_topic="test-dlq-topic",
 )
 
 
