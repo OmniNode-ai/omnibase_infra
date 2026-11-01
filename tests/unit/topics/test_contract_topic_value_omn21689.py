@@ -59,3 +59,8 @@ def test_fresh_import_order(module: str) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_unreadable_contract_error_names_source() -> None:
+    with pytest.raises(ValueError, match=r"nope/missing\.yaml: cannot read contract"):
+        contract_topic_value("nope/missing.yaml", "p", "M")

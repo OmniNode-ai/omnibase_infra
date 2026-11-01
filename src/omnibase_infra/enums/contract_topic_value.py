@@ -44,7 +44,12 @@ def _contract_topics(source: str) -> frozenset[str]:
         if Path(source).is_absolute()
         else files("omnibase_infra").joinpath(source)
     )
-    document = yaml.safe_load(resource.read_text(encoding="utf-8"))
+    try:
+        document = yaml.safe_load(resource.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(
+            f"{source}: cannot read contract ({type(error).__name__})"
+        ) from error
     if not isinstance(document, dict):
         raise ValueError(f"{source}: expected a contract mapping")
     if Path(source).name == "topics.yaml":
