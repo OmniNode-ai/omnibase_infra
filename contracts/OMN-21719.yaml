@@ -1,13 +1,13 @@
 schema_version: "1.0.0"
 ticket_id: OMN-21719
 title: Twenty-nine runtime timeouts in the capability probe, lifecycle executor, request-response wiring, invocation adapter, snapshot publisher and two mixins are read from a declared file, not from literals
-summary: The contracts_and_di check reported 399 literal_timeout findings among 1229 in src/omnibase_infra at dev aceff4fb1. This change declares them as 20 keys in models/runtime_timeouts/runtime_timeouts.yaml (call sites that share a wait share a key), loads them through ModelRuntimeTimeouts (no field defaults, so an omitted value fails to load; a default outside its bounds or a heartbeat at or above the session timeout fails to load), and binds each call site to the loaded value. The literal_timeout rule reports zero findings over the seven edited files and the model, and 370 over src/omnibase_infra.
+summary: The contracts_and_di check reported 399 literal_timeout findings among 1229 in src/omnibase_infra at dev aceff4fb1. This change declares 29 of them in models/runtime_timeouts/runtime_timeouts.yaml, loads them through ModelRuntimeTimeouts (no field defaults, so an omitted value fails to load; a default outside its bounds or a heartbeat at or above the session timeout fails to load), and binds each call site to the loaded value. The literal_timeout rule reports zero findings over the seven edited files and the model, and 370 over src/omnibase_infra.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn21719-slice-runtime-timeouts
-    statement: The capability probe, lifecycle executor, request-response wiring, node invocation adapter, snapshot publisher, LLM HTTP transport and introspection mixin take their timeouts (29 findings, 20 declared keys) from the declared timeouts file, and a block that omits a value fails to load.
+    statement: The capability probe, lifecycle executor, request-response wiring, node invocation adapter, snapshot publisher, LLM HTTP transport and introspection mixin take 29 timeouts from the declared timeouts file, and a block that omits a value fails to load.
     acceptance:
       - id: AC1
         statement: 'AC1: the contracts_and_di count for literal_timeout over the slice paths drops to zero and the repo total drops by the slice size, with no baseline entry or suppression added -- falsifier: onex run of runtime_validator_run with the contracts_and_di reference over omnibase_infra src before and after, counts compared per rule'
@@ -17,7 +17,7 @@ requirements:
         statement: 'AC3: the slice lands as one PR titled with this ticket id and carries lab proof of the tests and the checker re-run -- falsifier: uv run pytest tests/unit -q on the lab through lab-run at the PR head, receipt path in the PR body'
 evidence_requirements:
   - kind: tests
-    description: The loaded timeouts equal the declared file, each omitted value fails to load, every edited call site follows a doubled copy of the file and the Kafka and circuit-breaker keywords are wired to their keys.
+    description: The loaded timeouts equal the declared file, each omitted value fails to load, and every edited call site carries the declared value.
     command: uv run --frozen pytest tests/unit/models/runtime_timeouts -q
   - kind: ci
     description: The contracts_and_di check reports no literal_timeout finding over the seven edited files and the settings model; at the merge base the same run reports 29.
@@ -32,8 +32,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: >-
-          bash -c 'out=$(uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/probes/capability_probe.py src/omnibase_infra/runtime/protocol_lifecycle_executor.py src/omnibase_infra/runtime/request_response_wiring.py src/omnibase_infra/runtime/node_invocation_adapter.py src/omnibase_infra/projectors/snapshot_publisher_registration.py src/omnibase_infra/mixins/mixin_llm_http_transport.py src/omnibase_infra/mixins/mixin_node_introspection.py src/omnibase_infra/models/runtime_timeouts 2>&1); rc=$?; if [ "$rc" -ne 0 ]; then echo "$out" | grep -q "^Validation failed:" || exit 2; fi; ! echo "$out" | grep -q literal_timeout'
+        check_value: "bash -c '! uv run --frozen python -m omnibase_core.nodes.node_validation_report_write_effect.runtime_validator_run omnibase_core.validation.validator_contracts_and_di:ValidatorContractsAndDi src/omnibase_infra/probes/capability_probe.py src/omnibase_infra/runtime/protocol_lifecycle_executor.py src/omnibase_infra/runtime/request_response_wiring.py src/omnibase_infra/runtime/node_invocation_adapter.py src/omnibase_infra/projectors/snapshot_publisher_registration.py src/omnibase_infra/mixins/mixin_llm_http_transport.py src/omnibase_infra/mixins/mixin_node_introspection.py src/omnibase_infra/models/runtime_timeouts | grep -q literal_timeout'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1

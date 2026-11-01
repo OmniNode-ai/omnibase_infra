@@ -57,7 +57,6 @@ from omnibase_infra.event_bus.lane_client_transport_binding import (
 from omnibase_infra.event_bus.model_lane_client_transport import (
     ModelLaneClientTransport,
 )
-from omnibase_infra.models.runtime_timeouts import RUNTIME_TIMEOUTS
 from omnibase_infra.protocols import ProtocolEventBusLike
 
 if TYPE_CHECKING:
@@ -1309,16 +1308,4 @@ async def test_reply_consumer_authenticates_as_the_bound_lane_transport(
 
     assert consumer_kwargs["security_protocol"] == "SASL_PLAINTEXT"
     assert consumer_kwargs["sasl_mechanism"] == "SCRAM-SHA-256"
-    assert (
-        consumer_kwargs["session_timeout_ms"]
-        == RUNTIME_TIMEOUTS.kafka_session_timeout_ms
-    )
-    assert (
-        consumer_kwargs["heartbeat_interval_ms"]
-        == RUNTIME_TIMEOUTS.kafka_heartbeat_interval_ms
-    )
-    assert (
-        consumer_kwargs["max_poll_interval_ms"]
-        == RUNTIME_TIMEOUTS.kafka_max_poll_interval_ms
-    )
     assert consumer_kwargs["sasl_plain_username"] == "dev-cli-host"

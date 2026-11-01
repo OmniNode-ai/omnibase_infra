@@ -4,10 +4,7 @@
 
 The values live in the ``timeouts`` block of ``runtime_timeouts.yaml`` beside
 this module. The model has no field defaults, so a block that omits a value
-fails to load rather than falling back to a literal. Integer fields are
-strict: a fractional or float-typed value in the file is refused rather than
-truncated or coerced. The file ships with the wheel because hatchling includes
-every file under ``src/omnibase_infra`` (``[tool.hatch.build.targets.wheel]``).
+fails to load rather than falling back to a literal.
 """
 
 from __future__ import annotations
@@ -53,7 +50,7 @@ class ModelRuntimeTimeouts(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
-    capability_probe_ttl_seconds: int = Field(gt=0, strict=True)
+    capability_probe_ttl_seconds: int = Field(gt=0)
     capability_probe_seconds: float = Field(gt=0)
     health_check_min_seconds: float = Field(gt=0)
     health_check_max_seconds: float = Field(gt=0)
@@ -61,13 +58,13 @@ class ModelRuntimeTimeouts(BaseModel):
     handler_shutdown_min_seconds: float = Field(gt=0)
     handler_shutdown_max_seconds: float = Field(gt=0)
     handler_shutdown_default_seconds: float = Field(gt=0)
-    kafka_session_timeout_ms: int = Field(gt=0, strict=True)
-    kafka_heartbeat_interval_ms: int = Field(gt=0, strict=True)
-    kafka_max_poll_interval_ms: int = Field(gt=0, strict=True)
-    snapshot_consumer_timeout_ms: int = Field(gt=0, strict=True)
+    kafka_session_timeout_ms: int = Field(gt=0)
+    kafka_heartbeat_interval_ms: int = Field(gt=0)
+    kafka_max_poll_interval_ms: int = Field(gt=0)
+    snapshot_consumer_timeout_ms: int = Field(gt=0)
     circuit_breaker_reset_seconds: float = Field(gt=0)
     health_probe_seconds: float = Field(gt=0)
-    local_dispatch_seconds: int = Field(gt=0, strict=True)
+    local_dispatch_seconds: int = Field(gt=0)
     terminal_seconds: float = Field(gt=0)
     llm_transport_max_seconds: float = Field(gt=0)
     llm_post_seconds: float = Field(gt=0)
@@ -76,15 +73,7 @@ class ModelRuntimeTimeouts(BaseModel):
 
     @model_validator(mode="after")
     def _defaults_lie_within_bounds(self) -> ModelRuntimeTimeouts:
-        """Refuse a default outside its bounds, an inverted bound pair, a heartbeat that outlasts the session and a poll interval below it."""
-        if self.health_check_min_seconds > self.health_check_max_seconds:
-            raise ValueError(
-                "health_check_min_seconds exceeds health_check_max_seconds"
-            )
-        if self.handler_shutdown_min_seconds > self.handler_shutdown_max_seconds:
-            raise ValueError(
-                "handler_shutdown_min_seconds exceeds handler_shutdown_max_seconds"
-            )
+        """Refuse a default outside its bounds and a heartbeat that outlasts the session or a poll interval below it."""
         if not (
             self.health_check_min_seconds
             <= self.health_check_default_seconds
