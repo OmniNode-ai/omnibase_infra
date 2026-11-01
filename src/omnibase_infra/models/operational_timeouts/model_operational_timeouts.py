@@ -13,7 +13,7 @@ from functools import cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
@@ -90,12 +90,24 @@ class ModelOperationalTimeouts(BaseModel):
         """Load the timeouts from the ``timeouts`` mapping of a YAML file.
 
         Raises:
-            ProtocolConfigurationError: If the file has no ``timeouts`` mapping.
+            ProtocolConfigurationError: If the file cannot supply valid timeouts.
         """
-        with timeouts_path.open(encoding="utf-8") as handle:
-            document = yaml.safe_load(handle) or {}
-        block = document.get("timeouts") if isinstance(document, dict) else None
-        if not isinstance(block, dict):
+        try:
+            with timeouts_path.open(encoding="utf-8") as handle:
+                document = yaml.safe_load(handle) or {}
+            block = document.get("timeouts") if isinstance(document, dict) else None
+            if isinstance(block, dict):
+                return cls.model_validate(block)
+        except (OSError, yaml.YAMLError, ValidationError) as exc:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.FILESYSTEM,
+                operation="load_operational_timeouts",
+            )
+            raise ProtocolConfigurationError(
+                f"Unable to load valid timeouts from {timeouts_path.name}",
+                context=context,
+            ) from exc
+        else:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.FILESYSTEM,
                 operation="load_operational_timeouts",
@@ -104,7 +116,6 @@ class ModelOperationalTimeouts(BaseModel):
                 f"{timeouts_path.name} has no timeouts mapping",
                 context=context,
             )
-        return cls.model_validate(block)
 
 
 @cache
