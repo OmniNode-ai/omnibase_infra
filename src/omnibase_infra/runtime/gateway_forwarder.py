@@ -47,7 +47,6 @@ from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 from omnibase_infra.handlers.kafka_permanent_failure import kafka_failure_types
 from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
-from omnibase_infra.models.local_state_paths import load_local_state_paths
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderConfig,
     ModelGatewayForwarderRuntimeConfig,
@@ -2019,7 +2018,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--egress-health-file",
         type=Path,
-        default=Path(load_local_state_paths().gateway_egress_health_path),
+        required=True,
         help=(
             "Where to publish outbound egress denial/delivery counters "
             "(OMN-17201). The container healthcheck reads the same path; pass "
@@ -2029,7 +2028,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lane-mirror-health-file",
         type=Path,
-        default=Path(load_local_state_paths().gateway_lane_mirror_health_path),
+        required=True,
         help=(
             "Where to publish the lane-mirror delivery-verification counters "
             "(OMN-17201): per-lane consumed-vs-confirmed source offsets, "

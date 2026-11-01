@@ -27,8 +27,7 @@ while delivering nothing.
 
 To avoid spamming either broker, a real check only runs once every
 contract-declared ``canary.cadence_seconds``; between real checks this process
-reports the last real result from ``--state-file`` (default declared in the
-local state paths YAML), refreshed on every real run. This
+reports the last real result from the required ``--state-file``, refreshed on every real run. This
 process never depends on the long-running forwarder process being alive or
 reachable -- it dials the brokers directly, so a healthy forwarder container
 whose cloud leg is actually dead is caught even though ``docker ps`` and the
@@ -53,7 +52,6 @@ from aiokafka.admin import AIOKafkaAdminClient
 
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.models.local_state_paths import load_local_state_paths
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayCanaryConfig,
     ModelGatewayForwarderRuntimeConfig,
@@ -421,13 +419,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--state-file",
         type=Path,
-        default=Path(load_local_state_paths().gateway_canary_probe_state_path),
+        required=True,
         help="Cadence cache so repeated healthcheck ticks do not spam the brokers",
     )
     parser.add_argument(
         "--egress-health-file",
         type=Path,
-        default=Path(load_local_state_paths().gateway_egress_health_path),
+        required=True,
         help=(
             "Path the forwarder process publishes its egress denial/delivery "
             "counters to (OMN-17201). Must match the value passed to "
@@ -437,7 +435,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lane-mirror-health-file",
         type=Path,
-        default=Path(load_local_state_paths().gateway_lane_mirror_health_path),
+        required=True,
         help=(
             "Path the forwarder process publishes its lane-mirror "
             "delivery-verification counters to (OMN-17201). Must match the "

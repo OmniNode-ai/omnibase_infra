@@ -4,9 +4,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from omnibase_infra.models.local_state_paths import load_local_state_paths
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ModelLocalRuntimeIngressConfig(BaseModel):
@@ -24,9 +22,9 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
         description="Whether the runtime should bind a local Unix-socket ingress.",
     )
     socket_path: str = Field(
-        default_factory=lambda: load_local_state_paths().runtime_socket_path,
-        min_length=1,
-        description="Unix-socket path for local runtime command ingress.",
+        default="",
+        pattern=r"^(\S(.*\S)?)?$",
+        description="Unix-socket path for ingress; the runtime overlay supplies it.",
     )
     socket_permissions: int = Field(
         default=0o660,
@@ -58,20 +56,16 @@ class ModelLocalRuntimeIngressConfig(BaseModel):
         ),
     )
 
-    @field_validator("socket_path")
-    @classmethod
-    def _validate_socket_path(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("socket_path must be a non-empty string")
-        return normalized
+    @model_validator(mode="after")
+    def _validate_socket_path(self) -> ModelLocalRuntimeIngressConfig:
+        if self.enabled and not self.socket_path:
+            raise ValueError("socket_path must be a non-empty string when enabled")
+        return self
 
     @field_validator("package_names", "enabled_profiles", mode="before")
     @classmethod
-    def _coerce_tuple_fields(cls, value: object) -> object:
-        if isinstance(value, list):
-            return tuple(value)
-        return value
+    def _coerce_sequences(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
 
     @field_validator("package_names")
     @classmethod

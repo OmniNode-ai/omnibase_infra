@@ -8,8 +8,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnibase_infra.models.local_state_paths import load_local_state_paths
-
 
 class ModelScopeExtracted(BaseModel):
     """Extracted scope manifest from a plan file."""
@@ -18,10 +16,7 @@ class ModelScopeExtracted(BaseModel):
 
     correlation_id: UUID = Field(..., description="Workflow correlation ID.")
     plan_file_path: str = Field(..., description="Source plan file path.")
-    output_path: str = Field(
-        default_factory=lambda: load_local_state_paths().scope_manifest_path,
-        description="Path to write the scope manifest JSON.",
-    )
+    output_path: str = Field(..., description="Path to write the scope manifest JSON.")
     files: tuple[str, ...] = Field(default_factory=tuple, description="Files in scope.")
     directories: tuple[str, ...] = Field(
         default_factory=tuple, description="Directories in scope."

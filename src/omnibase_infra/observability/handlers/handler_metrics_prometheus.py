@@ -150,6 +150,7 @@ from omnibase_infra.errors import (
     RuntimeHostError,
 )
 from omnibase_infra.mixins import MixinEnvelopeExtraction
+from omnibase_infra.models.endpoint_defaults import load_endpoint_defaults
 from omnibase_infra.observability.handlers.model_metrics_handler_config import (
     ModelMetricsHandlerConfig,
 )
@@ -492,15 +493,11 @@ class HandlerMetricsPrometheus(MixinEnvelopeExtraction):
             self._runner = web.AppRunner(self._app)
             await self._runner.setup()
 
-            self._site = web.TCPSite(
-                self._runner,
-                self._config.host,
-                self._config.port,
-            )
+            self._site = web.TCPSite(self._runner, self._config.host, self._config.port)
             await self._site.start()
 
             # Log security-relevant configuration
-            is_localhost = self._config.host in ("127.0.0.1", "localhost", "::1")
+            is_localhost = load_endpoint_defaults().is_loopback(self._config.host)
             if not is_localhost:
                 logger.warning(
                     "HTTP metrics server binding to non-localhost address - "
